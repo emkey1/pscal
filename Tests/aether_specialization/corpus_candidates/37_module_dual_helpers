@@ -3,8 +3,8 @@
 // variadic println with imported label helper
 // expect: Result: 15
 
-use "math_utils";
-use "text_utils";
+use "95_math_utils";
+use "96_text_utils";
 
 fn main() -> Void {
     let total: Int = MathUtils.add(5, 10);

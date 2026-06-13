@@ -3,7 +3,7 @@
 // expect: Service https://api.example.com is healthy.
 // expect: Max retries allowed: 3
 
-use "service_config";
+use "100_service_config";
 
 fn main() -> Void {
     let status: Int = 200;

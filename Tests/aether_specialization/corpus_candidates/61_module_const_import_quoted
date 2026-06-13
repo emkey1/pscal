@@ -3,7 +3,7 @@
 // expect: Aether
 // expect: 42
 
-use "bench_consts";
+use "102_bench_consts";
 
 fn main() -> Void {
     let greeting: Text = Greeting;

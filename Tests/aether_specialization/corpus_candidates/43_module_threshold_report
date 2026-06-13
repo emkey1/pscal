@@ -6,8 +6,8 @@
 // expect: [cold] gamma
 // expect: threshold = 80
 
-use "severity_rules";
-use "severity_labels";
+use "98_severity_rules";
+use "99_severity_labels";
 
 type Finding {
     name: Text;

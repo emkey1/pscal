@@ -3,7 +3,7 @@
 // expect: Ada / high / pass=true
 // expect: Bob / low / pass=false
 
-use "bench_metrics";
+use "103_bench_metrics";
 
 fn main() -> Void {
     if !has_toon() {

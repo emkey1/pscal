@@ -764,8 +764,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/L4_ticket_triage",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/L4_ticket_triage",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/94_ticket_triage_capstone",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/94_ticket_triage_capstone",
       "sha256": "31ec7120071e281c72164e37e04c12ce05ea4c1360120c1791958a7b28067eba",
       "stdout": "ticket 0: TK1 / high / 3 / escalate=true\nticket 1: TK2 / low / 1 / escalate=true\nticket 2: TK3 / medium / 2 / escalate=false\nticket 3: TK4 / high / 3 / escalate=true\nescalated = 3\n",
       "metadata": {
@@ -782,8 +782,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/a1_array_rollup",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/a1_array_rollup",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/80_array_indexed_rollup",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/80_array_indexed_rollup",
       "sha256": "52b2ba8188fdef0b008b338d3d52dc0650ef277d6872edfd19c82217fba7d3fd",
       "stdout": "sum = 31\nmax = 9\ncount = 8\n",
       "metadata": {
@@ -799,8 +799,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/a2_inplace_mutation",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/a2_inplace_mutation",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/81_array_inplace_mutation",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/81_array_inplace_mutation",
       "sha256": "b97a9798749ea93c1a4222a9cb9ade035098c6cc85c5534fbb4cd02ce27907e8",
       "stdout": "a = 20\nb = 40\nc = 60\n",
       "metadata": {
@@ -816,8 +816,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/a3_text_array",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/a3_text_array",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/82_text_array_indexing",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/82_text_array_indexing",
       "sha256": "108283143215b9906d9f68cc36ab534b0b22aa1a59fcce1a12894d9c576e4c35",
       "stdout": "0: Ada\n1: Bob\n2: Cara\n",
       "metadata": {
@@ -833,8 +833,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/a4_record_array",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/a4_record_array",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/83_record_array_append",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/83_record_array_append",
       "sha256": "3b5193bb086e09ea54efa9e2671a28d8c891a25a7eee194acaa9c3b580fd7d83",
       "stdout": "apple x 3\npear x 5\ntotal qty = 8\n",
       "metadata": {
@@ -850,8 +850,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/a5_two_pass",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/a5_two_pass",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/84_array_two_pass",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/84_array_two_pass",
       "sha256": "95ebc4f50e12560c2aa2dac1d91745551ffc820fc18056b0ce5c32ad9221cd9c",
       "stdout": "above avg: 9\nabove avg: 16\nsum = 30\navg = 6\n",
       "metadata": {
@@ -867,8 +867,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/b1_direct_bool",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/b1_direct_bool",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/74_bool_direct_print",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/74_bool_direct_print",
       "sha256": "a6e22d3273e6ce382874864f32d471256f749414e7128ce2ea88c93e23f257d3",
       "stdout": "ready = true\nblocked = false\n",
       "metadata": {
@@ -883,8 +883,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/b2_bool_field",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/b2_bool_field",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/75_bool_field_print",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/75_bool_field_print",
       "sha256": "4ff0cd860cfefe7a8056dac6e99748ddfb77cfd726bcbbd6ecce1a5f2e1ac142",
       "stdout": "cache active = true\n",
       "metadata": {
@@ -900,8 +900,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/b3_bool_from_helper",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/b3_bool_from_helper",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/76_bool_from_helper",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/76_bool_from_helper",
       "sha256": "d67aba4ca3fa8c97b8638631f77adecfc09605f3932556c5786cfc921ccd65dd",
       "stdout": "95 -> true\n80 -> false\n",
       "metadata": {
@@ -917,8 +917,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/e1_if_else",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/e1_if_else",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/71_if_else",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/71_if_else",
       "sha256": "c36bc3bbffc3ccdccd02d49879f9b794643f3e8f2b7670512f39c893beb749c2",
       "stdout": "7 -> non-negative\n-3 -> negative\n",
       "metadata": {
@@ -933,8 +933,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/e2_else_if",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/e2_else_if",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/72_else_if",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/72_else_if",
       "sha256": "ac8b8a1c78159ca1a8299167b30fcf7ef5a855ff01932fd750184f322e7d0280",
       "stdout": "95 -> A\n85 -> B\n70 -> C\n",
       "metadata": {
@@ -949,8 +949,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/e3_continue",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/e3_continue",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/73_loop_continue",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/73_loop_continue",
       "sha256": "dd256545af78655355a5e130c06e59c2cf4b21be2aea833b4733961063c1e5df",
       "stdout": "sum of odds 0..10 = 25\n",
       "metadata": {
@@ -966,8 +966,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/h1_toon_to_array",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/h1_toon_to_array",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/90_toon_to_int_array",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/90_toon_to_int_array",
       "sha256": "d03bdd309dd46a13fa18d80631f2ca7fbc4e1217e469ea6a6ac489187b6bb87f",
       "stdout": "count = 5\npassing = 3\n",
       "metadata": {
@@ -983,8 +983,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/h2_toon_records",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/h2_toon_records",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/91_toon_to_record_array",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/91_toon_to_record_array",
       "sha256": "ddb31b0deca97319cb77cf98c11fbc7a46064dacf776acc58d799278f0319a9a",
       "stdout": "A / ready / 95\nB / ready / 100\nC / blocked / 50\nready = 2\n",
       "metadata": {
@@ -1000,8 +1000,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/m1_use_module",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/m1_use_module",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/92_module_use_helpers",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/92_module_use_helpers",
       "sha256": "5eaf71d6b8682a2dc49a94faec4ddd4e4a07a880de5c1b9dd58110b3357614e7",
       "stdout": "95 pass=true band=high\n68 pass=false band=low\n72 pass=true band=mid\npass mark = 70\n",
       "metadata": {
@@ -1017,8 +1017,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/m2_module_toon",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/m2_module_toon",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/93_module_use_toon",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/93_module_use_toon",
       "sha256": "f59228d9bab2f9c1dd31dde989bf5d80b707155ead7937c18f2ab32433fa5f07",
       "stdout": "Ada / high / pass=true\nBob / low / pass=false\n",
       "metadata": {
@@ -1034,8 +1034,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/n1_missing_final_key",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/n1_missing_final_key",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/87_toon_missing_key_guard",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/87_toon_missing_key_guard",
       "sha256": "23fd80db7039fe400737626478fdc29c30ba8fb1c092e9b962e81e8e99f083c1",
       "stdout": "email = none\n",
       "metadata": {
@@ -1051,8 +1051,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/n2_array_root_nested",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/n2_array_root_nested",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/88_toon_array_root_nested",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/88_toon_array_root_nested",
       "sha256": "87ecd47de289de96267625da548927cd575b2effcf36efbca4d29341a49bd93d",
       "stdout": "id 1 tag=x\nid 2 tag=none\n",
       "metadata": {
@@ -1068,8 +1068,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/n3_object_named_array_nested",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/n3_object_named_array_nested",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/89_toon_object_named_array",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/89_toon_object_named_array",
       "sha256": "72894b7d2b1a756b5d880e2593b15c3848ba768155c41030b0269b5b16145bda",
       "stdout": "a -> 10\nb -> 0\ntotal = 10\n",
       "metadata": {
@@ -1085,8 +1085,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/r1_format_grid",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/r1_format_grid",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/77_real_format_grid",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/77_real_format_grid",
       "sha256": "bfcddea8006bbb7e16622c845b6c16aa70e115aac108d97a6e2c1691cda83e97",
       "stdout": "pos default=3.141590 p2=3.14 w10=      3.14\nneg default=-2.500000 p2=-2.50 w10=     -2.50\n",
       "metadata": {
@@ -1102,8 +1102,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/r2_average",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/r2_average",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/78_real_average",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/78_real_average",
       "sha256": "963ed52603893c5a00fd56b159763f6ea781edbe43b5706829b639d7e38dc57c",
       "stdout": "sum = 337\naverage = 84.25\n",
       "metadata": {
@@ -1119,8 +1119,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/r3_currency",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/r3_currency",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/79_real_currency_format",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/79_real_currency_format",
       "sha256": "8d1db432ec813bbb0aef7994b5ded12ecadae8430ed8230b81d370fbcdec5e9d",
       "stdout": "items = 3\ntotal = $28.74\n",
       "metadata": {
@@ -1136,8 +1136,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/t1_clamp_tuple",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/t1_clamp_tuple",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/85_tuple_clamp_contract",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/85_tuple_clamp_contract",
       "sha256": "cf77b5b1c86cb236761394f021a7ffa29046854049de59e22407ef4152efe72c",
       "stdout": "clamp 150 -> 100 changed=true\nclamp 42 -> 42 changed=false\n",
       "metadata": {
@@ -1153,8 +1153,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/t3_bool_int_tuple",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/t3_bool_int_tuple",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/86_tuple_bool_int_mixed",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/86_tuple_bool_int_mixed",
       "sha256": "97638b63b343831fa2daef67ba78cea87ef33bc809fc729027c75a5effaf3d9d",
       "stdout": "positives = 1\nall positive = false\n",
       "metadata": {
@@ -1170,8 +1170,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/bench_metrics",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/bench_metrics",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/103_bench_metrics",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/103_bench_metrics",
       "sha256": "238fcb1cdf250f35c7ca4995c97a55a0f878a6006e8133cc2c8cadaf71672578",
       "metadata": {
         "canonical": true,
@@ -1474,8 +1474,8 @@
       "stdout": "Original Price: 100\nDiscount Applied: 0\nFinal Price: 100\nNotes: No notes provided\n"
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/math_utils",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/math_utils",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/95_math_utils",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/95_math_utils",
       "sha256": "4d14c7268473bfc1f751aaac67a9b400a9e14b02e58061d102b07c13b8697fb3",
       "metadata": {
         "canonical": true,
@@ -1488,8 +1488,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/text_utils",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/text_utils",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/96_text_utils",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/96_text_utils",
       "sha256": "4561fc761b7a305dd35d6312d620577b0fe7cce9b1646aa045149357374a04bf",
       "metadata": {
         "canonical": true,
@@ -1502,8 +1502,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/service_config",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/service_config",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/100_service_config",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/100_service_config",
       "sha256": "1c58a5a4b465ed2838b52146e4cf25ac5534e4d2af317e7d66d75d0966c825da",
       "metadata": {
         "canonical": true,
@@ -1516,8 +1516,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/severity_labels",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/severity_labels",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/99_severity_labels",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/99_severity_labels",
       "sha256": "0004203ea1060cdc432490e36b772712409a70d5f1f67297315cf036059f0b59",
       "metadata": {
         "canonical": true,
@@ -1530,8 +1530,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/severity_rules",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/severity_rules",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/98_severity_rules",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/98_severity_rules",
       "sha256": "bde4b3ea9aa4de84794ac2fd8c74b08015e0352b5a72160dae176c5442042247",
       "metadata": {
         "canonical": true,
@@ -1544,8 +1544,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/support_rules",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/support_rules",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/97_support_rules",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/97_support_rules",
       "sha256": "cc5360773a56df40a54b4794d5eeccc8d09784595ce1b8da39d589fd4aba7ed2",
       "metadata": {
         "canonical": true,
@@ -1558,8 +1558,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/bench_math",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/bench_math",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/101_bench_math",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/101_bench_math",
       "sha256": "ec870fd2ecd4e8b3756f66dcfe031cf1c92e043afbe9174672a4a11b8ceb4dba",
       "metadata": {
         "canonical": true,
@@ -1572,8 +1572,8 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/bench_consts",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/bench_consts",
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/102_bench_consts",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/102_bench_consts",
       "sha256": "e50246e49113e60d642ae00ab022fa05c1b4b58c54b6450d246d9a73e4b894b6",
       "metadata": {
         "canonical": true,

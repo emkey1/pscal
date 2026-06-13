@@ -2,7 +2,7 @@
 // Concepts: canonical quoted module import, direct exported helper call
 // expect: 42
 
-use "bench_math";
+use "101_bench_math";
 
 fn main() -> Void {
     let value: Int = answer();

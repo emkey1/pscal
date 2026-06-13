@@ -6,7 +6,7 @@
 // expect: 72 pass=true band=mid
 // expect: pass mark = 70
 
-use "bench_metrics";
+use "103_bench_metrics";
 
 fn main() -> Void {
     let scores: Int[] = [95, 68, 72];
