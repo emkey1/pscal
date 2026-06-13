@@ -901,6 +901,14 @@ if(PSCAL_REAL_IOS)
     unset(_PSCAL_ZLIB_SYSROOT)
 endif()
 
+# --- Zlib (system) ---
+find_package(ZLIB QUIET)
+if(NOT ZLIB_FOUND)
+    message(FATAL_ERROR "zlib is required but was not found. "
+        "Install the development package (e.g. 'sudo apt install zlib1g-dev' on Debian/Ubuntu "
+        "or 'sudo dnf install zlib-devel' on Fedora/RHEL) and re-run cmake.")
+endif()
+
 # --- CURL (system vs bundled) ---
 # Option A: build against a bundled libcurl (default on iOS where the SDK does not provide one).
 # Option B: rely on the system SDK via FindCURL (with optional Homebrew hints on macOS).

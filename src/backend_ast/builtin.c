@@ -4470,6 +4470,9 @@ void vmInitTerminalState(void) {
     vmSetupTermHandlers();
     vmPushColorState();
     vmEnableRawMode();
+    if (isatty(STDOUT_FILENO)) {
+        setvbuf(stdout, NULL, _IOFBF, 65536);
+    }
 }
 
 /*
@@ -5614,6 +5617,7 @@ Value vmBuiltinKeypressed(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "KeyPressed expects 0 arguments.");
         return makeBoolean(false);
     }
+    fflush(stdout);
     vmEnableRawMode();
 
     int bytes_available = 0;
@@ -5665,6 +5669,7 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
         return makeChar('\0');
     }
 
+    fflush(stdout);
     int c = 0;
     for (;;) {
         if (pscalRuntimeConsumeSigint()) {
@@ -5817,7 +5822,6 @@ Value vmBuiltinGotoxy(VM* vm, int arg_count, Value* args) {
     long long absX = gWindowLeft + x - 1;
     long long absY = gWindowTop + y - 1;
     printf("\x1B[%lld;%lldH", absY, absX);
-    fflush(stdout);
     return makeVoid();
 }
 
@@ -7888,6 +7892,7 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
+    fflush(stdout);
     FILE* input_stream = stdin;
     int var_start_index = 0;
     bool first_arg_is_file_by_value = false;
@@ -8276,7 +8281,9 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
         resetTextAttributes(output_stream);
     }
 
-    fflush(output_stream);
+    if (output_stream != stdout) {
+        fflush(output_stream);
+    }
     if (first_arg_is_file_by_value) { args[1].type = TYPE_NIL; args[1].f_val = NULL; }
 
     return makeVoid();
