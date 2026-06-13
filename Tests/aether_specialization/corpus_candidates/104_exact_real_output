@@ -1,0 +1,17 @@
+// 104_exact_real_output
+// Concepts: exact-output real formatting, explicit Real arithmetic
+// expect: pct=75.00
+// expect: avg=2.50
+
+fn main() -> Void {
+    let ok: Int = 3;
+    let total: Int = 4;
+    let pct: Real = ok * 100.0 / total;
+    let avg: Real = (1.0 + 2.0 + 4.0 + 3.0) / 4.0;
+
+    fx {
+        println("pct=", pct:0:2);
+        println("avg=", avg:0:2);
+    }
+    ret;
+}

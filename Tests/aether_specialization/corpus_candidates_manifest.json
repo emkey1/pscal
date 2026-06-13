@@ -1618,6 +1618,141 @@
         ],
         "notes": "Queries builtin_info and inspects the returned TOON object for builtin metadata."
       }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/100_method_field_shadow",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/100_method_field_shadow",
+      "sha256": "846002ba5381ac95ca9de0654b2da33f9ef38df27d79fe93b8021eae310d6fbc",
+      "stdout": "valid = 1\ninvalid = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "type",
+          "method",
+          "control-flow",
+          "scope"
+        ],
+        "notes": "Method-local binding shadows a field name; bare local and explicit self.field are both exercised."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/101_method_explicit_context",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/101_method_explicit_context",
+      "sha256": "04c518e517cf4ee07d116e4086f7455d5543f00986bc7bc7abef51cd91f04996",
+      "stdout": "row 0 -> Alpha\nrow 1 -> Beta\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "type",
+          "method",
+          "scope",
+          "output"
+        ],
+        "notes": "Shows that methods receive caller context explicitly instead of capturing outer loop locals."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/102_toon_doc_root_bridge",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/102_toon_doc_root_bridge",
+      "sha256": "7221cc25fb68c183e7692ab16a2a0541252a454103d369adf821922c015afa7e",
+      "stdout": "name = Aether\nenabled = true\ncount = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "toon",
+          "root-shape",
+          "typed-extraction"
+        ],
+        "notes": "Minimal canonical ToonDoc -> toon_root -> ToonNode extraction path."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/103_toon_object_array_extraction",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/103_toon_object_array_extraction",
+      "sha256": "9de3b547174054e1576cff353c4292326b39edbd238c49c13d4b5c12b161a099",
+      "stdout": "row 0 = A1\nrow 1 = EMPTY\nrow 2 = B7\nmissing = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "toon",
+          "root-shape",
+          "nested-guard",
+          "control-flow"
+        ],
+        "notes": "Object-root named-array extraction plus guarded intermediate lookup before a final _or helper."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/104_exact_real_output",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/104_exact_real_output",
+      "sha256": "bad42e20f31455a6709de2b0db92ce7e6e3756ece95f77aead19e87da5e25601",
+      "stdout": "pct=75.00\navg=2.50\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "real",
+          "formatting",
+          "output"
+        ],
+        "notes": "Exact-output decimal formatting with explicit Real arithmetic and width:precision formatting."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/105_exact_output_normalize",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/105_exact_output_normalize",
+      "sha256": "366969fe45d7a2cfa36bbf0c3d3e883822703249b92365572532e957d254b1f0",
+      "stdout": "normalize(150)=100\nnormalize(42)=42\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "contracts",
+          "output",
+          "control-flow"
+        ],
+        "notes": "Exact-output labels plus explicit final return path in a non-Void helper with contracts."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/106_exact_export_names",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/106_exact_export_names",
+      "sha256": "e5bef9aee5301f02acd0531c21adef54dcf37dc7ccfc5fb7b0d18aaeb07895c3",
+      "stdout": "raw=120\nscore=100\nstatus=ready\ndefault=50\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "module",
+          "output"
+        ],
+        "notes": "Uses a provided module and calls exported names exactly, without guessed wrappers."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/107_exact_export_names_module",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/107_exact_export_names_module",
+      "sha256": "ec04d54816b219e52f48796ceb0b0b44f53471edc28edca60a569d48eee46ee9",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "module"
+        ],
+        "notes": "Support module for 106_exact_export_names."
+      }
     }
   ]
 }

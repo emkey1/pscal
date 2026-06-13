@@ -39,11 +39,15 @@ compiler, and VM. It is not a separate runtime.
     when the JSON starts with `[`.
 15. **SCOPE-001.** A name must be declared before use and still be in scope at
     the use site. Do not rely on guessed globals or out-of-scope loop locals.
-16. **FMT-001.** If the prompt specifies exact output, match it exactly:
+16. **METH-001.** Methods do not capture outer locals. If a method needs `i`,
+    `name`, or another caller value, pass it as a parameter.
+17. **FIELD-001.** Inside a method, a local may reuse a field name. Bare
+    `valid` means the local; `self.valid` means the field.
+18. **FMT-001.** If the prompt specifies exact output, match it exactly:
     spacing, casing, line order, and decimal precision.
-17. **NAME-001.** Do not redeclare a local name in the same scope. Pick fresh
+19. **NAME-001.** Do not redeclare a local name in the same scope. Pick fresh
     names such as `values`, `count`, `sum`, `maxValue`.
-18. **MOD-002.** Canonical import form is `use "module_name";`. After import,
+20. **MOD-002.** Canonical import form is `use "module_name";`. After import,
     call exported names directly. Never guess `export { ... }`, `JsonDoc`,
     `json.parseFile(...)`, `Int.MIN`, or `value.toString()`.
 
@@ -239,6 +243,21 @@ loop i in 0..toon_len(jobs) {
 }
 ```
 
+Never do this:
+
+```aether
+let doc: ToonDoc = toon_parse_file("payload.json");
+let name: Text = toon_get_text(doc, "name");
+```
+
+Always do this:
+
+```aether
+let doc: ToonDoc = toon_parse_file("payload.json");
+let root: ToonNode = toon_root(doc);
+let name: Text = toon_get_text(root, "name");
+```
+
 Large-loop pattern:
 
 ```aether
@@ -313,6 +332,8 @@ Imports are advanced; most generated Aether should be single-file.
   rename. Module exports `classifySupport` → call `classifySupport(...)`,
   never a guessed `classify(...)`. Module exports `Answer` → use `Answer`,
   not `APP_NAME`, `AetherName`, or another invented spelling.
+- if a task provides exports named `clampSupport`, `classifySupport`, or
+  `PassMark`, call those exact names
 - file naming: `mod ModuleConsts` → `use "module_consts";`
 - when combining purity with module export, write `@pure` above `export fn`
 - for generated code, assume modules export `const` and `fn`; do not generate
@@ -383,6 +404,9 @@ fn main() -> Void {
 - mentions unknown import → remove `use` (IMP-001)
 - mentions `not in scope` → declare the name earlier or pass it explicitly
   (SCOPE-001)
+- mentions `ToonDoc` where a node is expected → add `let root: ToonNode = toon_root(doc);`
+- mentions wrong output or mismatch → remove extra headings/labels and match
+  punctuation, spacing, and decimal precision exactly
 - mentions `ToonDoc`/`ToonNode` → check handle types (TOON-001)
 - mentions a tuple → destructure a direct call only (TUP-001)
 - mentions annotation placement → move above the function (ANN-001)

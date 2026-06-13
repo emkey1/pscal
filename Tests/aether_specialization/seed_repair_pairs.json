@@ -96,6 +96,30 @@
       "files": {
         "bench_consts": "mod BenchConsts {\n    export const Greeting = \"Aether\";\n    export const Answer = 42;\n}\n"
       }
+    },
+    {
+      "id": "repair_toon_doc_vs_root",
+      "diagnostic": "[TOON-001] Aether type error: call to 'toon_get_text' expects a ToonNode handle, but 'doc' is ToonDoc.",
+      "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\"}\");\n    let name: Text = toon_get_text(doc, \"name\");\n\n    fx {\n        println(name);\n    }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\"}\");\n    let root: ToonNode = toon_root(doc);\n    let name: Text = toon_get_text(root, \"name\");\n\n    fx {\n        println(name);\n    }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "Aether\n"
+    },
+    {
+      "id": "repair_method_needs_context_param",
+      "diagnostic": "[SCOPE-001] identifier 'i' not in scope.",
+      "broken_source": "type Reporter {\n    fn emit(name: Text) -> Void {\n        fx {\n            println(\"row \", i, \" -> \", name);\n        }\n        ret;\n    }\n}\n\nfn main() -> Void {\n    let reporter: Reporter = new Reporter();\n    let names: Text[] = [\"Alpha\", \"Beta\"];\n    loop i in 0..length(names) {\n        reporter.emit(names[i]);\n    }\n    ret;\n}\n",
+      "fixed_source": "type Reporter {\n    fn emit(rowIndex: Int, name: Text) -> Void {\n        fx {\n            println(\"row \", rowIndex, \" -> \", name);\n        }\n        ret;\n    }\n}\n\nfn main() -> Void {\n    let reporter: Reporter = new Reporter();\n    let names: Text[] = [\"Alpha\", \"Beta\"];\n    loop i in 0..length(names) {\n        reporter.emit(i, names[i]);\n    }\n    ret;\n}\n",
+      "expected_stdout": "row 0 -> Alpha\nrow 1 -> Beta\n"
+    },
+    {
+      "id": "repair_module_exact_export_names",
+      "diagnostic": "[SCOPE-001] identifier 'normalize' not in scope.",
+      "broken_source": "use \"exact_exports\";\n\nfn main() -> Void {\n    let raw: Int = 120;\n    let score: Int = normalize(raw);\n    let status: Text = classify(score);\n    fx {\n        println(score, \" \", status);\n    }\n    ret;\n}\n",
+      "fixed_source": "use \"exact_exports\";\n\nfn main() -> Void {\n    let raw: Int = 120;\n    let score: Int = clampSupport(raw);\n    let status: Text = classifySupport(score);\n    fx {\n        println(score, \" \", status);\n    }\n    ret;\n}\n",
+      "expected_stdout": "100 ready\n",
+      "files": {
+        "exact_exports": "mod ExactExports {\n    @pure\n    export fn clampSupport(score: Int) -> Int {\n        if score > 100 {\n            ret 100;\n        }\n        ret score;\n    }\n\n    @pure\n    export fn classifySupport(score: Int) -> Text {\n        if score >= 90 {\n            ret \"ready\";\n        }\n        if score >= 70 {\n            ret \"review\";\n        }\n        ret \"blocked\";\n    }\n}\n"
+      }
     }
   ]
 }

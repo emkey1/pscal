@@ -257,6 +257,7 @@ static void splitTypeSuffix(const char *typeStart,
                             const char **outSuffixStart);
 static char *rewriteMethodScopedExpr(const char *start,
                                      const char *end,
+                                     const AetherBindingTable *bindings,
                                      const TypeBlockState *typeState,
                                      int isMethod);
 static char *rewriteAetherOpaqueNilComparisons(const char *start,
@@ -4167,6 +4168,7 @@ static char *extractAnnotationExpr(const char *body, const char *lineEnd, const 
 
 static char *rewriteInlineIfExpression(const char *exprStart,
                                        const char *exprEnd,
+                                       const AetherBindingTable *bindings,
                                        const TypeBlockState *typeState,
                                        int isMethod) {
     const char *cursor;
@@ -4277,9 +4279,9 @@ static char *rewriteInlineIfExpression(const char *exprStart,
         elseExprEnd--;
     }
 
-    rewrittenCond = rewriteMethodScopedExpr(condStart, condEnd, typeState, isMethod);
-    rewrittenThen = rewriteMethodScopedExpr(thenExprStart, thenExprEnd, typeState, isMethod);
-    rewrittenElse = rewriteMethodScopedExpr(elseExprStart, elseExprEnd, typeState, isMethod);
+    rewrittenCond = rewriteMethodScopedExpr(condStart, condEnd, bindings, typeState, isMethod);
+    rewrittenThen = rewriteMethodScopedExpr(thenExprStart, thenExprEnd, bindings, typeState, isMethod);
+    rewrittenElse = rewriteMethodScopedExpr(elseExprStart, elseExprEnd, bindings, typeState, isMethod);
     if (!rewrittenCond || !rewrittenThen || !rewrittenElse) {
         free(rewrittenCond);
         free(rewrittenThen);
@@ -4487,6 +4489,7 @@ static char *buildContractIndent(const char *lineStart, const char *body) {
 
 static char *rewriteMethodScopedExpr(const char *start,
                                      const char *end,
+                                     const AetherBindingTable *bindings,
                                      const TypeBlockState *typeState,
                                      int isMethod) {
     const char *cursor = start;
@@ -4557,6 +4560,7 @@ static char *rewriteMethodScopedExpr(const char *start,
             if (typeState &&
                 (cursor == start || cursor[-1] != '.') &&
                 !(afterName < end && *afterName == '(') &&
+                !findAetherBindingType(bindings, nameStart, (size_t)(nameEnd - nameStart)) &&
                 typeBlockHasField(typeState, nameStart, (size_t)(nameEnd - nameStart))) {
                 if (!bufferAppend(&out, "myself.") ||
                     !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart))) {
@@ -5382,6 +5386,7 @@ static char *translateReturnWithPost(const char *lineStart,
                                      const char *body,
                                      const char *lineEnd,
                                      const FunctionContracts *fnState,
+                                     const AetherBindingTable *bindings,
                                      const TypeBlockState *typeState,
                                      JsonAliasState *jsonState,
                                      const ToonLiteralTable *toonTable) {
@@ -5417,7 +5422,11 @@ static char *translateReturnWithPost(const char *lineStart,
     }
 
     if (exprStart < exprEnd) {
-        rewrittenExpr = rewriteMethodScopedExpr(exprStart, exprEnd, typeState, fnState->isMethod);
+        rewrittenExpr = rewriteMethodScopedExpr(exprStart,
+                                                exprEnd,
+                                                bindings,
+                                                typeState,
+                                                fnState->isMethod);
         if (!rewrittenExpr) {
             free(indent);
             free(out.data);
@@ -6650,7 +6659,7 @@ static char *translateTypedDeclLine(const char *lineStart,
         while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
             exprEnd--;
         }
-        inlineIfExpr = rewriteInlineIfExpression(exprStart, exprEnd, NULL, 0);
+        inlineIfExpr = rewriteInlineIfExpression(exprStart, exprEnd, NULL, NULL, 0);
     }
     if (!appendMappedParamTypeAndName(&out,
                                       afterColon,
@@ -6682,6 +6691,7 @@ static char *translateTypedDeclLine(const char *lineStart,
 static char *translateArrayAppendLine(const char *lineStart,
                                       const char *body,
                                       const char *lineEnd,
+                                      const AetherBindingTable *bindings,
                                       const TypeBlockState *typeState,
                                       int isMethod) {
     const char *equals;
@@ -6756,8 +6766,8 @@ static char *translateArrayAppendLine(const char *lineStart,
         return NULL;
     }
 
-    rewrittenLhs = rewriteMethodScopedExpr(lhsStart, lhsEnd, typeState, isMethod);
-    rewrittenItem = rewriteMethodScopedExpr(itemStart, itemEnd, typeState, isMethod);
+    rewrittenLhs = rewriteMethodScopedExpr(lhsStart, lhsEnd, bindings, typeState, isMethod);
+    rewrittenItem = rewriteMethodScopedExpr(itemStart, itemEnd, bindings, typeState, isMethod);
     if (!rewrittenLhs || !rewrittenItem) {
         free(rewrittenLhs);
         free(rewrittenItem);
@@ -6828,7 +6838,7 @@ static char *translateInferredDeclLine(const char *lineStart,
         while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
             exprEnd--;
         }
-        inlineIfExpr = rewriteInlineIfExpression(exprStart, exprEnd, NULL, 0);
+        inlineIfExpr = rewriteInlineIfExpression(exprStart, exprEnd, NULL, NULL, 0);
     }
 
     if (isConst) {
@@ -6944,7 +6954,7 @@ static char *translateConditionLine(const char *lineStart,
     while (brace > exprStart && isspace((unsigned char)brace[-1])) {
         brace--;
     }
-    rewrittenExpr = rewriteMethodScopedExpr(exprStart, brace, NULL, 0);
+    rewrittenExpr = rewriteMethodScopedExpr(exprStart, brace, NULL, NULL, 0);
     if (!rewrittenExpr) {
         return NULL;
     }
@@ -6967,6 +6977,7 @@ static char *translateConditionLine(const char *lineStart,
 static char *translateReturnInlineIfLine(const char *lineStart,
                                          const char *body,
                                          const char *lineEnd,
+                                         const AetherBindingTable *bindings,
                                          const TypeBlockState *typeState,
                                          int isMethod) {
     const char *exprStart;
@@ -6991,7 +7002,7 @@ static char *translateReturnInlineIfLine(const char *lineStart,
     while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
         exprEnd--;
     }
-    rewrittenExpr = rewriteInlineIfExpression(exprStart, exprEnd, typeState, isMethod);
+    rewrittenExpr = rewriteInlineIfExpression(exprStart, exprEnd, bindings, typeState, isMethod);
     if (!rewrittenExpr) {
         return NULL;
     }
@@ -7010,6 +7021,7 @@ static char *translateReturnInlineIfLine(const char *lineStart,
 static char *translateReturnObjectInitLine(const char *lineStart,
                                            const char *body,
                                            const char *lineEnd,
+                                           const AetherBindingTable *bindings,
                                            const TypeBlockState *typeState,
                                            int isMethod,
                                            int lineNumber) {
@@ -7137,9 +7149,9 @@ static char *translateReturnObjectInitLine(const char *lineStart,
         while (valueEnd > valueStart && isspace((unsigned char)valueEnd[-1])) {
             valueEnd--;
         }
-        rewrittenValue = rewriteInlineIfExpression(valueStart, valueEnd, typeState, isMethod);
+        rewrittenValue = rewriteInlineIfExpression(valueStart, valueEnd, bindings, typeState, isMethod);
         if (!rewrittenValue) {
-            rewrittenValue = rewriteMethodScopedExpr(valueStart, valueEnd, typeState, isMethod);
+            rewrittenValue = rewriteMethodScopedExpr(valueStart, valueEnd, bindings, typeState, isMethod);
         }
         if (!rewrittenValue) {
             freeTupleItemTypes(items, itemCount);
@@ -7225,7 +7237,7 @@ static char *translateCallInlineIfArgsLine(const char *lineStart,
     for (size_t i = 0; i < itemCount; i++) {
         const char *itemStart = items[i];
         const char *itemEnd = items[i] + strlen(items[i]);
-        char *rewritten = rewriteInlineIfExpression(itemStart, itemEnd, typeState, isMethod);
+        char *rewritten = rewriteInlineIfExpression(itemStart, itemEnd, NULL, typeState, isMethod);
         if (rewritten) {
             rewrittenAny = 1;
             if (!bufferAppend(&out, rewritten)) {
@@ -7308,11 +7320,11 @@ static char *translateAssignInlineIfLine(const char *lineStart,
     while (rhsEnd > rhsStart && isspace((unsigned char)rhsEnd[-1])) {
         rhsEnd--;
     }
-    rewrittenRhs = rewriteInlineIfExpression(rhsStart, rhsEnd, typeState, isMethod);
+    rewrittenRhs = rewriteInlineIfExpression(rhsStart, rhsEnd, NULL, typeState, isMethod);
     if (!rewrittenRhs) {
         return NULL;
     }
-    rewrittenLhs = rewriteMethodScopedExpr(lhsStart, lhsEnd, typeState, isMethod);
+    rewrittenLhs = rewriteMethodScopedExpr(lhsStart, lhsEnd, NULL, typeState, isMethod);
     if (!rewrittenLhs) {
         free(rewrittenRhs);
         return NULL;
@@ -7815,9 +7827,9 @@ static char *translateLine(const char *lineStart,
         return translateTypeLine(lineStart, body, lineEnd);
     }
     {
-        char *translated = translateReturnInlineIfLine(lineStart, body, lineEnd, NULL, 0);
+        char *translated = translateReturnInlineIfLine(lineStart, body, lineEnd, NULL, NULL, 0);
         if (!translated) {
-            translated = translateReturnObjectInitLine(lineStart, body, lineEnd, NULL, 0, lineNumber);
+            translated = translateReturnObjectInitLine(lineStart, body, lineEnd, NULL, NULL, 0, lineNumber);
         }
         if (!translated) {
             translated = translateAssignInlineIfLine(lineStart, body, lineEnd, NULL, 0);
@@ -7976,6 +7988,7 @@ static char *translateLineInMethod(const char *lineStart,
     if (isMethod && typeState) {
         rewritten = rewriteMethodScopedExpr(translated,
                                             translated + strlen(translated),
+                                            bindings,
                                             typeState,
                                             isMethod);
         free(translated);
@@ -8417,6 +8430,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 translated = translateReturnObjectInitLine(lineStart,
                                                            body,
                                                            lineEnd,
+                                                           &bindingTable,
                                                            &typeState,
                                                            fnState.isMethod,
                                                            lineNumber);
@@ -8425,6 +8439,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                                                          body,
                                                          lineEnd,
                                                          &fnState,
+                                                         &bindingTable,
                                                          &typeState,
                                                          &jsonState,
                                                          &toonTable);
@@ -8485,6 +8500,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 translated = translateArrayAppendLine(lineStart,
                                                      body,
                                                      lineEnd,
+                                                     &bindingTable,
                                                      &typeState,
                                                      fnState.active && fnState.isMethod);
                 if (!translated) {
@@ -8813,6 +8829,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     if (pending.preExpr) {
                         methodPreExpr = rewriteMethodScopedExpr(pending.preExpr,
                                                                 pending.preExpr + strlen(pending.preExpr),
+                                                                &bindingTable,
                                                                 &typeState,
                                                                 1);
                         if (!methodPreExpr) {
@@ -8835,6 +8852,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     if (pending.postExpr) {
                         methodPostExpr = rewriteMethodScopedExpr(pending.postExpr,
                                                                  pending.postExpr + strlen(pending.postExpr),
+                                                                 &bindingTable,
                                                                  &typeState,
                                                                  1);
                         if (!methodPostExpr) {

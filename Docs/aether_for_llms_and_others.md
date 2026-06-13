@@ -55,6 +55,10 @@ If you only read one part of this document, read **Highest-Value Rules** and
 14. **SCOPE-001.** A name must be declared before use and still be in scope at
     the use site. Do not rely on guessed globals, expired loop locals, or
     helper-local names from another function.
+15. **METH-001.** Methods do not capture outer locals. If a method needs a loop
+    index, label, or other caller context, pass it as a parameter.
+16. **FIELD-001.** Method locals may reuse field names. Bare `name` means the
+    local; `self.name` means the field.
 
 Fast failure checks: output outside `fx` is wrong; a guessed import is wrong;
 a helper not listed in this document is wrong; arithmetic on `ToonDoc` /
@@ -103,6 +107,8 @@ Generate the canonical form unless preserving existing code.
 | Record init | `Point { x: 3, y: 4 }` | `Point(x: 3, y: 4)` | — |
 | TOON nested lookup | bind and validate intermediates | nested calls when shape guaranteed | `_or` on missing intermediate |
 | Imports | verified `use "module";` | self-contained code | guessed modules |
+| Method context | pass loop/local context as params | helper computes its own label | implicit capture of outer `i` / `name` |
+| Field/local same name | `let valid = ...; if valid { self.valid = ...; }` | distinct local names | assuming bare `valid` means the field |
 
 ## What Aether is for
 
@@ -273,6 +279,10 @@ type JobSummary {
 - inside methods use lowercase `self`, never `Self`
 - top-level helpers whose first parameter is `self: Type` are extension-style
   methods; call them with method syntax (`counter.bump()`)
+- methods do not implicitly capture outer loop locals or helper locals from
+  another scope; pass needed context in the parameter list
+- if a local and a field share a name, bare `name` means the local and
+  `self.name` means the field
 
 Record values are pointer-backed: passing a record to a function or method
 and mutating its fields is visible to the caller.
@@ -316,6 +326,10 @@ if score >= 90 {
 
 `else if` is also supported, but sequential `if` + `ret` remains the most
 predictable style for generated classification helpers.
+
+Do not write a non-`Void` helper with one branch that returns and another that
+falls through to the closing brace. Add an explicit final `ret ...` on every
+reachable top-level path.
 
 Inline conditional expressions are allowed on the right-hand side of
 declarations, assignments, and returns — but never directly inside
@@ -500,6 +514,17 @@ let ys: Int[] = [1, 2, 3];
 the safe path. `ToonDoc` = parsed document, `ToonNode` = node within it; both
 opaque (TOON-001). Keys are `Text`, indexes `Int`. Always `toon_close(doc)`.
 
+Golden shape rules:
+
+- `toon_parse(...)` / `toon_parse_file(...)` returns `ToonDoc`
+- `toon_root(doc)` returns `ToonNode`
+- `toon_get_*`, `toon_key`, and `toon_at` operate on `ToonNode`, never
+  directly on `ToonDoc`
+- if the payload starts with `{`, inspect named keys on `root`; if it starts
+  with `[`, iterate `root` directly
+- `_or` helpers only protect the final key lookup, not a missing intermediate
+  object
+
 ### Helper surface (complete — BUILT-001)
 
 | Need | Helper |
@@ -541,6 +566,21 @@ loop i in 0..toon_len(jobs) {
 names a collection (`jobs`, `users`, `releases`) and the payload is
 object-shaped, bind that named array first.
 
+Wrong:
+
+```aether
+let doc: ToonDoc = toon_parse_file("payload.json");
+let name: Text = toon_get_text(doc, "name");
+```
+
+Right:
+
+```aether
+let doc: ToonDoc = toon_parse_file("payload.json");
+let root: ToonNode = toon_root(doc);
+let name: Text = toon_get_text(root, "name");
+```
+
 ### Key fidelity (KEY-001)
 
 Copy JSON keys exactly; never normalize (`"name"` under `"app"` is
@@ -563,6 +603,12 @@ if toon_has_key(row, "meta") {
 Avoid `toon_get_text_or(toon_key(row, "meta"), "code", "EMPTY")` unless
 `"meta"` is guaranteed present. Nested calls are fine when the shape is known,
 but intermediate bindings are easier to read and debug.
+
+Wrong:
+
+```aether
+let code: Text = toon_get_text_or(toon_key(row, "meta"), "code", "EMPTY");
+```
 
 ### Worked example
 
@@ -644,6 +690,8 @@ Hard rules:
 - when combining purity with module export, write `@pure` above `export fn`
 - for generated code, assume modules export `const` and `fn`; do not generate
   exported `type` blocks
+- if the task provides a module, copy its export names exactly; do not invent
+  wrapper names such as `classify(...)`, `normalize(...)`, or `getAnswer()`
 
 ```aether
 mod BenchSupport {
@@ -660,6 +708,14 @@ fn summarize(job: ToonNode) -> Int {
     let raw: Int = toon_get_int_or(job, "score", DefaultScore);
     ret clampSupport(raw);
 }
+```
+
+Wrong:
+
+```aether
+use "bench_support";
+let score: Int = normalize(raw);
+let status: Text = classify(score);
 ```
 
 Real module examples: `Examples/aether/base/module_demo`,
@@ -751,6 +807,27 @@ fn main() -> Void {
         println(answer);
     }
     ret;
+}
+```
+
+### Method with explicit loop context
+
+```aether
+type Audit {
+    valid: Int;
+    invalid: Int;
+
+    fn record(rowIndex: Int, ok: Bool, amount: Int) -> Void {
+        if ok {
+            self.valid = self.valid + 1;
+        } else {
+            self.invalid = self.invalid + 1;
+        }
+        fx {
+            println("row ", rowIndex, " -> ", amount);
+        }
+        ret;
+    }
 }
 ```
 
