@@ -1,12 +1,5 @@
 # Aether for Humans and LLMs
 
-Maintenance note:
-
-- full reference / source-of-truth version; keep it human-usable and precise
-  enough to extract into small-context LLM prompts
-- when this file changes, refresh `Docs/aether_for_llms_with_small_contexts.md`
-  in the same commit; **LLM-critical** sections almost always require that update
-
 Aether is a compact front end for the PSCAL suite. It targets the existing
 shared PSCAL backend, bytecode compiler, and VM. It is not a separate runtime.
 
@@ -727,6 +720,25 @@ let status: Text = classify(score);
 Real module examples: `Examples/aether/base/module_demo`,
 `Examples/aether/base/module_consts_demo`.
 
+Module recipe for generated code:
+
+1. Add `use "module_name";` only when the module is verified or provided.
+2. Copy exported names exactly as written in the module file.
+3. Bind imported results to typed locals if they feed later logic.
+4. Do not invent wrappers unless you define them yourself.
+
+```aether
+use "bench_math";
+
+fn main() -> Void {
+    let value: Int = answer();
+    fx {
+        println(value);
+    }
+    ret;
+}
+```
+
 ## Diagnostics
 
 Failures report original Aether source lines (`file:line:` prefix in CLI
@@ -790,6 +802,78 @@ fn main() -> Void {
 
     toon_close(doc);
     ret;
+}
+```
+
+### Safe nested TOON extraction
+
+```aether
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("{\"rows\":[{\"meta\":{\"code\":\"A1\"}},{\"meta\":{}},{\"broken\":true}]}");
+    let root: ToonNode = toon_root(doc);
+    let rows: ToonNode = toon_key(root, "rows");
+    let missing: Int = 0;
+
+    loop i in 0..toon_len(rows) {
+        let row: ToonNode = toon_at(rows, i);
+        let code: Text = "EMPTY";
+        if toon_has_key(row, "meta") {
+            let meta: ToonNode = toon_key(row, "meta");
+            code = toon_get_text_or(meta, "code", "EMPTY");
+        }
+        if code == "EMPTY" {
+            missing = missing + 1;
+        }
+        fx {
+            println("row ", i, " = ", code);
+        }
+    }
+
+    fx {
+        println("missing = ", missing);
+    }
+
+    toon_close(doc);
+    ret;
+}
+```
+
+### Large report recipe
+
+Use this shape for long benchmark-style programs:
+
+1. `const` defaults first
+2. pure normalization / classification helpers next
+3. one mutable `type` for counters or rollup state
+4. in `main`, parse TOON, bind `root`, extract the named array, iterate once
+5. inside the loop: extract, normalize, classify, update counters, print
+6. after the loop: print totals, then `toon_close(doc);`
+
+```aether
+type Totals {
+    total: Int;
+    ready: Int;
+    review: Int;
+    blocked: Int;
+
+    fn record(status: Text) -> Void {
+        self.total = self.total + 1;
+        if status == "ready" {
+            self.ready = self.ready + 1;
+            ret;
+        }
+        if status == "review" {
+            self.review = self.review + 1;
+            ret;
+        }
+        self.blocked = self.blocked + 1;
+        ret;
+    }
 }
 ```
 

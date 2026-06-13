@@ -1,0 +1,20 @@
+// 109_inline_average_exact
+// Concepts: inline if-expression on RHS only, exact integer output
+// expect: avg0=0
+// expect: avg2=4
+
+fn main() -> Void {
+    let total0: Int = 9;
+    let count0: Int = 0;
+    let total2: Int = 9;
+    let count2: Int = 2;
+
+    let avg0: Int = if count0 == 0 { 0 } else { total0 / count0 };
+    let avg2: Int = if count2 == 0 { 0 } else { total2 / count2 };
+
+    fx {
+        println("avg0=", avg0);
+        println("avg2=", avg2);
+    }
+    ret;
+}

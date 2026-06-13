@@ -1,0 +1,77 @@
+// 110_jobs_summary_file_exact
+// Concepts: toon_parse_file, object-root named-array extraction, pure classifier,
+// per-row reporting, final totals
+// expect: job 0 => Alpha / ready / 95
+// expect: job 1 => Beta / review / 78
+// expect: job 2 => Gamma / blocked / 62
+// expect: total = 3
+// expect: ready = 1
+// expect: review = 1
+// expect: blocked = 1
+
+@pure
+fn classify(score: Int) -> Text {
+    if score >= 90 {
+        ret "ready";
+    }
+    if score >= 70 {
+        ret "review";
+    }
+    ret "blocked";
+}
+
+type Totals {
+    total: Int;
+    ready: Int;
+    review: Int;
+    blocked: Int;
+
+    fn record(status: Text) -> Void {
+        self.total = self.total + 1;
+        if status == "ready" {
+            self.ready = self.ready + 1;
+            ret;
+        }
+        if status == "review" {
+            self.review = self.review + 1;
+            ret;
+        }
+        self.blocked = self.blocked + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse_file("jobs110.json");
+    let root: ToonNode = toon_root(doc);
+    let jobs: ToonNode = toon_key(root, "jobs");
+    let totals: Totals = new Totals();
+
+    loop i in 0..toon_len(jobs) {
+        let job: ToonNode = toon_at(jobs, i);
+        let name: Text = toon_get_text(job, "name");
+        let score: Int = toon_get_int(job, "score");
+        let status: Text = classify(score);
+
+        totals.record(status);
+
+        fx {
+            println("job ", i, " => ", name, " / ", status, " / ", score);
+        }
+    }
+
+    fx {
+        println("total = ", totals.total);
+        println("ready = ", totals.ready);
+        println("review = ", totals.review);
+        println("blocked = ", totals.blocked);
+    }
+
+    toon_close(doc);
+    ret;
+}

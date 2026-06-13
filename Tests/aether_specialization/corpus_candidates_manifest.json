@@ -1753,6 +1753,77 @@
         ],
         "notes": "Support module for 106_exact_export_names."
       }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/108_name_validation_exact",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/108_name_validation_exact",
+      "sha256": "327323b7706fc82ce751c134c1660b56cbb42128337f3308938bd1269002ddaf",
+      "stdout": "alpha=true\nempty=false\nbad=false\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "text",
+          "bool",
+          "output"
+        ],
+        "notes": "Direct Bool printing with string_len and text equality, shaped to the benchmark validation task."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/109_inline_average_exact",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/109_inline_average_exact",
+      "sha256": "5355582625954a132684e342e5c0ee7fa1487f652e4c808aeebb3b180c6fc66a",
+      "stdout": "avg0=0\navg2=4\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "inline-if",
+          "arithmetic",
+          "output"
+        ],
+        "notes": "Inline if-expression on the RHS only, with exact integer output labels."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/110_jobs_summary_file_exact",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/110_jobs_summary_file_exact",
+      "sha256": "dbc3f4571baca1b72c7eb2cad115ddd4d15fa837dc23d2257c1f6767876c68e1",
+      "stdout": "job 0 => Alpha / ready / 95\njob 1 => Beta / review / 78\njob 2 => Gamma / blocked / 62\ntotal = 3\nready = 1\nreview = 1\nblocked = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": false,
+        "tags": [
+          "toon",
+          "report",
+          "file",
+          "output"
+        ],
+        "notes": "Benchmark-mirror TOON file summary with object-root named-array extraction, per-row output, and final totals."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/111_support_module_rollup_exact",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/111_support_module_rollup_exact",
+      "sha256": "2fdf603aa3b8053ca7d10ed7f48654e825a7c11b899eb37601e8186b8d92f3ac",
+      "stdout": "job 0 -> Alpha / ready / 95\njob 1 -> Beta / blocked / 50\njob 2 -> Gamma / blocked / 12\nready = 1\nreview = 0\nblocked = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": false,
+        "tags": [
+          "module",
+          "toon",
+          "report",
+          "file",
+          "output"
+        ],
+        "notes": "Benchmark-mirror module plus TOON file rollup using exported names exactly and a provided default score."
+      }
     }
   ]
 }

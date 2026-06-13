@@ -1,10 +1,5 @@
 # Aether for LLMs with Small Contexts
 
-Maintenance note:
-
-- compact companion to the full reference (`Docs/aether_for_llms_and_others.md`)
-- keep this file short and rule-focused; refresh whenever the full doc changes
-
 Aether is a compact PSCAL front end. It uses the existing backend, bytecode
 compiler, and VM. It is not a separate runtime.
 
@@ -349,6 +344,20 @@ let score: Int = clampSupport(raw);
 let status: Text = classifySupport(score);
 ```
 
+Minimal import recipe:
+
+```aether
+use "bench_math";
+
+fn main() -> Void {
+    let value: Int = answer();
+    fx {
+        println(value);
+    }
+    ret;
+}
+```
+
 ## Contracts (ANN-001)
 
 ```aether
@@ -399,6 +408,54 @@ fn main() -> Void {
     ret;
 }
 ```
+
+```aether
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("{\"rows\":[{\"meta\":{\"code\":\"A1\"}},{\"meta\":{}},{\"broken\":true}]}");
+    let root: ToonNode = toon_root(doc);
+    let rows: ToonNode = toon_key(root, "rows");
+    let missing: Int = 0;
+
+    loop i in 0..toon_len(rows) {
+        let row: ToonNode = toon_at(rows, i);
+        let code: Text = "EMPTY";
+        if toon_has_key(row, "meta") {
+            let meta: ToonNode = toon_key(row, "meta");
+            code = toon_get_text_or(meta, "code", "EMPTY");
+        }
+        if code == "EMPTY" {
+            missing = missing + 1;
+        }
+        fx {
+            println("row ", i, " = ", code);
+        }
+    }
+
+    fx {
+        println("missing = ", missing);
+    }
+
+    toon_close(doc);
+    ret;
+}
+```
+
+Large-report recipe:
+
+- parse file
+- `let root: ToonNode = toon_root(doc);`
+- `let items: ToonNode = toon_key(root, "...");`
+- one pure normalize helper
+- one pure classify helper
+- one mutable totals type
+- one loop that extracts, classifies, updates totals, prints
+- one final totals block
+- `toon_close(doc);`
 
 ## Repair rules
 
