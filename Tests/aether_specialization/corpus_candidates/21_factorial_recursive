@@ -1,3 +1,7 @@
+// 21_factorial_recursive
+// Concepts: recursion inside a pure helper
+// expect: Factorial of 5 is 120
+
 @pure
 fn factorial(n: Int) -> Int {
     if n == 0 {

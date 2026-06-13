@@ -1,4 +1,12 @@
-fn describe_builtin(name: Text) -> Void {
+// 104_builtin_info_sleep
+// Concepts: builtin_info metadata query, TOON inspection of builtin descriptors
+// expect: builtin = sleep
+// expect: kind = procedure
+// expect: backend = delay
+// expect: return = Void
+// expect: effectful = true
+
+fn describeBuiltin(name: Text) -> Void {
     if !has_toon() {
         fx { println("yyjson unavailable"); }
         ret;
@@ -25,6 +33,6 @@ fn describe_builtin(name: Text) -> Void {
 }
 
 fn main() -> Void {
-    describe_builtin("sleep");
+    describeBuiltin("sleep");
     ret;
 }

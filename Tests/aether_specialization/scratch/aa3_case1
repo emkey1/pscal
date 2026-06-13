@@ -1,5 +1,0 @@
-fn main() -> Void {
-    let x: Int = 1;
-    fx { println(x); }
-    ret;
-}

@@ -1,4 +1,0 @@
-fn main() -> Void {
-    const label = "Aether";
-    ret;
-}

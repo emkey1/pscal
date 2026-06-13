@@ -315,6 +315,23 @@
       }
     },
     {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/21_factorial_recursive",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/21_factorial_recursive",
+      "sha256": "61f1c230ae7c6590387ff73e2c20e890e0ee99ebf093234e12a3e5e9b43a0d52",
+      "stdout": "Factorial of 5 is 120\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "pure",
+          "recursion",
+          "arithmetic"
+        ],
+        "notes": "Recursive @pure helper; complements the iterative factorial coverage in 14_factorial_loop."
+      }
+    },
+    {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/22_report_line",
       "repo_path": "Tests/aether_specialization/corpus_candidates/22_report_line",
       "sha256": "8e2ef9d4d4f4c45392af863944a0dbad4787d2e6fd5b930b36480920a9e2bdc9",
@@ -1583,6 +1600,23 @@
           "module"
         ],
         "notes": "Support module for 61_module_const_import_quoted; reconstructed 2026-06-12 from golden stdout."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/104_builtin_info_sleep",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/104_builtin_info_sleep",
+      "sha256": "1952f9ac273649f7c57833f0ec3ac45bb28ef29da872817e031eb7fdfd3f0d93",
+      "stdout": "builtin = sleep\nkind = procedure\nbackend = delay\nreturn = Void\neffectful = true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "builtin",
+          "toon",
+          "introspection"
+        ],
+        "notes": "Queries builtin_info and inspects the returned TOON object for builtin metadata."
       }
     }
   ]

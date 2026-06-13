@@ -1,8 +1,0 @@
-fn main() -> Void {
-    const label = "Aether";
-    let answer = 42;
-    let ratio = 3.5;
-    let enabled = true;
-    let ready = has_toon();
-    ret;
-}

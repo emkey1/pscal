@@ -1,5 +1,0 @@
-fn main() -> Void {
-    let doc = toon_parse("{\"count\":2}");
-    let root = toon_root(doc);
-    ret;
-}

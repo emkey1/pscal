@@ -1,4 +1,0 @@
-fn main() -> Void {
-    let answer = 42;
-    ret;
-}
