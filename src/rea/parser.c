@@ -4,6 +4,8 @@
 #include "symbol/symbol.h"
 #include "core/utils.h"
 #include "Pascal/globals.h"
+#include "aether/diagnostics.h"
+#include "rea/semantic.h"
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -11,6 +13,7 @@
 #include <ctype.h>
 #include <limits.h>
 #include "core/list.h"
+#include "common/frontend_kind.h"
 
 // Forward declaration from core/utils.c
 Token *newToken(TokenType type, const char *value, int line, int column);
@@ -4143,6 +4146,16 @@ AST *parseRea(const char *source) {
             if (p.current.type == REA_TOKEN_RIGHT_BRACE) {
                 reaAdvance(&p);
                 continue;
+            }
+            if (frontendIsAether()) {
+                const char *path = reaSemanticGetSourcePath();
+                const char *code = aetherInferDiagnosticCode("parser", "Unexpected token");
+                if (path && *path) {
+                    fprintf(stderr, "%s:%d: ", path, p.current.line);
+                }
+                if (code) {
+                    fprintf(stderr, "[%s] ", code);
+                }
             }
             fprintf(stderr,
                     "Unexpected token %s '%.*s' at line %d\n",

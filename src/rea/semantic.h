@@ -9,6 +9,7 @@
  * pascal_semantic_error_count variable. */
 void reaPerformSemanticAnalysis(AST *root);
 void reaSemanticSetSourcePath(const char *path);
+const char *reaSemanticGetSourcePath(void);
 int reaGetLoadedModuleCount(void);
 AST *reaGetModuleAST(int index);
 const char *reaGetModulePath(int index);

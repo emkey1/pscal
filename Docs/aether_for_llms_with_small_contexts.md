@@ -43,11 +43,15 @@ compiler, and VM. It is not a separate runtime.
     `name`, or another caller value, pass it as a parameter.
 17. **FIELD-001.** Inside a method, a local may reuse a field name. Bare
     `valid` means the local; `self.valid` means the field.
-18. **FMT-001.** If the prompt specifies exact output, match it exactly:
+18. **FIELD-002.** Record and type field names must exist exactly as declared.
+    Do not invent fields.
+19. **FLOW-001.** Every non-`Void` helper must return a value on every
+    reachable top-level path.
+20. **FMT-001.** If the prompt specifies exact output, match it exactly:
     spacing, casing, line order, and decimal precision.
-19. **NAME-001.** Do not redeclare a local name in the same scope. Pick fresh
+21. **NAME-001.** Do not redeclare a local name in the same scope. Pick fresh
     names such as `values`, `count`, `sum`, `maxValue`.
-20. **MOD-002.** Canonical import form is `use "module_name";`. After import,
+22. **MOD-002.** Canonical import form is `use "module_name";`. After import,
     call exported names directly. Never guess `export { ... }`, `JsonDoc`,
     `json.parseFile(...)`, `Int.MIN`, or `value.toString()`.
 
@@ -404,6 +408,10 @@ fn main() -> Void {
 - mentions unknown import → remove `use` (IMP-001)
 - mentions `not in scope` → declare the name earlier or pass it explicitly
   (SCOPE-001)
+- mentions `Unknown field` → use the exact declared field name, or add the
+  field to the type if the prompt truly requires it (FIELD-002)
+- mentions fallthrough/no return value → add an explicit final `ret ...`
+  on every reachable top-level path (FLOW-001)
 - mentions `ToonDoc` where a node is expected → add `let root: ToonNode = toon_root(doc);`
 - mentions wrong output or mismatch → remove extra headings/labels and match
   punctuation, spacing, and decimal precision exactly

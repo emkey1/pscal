@@ -5,6 +5,7 @@
 #include "core/utils.h"
 #include "rea/parser.h"
 #include "aether/parser.h"
+#include "aether/diagnostics.h"
 #include "aether/state.h"
 #include "aether/translate.h"
 #include "common/frontend_kind.h"
@@ -194,9 +195,7 @@ static void reportReaLineError(int line, const char *fmt, ...) {
     va_end(args);
 
     if (frontendIsAether()) {
-        if (strstr(message, "not in scope.")) {
-            code = "SCOPE-001";
-        }
+        code = aetherInferDiagnosticCode(NULL, message);
     }
 
     if (gReaSourcePath && *gReaSourcePath) {
@@ -214,20 +213,31 @@ static void reportReaLineError(int line, const char *fmt, ...) {
 static void reportReaLineWarning(int line, const char *fmt, ...) {
     va_list args;
     int displayLine = line;
+    char message[1024];
+    const char *code = NULL;
 
     if (frontendIsAether()) {
         displayLine = aetherMapRewrittenLineToSource(line);
     }
 
     va_start(args, fmt);
+    vsnprintf(message, sizeof(message), fmt, args);
+    va_end(args);
+
+    if (frontendIsAether()) {
+        code = aetherInferDiagnosticCode("compatibility", message);
+    }
+
     if (gReaSourcePath && *gReaSourcePath) {
         fprintf(stderr, "%s:%d: warning: ", gReaSourcePath, displayLine);
     } else {
         fprintf(stderr, "L%d: warning: ", displayLine);
     }
-    vfprintf(stderr, fmt, args);
+    if (code) {
+        fprintf(stderr, "[%s] ", code);
+    }
+    fputs(message, stderr);
     fprintf(stderr, "\n");
-    va_end(args);
 }
 
 static char **gEnvImportPaths = NULL;
@@ -651,6 +661,10 @@ void reaSemanticSetSourcePath(const char *path) {
     }
     pushModuleDir(dir);
     free(dir);
+}
+
+const char *reaSemanticGetSourcePath(void) {
+    return gReaSourcePath;
 }
 
 static void freeBindingList(ReaModuleBindingList *list) {
@@ -3240,7 +3254,10 @@ static const char *resolveExprClass(AST *expr, ClassInfo *currentClass) {
         const char *fname = expr->right && expr->right->token ? expr->right->token->value : NULL;
         Symbol *fs = lookupField(ci, fname);
         if (!fs) {
-            fprintf(stderr, "Unknown field '%s' on class '%s'\n", fname ? fname : "(null)", base);
+            reportReaLineError(expr && expr->token ? expr->token->line : 0,
+                               "Unknown field '%s' on class '%s'.",
+                               fname ? fname : "(null)",
+                               base);
             pascal_semantic_error_count++;
             return NULL;
         }
@@ -3649,7 +3666,10 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
             if (ci) {
                 Symbol *fs = lookupField(ci, fname);
                 if (!fs) {
-                    fprintf(stderr, "Unknown field '%s' on class '%s'\n", fname ? fname : "(null)", cls);
+                    reportReaLineError(node && node->token ? node->token->line : 0,
+                                       "Unknown field '%s' on class '%s'.",
+                                       fname ? fname : "(null)",
+                                       cls);
                     pascal_semantic_error_count++;
                 } else if (fs->is_const && fs->value) {
                     /* Replace field access with constant literal */

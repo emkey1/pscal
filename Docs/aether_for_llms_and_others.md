@@ -59,6 +59,10 @@ If you only read one part of this document, read **Highest-Value Rules** and
     index, label, or other caller context, pass it as a parameter.
 16. **FIELD-001.** Method locals may reuse field names. Bare `name` means the
     local; `self.name` means the field.
+17. **FIELD-002.** Record and type field names must exist exactly as declared.
+    Do not invent fields on a type.
+18. **FLOW-001.** Every non-`Void` function must return a value on every
+    reachable top-level path.
 
 Fast failure checks: output outside `fx` is wrong; a guessed import is wrong;
 a helper not listed in this document is wrong; arithmetic on `ToonDoc` /
@@ -283,6 +287,8 @@ type JobSummary {
   another scope; pass needed context in the parameter list
 - if a local and a field share a name, bare `name` means the local and
   `self.name` means the field
+- field names must exist exactly as declared on the type; do not invent
+  `self.blockers` if the type has no `blockers` field
 
 Record values are pointer-backed: passing a record to a function or method
 and mutating its fields is visible to the caller.
@@ -845,9 +851,13 @@ Map compiler complaints to fixes.
 - mentions unknown function → it does not exist; inline the logic (BUILT-001)
 - mentions `not in scope` → declare the name earlier, pass it as a parameter,
   or rename the local you actually meant (SCOPE-001)
+- mentions `Unknown field` → use the exact declared field name, or extend the
+  type explicitly if the prompt really requires that field (FIELD-002)
 - mentions `ToonDoc` / `ToonNode` → check handle types; do not mix (TOON-001)
 - mentions a tuple → destructure a direct top-level call only (TUP-001)
 - mentions annotation placement → move above the function (ANN-001)
+- mentions fallthrough/no return value → add an explicit final `ret ...` on
+  every reachable top-level path in the non-`Void` helper (FLOW-001)
 - integer result where decimals expected → introduce a `Real` operand (`100.0`)
 - unstable decimal output → use `value:0:precision`
 - wrong receiver spelling → `self`, never `Self`

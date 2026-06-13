@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "Pascal/globals.h"
+#include "aether/diagnostics.h"
 #include "aether/parser.h"
 #include "rea/semantic.h"
 
@@ -1383,41 +1384,7 @@ static const char *expectedTertiaryArgTypeName(const char *name, size_t len) {
 }
 
 static void reportAetherError(const char *kind, int line, const char *detail) {
-    const char *code = NULL;
-
-    if (kind && detail) {
-        if (strcmp(kind, "type") == 0 &&
-            strstr(detail, "opaque TOON handle") &&
-            strstr(detail, "arithmetic expressions")) {
-            code = "TOON-001";
-        } else if (strcmp(kind, "type") == 0 &&
-                   strstr(detail, "expects a ToonDoc handle")) {
-            code = "TOON-001";
-        } else if (strcmp(kind, "type") == 0 &&
-                   strstr(detail, "expects a ToonNode handle")) {
-            code = "TOON-001";
-        } else if (strcmp(kind, "type") == 0 &&
-                   strstr(detail, " first argument")) {
-            code = "TOON-001";
-        } else if (strcmp(kind, "type") == 0 &&
-                   strstr(detail, " second argument")) {
-            code = "TOON-001";
-        } else if (strcmp(kind, "type") == 0 &&
-                   strstr(detail, " third argument")) {
-            code = "TOON-001";
-        } else if (strcmp(kind, "effect") == 0 &&
-                   strstr(detail, "requires an fx block")) {
-            code = "FX-001";
-        } else if (strcmp(kind, "purity") == 0 &&
-                   strstr(detail, "cannot call effectful builtin")) {
-            code = "ANN-001";
-        } else if (strcmp(kind, "purity") == 0 &&
-                   strstr(detail, "cannot call non-pure function")) {
-            code = "ANN-001";
-        } else if (strstr(detail, "not in scope")) {
-            code = "SCOPE-001";
-        }
-    }
+    const char *code = aetherInferDiagnosticCode(kind, detail);
 
     if (code) {
         fprintf(stderr,

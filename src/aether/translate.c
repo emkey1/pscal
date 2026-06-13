@@ -1,4 +1,5 @@
 #include "aether/translate.h"
+#include "aether/diagnostics.h"
 #include "aether/state.h"
 
 #include <ctype.h>
@@ -642,29 +643,7 @@ static void reportAetherRewriteError(const char *path,
                                      const char *kind,
                                      const char *detail,
                                      const char *hint) {
-    const char *code = NULL;
-
-    if (kind && detail) {
-        if (strcmp(kind, "function") == 0 &&
-            strstr(detail, "explicit return type")) {
-            code = "SYN-001";
-        } else if (strcmp(kind, "type") == 0 &&
-                   strstr(detail, "type fields must end with ';', not ','")) {
-            code = "SYN-001";
-        } else if (strcmp(kind, "declaration") == 0 &&
-                   strstr(detail, "cannot infer the type of")) {
-            code = "TYPE-001";
-        } else if (strcmp(kind, "contract") == 0 &&
-                   strstr(detail, "@pre must annotate the next function declaration")) {
-            code = "ANN-001";
-        } else if (strcmp(kind, "contract") == 0 &&
-                   strstr(detail, "@post must annotate the next function declaration")) {
-            code = "ANN-001";
-        } else if (strcmp(kind, "feature") == 0 &&
-                   strstr(detail, "tuple return types are not supported yet")) {
-            code = "TUP-001";
-        }
-    }
+    const char *code = aetherInferDiagnosticCode(kind, detail);
 
     if (code) {
         fprintf(stderr,
@@ -690,14 +669,25 @@ static void reportAetherRewriteError(const char *path,
 static void reportAetherCompatibilityWarning(const char *path,
                                              int line,
                                              const char *detail) {
+    const char *code = aetherInferDiagnosticCode("compatibility", detail);
+
     if (!aetherGetVerboseCompatibilityDiagnostics()) {
         return;
     }
-    fprintf(stderr,
-            "%s:%d: Aether compatibility warning: %s\n",
-            path ? path : "<aether>",
-            line > 0 ? line : 1,
-            detail ? detail : "compatibility fallback applied.");
+    if (code) {
+        fprintf(stderr,
+                "%s:%d: [%s] Aether compatibility warning: %s\n",
+                path ? path : "<aether>",
+                line > 0 ? line : 1,
+                code,
+                detail ? detail : "compatibility fallback applied.");
+    } else {
+        fprintf(stderr,
+                "%s:%d: Aether compatibility warning: %s\n",
+                path ? path : "<aether>",
+                line > 0 ? line : 1,
+                detail ? detail : "compatibility fallback applied.");
+    }
 }
 
 static int isIdentifierChar(unsigned char ch) {
