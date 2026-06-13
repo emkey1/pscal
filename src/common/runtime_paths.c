@@ -1,4 +1,4 @@
-#include "pscal_paths.h"
+#include <pscal_paths.h>
 
 #if defined(PSCAL_TARGET_IOS)
 

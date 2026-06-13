@@ -41,7 +41,7 @@
 #include "clike/preproc.h"
 #include "vm/vm.h"
 #include "core/cache.h"
-#include "pscal_paths.h"
+#include <pscal_paths.h>
 #include "core/utils.h"
 #include "core/build_info.h"
 #include "symbol/symbol.h"

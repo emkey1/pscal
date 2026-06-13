@@ -3,7 +3,7 @@
 #include "audio.h"
 #include "Pascal/globals.h" // For EXIT_FAILURE_HANDLER
 #include "core/utils.h" // For EXIT_FAILURE_HANDLER
-#include "pscal_paths.h"
+#include <pscal_paths.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>

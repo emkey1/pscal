@@ -4,7 +4,7 @@
 #include "clike/builtins.h"
 #include "clike/parser.h"
 #include "backend_ast/builtin.h"
-#include "pscal_paths.h"
+#include <pscal_paths.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

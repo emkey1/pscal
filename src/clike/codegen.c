@@ -11,7 +11,7 @@
 #include "compiler/compiler.h"
 #include "vm/string_sentinels.h"
 #include "vm/vm.h"
-#include "pscal_paths.h"
+#include <pscal_paths.h>
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>

@@ -25,7 +25,7 @@
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
-#include "pscal_paths.h"
+#include <pscal_paths.h>
 
 static pthread_mutex_t dynamic_array_refcount_mutex = PTHREAD_MUTEX_INITIALIZER;
 
