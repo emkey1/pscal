@@ -29,3 +29,4 @@
 - Document any env vars you touch (`SDL_VIDEODRIVER`, `RUN_SDL`, etc.) in commits/PRs; future agents look here for quick bootstrapping.
 - Binaries tend to have both a --dump-ast-json and --dump-bytecode options which can provide substantial clues as to what is going on in the AST building and compilation portions of the code when debugging.
 - Commit early and often—small, frequent commits keep iPadOS and desktop work in sync and avoid multi-thousand-file diffs that are hard to review or push.
+- On the Spark/training hosts, do not default to tiny context windows or overly conservative output-token caps just to be "safe". Those machines are provisioned for large-context benchmarking and training work. Start with a generous context and output budget, and only shrink it after a concrete memory-fit or latency problem is observed.

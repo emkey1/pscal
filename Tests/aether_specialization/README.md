@@ -87,8 +87,9 @@ Keep that reference corpus separate from raw executable Aether source. It is
 meant for instruction-style conditioning, synthetic-pair generation, or
 retrieval-time context, not for blind mixing into the verified source corpus.
 
-The output is intended to become the first input to a `Qwen/Qwen3-4B-Base`
-specialization run.
+The output is intended to feed specialization runs. The original baseline path
+used `Qwen/Qwen3-4B-Base`; the current larger-model path targets
+`unsloth/Qwen3-Coder-30B-A3B-Instruct` inside the Unsloth DGX Spark container.
 
 ## Spark workflow
 
@@ -135,6 +136,69 @@ Current remote helpers:
 
 - `tools/aether_specialization_sync_to_spark.py`
 - `tools/spark_qwen3_base_train_remote.py`
+
+## Unsloth 30B Spark workflow
+
+The current large-model path uses the upstream Unsloth DGX Spark container
+recipe (`Dockerfile_DGX_Spark`) instead of a bare-metal Python environment on
+the Spark host.
+
+Prepare and sync verified assets plus the Unsloth trainer:
+
+```bash
+python3 tools/spark_unsloth_qwen_coder_train_remote.py sync
+```
+
+Build the pinned Unsloth DGX Spark image on the remote host:
+
+```bash
+python3 tools/spark_unsloth_qwen_coder_train_remote.py build-image
+```
+
+Start a run:
+
+```bash
+python3 tools/spark_unsloth_qwen_coder_train_remote.py \
+  --run-name sft-qwen-coder-30b-v1 \
+  --epochs 8 \
+  --eval-cases 12 \
+  start
+```
+
+Check status and tail the remote log:
+
+```bash
+python3 tools/spark_unsloth_qwen_coder_train_remote.py \
+  --run-name sft-qwen-coder-30b-v1 \
+  status
+```
+
+Stop the run container:
+
+```bash
+python3 tools/spark_unsloth_qwen_coder_train_remote.py \
+  --run-name sft-qwen-coder-30b-v1 \
+  stop
+```
+
+Design notes for the Unsloth path:
+
+- model: `unsloth/Qwen3-Coder-30B-A3B-Instruct`
+- method: QLoRA with `load_in_4bit=True`
+- LoRA targets:
+  `q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj`
+- LoRA config: `r=16`, `alpha=32`
+- gradient checkpointing: `"unsloth"`
+- compute: bf16
+- router/gating fine-tuning remains off
+- validation holdout defaults to 12 compiler-verified cases
+- `max_seq_length` is auto-sized just above the longest tokenized training
+  example unless explicitly overridden
+- GGUF export defaults to non-Q4 variants only
+
+Convenience wrapper:
+
+- `tools/run_unsloth_qwen_coder_30b_spark_training.sh`
 
 Current default remote workspace:
 

@@ -26,8 +26,20 @@ def run_remote(host: str, script: str) -> None:
     )
 
 
-def expand_remote_workspace(workspace: str) -> str:
-    return workspace.replace("$HOME", "~")
+def resolve_remote_home(host: str) -> str:
+    proc = subprocess.run(
+        ["ssh", host, "bash -lc 'printf %s \"$HOME\"'"],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return proc.stdout.strip()
+
+
+def expand_remote_workspace(host: str, workspace: str) -> str:
+    if "$HOME" not in workspace:
+        return workspace
+    return workspace.replace("$HOME", resolve_remote_home(host))
 
 
 def main() -> int:
@@ -59,7 +71,7 @@ def main() -> int:
         ]
     )
 
-    remote_workspace = expand_remote_workspace(args.remote_workspace)
+    remote_workspace = expand_remote_workspace(args.host, args.remote_workspace)
     remote_data_dir = f"{remote_workspace}/data"
     run_remote(
         args.host,
