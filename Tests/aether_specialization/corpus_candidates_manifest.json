@@ -2359,6 +2359,201 @@
         ],
         "notes": "Support module for 142_invoice_tax (TaxRates: BaseRate, Surcharge)."
       }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/144_contract_clamp_speed",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/144_contract_clamp_speed",
+      "sha256": "c52b2633ceb9c6d50beae63d1966029fbaa49ac7e5f2d8666ffed485ed31d924",
+      "stdout": "130 -> 120\n65 -> 65\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "contract",
+          "pre",
+          "post"
+        ],
+        "notes": "@pre/@post above fn; speed clamp. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/145_contract_floor_wage",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/145_contract_floor_wage",
+      "sha256": "46b0f5d519b11ab5204ad0b0d4756d80940a89d9cf237e29fbf35a6a9087da86",
+      "stdout": "wage 9 => 15\nwage 24 => 24\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "contract",
+          "pre",
+          "post"
+        ],
+        "notes": "@pre/@post above fn; wage floor with @post. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/146_contract_cap_discount",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/146_contract_cap_discount",
+      "sha256": "322ec272591a70161fc40f7e1b513589e9ae15be56c3fe91f423d275b748c068",
+      "stdout": "80 => 50\n35 => 35\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "contract",
+          "post"
+        ],
+        "notes": "@post above fn; discount cap. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/147_contract_scale_score",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/147_contract_scale_score",
+      "sha256": "7e109541c187d03a0b0d0ef722ca41f13003f42318a5d94dcac9f6626d2e60bd",
+      "stdout": "30 => 60\n70 => 100\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "contract",
+          "pre",
+          "post"
+        ],
+        "notes": "@pre/@post above fn; scale then clamp. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/148_contract_nonneg_balance",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/148_contract_nonneg_balance",
+      "sha256": "f993223bdaa20a61472501e2779d93af243c9fccc26e8dfcf9018a039f4c6fd2",
+      "stdout": "100-30 => 70\n20-50 => 0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "contract",
+          "post"
+        ],
+        "notes": "@post result>=0 above fn; balance settle. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/149_pure_to_fahrenheit",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/149_pure_to_fahrenheit",
+      "sha256": "e37e7206f0e6f874c49c80621a398e3a3d95a9a5f58c324c5267938b8c11822f",
+      "stdout": "0C=32.000000\n100C=212.000000\n37C=98.600000\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "pure"
+        ],
+        "notes": "@pure helper; integer F conversion. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/150_pure_letter_grade",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/150_pure_letter_grade",
+      "sha256": "4eace289e9d3e8954994a1fd511329101d36c8285156b0e7d7bf3a3827f61c44",
+      "stdout": "95:A\n82:B\n60:F\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "pure",
+          "branching"
+        ],
+        "notes": "@pure tiered letter-grade classifier. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/151_pure_sign",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/151_pure_sign",
+      "sha256": "2da225b72a9815d1de332c66b4c6cc0569246a9a5c718567fa3c871ce0f5bf85",
+      "stdout": "sign 8 = 1\nsign -3 = -1\nsign 0 = 0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "pure"
+        ],
+        "notes": "@pure sign helper. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/152_tuple_minmax_post",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/152_tuple_minmax_post",
+      "sha256": "996e7be55c8bf8c682b3d0354068b280a77e4d8533f42f04cf4c310aaf11fb95",
+      "stdout": "min=4\nmax=11\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "tuple",
+          "contract"
+        ],
+        "notes": "tuple return with @post on a slot, above fn. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/153_pure_clamp_unit",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/153_pure_clamp_unit",
+      "sha256": "10614096100ead96d77838fa71876ce6572d7ee546c8ea1174c8d3edbfd05aa8",
+      "stdout": "a=100\nb=55\nc=0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "pure"
+        ],
+        "notes": "@pure clamp 0..100. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/154_contract_loop_apply",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/154_contract_loop_apply",
+      "sha256": "374db90c9a33bec7ee62c858418b3300215be7ff44398b62c88f9a6da02c44a3",
+      "stdout": "capped 0 = 40\ncapped 1 = 100\ncapped 2 = 90\ntotal = 230\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "contract",
+          "pre",
+          "post",
+          "loop",
+          "array"
+        ],
+        "notes": "@pre/@post helper applied over an array in a loop. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/155_pure_and_contract",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/155_pure_and_contract",
+      "sha256": "64f6d4721d08555bc27019bf8690405b1ce4e857e7c51cf918d5c1f775684ec1",
+      "stdout": "pos 5: true\npos -2: false\ndouble 7 = 14\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "pure",
+          "contract"
+        ],
+        "notes": "both @pure and @pre/@post functions in one program. Verified with build/bin/aether."
+      }
     }
   ]
 }

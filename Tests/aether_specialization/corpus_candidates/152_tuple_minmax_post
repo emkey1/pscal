@@ -1,0 +1,16 @@
+// 152_tuple_minmax_post
+@post result.0 <= result.1
+fn minmax(a: Int, b: Int) -> (Int, Int) {
+    if a <= b {
+        ret (a, b);
+    }
+    ret (b, a);
+}
+fn main() -> Void {
+    let (lo, hi) = minmax(11, 4);
+    fx {
+        println("min=", lo);
+        println("max=", hi);
+    }
+    ret;
+}

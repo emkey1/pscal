@@ -1,0 +1,19 @@
+// 153_pure_clamp_unit
+@pure
+fn clampPct(value: Int) -> Int {
+    if value < 0 {
+        ret 0;
+    }
+    if value > 100 {
+        ret 100;
+    }
+    ret value;
+}
+fn main() -> Void {
+    fx {
+        println("a=", clampPct(140));
+        println("b=", clampPct(55));
+        println("c=", clampPct(0 - 10));
+    }
+    ret;
+}
