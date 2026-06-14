@@ -876,22 +876,34 @@ struct AppDiagnosticsView: View {
                     Button("Close") {
                         dismiss()
                     }
+                    .accessibilityLabel("Close Diagnostics")
+                    .accessibilityHint("Closes the diagnostics view")
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button(copiedReport ? "Copied" : "Copy Report") {
                         runner.copyReportToPasteboard()
-                        copiedReport = true
+                        withAnimation {
+                            copiedReport = true
+                        }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                            copiedReport = false
+                            withAnimation {
+                                copiedReport = false
+                            }
                         }
                     }
                     .disabled(runner.report.isEmpty)
+                    .accessibilityLabel(copiedReport ? "Report copied" : "Copy report to clipboard")
+                    .accessibilityHint("Copies the diagnostic report to the clipboard")
 
                     Button(runner.isRunning ? "Running..." : (runner.checks.isEmpty ? "Run Diagnostics" : "Run Again")) {
-                        copiedReport = false
+                        withAnimation {
+                            copiedReport = false
+                        }
                         runner.run()
                     }
                     .disabled(runner.isRunning)
+                    .accessibilityLabel(runner.isRunning ? "Running diagnostics" : (runner.checks.isEmpty ? "Run Diagnostics" : "Run Diagnostics Again"))
+                    .accessibilityHint("Executes the app diagnostic checks")
                 }
             }
         }
