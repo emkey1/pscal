@@ -120,6 +120,30 @@
       "files": {
         "exact_exports": "mod ExactExports {\n    @pure\n    export fn clampSupport(score: Int) -> Int {\n        if score > 100 {\n            ret 100;\n        }\n        ret score;\n    }\n\n    @pure\n    export fn classifySupport(score: Int) -> Text {\n        if score >= 90 {\n            ret \"ready\";\n        }\n        if score >= 70 {\n            ret \"review\";\n        }\n        ret \"blocked\";\n    }\n}\n"
       }
+    },
+    {
+      "id": "repair_pre_above_fn",
+      "diagnostic": "Aether contract rewrite error: @pre must annotate the next function declaration.",
+      "broken_source": "fn cap(x: Int) -> Int {\n    @pre x >= 0\n    if x > 50 {\n        ret 50;\n    }\n    ret x;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"cap=\", cap(70));\n    }\n    ret;\n}\n",
+      "fixed_source": "@pre x >= 0\n@post result <= 50\nfn cap(x: Int) -> Int {\n    if x > 50 {\n        ret 50;\n    }\n    ret x;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"cap=\", cap(70));\n    }\n    ret;\n}\n",
+      "expected_stdout": "cap=50\n"
+    },
+    {
+      "id": "repair_toon_root_before_get",
+      "diagnostic": "Aether type error: call to 'toon_get_text_or' expects a ToonNode handle, but 'doc' is ToonDoc.",
+      "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"city\\\":\\\"Metro\\\"}\");\n    let city: Text = toon_get_text_or(doc, \"city\", \"NONE\");\n    fx {\n        println(\"city=\", city);\n    }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"city\\\":\\\"Metro\\\"}\");\n    let root: ToonNode = toon_root(doc);\n    let city: Text = toon_get_text_or(root, \"city\", \"NONE\");\n    fx {\n        println(\"city=\", city);\n    }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "city=Metro\n"
+    },
+    {
+      "id": "repair_use_module_direct_call",
+      "diagnostic": "identifier 'color_rules' not in scope.",
+      "broken_source": "use \"color_rules\";\n\nfn main() -> Void {\n    let shade: Text = color_rules.shadeFor(120);\n    fx {\n        println(\"shade=\", shade);\n    }\n    ret;\n}\n",
+      "fixed_source": "use \"color_rules\";\n\nfn main() -> Void {\n    let shade: Text = shadeFor(120);\n    fx {\n        println(\"shade=\", shade);\n    }\n    ret;\n}\n",
+      "expected_stdout": "shade=bright\n",
+      "files": {
+        "color_rules": "mod ColorRules {\n    @pure\n    export fn shadeFor(v: Int) -> Text {\n        if v >= 100 {\n            ret \"bright\";\n        }\n        ret \"dim\";\n    }\n}\n"
+      }
     }
   ]
 }

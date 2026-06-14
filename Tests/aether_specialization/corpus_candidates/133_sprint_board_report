@@ -1,0 +1,116 @@
+// 133_sprint_board_report
+// Concepts: object-root TOON, clamp-normalize, lane classify, blocked flag from
+// blockers, custom board type with field reused as a method local (FIELD-001),
+// clamped real average with fixed precision
+// expect: story 0: S1 / done / false / 95
+// expect: story 1: S2 / doing / true / 60
+// expect: story 2: S3 / todo / false / 30
+// expect: story 3: S4 / done / true / 100
+// expect: done = 2
+// expect: doing = 1
+// expect: todo = 1
+// expect: blocked = 2
+// expect: average = 71.25
+
+@pure
+fn clampProgress(raw: Int) -> Int {
+    if raw < 0 {
+        ret 0;
+    }
+    if raw > 100 {
+        ret 100;
+    }
+    ret raw;
+}
+
+@pure
+fn classifyLane(progress: Int) -> Text {
+    if progress >= 90 {
+        ret "done";
+    }
+    if progress >= 50 {
+        ret "doing";
+    }
+    ret "todo";
+}
+
+@pure
+fn isBlocked(blockers: Int) -> Bool {
+    if blockers > 0 {
+        ret true;
+    }
+    ret false;
+}
+
+type Board {
+    count: Int;
+    total: Int;
+    done: Int;
+    doing: Int;
+    todo: Int;
+    blocked: Int;
+
+    fn record(lane: Text, blocked: Bool, progress: Int) -> Void {
+        self.count = self.count + 1;
+        self.total = self.total + progress;
+        if blocked {
+            self.blocked = self.blocked + 1;
+        }
+        if lane == "done" {
+            self.done = self.done + 1;
+            ret;
+        }
+        if lane == "doing" {
+            self.doing = self.doing + 1;
+            ret;
+        }
+        self.todo = self.todo + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse_file("stories133.json");
+    let root: ToonNode = toon_root(doc);
+    let stories: ToonNode = toon_key(root, "stories");
+    let board: Board = new Board();
+
+    loop i in 0..toon_len(stories) {
+        let story: ToonNode = toon_at(stories, i);
+        let id: Text = toon_get_text_or(story, "id", "UNKNOWN");
+        let raw: Int = toon_get_int_or(story, "progress", 0);
+        let blockers: Int = toon_get_int_or(story, "blockers", 0);
+        let progress: Int = clampProgress(raw);
+        let lane: Text = classifyLane(progress);
+        let blocked: Bool = isBlocked(blockers);
+
+        board.record(lane, blocked, progress);
+
+        fx {
+            println("story ", i, ": ", id, " / ", lane, " / ", blocked, " / ", progress);
+        }
+    }
+
+    let average: Real = 0.0;
+    if board.count > 0 {
+        average = board.total * 1.0 / board.count;
+    }
+
+    fx {
+        println("done = ", board.done);
+        println("doing = ", board.doing);
+        println("todo = ", board.todo);
+        println("blocked = ", board.blocked);
+        println("average = ", average:0:2);
+    }
+
+    toon_close(doc);
+    ret;
+}

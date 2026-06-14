@@ -2145,6 +2145,59 @@
         ],
         "notes": "Support module for 129_depot_stock_report (StockRules: SafetyStock, stockStatus)."
       }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/131_deployment_readiness_validator",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/131_deployment_readiness_validator",
+      "sha256": "58ab50c9197c3417757036508983373f25f6a8add475fcbdbc70aa9a685074ca",
+      "stdout": "ISSUE: service name is empty or too long\nISSUE: port out of range (70000)\nISSUE: replicas must be at least 1\nISSUE: cpu must be at least 1\nISSUE: memory below minimum (64)\nISSUE: unknown rollout strategy (yolo)\nISSUE: maxUnavailable exceeds replicas\nissue count: 7\nDEPLOY BLOCKED: 7 issue(s)\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": true,
+        "tags": [
+          "toon",
+          "validate",
+          "nested",
+          "type"
+        ],
+        "notes": "Deployment readiness validator: deeply nested TOON (service/resources/rollout), many pure field validators, per-issue ISSUE lines, cross-field check, readiness verdict. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/132_grant_application_audit",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/132_grant_application_audit",
+      "sha256": "6ba9951df191c44ca4e9250488514247db94e5066febb482b42137a372d6db1c",
+      "stdout": "app 0: G1 / approved / 20000\napp 1: G2 / rejected / 0\napp 2: G3 / review / 7500\napp 3: G4 / rejected / 0\napp 4: UNKNOWN / rejected / 0\napproved = 1\nreview = 1\nrejected = 3\ntotal awarded = 27500\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": true,
+        "tags": [
+          "toon",
+          "audit",
+          "type"
+        ],
+        "notes": "Grant application audit: const cap, cross-field decision, derived award amount, custom audit type with multiple counters and running total. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/133_sprint_board_report",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/133_sprint_board_report",
+      "sha256": "fb4939e067cd4e56a4a3429199d2f2e7cb0df94ea9fc586688f0145028322ebe",
+      "stdout": "story 0: S1 / done / false / 95\nstory 1: S2 / doing / true / 60\nstory 2: S3 / todo / false / 30\nstory 3: S4 / done / true / 100\ndone = 2\ndoing = 1\ntodo = 1\nblocked = 2\naverage = 71.25\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": true,
+        "tags": [
+          "toon",
+          "classify",
+          "type",
+          "real"
+        ],
+        "notes": "Sprint board report: clamp-normalize, lane classify, blocked flag, custom board type reusing a field name as a method local, clamped real average. Verified with build/bin/aether."
+      }
     }
   ]
 }

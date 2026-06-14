@@ -1,0 +1,1 @@
+{"applications":[{"id":"G1","requested":20000,"score":90},{"id":"G2","requested":60000,"score":95},{"id":"G3","requested":15000,"score":60},{"id":"G4","requested":10000,"score":30},{"broken":true}]}

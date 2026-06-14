@@ -1,0 +1,1 @@
+{"service":{"name":"","port":70000,"replicas":0},"resources":{"cpu":0,"memoryMb":64},"rollout":{"strategy":"yolo","maxUnavailable":5}}
