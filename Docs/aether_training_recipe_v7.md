@@ -171,3 +171,57 @@ read independent of `tasks.json`.
   and `.cache/`.
 - **vLLM readiness.** Serving the merged checkpoint from `/storage` (NFS) is slow
   to become ready (load + torch.compile + warmup). "Container up" ≠ "endpoint up."
+
+## Iteration results and ceiling analysis (v7 → v7.3)
+
+After the recipe fix, a corpus-augmentation loop was run (de-contaminated,
+5 epochs/run from v7.1 on). `none` (the KPI) trajectory:
+
+| run | corpus instr/repair | none | change |
+|---|---|---:|---|
+| v6 | 0 (empty) | 0/25 | the broken baseline |
+| v7 | 99 / 10 | 8/25 | recipe fix, 3 epochs |
+| v7.1 | 104 / 10 | **14/25** | +5 large/TOON/module programs, 5 epochs |
+| v7.2 | 115 / 10 | 12/25 | +11 more verified programs |
+| v7.3 | 118 / 13 | 12/25 | +3 rich validators, +3 targeted repair pairs |
+
+Guide-in-context stayed strong throughout but did **not** improve with more
+training — full 20–23/25, small 21–22/25 across versions, with v7 (the first,
+least-trained corrected model) peaking at **full 23 / small 22** and v7.3
+slipping to 20/21. The whole gain on `none` came from v7→v7.1 (recipe + first
+corpus); further verified, targeted data plateaued at ~12–14 on `none` (±2 is
+temp-0.2 sampling noise — the tasks that flip between runs are simple TOON ones)
+and mildly eroded guide-in-context (overfitting on the tiny set). **v7.1 is the
+sweet spot: best `none` (14) and least over-trained of the 5-epoch runs.**
+
+**Why it plateaus — the remaining failures are base-prior errors, not missing
+examples.** Reading the model's actual generations on the persistent failures:
+- `module_*`: references the module name as an identifier (`mod.fn()`) instead of
+  `use "mod"; fn()` (SCOPE-001)
+- `toon_jobs_summary`: `toon_key(doc, …)` instead of `toon_root(doc)` first (TOON-001)
+- `contract_normalize`: `@pre` placed inside the function body (ANN-001)
+- `large_*`: now compile and run, but miss output detail (variadic-int spacing
+  `"( 0)"` vs `"(0)"`, off-by-one severity logic)
+
+These are the base model's pretraining instincts overriding Aether's rules.
+Three rounds of correct examples and explicit error→fix repair pairs did not
+reliably dislodge them — so this is a model-prior ceiling, not a data-quantity
+problem.
+
+**Levers not yet pulled (for `none` > 14 in future work):**
+- A larger, sustained de-contaminated corpus (hundreds of examples accrued over
+  time, not the ~35 added here).
+- Preference/RL on the task distribution — directly optimizes exact-match, which
+  SFT does not.
+- Higher LoRA rank / more epochs — but note `eval_loss` anti-correlates with
+  `none` here (v7.3 had the lowest eval_loss yet not the best `none`), so
+  selecting the checkpoint by instruction `eval_loss` is a weak proxy for the KPI;
+  a held-out *none-style* eval for checkpoint selection would help.
+- A stronger/larger base model.
+- A fresh held-out benchmark (n=25 at temp 0.2 is noisy; ±2 is not signal).
+
+**Best checkpoint:** v7.1 had the peak measured `none` (14); v7.3 has the richest
+training (incl. repair coverage) and is the more robust bet beyond this 25-task
+eval. The two are within benchmark noise — either is a fine source for the NVFP4
+export. Merged checkpoints live at
+`/storage/aether-qwen-coder-30b-sft-qwen-coder-30b-v7{,1,2,3}/merged_16bit`.
