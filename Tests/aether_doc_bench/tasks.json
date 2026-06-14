@@ -1,185 +1,351 @@
 {
+  "version": "2",
+  "description": "Aether doc-bench, rebuilt: mechanism-tagged, deduplicated, every non-trivial task has a compiler-verified reference_solution.",
   "tasks": [
     {
       "id": "hello_fx",
       "title": "Minimal fx hello world",
+      "mechanisms": [
+        "output"
+      ],
       "prompt": "Write the smallest valid Aether program that prints exactly `hello from benchmark` followed by a newline.",
-      "expected_stdout": "hello from benchmark\n"
+      "expected_stdout": "hello from benchmark\n",
+      "achievability": "model-verified"
     },
     {
       "id": "hello_const_name",
       "title": "Constants plus fx output",
+      "mechanisms": [
+        "const",
+        "output"
+      ],
       "prompt": "Write an Aether program that defines `Greeting` as `hello` and `Target` as `Aether`, then prints exactly `hello, Aether` followed by a newline.",
-      "expected_stdout": "hello, Aether\n"
+      "expected_stdout": "hello, Aether\n",
+      "achievability": "model-verified"
     },
     {
       "id": "classify_scores",
       "title": "Pure helper plus effectful output",
+      "mechanisms": [
+        "branching",
+        "pure_helper"
+      ],
       "prompt": "Write an Aether program with a pure helper `classify(score: Int) -> Text` that returns `ready` for scores >= 90, `review` for scores >= 70, and `blocked` otherwise. In `main`, print three lines for scores 95, 72, and 10 in the format `95 => ready`.",
-      "expected_stdout": "95 => ready\n72 => review\n10 => blocked\n"
-    },
-    {
-      "id": "type_and_method",
-      "title": "Type block with self mutation",
-      "prompt": "Write an Aether program that defines a `Counter` type with a `value: Int` field and a `bump() -> Int` method that increments the field and returns it. In `main`, create a counter, initialize it correctly, call `bump()` twice, and print each returned value on its own line.",
-      "expected_stdout": "1\n2\n"
-    },
-    {
-      "id": "real_format_circle",
-      "title": "Real arithmetic with formatted output",
-      "prompt": "Write an Aether program with `const PI: Real = 3.14159265;` and a pure helper `area(radius: Real) -> Real`. Use radius `2.5` and print exactly `area=19.63` followed by a newline. Use Aether's real formatting syntax instead of string post-processing.",
-      "expected_stdout": "area=19.63\n"
-    },
-    {
-      "id": "inline_if_average",
-      "title": "Inline conditional expression",
-      "prompt": "Write an Aether program that computes `avg0` from `total0 = 9` and `count0 = 0`, and `avg2` from `total2 = 9` and `count2 = 2`, using inline `if ... else ...` expressions on the right-hand side. Print `avg0=0` and `avg2=4` on separate lines.",
-      "expected_stdout": "avg0=0\navg2=4\n"
-    },
-    {
-      "id": "string_checks",
-      "title": "String length and equality checks",
-      "prompt": "Write an Aether program with a pure helper `validName(name: Text) -> Bool` that returns true only when the name length is between 1 and 6 inclusive and the name is not equal to `bad`. In `main`, print `alpha=true`, `empty=false`, and `bad=false` on separate lines for the sample inputs `alpha`, ``, and `bad`.",
-      "expected_stdout": "alpha=true\nempty=false\nbad=false\n"
+      "expected_stdout": "95 => ready\n72 => review\n10 => blocked\n",
+      "achievability": "model-verified"
     },
     {
       "id": "range_loop_squares",
       "title": "Half-open range loop",
+      "mechanisms": [
+        "loop_range"
+      ],
       "prompt": "Write an Aether program that uses a `loop i in 0..5` style range loop and prints one line per iteration in the form `0 => 0`, `1 => 1`, ..., `4 => 16`.",
-      "expected_stdout": "0 => 0\n1 => 1\n2 => 4\n3 => 9\n4 => 16\n"
+      "expected_stdout": "0 => 0\n1 => 1\n2 => 4\n3 => 9\n4 => 16\n",
+      "achievability": "model-verified"
     },
     {
-      "id": "tuple_destructure",
-      "title": "Tuple return plus destructuring",
-      "prompt": "Write an Aether program with a helper `pair() -> (Text, Int)` that returns `(\"answer\", 42)`. Destructure the direct call with `let (label, value) = pair();` and print `answer 42` followed by a newline.",
-      "expected_stdout": "answer 42\n"
+      "id": "loop_until_threshold",
+      "title": "Conditional loop with break",
+      "mechanisms": [
+        "loop_conditional",
+        "break",
+        "mutation"
+      ],
+      "prompt": "Write an Aether program that starts `level` at 0 and `steps` at 0. Using a loop, repeatedly add 7 to `level` and add 1 to `steps`, printing `step N: LEVEL` each iteration (e.g. `step 1: 7`). Stop the loop with `break` the first time `level` is at least 30, then print `steps = S`.",
+      "expected_stdout": "step 1: 7\nstep 2: 14\nstep 3: 21\nstep 4: 28\nstep 5: 35\nsteps = 5\n",
+      "reference_solution": "fn main() -> Void {\n    let level: Int = 0;\n    let steps: Int = 0;\n    loop {\n        level = level + 7;\n        steps = steps + 1;\n        fx {\n            println(\"step \", steps, \": \", level);\n        }\n        if level >= 30 {\n            break;\n        }\n    }\n    fx {\n        println(\"steps = \", steps);\n    }\n    ret;\n}\n"
     },
     {
-      "id": "module_function_import",
-      "title": "Import provided module function",
-      "prompt": "A module file named `bench_math` is provided in the working directory. Its exported helper is named `answer` and returns 42. Write an Aether program that imports the module using current Aether import syntax, calls `answer()`, and prints exactly `42` followed by a newline.",
-      "expected_stdout": "42\n",
-      "files": {
-        "bench_math": "mod BenchMath {\n    export fn answer() -> Int {\n        ret 42;\n    }\n}\n"
-      }
+      "id": "nested_multiply_grid",
+      "title": "Nested loops over a grid",
+      "mechanisms": [
+        "loop_nested"
+      ],
+      "prompt": "Write an Aether program with nested range loops over `i` and `j`, each from 1 to 3 inclusive, printing one line per pair in the form `i x j = product` (e.g. `2 x 3 = 6`).",
+      "expected_stdout": "1 x 1 = 1\n1 x 2 = 2\n1 x 3 = 3\n2 x 1 = 2\n2 x 2 = 4\n2 x 3 = 6\n3 x 1 = 3\n3 x 2 = 6\n3 x 3 = 9\n",
+      "reference_solution": "fn main() -> Void {\n    loop i in 1..4 {\n        loop j in 1..4 {\n            fx {\n                println(i, \" x \", j, \" = \", i * j);\n            }\n        }\n    }\n    ret;\n}\n"
     },
     {
-      "id": "module_const_import",
-      "title": "Import provided module constants",
-      "prompt": "A module file named `bench_consts` is provided in the working directory. It exports constants named `Greeting` and `Answer`. Write an Aether program that imports the module using current Aether import syntax, reads `Greeting` and `Answer`, and prints `Aether` on the first line and `42` on the second line.",
-      "expected_stdout": "Aether\n42\n",
-      "files": {
-        "bench_consts": "mod BenchConsts {\n    export const Greeting = \"Aether\";\n    export const Answer = 42;\n}\n"
-      }
+      "id": "inline_if_average",
+      "title": "Inline conditional expression",
+      "mechanisms": [
+        "inline_if",
+        "int_division"
+      ],
+      "prompt": "Write an Aether program that computes `avg0` from `total0 = 9` and `count0 = 0`, and `avg2` from `total2 = 9` and `count2 = 2`, using inline `if ... else ...` expressions on the right-hand side. Print `avg0=0` and `avg2=4` on separate lines.",
+      "expected_stdout": "avg0=0\navg2=4\n",
+      "achievability": "model-verified"
     },
     {
-      "id": "contract_normalize",
-      "title": "Preconditions and postconditions",
-      "prompt": "Write an Aether program with `@pre` and `@post` contracts on a helper `normalize(score: Int) -> Int` that clamps a non-negative score into the range 0..100. Call it for 150 and 42, and print `150 => 100` and `42 => 42` on separate lines.",
-      "expected_stdout": "150 => 100\n42 => 42\n"
-    },
-    {
-      "id": "type_init_point",
-      "title": "Record-style type initialization",
-      "prompt": "Write an Aether program that defines a `Point` type with `x` and `y` integer fields and a `sum() -> Int` method. Initialize a point with values 3 and 4 using current Aether type-initialization syntax, and print exactly `sum=7` followed by a newline.",
-      "expected_stdout": "sum=7\n"
-    },
-    {
-      "id": "toon_inline_extract",
-      "title": "TOON parsing with inline node lookup",
-      "prompt": "Write an Aether program that checks `has_toon()`. If TOON support is missing, print `toon unavailable` and exit. Otherwise parse the JSON text `{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42}`, extract the `name` and `score`, print them as `Aether 42`, close the document, and return.",
-      "expected_stdout": "Aether 42\n"
-    },
-    {
-      "id": "toon_parse_file_simple",
-      "title": "TOON parse_file with typed extraction",
-      "prompt": "A file named `payload.json` is provided in the working directory. Write an Aether program that checks `has_toon()`, parses the file with `toon_parse_file`, extracts `name`, `enabled`, and `count`, prints those three values on separate lines, closes the document, and returns.",
-      "expected_stdout": "Aether\ntrue\n2\n",
-      "files": {
-        "payload.json": "{\"name\":\"Aether\",\"enabled\":true,\"count\":2}\n"
-      }
-    },
-    {
-      "id": "toon_jobs_summary",
-      "title": "TOON array iteration with classification summary",
-      "prompt": "A file named `jobs.json` is provided in the working directory. Write an Aether program that checks `has_toon()`, parses the file, iterates through the `jobs` array, uses a pure classifier helper to map scores to `ready`, `review`, or `blocked`, prints one line per job in the form `job 0 => Alpha / ready / 95`, then prints total counts for `ready`, `review`, and `blocked`.",
-      "expected_stdout": "job 0 => Alpha / ready / 95\njob 1 => Beta / review / 78\njob 2 => Gamma / blocked / 62\ntotal = 3\nready = 1\nreview = 1\nblocked = 1\n",
-      "files": {
-        "jobs.json": "{\"jobs\":[{\"name\":\"Alpha\",\"score\":95},{\"name\":\"Beta\",\"score\":78},{\"name\":\"Gamma\",\"score\":62}]}\n"
-      }
-    },
-    {
-      "id": "toon_safe_nested_codes",
-      "title": "Safe nested TOON lookups with missing data",
-      "prompt": "A file named `rows.json` is provided in the working directory. Write an Aether program that checks `has_toon()`, parses the file, iterates through the `rows` array, safely reads `meta.code` when present, falls back to `EMPTY` when it is absent, prints `row 0 = A1` style lines, counts how many rows resolved to `EMPTY`, and prints `missing = N` at the end. Use the safer staged TOON access pattern rather than assuming nested fallbacks protect the whole chain.",
-      "expected_stdout": "row 0 = A1\nrow 1 = EMPTY\nrow 2 = EMPTY\nmissing = 2\n",
-      "files": {
-        "rows.json": "{\"rows\":[{\"meta\":{\"code\":\"A1\"}},{\"meta\":{}},{\"broken\":true}]}\n"
-      }
-    },
-    {
-      "id": "dynamic_array_rollup",
-      "title": "Dynamic array length and indexing",
-      "prompt": "Write an Aether program that creates an `Int[]` dynamic array containing the values 3, 1, 4, 1, and 5 using supported array syntax. Iterate over it with `length(...)` and indexing, compute the sum and maximum value, and print `sum=14`, `max=5`, and `count=5` on separate lines.",
-      "expected_stdout": "sum=14\nmax=5\ncount=5\n"
+      "id": "real_format_circle",
+      "title": "Real arithmetic with formatted output",
+      "mechanisms": [
+        "real_format"
+      ],
+      "prompt": "Write an Aether program with `const PI: Real = 3.14159265;` and a pure helper `area(radius: Real) -> Real`. Use radius `2.5` and print exactly `area=19.63` followed by a newline. Use Aether's real formatting syntax instead of string post-processing.",
+      "expected_stdout": "area=19.63\n",
+      "reference_solution": "const PI: Real = 3.14159265;\n\n@pure\nfn area(radius: Real) -> Real {\n    ret PI * radius * radius;\n}\n\nfn main() -> Void {\n    let a: Real = area(2.5);\n    fx {\n        println(\"area=\", a:0:2);\n    }\n    ret;\n}\n"
     },
     {
       "id": "percentage_format",
       "title": "Real percentage formatting",
+      "mechanisms": [
+        "real_format",
+        "int_to_real"
+      ],
       "prompt": "Write an Aether program that computes a success percentage from `ok = 3` and `total = 4`, forces real arithmetic correctly, and prints exactly `pct=75.00` followed by a newline using Aether's real-formatting syntax.",
-      "expected_stdout": "pct=75.00\n"
+      "expected_stdout": "pct=75.00\n",
+      "reference_solution": "fn main() -> Void {\n    let ok: Int = 3;\n    let total: Int = 4;\n    let pct: Real = ok * 100.0 / total;\n    fx {\n        println(\"pct=\", pct:0:2);\n    }\n    ret;\n}\n"
+    },
+    {
+      "id": "eligibility_bool_logic",
+      "title": "Boolean-operator predicate",
+      "mechanisms": [
+        "bool_logic",
+        "pure_helper"
+      ],
+      "prompt": "Write an Aether program with a pure helper `admit(age: Int, hasTicket: Bool, isVip: Bool, flagged: Bool) -> Bool` that returns true when age is at least 18 AND (the guest has a ticket OR is a VIP) AND is NOT flagged, using the boolean operators `&&`, `||`, and `!`. In `main`, print `guest N: RESULT` for guests (20,true,false,false), (16,true,false,false), (25,false,false,false), (30,false,true,true), (40,true,false,false).",
+      "expected_stdout": "guest 0: true\nguest 1: false\nguest 2: false\nguest 3: false\nguest 4: true\n",
+      "reference_solution": "@pure\nfn admit(age: Int, hasTicket: Bool, isVip: Bool, flagged: Bool) -> Bool {\n    ret age >= 18 && (hasTicket || isVip) && !flagged;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"guest 0: \", admit(20, true, false, false));\n        println(\"guest 1: \", admit(16, true, false, false));\n        println(\"guest 2: \", admit(25, false, false, false));\n        println(\"guest 3: \", admit(30, false, true, true));\n        println(\"guest 4: \", admit(40, true, false, false));\n    }\n    ret;\n}\n"
+    },
+    {
+      "id": "string_checks",
+      "title": "String length and equality checks",
+      "mechanisms": [
+        "text",
+        "bool_return"
+      ],
+      "prompt": "Write an Aether program with a pure helper `validName(name: Text) -> Bool` that returns true only when the name length is between 1 and 6 inclusive and the name is not equal to `bad`. In `main`, print `alpha=true`, `empty=false`, and `bad=false` on separate lines for the sample inputs `alpha`, ``, and `bad`.",
+      "expected_stdout": "alpha=true\nempty=false\nbad=false\n",
+      "reference_solution": "@pure\nfn validName(name: Text) -> Bool {\n    let n: Int = string_len(name);\n    if n < 1 {\n        ret false;\n    }\n    if n > 6 {\n        ret false;\n    }\n    if name == \"bad\" {\n        ret false;\n    }\n    ret true;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"alpha=\", validName(\"alpha\"));\n        println(\"empty=\", validName(\"\"));\n        println(\"bad=\", validName(\"bad\"));\n    }\n    ret;\n}\n"
+    },
+    {
+      "id": "type_init_point",
+      "title": "Record-style type initialization",
+      "mechanisms": [
+        "type",
+        "method",
+        "type_init"
+      ],
+      "prompt": "Write an Aether program that defines a `Point` type with `x` and `y` integer fields and a `sum() -> Int` method. Initialize a point with values 3 and 4 using current Aether type-initialization syntax, and print exactly `sum=7` followed by a newline.",
+      "expected_stdout": "sum=7\n",
+      "achievability": "model-verified"
     },
     {
       "id": "inventory_status",
       "title": "Stateful type with status method",
+      "mechanisms": [
+        "type",
+        "method",
+        "state"
+      ],
       "prompt": "Write an Aether program that defines an `Inventory` type with `currentStock` and `maxCapacity` fields, an `addItem(amount: Int) -> Int` method that updates the stock without exceeding capacity, and a `getStatus() -> Text` method that returns `FULL`, `IN_STOCK`, or `EMPTY`. Initialize the inventory to 10 of 50, add 25, and print `Final Stock: 35` and `Current Status: IN_STOCK` on separate lines.",
-      "expected_stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+      "expected_stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n",
+      "achievability": "model-verified"
     },
     {
-      "id": "large_agent_report",
-      "title": "Large agent-style report over TOON job data",
-      "prompt": "A file named `agent_payload.json` is provided in the working directory. Write a clear, multi-helper Aether program that checks `has_toon()`, parses the file, normalizes scores into 0..100, classifies them as `ready`, `review`, or `blocked`, uses at least one custom `type` for structured intermediate data, prints one line per job in the form `job 0: Alpha / ready / 95`, then prints final totals. A clean answer will likely exceed 120 lines; do not golf it into one short function.",
-      "expected_stdout": "job 0: Alpha / ready / 95\njob 1: Beta / review / 78\njob 2: Gamma / blocked / 62\njob 3: Delta / blocked / 41\njob 4: Epsilon / ready / 100\ntotal = 5\nready = 2\nreview = 1\nblocked = 2\n",
+      "id": "two_type_methods",
+      "title": "Two custom types with extension methods",
+      "mechanisms": [
+        "type",
+        "method",
+        "multi_type"
+      ],
+      "prompt": "Write an Aether program with two custom types: a `Point` with integer `x` and `y`, and a `Box` with integer `width` and `height`. Give `Point` an extension method `shiftX(dx: Int) -> Int` returning `x + dx`, and `Box` an extension method `area() -> Int` returning `width * height`. In `main`, create `Point` (3,4) and `Box` (5,6), then print `shiftedX=` (shiftX 10), `area=`, and `combined=` (shiftX 10 + area) on three lines.",
+      "expected_stdout": "shiftedX=13\narea=30\ncombined=43\n",
+      "reference_solution": "type Point {\n    x: Int;\n    y: Int;\n}\n\ntype Box {\n    width: Int;\n    height: Int;\n}\n\nfn shiftX(self: Point, dx: Int) -> Int {\n    ret self.x + dx;\n}\n\nfn area(self: Box) -> Int {\n    ret self.width * self.height;\n}\n\nfn main() -> Void {\n    let p: Point = Point { x: 3, y: 4 };\n    let b: Box = Box { width: 5, height: 6 };\n    fx {\n        println(\"shiftedX=\", p.shiftX(10));\n        println(\"area=\", b.area());\n        println(\"combined=\", p.shiftX(10) + b.area());\n    }\n    ret;\n}\n"
+    },
+    {
+      "id": "tuple_destructure",
+      "title": "Tuple return plus destructuring",
+      "mechanisms": [
+        "tuple"
+      ],
+      "prompt": "Write an Aether program with a helper `pair() -> (Text, Int)` that returns `(\"answer\", 42)`. Destructure the direct call with `let (label, value) = pair();` and print `answer 42` followed by a newline.",
+      "expected_stdout": "answer 42\n",
+      "achievability": "model-verified"
+    },
+    {
+      "id": "tuple_order_post",
+      "title": "Tuple return with @post on a slot",
+      "mechanisms": [
+        "tuple",
+        "contract"
+      ],
+      "prompt": "Write an Aether program with a helper `ordered(a: Int, b: Int) -> (Int, Int)` that returns the two inputs as a tuple with the larger value first, and an `@post` contract asserting the first slot is >= the second (use positional slot syntax). In `main`, destructure `ordered(3, 8)` into `hi` and `lo` and print `hi=8` and `lo=3` on separate lines.",
+      "expected_stdout": "hi=8\nlo=3\n",
+      "reference_solution": "@post result.0 >= result.1\nfn ordered(a: Int, b: Int) -> (Int, Int) {\n    if a >= b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (hi, lo) = ordered(3, 8);\n    fx {\n        println(\"hi=\", hi);\n        println(\"lo=\", lo);\n    }\n    ret;\n}\n"
+    },
+    {
+      "id": "dynamic_array_rollup",
+      "title": "Dynamic array length and indexing",
+      "mechanisms": [
+        "dynamic_array"
+      ],
+      "prompt": "Write an Aether program that creates an `Int[]` dynamic array containing the values 3, 1, 4, 1, and 5 using supported array syntax. Iterate over it with `length(...)` and indexing, compute the sum and maximum value, and print `sum=14`, `max=5`, and `count=5` on separate lines.",
+      "expected_stdout": "sum=14\nmax=5\ncount=5\n",
+      "achievability": "model-verified"
+    },
+    {
+      "id": "array_minmax",
+      "title": "Array min/max/range scan",
+      "mechanisms": [
+        "dynamic_array",
+        "loop",
+        "comparison"
+      ],
+      "prompt": "Write an Aether program that declares an `Int[]` array containing `12, 5, 23, 8, 19`, then scans it with `length(...)` and indexing to find the minimum, maximum, and range (max - min). Print `min = `, `max = `, and `range = ` on separate lines.",
+      "expected_stdout": "min = 5\nmax = 23\nrange = 18\n",
+      "reference_solution": "fn main() -> Void {\n    let readings: Int[] = [12, 5, 23, 8, 19];\n    let lo: Int = readings[0];\n    let hi: Int = readings[0];\n    loop i in 0..length(readings) {\n        let v: Int = readings[i];\n        if v < lo {\n            lo = v;\n        }\n        if v > hi {\n            hi = v;\n        }\n    }\n    fx {\n        println(\"min = \", lo);\n        println(\"max = \", hi);\n        println(\"range = \", hi - lo);\n    }\n    ret;\n}\n"
+    },
+    {
+      "id": "contract_normalize",
+      "title": "Preconditions and postconditions",
+      "mechanisms": [
+        "contract"
+      ],
+      "prompt": "Write an Aether program with `@pre` and `@post` contracts on a helper `normalize(score: Int) -> Int` that clamps a non-negative score into the range 0..100. Call it for 150 and 42, and print `150 => 100` and `42 => 42` on separate lines.",
+      "expected_stdout": "150 => 100\n42 => 42\n",
+      "reference_solution": "@pre score >= 0\n@post result <= 100\nfn normalize(score: Int) -> Int {\n    if score > 100 {\n        ret 100;\n    }\n    ret score;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"150 => \", normalize(150));\n        println(\"42 => \", normalize(42));\n    }\n    ret;\n}\n"
+    },
+    {
+      "id": "module_function_import",
+      "title": "Import and call a module function",
+      "mechanisms": [
+        "module",
+        "module_fn"
+      ],
+      "prompt": "A module file named `bench_math` is provided in the working directory. It exports a function `cube(n: Int) -> Int`. Write an Aether program that imports the module using current Aether import syntax and, by calling the exported function, prints `cube(2)=8`, `cube(3)=27`, and `cube(4)=64` on separate lines.",
+      "expected_stdout": "cube(2)=8\ncube(3)=27\ncube(4)=64\n",
       "files": {
-        "agent_payload.json": "{\"jobs\":[{\"name\":\"Alpha\",\"score\":95},{\"name\":\"Beta\",\"score\":78},{\"name\":\"Gamma\",\"score\":62},{\"name\":\"Delta\",\"score\":41},{\"name\":\"Epsilon\",\"score\":112}]}\n"
-      }
+        "bench_math": "mod BenchMath {\n    export fn cube(n: Int) -> Int {\n        ret n * n * n;\n    }\n}\n"
+      },
+      "reference_solution": "use \"bench_math\";\n\nfn main() -> Void {\n    fx {\n        println(\"cube(2)=\", cube(2));\n        println(\"cube(3)=\", cube(3));\n        println(\"cube(4)=\", cube(4));\n    }\n    ret;\n}\n"
     },
     {
-      "id": "large_config_validator",
+      "id": "module_const_import",
+      "title": "Import and use module constants",
+      "mechanisms": [
+        "module",
+        "module_const"
+      ],
+      "prompt": "A module file named `bench_consts` is provided in the working directory. It exports constants `Base` (100) and `Step` (7). Write an Aether program that imports the module using current Aether import syntax and, using the exported constants, prints `Base`, `Base + Step`, and `Base + Step + Step` on three lines (`100`, `107`, `114`).",
+      "expected_stdout": "100\n107\n114\n",
+      "files": {
+        "bench_consts": "mod BenchConsts {\n    export const Base: Int = 100;\n    export const Step: Int = 7;\n}\n"
+      },
+      "reference_solution": "use \"bench_consts\";\n\nfn main() -> Void {\n    fx {\n        println(Base);\n        println(Base + Step);\n        println(Base + Step + Step);\n    }\n    ret;\n}\n"
+    },
+    {
+      "id": "toon_inline_extract",
+      "title": "TOON parsing with inline node lookup",
+      "mechanisms": [
+        "toon",
+        "toon_inline"
+      ],
+      "prompt": "Write an Aether program that checks `has_toon()`. If TOON support is missing, print `toon unavailable` and exit. Otherwise parse the JSON text `{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42}`, extract the `name` and `score`, print them as `Aether 42`, close the document, and return.",
+      "expected_stdout": "Aether 42\n",
+      "reference_solution": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42}\");\n    let root: ToonNode = toon_root(doc);\n    let name: Text = toon_get_text_or(root, \"name\", \"NONE\");\n    let score: Int = toon_get_int_or(root, \"score\", 0);\n    fx {\n        println(name, \" \", score);\n    }\n    toon_close(doc);\n    ret;\n}\n"
+    },
+    {
+      "id": "toon_parse_file_simple",
+      "title": "TOON parse_file with typed extraction",
+      "mechanisms": [
+        "toon",
+        "toon_file"
+      ],
+      "prompt": "A file named `payload.json` is provided in the working directory. Write an Aether program that checks `has_toon()`, parses the file with `toon_parse_file`, extracts `name`, `enabled`, and `count`, prints those three values on separate lines, closes the document, and returns.",
+      "expected_stdout": "Aether\ntrue\n2\n",
+      "files": {
+        "payload.json": "{\"name\":\"Aether\",\"enabled\":true,\"count\":2}\n"
+      },
+      "reference_solution": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse_file(\"payload.json\");\n    let root: ToonNode = toon_root(doc);\n    let name: Text = toon_get_text_or(root, \"name\", \"NONE\");\n    let enabled: Bool = toon_get_bool_or(root, \"enabled\", false);\n    let count: Int = toon_get_int_or(root, \"count\", 0);\n    fx {\n        println(name);\n        println(enabled);\n        println(count);\n    }\n    toon_close(doc);\n    ret;\n}\n"
+    },
+    {
+      "id": "toon_type_probe",
+      "title": "TOON value type introspection",
+      "mechanisms": [
+        "toon",
+        "toon_introspection"
+      ],
+      "prompt": "Write an Aether program that checks `has_toon()`, parses the inline TOON text `{\"values\":[42, \"hi\", true, 3.5]}`, iterates the `values` array, and for each element prints `item N: KIND` where KIND is `int`, `text`, `bool`, or `real`, determined using Aether's TOON type-probing helpers rather than guessing. Close the document.",
+      "expected_stdout": "item 0: int\nitem 1: text\nitem 2: bool\nitem 3: real\n",
+      "reference_solution": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"values\\\":[42, \\\"hi\\\", true, 3.5]}\");\n    let root: ToonNode = toon_root(doc);\n    let values: ToonNode = toon_key(root, \"values\");\n    loop i in 0..toon_len(values) {\n        let item: ToonNode = toon_at(values, i);\n        let kind: Text = \"other\";\n        if toon_is_int(item) {\n            kind = \"int\";\n        }\n        if toon_is_text(item) {\n            kind = \"text\";\n        }\n        if toon_is_bool(item) {\n            kind = \"bool\";\n        }\n        if toon_is_real(item) {\n            kind = \"real\";\n        }\n        fx {\n            println(\"item \", i, \": \", kind);\n        }\n    }\n    toon_close(doc);\n    ret;\n}\n"
+    },
+    {
+      "id": "toon_safe_nested_codes",
+      "title": "Safe nested TOON lookups with missing data",
+      "mechanisms": [
+        "toon",
+        "toon_nested_guard"
+      ],
+      "prompt": "A file named `rows.json` is provided in the working directory. Write an Aether program that checks `has_toon()`, parses the file, iterates through the `rows` array, safely reads `meta.code` when present, falls back to `EMPTY` when it is absent, prints `row 0 = A1` style lines, counts how many rows resolved to `EMPTY`, and prints `missing = N` at the end. Use the safer staged TOON access pattern rather than assuming nested fallbacks protect the whole chain.",
+      "expected_stdout": "row 0 = A1\nrow 1 = EMPTY\nrow 2 = EMPTY\nmissing = 2\n",
+      "files": {
+        "rows.json": "{\"rows\":[{\"meta\":{\"code\":\"A1\"}},{\"meta\":{}},{\"broken\":true}]}\n"
+      },
+      "reference_solution": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse_file(\"rows.json\");\n    let root: ToonNode = toon_root(doc);\n    let rows: ToonNode = toon_key(root, \"rows\");\n    let missing: Int = 0;\n    loop i in 0..toon_len(rows) {\n        let row: ToonNode = toon_at(rows, i);\n        let code: Text = \"EMPTY\";\n        if toon_has_key(row, \"meta\") {\n            let meta: ToonNode = toon_key(row, \"meta\");\n            code = toon_get_text_or(meta, \"code\", \"EMPTY\");\n        }\n        if code == \"EMPTY\" {\n            missing = missing + 1;\n        }\n        fx {\n            println(\"row \", i, \" = \", code);\n        }\n    }\n    fx {\n        println(\"missing = \", missing);\n    }\n    toon_close(doc);\n    ret;\n}\n"
+    },
+    {
+      "id": "toon_deep_nested",
+      "title": "Deeply nested TOON (array of objects of arrays)",
+      "mechanisms": [
+        "toon",
+        "toon_deep_nesting"
+      ],
+      "prompt": "A file named `rosters.json` is provided with shape `{\"teams\":[{\"name\":Text,\"members\":[Text,...]}]}`. Write an Aether program that checks `has_toon()`, parses the file, and for each team prints `team N: NAME / COUNT` where COUNT is the number of entries in that team's nested `members` array, then prints `total members = T`. Close the document.",
+      "expected_stdout": "team 0: Reds / 3\nteam 1: Blues / 2\ntotal members = 5\n",
+      "files": {
+        "rosters.json": "{\"teams\":[{\"name\":\"Reds\",\"members\":[\"a\",\"b\",\"c\"]},{\"name\":\"Blues\",\"members\":[\"x\",\"y\"]}]}\n"
+      },
+      "reference_solution": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse_file(\"rosters.json\");\n    let root: ToonNode = toon_root(doc);\n    let teams: ToonNode = toon_key(root, \"teams\");\n    let grand: Int = 0;\n    loop i in 0..toon_len(teams) {\n        let team: ToonNode = toon_at(teams, i);\n        let name: Text = toon_get_text_or(team, \"name\", \"UNKNOWN\");\n        let members: ToonNode = toon_key(team, \"members\");\n        let count: Int = toon_len(members);\n        grand = grand + count;\n        fx {\n            println(\"team \", i, \": \", name, \" / \", count);\n        }\n    }\n    fx {\n        println(\"total members = \", grand);\n    }\n    toon_close(doc);\n    ret;\n}\n"
+    },
+    {
+      "id": "config_validator",
       "title": "Large configuration validator with TOON and pure helpers",
+      "mechanisms": [
+        "toon",
+        "toon_nested_object",
+        "validation"
+      ],
       "prompt": "A file named `config.json` is provided in the working directory. Its shape is `{\"server\":{\"host\":Text,\"port\":Int},\"app\":{\"name\":Text,\"version\":Text},\"log\":{\"level\":Text}}`. The sample file uses port `0`, app name `\"\"`, and log level `\"warning\"`. Use pure helpers to validate the port and application name, and compute numeric log severity with `info=1`, `warning=2`, `error=3`, and anything else falling back to `1`. Write a clear Aether program that checks `has_toon()`, parses the file, prints one `ISSUE:` line for each validation problem, then prints the severity line and a final validation summary. Separate pure logic from `fx` output and use several helpers rather than a monolithic main function.",
       "expected_stdout": "ISSUE: port is invalid (0)\nISSUE: app name is empty or too long\nlog severity level: 2\nVALIDATION FAILED: 2 issue(s) found\n",
       "files": {
         "config.json": "{\"server\":{\"host\":\"0.0.0.0\",\"port\":0},\"app\":{\"name\":\"\",\"version\":\"1.0\"},\"log\":{\"level\":\"warning\"}}\n"
-      }
+      },
+      "reference_solution": "@pure\nfn validPort(port: Int) -> Bool {\n    if port < 1 {\n        ret false;\n    }\n    if port > 65535 {\n        ret false;\n    }\n    ret true;\n}\n\n@pure\nfn validName(name: Text) -> Bool {\n    let size: Int = string_len(name);\n    if size < 1 {\n        ret false;\n    }\n    if size > 64 {\n        ret false;\n    }\n    ret true;\n}\n\n@pure\nfn severityForLevel(level: Text) -> Int {\n    if level == \"info\" {\n        ret 1;\n    }\n    if level == \"warning\" {\n        ret 2;\n    }\n    if level == \"error\" {\n        ret 3;\n    }\n    ret 1;\n}\n\ntype Summary {\n    issues: Int;\n\n    fn addIssue() -> Void {\n        self.issues = self.issues + 1;\n        ret;\n    }\n}\n\nfn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse_file(\"config.json\");\n    let root: ToonNode = toon_root(doc);\n    let server: ToonNode = toon_key(root, \"server\");\n    let app: ToonNode = toon_key(root, \"app\");\n    let log: ToonNode = toon_key(root, \"log\");\n    let port: Int = toon_get_int_or(server, \"port\", 0);\n    let appName: Text = toon_get_text_or(app, \"name\", \"\");\n    let logLevel: Text = toon_get_text_or(log, \"level\", \"info\");\n    let summary: Summary = new Summary();\n    if !validPort(port) {\n        summary.addIssue();\n        fx {\n            print(\"ISSUE: port is invalid (\");\n            print(port);\n            println(\")\");\n        }\n    }\n    if !validName(appName) {\n        summary.addIssue();\n        fx {\n            println(\"ISSUE: app name is empty or too long\");\n        }\n    }\n    fx {\n        println(\"log severity level: \", severityForLevel(logLevel));\n    }\n    if summary.issues > 0 {\n        fx {\n            println(\"VALIDATION FAILED: \", summary.issues, \" issue(s) found\");\n        }\n        toon_close(doc);\n        ret;\n    }\n    fx {\n        println(\"CONFIG VALID\");\n    }\n    toon_close(doc);\n    ret;\n}\n"
     },
     {
-      "id": "large_ledger_audit",
-      "title": "Large ledger audit over nested transaction data",
-      "prompt": "A file named `transactions.json` is provided in the working directory. Its shape is `{\"metadata\":Text,\"transactions\":[...]}` where each transaction may contain `id` and `amount`. The batch label comes from the top-level `metadata` field, not from `batch`. Missing transaction fields should fall back to `UNKNOWN` for `id` and `-1` for `amount`. Write a structured Aether program that checks `has_toon()`, parses the file, defines `const MaxTxAmount: Int = 10000;`, uses a pure helper `isTxValid(amount: Int) -> Bool`, maintains a custom `Ledger` type with counters, prints one line per transaction in the form `row 0: T1 / valid / 500`, and then prints batch summary lines for `batch`, `balance`, `valid`, and `invalid`. A clean answer will likely exceed 150 lines if written readably.",
-      "expected_stdout": "row 0: T1 / valid / 500\nrow 1: T2 / invalid / 99999\nrow 2: T3 / invalid / -100\nrow 3: UNKNOWN / invalid / -1\nbatch = batch_99\nbalance = 500\nvalid = 1\ninvalid = 3\n",
-      "files": {
-        "transactions.json": "{\"metadata\":\"batch_99\",\"transactions\":[{\"id\":\"T1\",\"amount\":500},{\"id\":\"T2\",\"amount\":99999},{\"id\":\"T3\",\"amount\":-100},{\"broken\":true}]}\n"
-      }
-    },
-    {
-      "id": "large_release_board",
-      "title": "Large release-board summary with normalization and averages",
-      "prompt": "A file named `releases.json` is provided in the working directory. Its top-level shape is `{\"releases\":[...]}` and each release object contains `id`, `owner`, `score`, and `blockers`. Normalize scores into `0..100`. Classify normalized scores as `green` when `>= 90`, `yellow` when `>= 70`, and `red` otherwise. A release is blocked when `blockers > 0`. Write a structured Aether program that checks `has_toon()`, parses the file, prints one line per release in the form `release 0: R1 / green / false / 92`, then prints the counts for each lane, the blocked count, and the average normalized score formatted to two decimals. Use several helpers and at least one custom `type`. A clean answer will likely exceed 150 lines.",
+      "id": "release_board",
+      "title": "Release-board report over TOON array",
+      "mechanisms": [
+        "toon",
+        "toon_array_report",
+        "real_format"
+      ],
+      "prompt": "A file named `releases.json` is provided in the working directory. Its top-level shape is `{\"releases\":[...]}` and each release object contains `id`, `owner`, `score`, and `blockers`. Normalize scores into `0..100`. Classify normalized scores as `green` when `>= 90`, `yellow` when `>= 70`, and `red` otherwise. A release is blocked when `blockers > 0`. Write a structured Aether program that checks `has_toon()`, parses the file, prints one line per release in the form `release 0: R1 / green / false / 92`, then prints the counts for each lane, the blocked count, and the average normalized score formatted to two decimals. Use several helpers and at least one custom `type`.",
       "expected_stdout": "release 0: R1 / green / false / 92\nrelease 1: R2 / yellow / true / 76\nrelease 2: R3 / red / false / 61\nrelease 3: R4 / green / true / 100\ngreen = 2\nyellow = 1\nred = 1\nblocked = 2\naverage = 82.25\n",
       "files": {
         "releases.json": "{\"releases\":[{\"id\":\"R1\",\"owner\":\"alice\",\"score\":92,\"blockers\":0},{\"id\":\"R2\",\"owner\":\"bob\",\"score\":76,\"blockers\":1},{\"id\":\"R3\",\"owner\":\"cara\",\"score\":61,\"blockers\":0},{\"id\":\"R4\",\"owner\":\"dave\",\"score\":105,\"blockers\":2}]}\n"
-      }
+      },
+      "reference_solution": "@pure\nfn clampScore(raw: Int) -> Int {\n    if raw < 0 {\n        ret 0;\n    }\n    if raw > 100 {\n        ret 100;\n    }\n    ret raw;\n}\n\n@pure\nfn classifyLane(score: Int) -> Text {\n    if score >= 90 {\n        ret \"green\";\n    }\n    if score >= 70 {\n        ret \"yellow\";\n    }\n    ret \"red\";\n}\n\n@pure\nfn isBlocked(blockers: Int) -> Bool {\n    if blockers > 0 {\n        ret true;\n    }\n    ret false;\n}\n\ntype Board {\n    count: Int;\n    total: Int;\n    green: Int;\n    yellow: Int;\n    red: Int;\n    blocked: Int;\n\n    fn record(lane: Text, blocked: Bool, score: Int) -> Void {\n        self.count = self.count + 1;\n        self.total = self.total + score;\n        if blocked {\n            self.blocked = self.blocked + 1;\n        }\n        if lane == \"green\" {\n            self.green = self.green + 1;\n            ret;\n        }\n        if lane == \"yellow\" {\n            self.yellow = self.yellow + 1;\n            ret;\n        }\n        self.red = self.red + 1;\n        ret;\n    }\n}\n\nfn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse_file(\"releases.json\");\n    let root: ToonNode = toon_root(doc);\n    let releases: ToonNode = toon_key(root, \"releases\");\n    let board: Board = new Board();\n    loop i in 0..toon_len(releases) {\n        let rel: ToonNode = toon_at(releases, i);\n        let id: Text = toon_get_text_or(rel, \"id\", \"UNKNOWN\");\n        let raw: Int = toon_get_int_or(rel, \"score\", 0);\n        let blockers: Int = toon_get_int_or(rel, \"blockers\", 0);\n        let score: Int = clampScore(raw);\n        let lane: Text = classifyLane(score);\n        let blocked: Bool = isBlocked(blockers);\n        board.record(lane, blocked, score);\n        fx {\n            println(\"release \", i, \": \", id, \" / \", lane, \" / \", blocked, \" / \", score);\n        }\n    }\n    let average: Real = 0.0;\n    if board.count > 0 {\n        average = board.total * 1.0 / board.count;\n    }\n    fx {\n        println(\"green = \", board.green);\n        println(\"yellow = \", board.yellow);\n        println(\"red = \", board.red);\n        println(\"blocked = \", board.blocked);\n        println(\"average = \", average:0:2);\n    }\n    toon_close(doc);\n    ret;\n}\n"
     },
     {
-      "id": "large_support_module_report",
+      "id": "module_toon_report",
       "title": "Large combined module plus TOON report",
+      "mechanisms": [
+        "toon",
+        "module",
+        "integration"
+      ],
       "prompt": "A module file named `bench_support` and a data file named `support_jobs.json` are provided in the working directory. The module exports `DefaultScore`, `classifySupport(score: Int) -> Text`, and `clampSupport(score: Int) -> Int`. The JSON file has top-level shape `{\"jobs\":[...]}` and missing scores should fall back to `DefaultScore`. Write a structured Aether program that imports the module, uses those exported members, parses the job file, prints one line per job in the form `job 0 -> Alpha / ready / 95`, and then prints final totals for `ready`, `review`, and `blocked`. Keep the program cleanly separated into helpers, and prefer a readable multi-function solution over a compact one-liner.",
       "expected_stdout": "job 0 -> Alpha / ready / 95\njob 1 -> Beta / blocked / 50\njob 2 -> Gamma / blocked / 12\nready = 1\nreview = 0\nblocked = 2\n",
       "files": {
         "bench_support": "mod BenchSupport {\n    export const DefaultScore: Int = 50;\n\n    @pure\n    export fn classifySupport(score: Int) -> Text {\n        if score >= 90 {\n            ret \"ready\";\n        }\n        if score >= 70 {\n            ret \"review\";\n        }\n        ret \"blocked\";\n    }\n\n    @pure\n    export fn clampSupport(score: Int) -> Int {\n        if score > 100 {\n            ret 100;\n        }\n        if score < 0 {\n            ret 0;\n        }\n        ret score;\n    }\n}\n",
         "support_jobs.json": "{\"jobs\":[{\"name\":\"Alpha\",\"score\":95},{\"name\":\"Beta\"},{\"name\":\"Gamma\",\"score\":12}]}\n"
-      }
+      },
+      "reference_solution": "use \"bench_support\";\n\ntype Totals {\n    ready: Int;\n    review: Int;\n    blocked: Int;\n\n    fn record(status: Text) -> Void {\n        if status == \"ready\" {\n            self.ready = self.ready + 1;\n            ret;\n        }\n        if status == \"review\" {\n            self.review = self.review + 1;\n            ret;\n        }\n        self.blocked = self.blocked + 1;\n        ret;\n    }\n}\n\nfn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse_file(\"support_jobs.json\");\n    let root: ToonNode = toon_root(doc);\n    let jobs: ToonNode = toon_key(root, \"jobs\");\n    let totals: Totals = new Totals();\n    loop i in 0..toon_len(jobs) {\n        let job: ToonNode = toon_at(jobs, i);\n        let name: Text = toon_get_text_or(job, \"name\", \"UNKNOWN\");\n        let raw: Int = toon_get_int_or(job, \"score\", DefaultScore);\n        let score: Int = clampSupport(raw);\n        let status: Text = classifySupport(score);\n        totals.record(status);\n        fx {\n            println(\"job \", i, \" -> \", name, \" / \", status, \" / \", score);\n        }\n    }\n    fx {\n        println(\"ready = \", totals.ready);\n        println(\"review = \", totals.review);\n        println(\"blocked = \", totals.blocked);\n    }\n    toon_close(doc);\n    ret;\n}\n"
     }
   ]
 }
