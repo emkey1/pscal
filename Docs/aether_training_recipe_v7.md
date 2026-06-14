@@ -225,3 +225,47 @@ training (incl. repair coverage) and is the more robust bet beyond this 25-task
 eval. The two are within benchmark noise — either is a fine source for the NVFP4
 export. Merged checkpoints live at
 `/storage/aether-qwen-coder-30b-sft-qwen-coder-30b-v7{,1,2,3}/merged_16bit`.
+
+## Rebuilt benchmark (v2) + noise-robust protocol
+
+`tasks.json` was rebuilt to 29 mechanism-tagged tasks (deduped, every non-trivial
+task carries a compiler-verified `reference_solution`; see the commit). Canonical
+v7.1 baseline on it, temp 0: **none 19/29, small 26/29, full 26/29**, vs a
+**Python baseline of 15/29** (the same model asked to solve each task in Python) —
+so the Aether specialization beats native Python in every config.
+
+**The benchmark is run on claw2 now**, not the laptop — the Aether compiler is
+built at `~/pscal-bench/build/bin/aether` (clone repo, `sudo apt install
+libssl-dev`, `cmake -B build`, `cmake --build build --target aether`). Run it
+detached so laptop sleep can't kill it; the vLLM endpoint is `localhost:8018`.
+
+**Noise floor:** at n=29 and temp 0, vLLM is still slightly non-deterministic —
+a ±2 swing is noise (v7.4 moved the *Python* baseline 15→13 with zero Python-side
+changes). So **never trust a single-run Δ ≤ 2**. Protocol for model comparison:
+
+```bash
+# on claw2, model served at :8018
+python3 Tools/aether_doc_bench.py --docs none --repeats 3 \
+  --destinations-config <t0 config> --destination <id> \
+  --aether-bin "$HOME/pscal-bench/build/bin/aether" \
+  --output-json out/<run>.json --progress
+# majority verdict + flaky-task flagging (noise-robust):
+python3 Tools/aether_doc_bench_mechanisms.py out/<run>.json --doc none
+```
+
+`aether_doc_bench_mechanisms.py` is repeat-aware: each task's verdict is the
+majority across repeats, and tasks that pass some-but-not-all repeats are flagged
+`FLAKY` — that's the noise band, and a real gain must clear it.
+
+## Corpus-addition ceiling (confirmed)
+
+`none` plateaus at ~19/29 (guided ~26). v7.4 added targeted examples for the
+syntax gaps Python exposed (contracts, nested loops, tuples, bool-logic,
+module-const). Result: 2 of 5 gaps closed at the mechanism level
+(`nested_multiply_grid`, `module_const_import` flipped fail→pass) — proving
+targeted examples *work* — but offsetting drift/noise left the net flat (19→19),
+and guided dipped 1–2. Contracts and bool-logic resisted a handful entirely.
+**Conclusion:** incremental SFT corpus-addition has hit its ceiling for this base.
+Pushing past it needs a different lever — preference/RL on the task distribution,
+a much larger corpus accrued over time, or a stronger base model — plus
+`--repeats` so decisions aren't made on noise.
