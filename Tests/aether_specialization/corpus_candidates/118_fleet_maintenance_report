@@ -1,0 +1,79 @@
+// 118_fleet_maintenance_report
+// Concepts: object-root TOON extraction, derived metric (km since service),
+// threshold classify, custom totals type, missing-field fallbacks, summary
+// expect: vehicle 0: V1 / 17000 / overdue
+// expect: vehicle 1: V2 / 13000 / due
+// expect: vehicle 2: V3 / 17000 / overdue
+// expect: vehicle 3: V4 / 1000 / ok
+// expect: vehicle 4: UNKNOWN / 0 / ok
+// expect: overdue = 2
+// expect: due = 1
+// expect: ok = 2
+
+@pure
+fn classifyService(kmSince: Int) -> Text {
+    if kmSince > 15000 {
+        ret "overdue";
+    }
+    if kmSince > 10000 {
+        ret "due";
+    }
+    ret "ok";
+}
+
+type FleetTotals {
+    overdue: Int;
+    due: Int;
+    ok: Int;
+
+    fn record(status: Text) -> Void {
+        if status == "overdue" {
+            self.overdue = self.overdue + 1;
+            ret;
+        }
+        if status == "due" {
+            self.due = self.due + 1;
+            ret;
+        }
+        self.ok = self.ok + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse_file("fleet118.json");
+    let root: ToonNode = toon_root(doc);
+    let vehicles: ToonNode = toon_key(root, "vehicles");
+    let totals: FleetTotals = new FleetTotals();
+
+    loop i in 0..toon_len(vehicles) {
+        let vehicle: ToonNode = toon_at(vehicles, i);
+        let id: Text = toon_get_text_or(vehicle, "id", "UNKNOWN");
+        let mileage: Int = toon_get_int_or(vehicle, "mileage", 0);
+        let lastServiceKm: Int = toon_get_int_or(vehicle, "lastServiceKm", 0);
+        let kmSince: Int = mileage - lastServiceKm;
+        let status: Text = classifyService(kmSince);
+
+        totals.record(status);
+
+        fx {
+            println("vehicle ", i, ": ", id, " / ", kmSince, " / ", status);
+        }
+    }
+
+    fx {
+        println("overdue = ", totals.overdue);
+        println("due = ", totals.due);
+        println("ok = ", totals.ok);
+    }
+
+    toon_close(doc);
+    ret;
+}

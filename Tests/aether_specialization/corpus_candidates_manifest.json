@@ -1928,6 +1928,223 @@
         ],
         "notes": "Support module for 116_payroll_summary (PayrollRates: BaseHours, clampHours, classifyShift). Authored 2026-06-13."
       }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/118_fleet_maintenance_report",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/118_fleet_maintenance_report",
+      "sha256": "d0a9266cc1666a8524769799b6398262be0f24dcae9463b46e41f878bdb98535",
+      "stdout": "vehicle 0: V1 / 17000 / overdue\nvehicle 1: V2 / 13000 / due\nvehicle 2: V3 / 17000 / overdue\nvehicle 3: V4 / 1000 / ok\nvehicle 4: UNKNOWN / 0 / ok\noverdue = 2\ndue = 1\nok = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": true,
+        "tags": [
+          "toon",
+          "report",
+          "type"
+        ],
+        "notes": "Fleet maintenance report: object-root TOON, derived km-since-service metric, threshold classify, custom totals type. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/119_tournament_standings",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/119_tournament_standings",
+      "sha256": "228177087289c3b151d95a60c430754d1c9903e2501886db6715cd93db274cd5",
+      "stdout": "team 0: Lions / 80 / top\nteam 1: Bears / 40 / mid\nteam 2: Hawks / 20 / low\nteam 3: Wolves / 100 / top\ntop = 2\nmid = 1\nlow = 1\naverage = 60.00\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": true,
+        "tags": [
+          "toon",
+          "classify",
+          "type",
+          "real"
+        ],
+        "notes": "Tournament standings: normalize-with-clamp, tiered classify, custom totals type, clamped real average. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/120_warehouse_inventory_rollup",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/120_warehouse_inventory_rollup",
+      "sha256": "87847863b2091013fddb6b8efa10e0a00ada908a7f60a26c9abf74e935fe67bc",
+      "stdout": "item 0: A1 / 50 / ok\nitem 1: B2 / 5 / low\nitem 2: C3 / 0 / out\nitem 3: D4 / 15 / ok\nitem 4: UNKNOWN / 0 / out\nok = 2\nlow = 1\nout = 2\ntotal qty = 70\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": true,
+        "tags": [
+          "toon",
+          "inventory",
+          "type"
+        ],
+        "notes": "Warehouse inventory rollup: reorder-threshold classify, running quantity total, custom totals type. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/121_toon_inline_status",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/121_toon_inline_status",
+      "sha256": "42d3556a300aa3b0d8222774663613de3866d9892dfc03950f6dfaec7d63709f",
+      "stdout": "sensor 0: S1 / 12 / low\nsensor 1: S2 / 80 / high\nsensor 2: S3 / 55 / high\nhigh count = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "toon",
+          "inline"
+        ],
+        "notes": "Inline toon_parse of a string literal, object-root array extraction, threshold classify. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/122_geometry_real_report",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/122_geometry_real_report",
+      "sha256": "9518452016904b49f4e30afb096cfca4cea736aa4b5862e9a7582bd00f9bf051",
+      "stdout": "area r=2 => 12.57\narea r=5 => 78.54\ntotal => 91.11\nfirst share pct = 13.79\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "real",
+          "format",
+          "math"
+        ],
+        "notes": "Geometry real report: Real const, forced Real operand, fixed-precision value:0:2 output, percentage share. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/123_sales_quota_report",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/123_sales_quota_report",
+      "sha256": "9e0a6a7dd265fc1ae1db9c035885b51cbd7b684c886c151ec0c398ac2bb1da6c",
+      "stdout": "rep 0: Ada / 120 / bonus no\nrep 1: Ben / 160 / bonus yes\nrep 2: Cyd / 90 / bonus no\nquota = 100\nbonus reps = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": true,
+        "tags": [
+          "toon",
+          "module",
+          "import",
+          "type"
+        ],
+        "notes": "Sales quota report: imports 124_sales_targets and calls its exact exported consts + pure fn; object-root TOON, bonus tally. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/125_contract_normalize_levels",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/125_contract_normalize_levels",
+      "sha256": "a747f98b82d3daf899404e49b1301505f21cf43484add12ae4a270a3499f50cf",
+      "stdout": "30 => 30 / low\n150 => 100 / high\n65 => 65 / mid\n90 => 90 / high\ntotal = 285\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "contract",
+          "pre",
+          "post"
+        ],
+        "notes": "Contract normalize: @pre/@post contracts (@post references result) on a clamp helper, pure banding helper, totals. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/126_point_grid_methods",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/126_point_grid_methods",
+      "sha256": "a6b8bc1616ad6ebe49c6245dbb0ed1de0230f8b9c31e705f0b25cadf68cc9ac4",
+      "stdout": "a => 3,4 m=7\nb => 1,6 m=7\nc => 5,2 m=7\ntotal m = 21\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "type",
+          "method",
+          "init"
+        ],
+        "notes": "Point grid methods: literal Point{x,y} init, new Point() with field assignment, top-level extension method via value.method(). Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/127_username_validation",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/127_username_validation",
+      "sha256": "24a80621d71bea54d35731144068aa0c81eaa7c1012c5b2e1dafa688383c2bf5",
+      "stdout": "user 0: ed / 2 / false\nuser 1: alice / 5 / true\nuser 2: supercalifrag / 13 / false\nuser 3: bob / 3 / true\nvalid = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "toon",
+          "string",
+          "validate"
+        ],
+        "notes": "Username validation: inline toon_parse, string_len length checks, Bool printing, valid counter. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/128_ticket_queue_summary",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/128_ticket_queue_summary",
+      "sha256": "9207ab4dcf5eb0652fe65dabed62cc1b9d494f120ca0c4de20fdf5809b9272a9",
+      "stdout": "ticket 0 => T1 / done / 95\nticket 1 => T2 / active / 60\nticket 2 => T3 / blocked / 20\ndone = 1\nactive = 1\nblocked = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": true,
+        "tags": [
+          "toon",
+          "summary",
+          "type"
+        ],
+        "notes": "Ticket queue summary: object-root TOON, score-derived status, custom totals type, => formatted rows. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/129_depot_stock_report",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/129_depot_stock_report",
+      "sha256": "2fb42db7f72f708d23f8649d8c91f6d06d3b7e2264cc47c1a29c35820d2e2d03",
+      "stdout": "bin 0: Z1 / 25 / ok\nbin 1: Z2 / 5 / low\nbin 2: Z3 / 0 / out\nsafety stock = 10\nok bins = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": true,
+        "tags": [
+          "toon",
+          "module",
+          "import",
+          "type"
+        ],
+        "notes": "Depot stock report: imports 130_stock_rules and calls its exact exported fn + const; object-root TOON, ok-bin counter. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/124_sales_targets",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/124_sales_targets",
+      "sha256": "49a58090a1123cba651f8f0548af56eeaf2bbc05bcc1741a673b097b0c01d07c",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "module"
+        ],
+        "notes": "Support module for 123_sales_quota_report (SalesTargets: MonthlyQuota, BonusThreshold, attainment)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/130_stock_rules",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/130_stock_rules",
+      "sha256": "ec381964a5f20b4f2cad3e3f487211d0dcd61f0a3e1dcc0e02e11263ed66e7c3",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "module"
+        ],
+        "notes": "Support module for 129_depot_stock_report (StockRules: SafetyStock, stockStatus)."
+      }
     }
   ]
 }

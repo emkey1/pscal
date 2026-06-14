@@ -1,0 +1,14 @@
+mod StockRules {
+    export const SafetyStock: Int = 10;
+
+    @pure
+    export fn stockStatus(qty: Int) -> Text {
+        if qty < 1 {
+            ret "out";
+        }
+        if qty < SafetyStock {
+            ret "low";
+        }
+        ret "ok";
+    }
+}

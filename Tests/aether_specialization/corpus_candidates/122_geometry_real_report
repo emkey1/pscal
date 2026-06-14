@@ -1,0 +1,33 @@
+// 122_geometry_real_report
+// Concepts: Real const, pure Real-returning helper with forced Real operand,
+// fixed-precision output (value:0:2), percentage share formatting
+// expect: area r=2 => 12.57
+// expect: area r=5 => 78.54
+// expect: total => 91.11
+// expect: first share pct = 13.79
+
+const Pi: Real = 3.14159;
+
+@pure
+fn circleArea(radius: Int) -> Real {
+    let r: Real = radius * 1.0;
+    ret Pi * r * r;
+}
+
+fn main() -> Void {
+    let r1: Int = 2;
+    let r2: Int = 5;
+    let area1: Real = circleArea(r1);
+    let area2: Real = circleArea(r2);
+    let total: Real = area1 + area2;
+    let share: Real = area1 * 100.0 / total;
+
+    fx {
+        println("area r=", r1, " => ", area1:0:2);
+        println("area r=", r2, " => ", area2:0:2);
+        println("total => ", total:0:2);
+        println("first share pct = ", share:0:2);
+    }
+
+    ret;
+}

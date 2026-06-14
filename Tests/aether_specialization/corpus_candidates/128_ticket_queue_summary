@@ -1,0 +1,75 @@
+// 128_ticket_queue_summary
+// Concepts: object-root TOON extraction, score-derived status, "=>" formatted
+// per-row output, custom totals type, summary counts
+// expect: ticket 0 => T1 / done / 95
+// expect: ticket 1 => T2 / active / 60
+// expect: ticket 2 => T3 / blocked / 20
+// expect: done = 1
+// expect: active = 1
+// expect: blocked = 1
+
+@pure
+fn ticketStatus(score: Int) -> Text {
+    if score >= 90 {
+        ret "done";
+    }
+    if score >= 50 {
+        ret "active";
+    }
+    ret "blocked";
+}
+
+type Queue {
+    done: Int;
+    active: Int;
+    blocked: Int;
+
+    fn record(status: Text) -> Void {
+        if status == "done" {
+            self.done = self.done + 1;
+            ret;
+        }
+        if status == "active" {
+            self.active = self.active + 1;
+            ret;
+        }
+        self.blocked = self.blocked + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse_file("tickets128.json");
+    let root: ToonNode = toon_root(doc);
+    let tickets: ToonNode = toon_key(root, "tickets");
+    let queue: Queue = new Queue();
+
+    loop i in 0..toon_len(tickets) {
+        let ticket: ToonNode = toon_at(tickets, i);
+        let id: Text = toon_get_text_or(ticket, "id", "UNKNOWN");
+        let score: Int = toon_get_int_or(ticket, "score", 0);
+        let status: Text = ticketStatus(score);
+
+        queue.record(status);
+
+        fx {
+            println("ticket ", i, " => ", id, " / ", status, " / ", score);
+        }
+    }
+
+    fx {
+        println("done = ", queue.done);
+        println("active = ", queue.active);
+        println("blocked = ", queue.blocked);
+    }
+
+    toon_close(doc);
+    ret;
+}
