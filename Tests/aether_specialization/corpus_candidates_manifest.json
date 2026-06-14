@@ -2198,6 +2198,167 @@
         ],
         "notes": "Sprint board report: clamp-normalize, lane classify, blocked flag, custom board type reusing a field name as a method local, clamped real average. Verified with build/bin/aether."
       }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/134_contract_clamp_volume",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/134_contract_clamp_volume",
+      "sha256": "1db5f3fcc3b13949f07330aa787e966ff06c06a731a37ef80976fd50e05a690d",
+      "stdout": "18 -> 11\n7 -> 7\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "contract",
+          "pre",
+          "post"
+        ],
+        "notes": "Contract @pre/@post placed above the function; scalar clamp. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/135_contract_fee_floor",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/135_contract_fee_floor",
+      "sha256": "fb14bdf083654c3712cc4d2f5a59a8628c8bd871a828bcd824d6a35329004c4f",
+      "stdout": "fee 2 => 5\nfee 40 => 40\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "contract",
+          "pre",
+          "post"
+        ],
+        "notes": "Contract @pre/@post above the function; @post references result; fee floor. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/136_nested_grid_sum",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/136_nested_grid_sum",
+      "sha256": "4d0806e061a0a8292c0ffd3af825137ab9be795839d7c0bcb0d4c6505a809268",
+      "stdout": "cell 1,1 = 1\ncell 1,2 = 2\ncell 2,1 = 2\ncell 2,2 = 4\ngrid total = 9\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "loop",
+          "nested"
+        ],
+        "notes": "Nested range loops with cross-dimension accumulation and per-cell output. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/137_nested_pairings",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/137_nested_pairings",
+      "sha256": "988a89b25bc48e3400e34f1fc9d8cd3780b1e17190c5e082dd1ab66dfae33823",
+      "stdout": "A vs B\nA vs C\nB vs C\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "loop",
+          "nested",
+          "array"
+        ],
+        "notes": "Nested loops over an array with an i<j guard for round-robin pairings. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/138_tuple_bounds_post",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/138_tuple_bounds_post",
+      "sha256": "aebdf095d411b4ae0b46f7c12ec71011e6f27923979862799032ea23b67965d8",
+      "stdout": "lo=4\nhi=9\nspan=5\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "tuple",
+          "contract"
+        ],
+        "notes": "Tuple-returning helper with @post on a positional slot; direct-call destructure. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/139_tuple_divmod",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/139_tuple_divmod",
+      "sha256": "9490b2c8f3986137fdafb5a09c94e6ec870cc291a0b0f6e13d730e6ede6f8d6b",
+      "stdout": "quotient=3\nremainder=2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "tuple"
+        ],
+        "notes": "Tuple return of quotient/remainder; direct-call destructure. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/140_bool_access_policy",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/140_bool_access_policy",
+      "sha256": "f03a49803287b3518a533113284b2d36f27aaad6d50656a48fb0d16b1d620979",
+      "stdout": "p0: true\np1: false\np2: false\np3: false\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "bool",
+          "logic"
+        ],
+        "notes": "Boolean operators && || ! in a pure access predicate. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/141_bool_refundable",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/141_bool_refundable",
+      "sha256": "84c48cde3f6d85b590183100a5f22d572641105abdb316b52b817470eeb46091",
+      "stdout": "a=true\nb=false\nc=false\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "bool",
+          "logic"
+        ],
+        "notes": "Boolean operators && and ! in a pure refund predicate. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/142_invoice_tax",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/142_invoice_tax",
+      "sha256": "6462facc28e1280ee03bf21cfa63bef91aab33d769d95a13a307a2aae0937e78",
+      "stdout": "base rate = 8\nbase tax = 16\nsurcharge = 6\ntotal tax = 22\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "module",
+          "import",
+          "const"
+        ],
+        "notes": "Imports 143_tax_rates and uses its exact exported consts in arithmetic. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/143_tax_rates",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/143_tax_rates",
+      "sha256": "c75276ee0808f14aa9ce30df8b7c3f82a98af60f55484ac5dd9f1adc21801ba4",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "module"
+        ],
+        "notes": "Support module for 142_invoice_tax (TaxRates: BaseRate, Surcharge)."
+      }
     }
   ]
 }

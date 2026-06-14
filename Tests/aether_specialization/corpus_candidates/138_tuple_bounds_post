@@ -1,0 +1,19 @@
+// 138_tuple_bounds_post
+// Concepts: tuple-returning helper with @post on positional slot, destructure
+@post result.0 <= result.1
+fn bounds(a: Int, b: Int) -> (Int, Int) {
+    if a <= b {
+        ret (a, b);
+    }
+    ret (b, a);
+}
+
+fn main() -> Void {
+    let (lo, hi) = bounds(9, 4);
+    fx {
+        println("lo=", lo);
+        println("hi=", hi);
+        println("span=", hi - lo);
+    }
+    ret;
+}

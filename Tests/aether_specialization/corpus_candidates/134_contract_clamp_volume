@@ -1,0 +1,18 @@
+// 134_contract_clamp_volume
+// Concepts: @pre/@post contracts placed ABOVE the function, scalar clamp
+@pre level >= 0
+@post result <= 11
+fn clampVolume(level: Int) -> Int {
+    if level > 11 {
+        ret 11;
+    }
+    ret level;
+}
+
+fn main() -> Void {
+    fx {
+        println("18 -> ", clampVolume(18));
+        println("7 -> ", clampVolume(7));
+    }
+    ret;
+}

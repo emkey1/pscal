@@ -1,0 +1,16 @@
+// 142_invoice_tax
+// Concepts: import a module and use its exported consts in arithmetic
+use "143_tax_rates";
+
+fn main() -> Void {
+    let subtotal: Int = 200;
+    let base: Int = subtotal * BaseRate / 100;
+    let extra: Int = subtotal * Surcharge / 100;
+    fx {
+        println("base rate = ", BaseRate);
+        println("base tax = ", base);
+        println("surcharge = ", extra);
+        println("total tax = ", base + extra);
+    }
+    ret;
+}

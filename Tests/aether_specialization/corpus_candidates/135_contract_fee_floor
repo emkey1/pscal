@@ -1,0 +1,18 @@
+// 135_contract_fee_floor
+// Concepts: @pre/@post contracts above the function, @post references result
+@pre amount >= 0
+@post result >= 5
+fn applyFloor(amount: Int) -> Int {
+    if amount < 5 {
+        ret 5;
+    }
+    ret amount;
+}
+
+fn main() -> Void {
+    fx {
+        println("fee 2 => ", applyFloor(2));
+        println("fee 40 => ", applyFloor(40));
+    }
+    ret;
+}

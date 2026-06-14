@@ -1,0 +1,16 @@
+// 139_tuple_divmod
+// Concepts: tuple return of two computed values, direct-call destructure
+fn divmod(n: Int, d: Int) -> (Int, Int) {
+    let q: Int = n / d;
+    let r: Int = n - q * d;
+    ret (q, r);
+}
+
+fn main() -> Void {
+    let (q, r) = divmod(17, 5);
+    fx {
+        println("quotient=", q);
+        println("remainder=", r);
+    }
+    ret;
+}
