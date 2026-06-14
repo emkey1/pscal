@@ -1824,6 +1824,110 @@
         ],
         "notes": "Benchmark-mirror module plus TOON file rollup using exported names exactly and a provided default score."
       }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/112_weather_station_report",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/112_weather_station_report",
+      "sha256": "d1fcfb3d80b3c493add56d12ea13f392bbaaddabc3722710c88cdcad8177a8a8",
+      "stdout": "station 0: NORTH / 18 / normal\nstation 1: EAST / 30 / warn\nstation 2: SOUTH / 37 / alert\nstation 3: WEST / -5 / alert\nstation 4: RIDGE / 0 / normal\nnormal = 2\nwarn = 1\nalert = 2\naverage = 16.00\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": true,
+        "tags": [
+          "toon",
+          "report",
+          "type",
+          "real"
+        ],
+        "notes": "Weather station telemetry report: object-root TOON extraction, threshold classify, custom totals type, clamped real average. Authored 2026-06-13; verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/113_library_loan_audit",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/113_library_loan_audit",
+      "sha256": "42a2ca77d2eea347e37282c4c44e9f462c8c0ed0f3297c13552f41dc6e248c22",
+      "stdout": "loan 0: B101 / alice / overdue / fee 12\nloan 1: B102 / bob / on-time / fee 0\nloan 2: B103 / cara / overdue / fee 32\nloan 3: UNKNOWN / UNKNOWN / on-time / fee 0\ntotal = 4\noverdue = 2\non-time = 2\nfees = 44\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": true,
+        "tags": [
+          "toon",
+          "ledger",
+          "audit",
+          "type"
+        ],
+        "notes": "Library loan audit: pure overdue/fee helpers, const policy, custom catalog type reusing a field name as a method local. Authored 2026-06-13; verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/114_gradebook_rollup",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/114_gradebook_rollup",
+      "sha256": "754c2eb19b701dd730d9c56e5075a437a7a627bd471e29a57912de0a229a84be",
+      "stdout": "student 0: Ana / 92 / distinction\nstudent 1: Ben / 78 / merit\nstudent 2: Cy / 55 / pass\nstudent 3: Dee / 100 / distinction\nstudent 4: Eli / 0 / fail\ndistinction = 2\nmerit = 1\npass = 1\nfail = 1\naverage = 65.00\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": true,
+        "tags": [
+          "toon",
+          "classify",
+          "type",
+          "real"
+        ],
+        "notes": "Gradebook rollup: clamp + tiered classify, custom gradebook type, clamped real average with fixed precision. Authored 2026-06-13; verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/115_incident_severity_digest",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/115_incident_severity_digest",
+      "sha256": "779da61bbc88b65949bb03ee6be2ae333b05b5a71784a8ad1db5c50f7c194770",
+      "stdout": "incident 0: INC1 / SEV1\nincident 1: INC2 / NONE\nincident 2: INC3 / NONE\nincident 3: UNKNOWN / NONE\ncoded = 1\nmissing = 3\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": true,
+        "tags": [
+          "toon",
+          "nested",
+          "guard",
+          "type"
+        ],
+        "notes": "Incident severity digest: guarded nested-object extraction (toon_has_key before toon_key), coded/missing tally. Authored 2026-06-13; verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/116_payroll_summary",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/116_payroll_summary",
+      "sha256": "ffeb3b43d752b9d560c6b9acce09587327728c0d498a85f5c4afb320b0870ecf",
+      "stdout": "worker 0: Ivy / 45 / overtime\nworker 1: Jon / 40 / full\nworker 2: Kim / 30 / partial\nworker 3: Lee / 80 / overtime\nbase hours = 40\novertime workers = 2\ntotal hours = 195\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": true,
+        "tags": [
+          "toon",
+          "module",
+          "import",
+          "type"
+        ],
+        "notes": "Payroll summary: imports 117_payroll_rates and calls its exact exported const and pure fns; object-root TOON, running totals. Authored 2026-06-13; verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/117_payroll_rates",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/117_payroll_rates",
+      "sha256": "597892a16690893194898975fb5b0af42306b8043014ee433829a82eb29dfca2",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "module"
+        ],
+        "notes": "Support module for 116_payroll_summary (PayrollRates: BaseHours, clampHours, classifyShift). Authored 2026-06-13."
+      }
     }
   ]
 }

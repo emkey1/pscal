@@ -72,35 +72,18 @@ def load_manifest_items(path: pathlib.Path) -> list[dict]:
     return payload.get("items", [])
 
 
+def is_numbered_case_name(name: str) -> bool:
+    return re.match(r"^\d+_", name) is not None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-json", type=pathlib.Path, required=True)
     parser.add_argument("--manifest", type=pathlib.Path, default=DEFAULT_MANIFEST)
     args = parser.parse_args()
 
-    manifest_metadata = load_manifest_metadata(args.manifest)
     manifest_items = load_manifest_items(args.manifest)
     items: list[dict[str, str]] = []
-    seen_repo_paths: set[str] = set()
-    for root in DEFAULT_ROOTS:
-        for path in sorted(root.rglob("*")):
-            if not looks_like_source(path):
-                continue
-            text = path.read_text(encoding="utf-8")
-            if not looks_canonical_for_training(text):
-                continue
-            repo_path = str(path.relative_to(REPO_ROOT))
-            record = {
-                "path": repo_path,
-                "kind": "raw_aether_corpus",
-                "content": text,
-            }
-            metadata = manifest_metadata.get(repo_path)
-            if metadata:
-                record["metadata"] = metadata
-            items.append(record)
-            seen_repo_paths.add(repo_path)
-
     missing_manifest_paths: list[str] = []
     for item in manifest_items:
         repo_path = item.get("repo_path")
@@ -108,6 +91,10 @@ def main() -> int:
             continue
         metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
         if metadata.get("include_in_training") is False:
+            continue
+        if not is_numbered_case_name(pathlib.Path(repo_path).name):
+            continue
+        if not isinstance(item.get("stdout"), str) or not item.get("stdout"):
             continue
         path = REPO_ROOT / repo_path
         if not path.exists():
@@ -120,8 +107,6 @@ def main() -> int:
         text = path.read_text(encoding="utf-8")
         if not looks_canonical_for_training(text):
             continue
-        if repo_path in seen_repo_paths:
-            continue
         record = {
             "path": repo_path,
             "kind": "raw_aether_corpus",
@@ -130,7 +115,6 @@ def main() -> int:
         if metadata:
             record["metadata"] = metadata
         items.append(record)
-        seen_repo_paths.add(repo_path)
 
     if missing_manifest_paths:
         raise SystemExit(

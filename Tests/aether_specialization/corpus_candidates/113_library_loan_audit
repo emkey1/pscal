@@ -1,0 +1,96 @@
+// 113_library_loan_audit
+// Concepts: object-root TOON extraction, pure overdue/fee helpers, const policy,
+// custom mutable catalog type with a method that reuses a field name as a local,
+// missing-field fallbacks, per-loan and summary output
+// expect: loan 0: B101 / alice / overdue / fee 12
+// expect: loan 1: B102 / bob / on-time / fee 0
+// expect: loan 2: B103 / cara / overdue / fee 32
+// expect: loan 3: UNKNOWN / UNKNOWN / on-time / fee 0
+// expect: total = 4
+// expect: overdue = 2
+// expect: on-time = 2
+// expect: fees = 44
+
+const GraceDays: Int = 14;
+const DailyFine: Int = 2;
+
+@pure
+fn isOverdue(daysOut: Int) -> Bool {
+    if daysOut > GraceDays {
+        ret true;
+    }
+    ret false;
+}
+
+@pure
+fn lateFee(daysOut: Int) -> Int {
+    if daysOut <= GraceDays {
+        ret 0;
+    }
+    ret (daysOut - GraceDays) * DailyFine;
+}
+
+@pure
+fn statusLabel(overdue: Bool) -> Text {
+    if overdue {
+        ret "overdue";
+    }
+    ret "on-time";
+}
+
+type Catalog {
+    total: Int;
+    overdue: Int;
+    onTime: Int;
+    fees: Int;
+
+    fn record(overdue: Bool, fee: Int) -> Void {
+        self.total = self.total + 1;
+        self.fees = self.fees + fee;
+        if overdue {
+            self.overdue = self.overdue + 1;
+            ret;
+        }
+        self.onTime = self.onTime + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse_file("loans113.json");
+    let root: ToonNode = toon_root(doc);
+    let loans: ToonNode = toon_key(root, "loans");
+    let catalog: Catalog = new Catalog();
+
+    loop i in 0..toon_len(loans) {
+        let loan: ToonNode = toon_at(loans, i);
+        let id: Text = toon_get_text_or(loan, "id", "UNKNOWN");
+        let borrower: Text = toon_get_text_or(loan, "borrower", "UNKNOWN");
+        let daysOut: Int = toon_get_int_or(loan, "daysOut", 0);
+        let overdue: Bool = isOverdue(daysOut);
+        let fee: Int = lateFee(daysOut);
+
+        catalog.record(overdue, fee);
+
+        fx {
+            println("loan ", i, ": ", id, " / ", borrower, " / ", statusLabel(overdue), " / fee ", fee);
+        }
+    }
+
+    fx {
+        println("total = ", catalog.total);
+        println("overdue = ", catalog.overdue);
+        println("on-time = ", catalog.onTime);
+        println("fees = ", catalog.fees);
+    }
+
+    toon_close(doc);
+    ret;
+}

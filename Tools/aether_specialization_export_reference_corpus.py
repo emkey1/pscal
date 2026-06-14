@@ -10,8 +10,10 @@ import pathlib
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_DOCS = [
-    REPO_ROOT / "Docs" / "aether_for_llms_and_others.md",
     REPO_ROOT / "Docs" / "aether_for_llms_with_small_contexts.md",
+]
+OPTIONAL_DOCS = [
+    REPO_ROOT / "Docs" / "aether_for_llms_and_others.md",
 ]
 
 
@@ -22,10 +24,18 @@ def count_words(text: str) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-json", type=pathlib.Path, required=True)
+    parser.add_argument(
+        "--include-full-guide",
+        action="store_true",
+        help="include the full Aether guide in the exported reference corpus",
+    )
     args = parser.parse_args()
 
     items: list[dict[str, object]] = []
-    for path in DEFAULT_DOCS:
+    docs = list(DEFAULT_DOCS)
+    if args.include_full_guide:
+        docs.extend(OPTIONAL_DOCS)
+    for path in docs:
         text = path.read_text(encoding="utf-8")
         items.append(
             {

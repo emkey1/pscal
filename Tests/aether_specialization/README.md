@@ -21,6 +21,9 @@ specialization.
 
 These manifests feed `tools/aether_specialization_build_dataset.py`, which
 verifies each sample before writing JSONL for later SFT or repair training.
+The seed manifests are no longer the whole supervised set: canonical
+compiler-verified corpus candidates with meaningful stdout are also promoted
+into instruction-style SFT records automatically.
 
 Typical local flow:
 
@@ -80,8 +83,11 @@ and are not referenced by the manifest or the training export pipeline.
 
 The separate reference corpus currently pulls from:
 
-- `Docs/aether_for_llms_and_others.md`
 - `Docs/aether_for_llms_with_small_contexts.md`
+
+By default, only the small-context guide is exported into the reference corpus.
+Use `tools/aether_specialization_export_reference_corpus.py --include-full-guide`
+when a run explicitly needs the full guide as reference ballast.
 
 Keep that reference corpus separate from raw executable Aether source. It is
 meant for instruction-style conditioning, synthetic-pair generation, or
