@@ -2112,7 +2112,8 @@ static const char *inferHelperReturnTypeName(const char *nameStart, size_t nameL
         (nameLen == 15 && strncmp(nameStart, "toon_text_value", 15) == 0) ||
         (nameLen == 7 && strncmp(nameStart, "ai_chat", 7) == 0) ||
         (nameLen == 13 && strncmp(nameStart, "builtins_json", 13) == 0) ||
-        (nameLen == 12 && strncmp(nameStart, "builtin_info", 12) == 0)) {
+        (nameLen == 12 && strncmp(nameStart, "builtin_info", 12) == 0) ||
+        (nameLen == 11 && strncmp(nameStart, "int_to_text", 11) == 0)) {
         return "Text";
     }
     if ((nameLen == 8 && strncmp(nameStart, "toon_len", 8) == 0) ||
@@ -3261,6 +3262,9 @@ static int appendAetherBuiltinAlias(Buffer *out, const char *nameStart, size_t n
     }
     if (nameLen == 7 && strncmp(nameStart, "println", nameLen) == 0) {
         return bufferAppend(out, "writeln");
+    }
+    if (nameLen == 11 && strncmp(nameStart, "int_to_text", nameLen) == 0) {
+        return bufferAppend(out, "IntToStr");
     }
     if (nameLen == 5 && strncmp(nameStart, "sleep", nameLen) == 0) {
         return bufferAppend(out, "delay");

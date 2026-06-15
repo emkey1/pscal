@@ -1077,7 +1077,11 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
 
     initSymbolSystem();
     reaSymbolStateActive = true;
-    gSuppressWriteSpacing = 0;
+    /* Rea uses friendly auto-spacing between write() arguments. Aether does NOT:
+     * a write/writeln must emit its arguments verbatim so the programmer controls
+     * spacing exactly (no "magic" spaces that can't be removed). Aether lowers to
+     * Rea, so suppress the spacing specifically for the Aether frontend. */
+    gSuppressWriteSpacing = (frontendGetKind() == FRONTEND_KIND_AETHER) ? 1 : 0;
     gUppercaseBooleans = 0;
     registerAllBuiltins();
     reaRegisterThreadBuiltins();
