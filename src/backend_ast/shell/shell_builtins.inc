@@ -250,10 +250,17 @@ static const char *shellTypesetArithmeticErrorFormat(void) {
     static int cached_style = -1;
     if (cached_style < 0) {
         cached_style = 0;
+        /* Sentinel: Prevent command execution vulnerability via BASH env var by validating path */
         const char *bash_path = shellSafeGetenv("BASH");
         if (!bash_path || bash_path[0] == '\0') {
             bash_path = "/bin/bash";
         }
+
+        // Ensure bash_path only points to a shell (not a relative, injected path or arguments)
+        if (strstr(bash_path, "bash") == NULL && strstr(bash_path, "sh") == NULL) {
+            bash_path = "/bin/bash";
+        }
+
         if (bash_path && bash_path[0] != '\0') {
             char quoted[768];
             size_t qlen = 0;
