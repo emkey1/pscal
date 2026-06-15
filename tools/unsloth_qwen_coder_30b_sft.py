@@ -333,6 +333,15 @@ def main() -> int:
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.0)
     parser.add_argument("--random-state", type=int, default=3407)
+    parser.add_argument("--target-modules", default="",
+                        help="comma-separated LoRA target module names; empty uses the default set. "
+                             "For hybrid-attention archs (qwen3_5) add the linear_attn projections.")
+    parser.add_argument("--max-steps", type=int, default=-1,
+                        help="cap optimizer steps, overriding epochs when > 0 (smoke tests)")
+    parser.add_argument("--gradient-checkpointing", default="unsloth",
+                        choices=["unsloth", "true", "false"],
+                        help="gradient checkpointing mode; 'false' disables it (needs more VRAM, "
+                             "but avoids Unsloth's offload-recompute path)")
     parser.add_argument(
         "--export-gguf",
         default="",
@@ -438,14 +447,18 @@ def main() -> int:
         unsloth_tokenizer.pad_token = unsloth_tokenizer.eos_token
     unsloth_tokenizer.padding_side = "right"
 
+    target_modules = [m.strip() for m in args.target_modules.split(",") if m.strip()] or TARGET_MODULES
+    print(f"LoRA target modules ({len(target_modules)}): {target_modules}", flush=True)
+    gc_value = {"unsloth": "unsloth", "true": True, "false": False}[args.gradient_checkpointing]
+    print(f"use_gradient_checkpointing = {gc_value!r}", flush=True)
     model = FastLanguageModel.get_peft_model(
         model,
         r=args.lora_r,
-        target_modules=TARGET_MODULES,
+        target_modules=target_modules,
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
         bias="none",
-        use_gradient_checkpointing="unsloth",
+        use_gradient_checkpointing=gc_value,
         random_state=args.random_state,
         use_rslora=False,
         loftq_config=None,
@@ -453,6 +466,12 @@ def main() -> int:
 
     train_dataset = Dataset.from_list(train_records)
     eval_dataset = Dataset.from_list(eval_records)
+    # Newer TRL (transformers 5.x) treats a `messages` column as a conversational
+    # dataset and re-templates it, which conflicts with our pre-rendered `text`
+    # (RuntimeError: Could not infer dtype of dict). Keep only `text` so SFTTrainer
+    # tokenizes the strings we already built via materialize_chat_text.
+    train_dataset = train_dataset.remove_columns([c for c in train_dataset.column_names if c != "text"])
+    eval_dataset = eval_dataset.remove_columns([c for c in eval_dataset.column_names if c != "text"])
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -466,6 +485,7 @@ def main() -> int:
         args=SFTConfig(
             output_dir=str(args.output_dir),
             num_train_epochs=args.epochs,
+            max_steps=args.max_steps,
             per_device_train_batch_size=args.batch_size,
             per_device_eval_batch_size=1,
             gradient_accumulation_steps=args.grad_accum,
@@ -535,7 +555,7 @@ def main() -> int:
         "dtype": args.dtype,
         "device_map": args.device_map,
         "gpu_memory_utilization": args.gpu_memory_utilization,
-        "target_modules": TARGET_MODULES,
+        "target_modules": target_modules,
         "lora_r": args.lora_r,
         "lora_alpha": args.lora_alpha,
         "lora_dropout": args.lora_dropout,

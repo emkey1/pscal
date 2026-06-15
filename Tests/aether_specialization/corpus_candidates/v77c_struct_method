@@ -1,0 +1,16 @@
+type Vec {
+    x: Int;
+    y: Int;
+
+    fn total() -> Int {
+        ret self.x + self.y;
+    }
+}
+
+fn main() -> Void {
+    let v: Vec = Vec { x: 3, y: 4 };
+    fx {
+        println("sum=", v.total());
+    }
+    ret;
+}

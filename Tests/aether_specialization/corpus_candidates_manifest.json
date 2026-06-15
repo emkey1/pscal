@@ -383,7 +383,7 @@
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/25_percentage",
       "repo_path": "Tests/aether_specialization/corpus_candidates/25_percentage",
       "sha256": "9f8233506618d980bef86239c6805bc866f2a12d2effa5ca4b013f151aa5e470",
-      "stdout": "success = 84.00 %\n",
+      "stdout": "success = 84.00%\n",
       "metadata": {
         "canonical": true,
         "fixture_required": false,
@@ -526,7 +526,7 @@
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/34_toon_stats",
       "repo_path": "Tests/aether_specialization/corpus_candidates/34_toon_stats",
       "sha256": "9e791c01f1828c9031f625d9b683f9ae5711f7c834511723cda73524db6b8eb0",
-      "stdout": "transactions = 4\ntotal = 545\nlarge share = 50.00 %\n",
+      "stdout": "transactions = 4\ntotal = 545\nlarge share = 50.00%\n",
       "metadata": {
         "canonical": true,
         "fixture_required": false,
@@ -557,7 +557,7 @@
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/36_pipeline_capstone",
       "repo_path": "Tests/aether_specialization/corpus_candidates/36_pipeline_capstone",
       "sha256": "62a4ded2b15b53b377c3262e325aa4c3bd803ba9adae77249919157b80e776e8",
-      "stdout": "alpha [ 95] -> ready\nbeta [ 72] -> review\ngamma [ 100] -> ready\nready jobs = 2\n",
+      "stdout": "alpha [95] -> ready\nbeta [72] -> review\ngamma [100] -> ready\nready jobs = 2\n",
       "metadata": {
         "canonical": true,
         "fixture_required": false,
@@ -1322,7 +1322,7 @@
           "toon"
         ]
       },
-      "stdout": "Processing 2 users\nUser # 1 is Alice\nUser # 2 is Bob\n"
+      "stdout": "Processing 2 users\nUser #1 is Alice\nUser #2 is Bob\n"
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/46_bank_account_methods",
@@ -1412,7 +1412,7 @@
         "assumption_bearing": false,
         "tags": []
       },
-      "stdout": "Starting process...\nAttempt # 1\nAttempt # 2\nAttempt # 3\nCritical check passed. Stopping early.\nProcess finished after 3 iterations.\n"
+      "stdout": "Starting process...\nAttempt #1\nAttempt #2\nAttempt #3\nCritical check passed. Stopping early.\nProcess finished after 3 iterations.\n"
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/53_real_receipt_formatting",
@@ -1438,7 +1438,7 @@
           "array"
         ]
       },
-      "stdout": "Modified buffer:\n  [ 0]: 20\n  [ 1]: 40\n  [ 2]: 99\n  [ 3]: 80\n  [ 4]: 100\n"
+      "stdout": "Modified buffer:\n  [0]: 20\n  [1]: 40\n  [2]: 99\n  [3]: 80\n  [4]: 100\n"
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/55_bool_validation_flow",
@@ -2553,6 +2553,367 @@
           "contract"
         ],
         "notes": "both @pure and @pre/@post functions in one program. Verified with build/bin/aether."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/t77_toon_type_scan",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/t77_toon_type_scan",
+      "sha256": "22dd8641a7650d93e947f3411274f9ae33c842a3c57db424633241f9121becdd",
+      "stdout": "slot 0 -> int\nslot 1 -> text\nslot 2 -> bool\nslot 3 -> real\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "toon",
+          "type_probe"
+        ],
+        "notes": "TOON toon_is_* type predicates over a mixed array. Verified with build/bin/aether (v7.7)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/t77_toon_or_defaults",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/t77_toon_or_defaults",
+      "sha256": "0066193bb4bdac8bf410e15a3f502d394929035d3980d63bf7b980333aff71ad",
+      "stdout": "host=db1\nport=5432\ntls=off\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "toon"
+        ],
+        "notes": "TOON has_toon guard + toon_get_*_or with defaults. Verified with build/bin/aether (v7.7)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/t77_toon_nested_guard",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/t77_toon_nested_guard",
+      "sha256": "77c3ff746ce6df7f8ce01dfa9a3a31b02ab7566462b8e6d9734c620d2fa74c1f",
+      "stdout": "name=Ada\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "toon"
+        ],
+        "notes": "TOON nested object navigation via toon_has_key/toon_key. Verified with build/bin/aether (v7.7)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/t77_struct_init",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/t77_struct_init",
+      "sha256": "dbb09962c45f4a33aa2f1b3cce046517d5e7950f5ed22f9aab6cbfba92ad3411",
+      "stdout": "area=20\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "type"
+        ],
+        "notes": "Record init TypeName { field: value } (no `new`). Verified with build/bin/aether (v7.7)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/t77_halfopen_grid",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/t77_halfopen_grid",
+      "sha256": "b5e1402fe1968c4ce8d4b2a12ab72b9f47c26fa7cf4986546898e14f4d7645ce",
+      "stdout": "cell 0,0 = 0\ncell 0,1 = 0\ncell 0,2 = 0\ncell 1,0 = 0\ncell 1,1 = 1\ncell 1,2 = 2\ncell 2,0 = 0\ncell 2,1 = 2\ncell 2,2 = 4\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "loop",
+          "loop_nested"
+        ],
+        "notes": "Half-open nested ranges 0..n (no inclusive ..=). Verified with build/bin/aether (v7.7)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/t77_fx_block_basic",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/t77_fx_block_basic",
+      "sha256": "9db7c24c2e700f6d1492fc0494974e2f93d1423850318782bf17ec1feff61b88",
+      "stdout": "doubled=42\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "pure",
+          "output"
+        ],
+        "notes": "println inside fx block (not @fx) + pure helper. Verified with build/bin/aether (v7.7)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/t77_module_const_scope",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/t77_module_const_scope",
+      "sha256": "c9a2adfd176554d6d19f10d96c99a01050af79df8b85464d53db80f0802ead2f",
+      "stdout": "weekly=21\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "module_const"
+        ],
+        "notes": "Module-scope const used by a @pure function. Verified with build/bin/aether (v7.7)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/t77_toon_obj_array",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/t77_toon_obj_array",
+      "sha256": "baf648edf7c620bee692b7cb2e20fc3ac57d022dc8a4192e7edf2f26917d71ab",
+      "stdout": "id 1 ok=yes\nid 2 ok=no\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "toon",
+          "array"
+        ],
+        "notes": "TOON array-of-objects iteration with toon_at/toon_len. Verified with build/bin/aether (v7.7)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/v77b_fx_multi",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/v77b_fx_multi",
+      "sha256": "7f537626dfc1bb5f5d66165d957fd84ea79950c85db683871d28b5441776dfb9",
+      "stdout": "a=4\nb=6\nsum=10\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "output"
+        ],
+        "notes": "Multiple println inside one fx block. Verified v7.7c reinforcement (confirmed none-failure target)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/v77b_fx_after_loop",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/v77b_fx_after_loop",
+      "sha256": "55d3fb25005120b0e8f5aaeec3ffa38de21fec016914d42a00b1e29dd0e3c16f",
+      "stdout": "total=10\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "output",
+          "loop"
+        ],
+        "notes": "Accumulate in loop, print result in fx block. Verified v7.7c reinforcement (confirmed none-failure target)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/v77b_fx_pure_call",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/v77b_fx_pure_call",
+      "sha256": "37d06e4e190cea1e819d40ea7918f0e87325d0098ec2bb287a1ea9287d4cd70f",
+      "stdout": "doubled=42\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "output",
+          "pure"
+        ],
+        "notes": "println inside fx calling a @pure helper. Verified v7.7c reinforcement (confirmed none-failure target)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/v77b_range_countup",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/v77b_range_countup",
+      "sha256": "74ff1e146802e0e8609d3444103984e77424cdb8fc83e72ffaadc417f67edc76",
+      "stdout": "n=1\nn=2\nn=3\nn=4\nn=5\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "loop"
+        ],
+        "notes": "Half-open 1..6 prints values 1..5 (no inclusive ..=). Verified v7.7c reinforcement (confirmed none-failure target)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/v77b_range_sum_to_n",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/v77b_range_sum_to_n",
+      "sha256": "6f6d03574d80629138e38b4b7c83ddbf00831e40ccb862b1dbf9b02ada10b9c2",
+      "stdout": "sum=15\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "loop",
+          "pure"
+        ],
+        "notes": "Sum 1..n via half-open 1..n+1. Verified v7.7c reinforcement (confirmed none-failure target)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/v77b_range_table_1to3",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/v77b_range_table_1to3",
+      "sha256": "b830359b16e46c0d4e55a18760e2d1195d3b67ad568b77ebb4308975df0d61fa",
+      "stdout": "row 1 -> 10\nrow 2 -> 20\nrow 3 -> 30\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "loop"
+        ],
+        "notes": "Rows 1,2,3 via half-open 1..4. Verified v7.7c reinforcement (confirmed none-failure target)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/v77b_const_rate",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/v77b_const_rate",
+      "sha256": "1f1a1034450384ac4e23a534bb45bc475eaea0c91f32c3438e95f53ea2057788",
+      "stdout": "scaled=21\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "module_const",
+          "pure"
+        ],
+        "notes": "Module-scope const used by a @pure fn. Verified v7.7c reinforcement (confirmed none-failure target)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/v77b_const_two",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/v77b_const_two",
+      "sha256": "a9124ad1e94c89b678299835afeb6924d7701453513c31617d1757119455215d",
+      "stdout": "level0=100\nlevel3=115\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "module_const",
+          "pure"
+        ],
+        "notes": "Two module-scope consts across helpers. Verified v7.7c reinforcement (confirmed none-failure target)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/v77b_const_real",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/v77b_const_real",
+      "sha256": "515502d3cd499ca0fb3de149e595fe573e513aa365bb9b71fa27c338f9a44a6d",
+      "stdout": "net=40.00\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "module_const",
+          "pure",
+          "real"
+        ],
+        "notes": "Module-scope Real const in @pure fn. Verified v7.7c reinforcement (confirmed none-failure target)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/v77c_struct_method",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/v77c_struct_method",
+      "sha256": "c6e268a99f59378e7e0d44ddc7f6307e230254e8b3282340663e259cf9bf01a9",
+      "stdout": "sum=7\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "type"
+        ],
+        "notes": "Construct a method-bearing type with T{field:val} (no new). Verified v7.7c reinforcement (confirmed none-failure target)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/v77c_toon_is_scan",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/v77c_toon_is_scan",
+      "sha256": "468ea872ce2a4d2669d98187feccdf01746aa9dda9f9138ca39279f6a187748d",
+      "stdout": "item 0: int\nitem 1: text\nitem 2: bool\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "toon",
+          "type_probe"
+        ],
+        "notes": "toon_is_* predicates over a mixed array (no ToonKind*). Verified v7.7c reinforcement (confirmed none-failure target)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/r2_addition_table",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/r2_addition_table",
+      "sha256": "d5a91e1d107b82e4cc243ca2147d156b318a687bed6ddc5c9b2f2b3828c0ae23",
+      "stdout": "1 + 1 = 2\n1 + 2 = 3\n1 + 3 = 4\n2 + 1 = 3\n2 + 2 = 4\n2 + 3 = 5\n3 + 1 = 4\n3 + 2 = 5\n3 + 3 = 6\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "loop",
+          "loop_nested"
+        ],
+        "notes": "Nested half-open 1..4 loops (inclusive-from-1 without ..=). v7.8 round-2 (stubborn-revert target)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/r2_pair_grid",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/r2_pair_grid",
+      "sha256": "a7b93cc22f71c993298785ea71407b9c7ba02b40dedc084c7a440ba1f44f53d4",
+      "stdout": "cell(1,1)\ncell(1,2)\ncell(2,1)\ncell(2,2)\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "loop",
+          "loop_nested"
+        ],
+        "notes": "Nested half-open 1..3 loops. v7.8 round-2 (stubborn-revert target)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/r2_box_volume",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/r2_box_volume",
+      "sha256": "b64ae83e1a05d2bf669ab8977fa878db1ca8e0fd9ff6a7b045145c1f9fe9cd09",
+      "stdout": "vol=24\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "type",
+          "method"
+        ],
+        "notes": "Method-bearing type constructed with T{field:val} (no new). v7.8 round-2 (stubborn-revert target)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/r2_rect_area_method",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/r2_rect_area_method",
+      "sha256": "a029dda39f98ab8ba050d7346885eb7eb1349c55221ee903171d8276bc93a629",
+      "stdout": "area1=15\narea2=4\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "type",
+          "method"
+        ],
+        "notes": "Method-bearing type, two T{..} literals + method calls. v7.8 round-2 (stubborn-revert target)."
       }
     }
   ]

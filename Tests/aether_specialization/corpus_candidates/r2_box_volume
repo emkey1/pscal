@@ -1,0 +1,17 @@
+type Box {
+    w: Int;
+    h: Int;
+    d: Int;
+
+    fn volume() -> Int {
+        ret self.w * self.h * self.d;
+    }
+}
+
+fn main() -> Void {
+    let b: Box = Box { w: 2, h: 3, d: 4 };
+    fx {
+        println("vol=", b.volume());
+    }
+    ret;
+}

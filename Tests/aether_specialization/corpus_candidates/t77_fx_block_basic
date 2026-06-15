@@ -1,0 +1,12 @@
+@pure
+fn doubled(n: Int) -> Int {
+    ret n * 2;
+}
+
+fn main() -> Void {
+    let x: Int = 21;
+    fx {
+        println("doubled=", doubled(x));
+    }
+    ret;
+}

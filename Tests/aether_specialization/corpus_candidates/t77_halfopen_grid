@@ -1,0 +1,10 @@
+fn main() -> Void {
+    loop i in 0..3 {
+        loop j in 0..3 {
+            fx {
+                println("cell ", i, ",", j, " = ", i * j);
+            }
+        }
+    }
+    ret;
+}

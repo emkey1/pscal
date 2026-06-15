@@ -165,6 +165,41 @@
       "broken_source": "fn ordered(a: Int, b: Int) -> (Int, Int) @post result.0 >= result.1 {\n    if a >= b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (hi, lo) = ordered(2, 7);\n    fx {\n        println(\"hi=\", hi);\n        println(\"lo=\", lo);\n    }\n    ret;\n}\n",
       "fixed_source": "@post result.0 >= result.1\nfn ordered(a: Int, b: Int) -> (Int, Int) {\n    if a >= b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (hi, lo) = ordered(2, 7);\n    fx {\n        println(\"hi=\", hi);\n        println(\"lo=\", lo);\n    }\n    ret;\n}\n",
       "expected_stdout": "hi=7\nlo=2\n"
+    },
+    {
+      "id": "repair_at_fx_to_block",
+      "diagnostic": "Aether effect error: output statements like println must live inside an `fx { ... }` block in the function body, not behind an `@fx` annotation. There is no `@fx` annotation.",
+      "broken_source": "@fx\nfn main() -> Void {\n    println(\"hi\");\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    fx {\n        println(\"hi\");\n    }\n    ret;\n}\n",
+      "expected_stdout": "hi\n"
+    },
+    {
+      "id": "repair_inclusive_range",
+      "diagnostic": "Aether range error: `loop` ranges are half-open with `..`; there is no inclusive `..=`. To iterate values 1..3 inclusive, write `1..4`.",
+      "broken_source": "fn main() -> Void {\n    loop i in 1..=3 {\n        fx { println(\"i=\", i); }\n    }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    loop i in 1..4 {\n        fx { println(\"i=\", i); }\n    }\n    ret;\n}\n",
+      "expected_stdout": "i=1\ni=2\ni=3\n"
+    },
+    {
+      "id": "repair_new_struct_init",
+      "diagnostic": "Aether record init error: construct a type with `TypeName { field: value, ... }`. Do not prefix with `new`.",
+      "broken_source": "type Point {\n    x: Int;\n    y: Int;\n}\n\nfn main() -> Void {\n    let p: Point = new Point { x: 3, y: 4 };\n    fx { println(\"x=\", p.x); }\n    ret;\n}\n",
+      "fixed_source": "type Point {\n    x: Int;\n    y: Int;\n}\n\nfn main() -> Void {\n    let p: Point = Point { x: 3, y: 4 };\n    fx { println(\"x=\", p.x); }\n    ret;\n}\n",
+      "expected_stdout": "x=3\n"
+    },
+    {
+      "id": "repair_toon_availability",
+      "diagnostic": "Aether TOON error: the availability guard is `has_toon()`. There is no `has_toon_parser`.",
+      "broken_source": "fn main() -> Void {\n    if !has_toon_parser() {\n        fx { println(\"no toon\"); }\n        ret;\n    }\n    fx { println(\"ok\"); }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no toon\"); }\n        ret;\n    }\n    fx { println(\"ok\"); }\n    ret;\n}\n",
+      "expected_stdout": "ok\n"
+    },
+    {
+      "id": "repair_const_module_scope",
+      "diagnostic": "Aether scope error: a constant used by a top-level `@pure` function must be declared at module scope (outside `main`), not inside `main`.",
+      "broken_source": "@pure\nfn taxed(n: Int) -> Int {\n    ret n + RATE;\n}\n\nfn main() -> Void {\n    const RATE: Int = 5;\n    fx { println(\"t=\", taxed(10)); }\n    ret;\n}\n",
+      "fixed_source": "const RATE: Int = 5;\n\n@pure\nfn taxed(n: Int) -> Int {\n    ret n + RATE;\n}\n\nfn main() -> Void {\n    fx { println(\"t=\", taxed(10)); }\n    ret;\n}\n",
+      "expected_stdout": "t=15\n"
     }
   ]
 }

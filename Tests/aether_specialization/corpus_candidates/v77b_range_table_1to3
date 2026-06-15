@@ -1,0 +1,9 @@
+// rows 1,2,3 -> half-open 1..4
+fn main() -> Void {
+    loop r in 1..4 {
+        fx {
+            println("row ", r, " -> ", r * 10);
+        }
+    }
+    ret;
+}

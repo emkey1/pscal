@@ -1,0 +1,20 @@
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+    let doc: ToonDoc = toon_parse("{\"vals\":[7,\"hi\",true,2.5]}");
+    let root: ToonNode = toon_root(doc);
+    let vals: ToonNode = toon_key(root, "vals");
+    loop i in 0..toon_len(vals) {
+        let item: ToonNode = toon_at(vals, i);
+        let kind: Text = "other";
+        if toon_is_int(item) { kind = "int"; }
+        if toon_is_text(item) { kind = "text"; }
+        if toon_is_bool(item) { kind = "bool"; }
+        if toon_is_real(item) { kind = "real"; }
+        fx { println("slot ", i, " -> ", kind); }
+    }
+    toon_close(doc);
+    ret;
+}

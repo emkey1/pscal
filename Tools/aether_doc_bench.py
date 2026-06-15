@@ -87,6 +87,7 @@ class Destination:
     request_timeout_seconds: int = 120
     request_max_retries: int = 0
     retry_backoff_seconds: float = 2.0
+    extra_body: dict | None = None
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -413,6 +414,7 @@ def load_destinations(path: pathlib.Path) -> list[Destination]:
                 request_timeout_seconds=int(item.get("request_timeout_seconds", 120)),
                 request_max_retries=int(item.get("request_max_retries", 0)),
                 retry_backoff_seconds=float(item.get("retry_backoff_seconds", 2.0)),
+                extra_body=item.get("extra_body"),
             )
         )
     return destinations
@@ -537,7 +539,7 @@ def build_guide_block(doc_name: str, doc_text: str) -> str:
 
 
 def sanitize_code(raw: str) -> str:
-    text = raw
+    text = strip_reasoning_block(raw)
     marker_idx = text.find(OUTPUT_END_MARKER)
     if marker_idx != -1:
         text = text[:marker_idx]
@@ -776,7 +778,22 @@ def resolve_api_key(destination: Destination) -> str | None:
     return os.environ.get("OPENAI_API_KEY")
 
 
+def strip_reasoning_block(text: str) -> str:
+    """Drop a leading reasoning block from reasoning models (e.g. Qwen3.5).
+
+    The model emits ``<think>...</think>`` before its answer. With the chat
+    template's generation prompt the opening ``<think>`` may already be consumed,
+    so the reply can start with the closing tag alone. Remove everything up to and
+    including the first ``</think>``. No-op for models that emit no think block.
+    """
+    idx = text.find("</think>")
+    if idx != -1:
+        return text[idx + len("</think>"):].lstrip()
+    return text
+
+
 def strip_markdown_fences(text: str) -> str:
+    text = strip_reasoning_block(text)
     marker_idx = text.find(OUTPUT_END_MARKER)
     if marker_idx != -1:
         text = text[:marker_idx]
@@ -1058,6 +1075,8 @@ def invoke_openai_chat_completions(prompt: str, destination: Destination) -> dic
     }
     if destination.temperature >= 0:
         body["temperature"] = destination.temperature
+    if destination.extra_body:
+        body.update(destination.extra_body)
 
     payload = http_json_request(
         f"{base_url}/chat/completions",
