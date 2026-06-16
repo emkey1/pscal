@@ -289,15 +289,27 @@ reached Rea verbatim → `SCOPE-001`; raw `fx {` → `SYN-001`).
 
 **The fix** — `expandInlineBlockLine` in `translate.c`. When a line's leading
 block construct (`if`/`else`/`while`/`for`/`loop`/`fx`) has its opening brace
-matched **on the same line**, it is expanded into the canonical multi-line form
-and each header/statement is run through the normal `translateLine` +
-`applyJsonAliasesToLine` path (so `toon_*` calls in conditions still resolve).
-The expanded chunk is emitted via `trackRewriteOutputLines`, which maps every
-produced line back to the **single source line** — so diagnostics keep their
-original Aether line numbers (regression-tested). It is brace-balanced (net depth
-delta 0) and a strict no-op for already-multi-line code: a differential over all
-183 corpus candidates was byte-identical before/after. It does **not** touch the
-shared Rea grammar.
+matched **on the same line**, it is expanded into the canonical multi-line form.
+Each header runs through `translateLineInMethod` (the main loop's header path)
+and each **body statement** runs through the *same specialized per-statement
+handlers the main rewrite loop applies, in the same priority order* — tuple
+return (`translateTupleReturnLine`), return object-init / return-with-post,
+array append (`translateArrayAppendLine`), then `translateLineInMethod` as the
+fallback — followed by `applyJsonAliasesToLine` (so `toon_*` calls in conditions
+still resolve). This is what makes a one-liner body lower **identically** to its
+multi-line form: an earlier version translated body statements with bare
+`translateLine`, which skipped those handlers, so a one-liner `ret (a, b);`
+leaked `return (a, b);` (SYN-001) and `xs = xs + [v];` leaked an `ARRAY + ARRAY`
+runtime error, even though the multi-line bodies lowered fine. The dispatch reads
+`fnState`/`typeState` (the enclosing function/type context) but does not mutate
+them, preserving the expander's self-contained property. The expanded chunk is
+emitted via `trackRewriteOutputLines`, which maps every produced line back to the
+**single source line** — so diagnostics keep their original Aether line numbers
+(regression-tested). It is brace-balanced (net depth delta 0) and a strict no-op
+for already-multi-line code: a differential over all 183 corpus candidates was
+byte-identical before/after, and collapsing those candidates to one-liner form
+(`Tools/aether_collapse_oneliners.py`) and recompiling reproduces each one's
+multi-line output. It does **not** touch the shared Rea grammar.
 
 This is why a pre-pass was the *wrong* shape (see §5-style reasoning): `lineNumber`
 advances once per preprocessed line, so adding lines before the main loop would

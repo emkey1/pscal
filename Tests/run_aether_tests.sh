@@ -1429,4 +1429,51 @@ else
     fi
 fi
 
+# One-liner body statements must reach the SAME specialized per-statement
+# handlers the main rewrite loop applies, so a body needing one lowers exactly
+# like its multi-line form. A tuple `ret (a, b);` inside a one-liner guard must
+# hit translateTupleReturnLine (bare translateLine leaks `return (a, b);` ->
+# SYN-001 Unexpected COMMA). The minmax(3, 7) call takes the one-liner branch.
+cat > /tmp/aether_oneliner_tuple_ret.aether <<'AETH'
+fn minmax(a: Int, b: Int) -> (Int, Int) {
+    if a <= b { ret (a, b); }
+    ret (b, a);
+}
+fn main() -> Void {
+    let (lo, hi) = minmax(3, 7);
+    fx {
+        println(lo);
+        println(hi);
+    }
+    ret;
+}
+AETH
+"$AETHER_BIN" --no-cache /tmp/aether_oneliner_tuple_ret.aether >/tmp/aether_oneliner_tuple_ret.out 2>&1
+printf '3\n7\n' >/tmp/aether_oneliner_tuple_ret_expected.out
+if ! cmp -s /tmp/aether_oneliner_tuple_ret_expected.out /tmp/aether_oneliner_tuple_ret.out; then
+    echo "unexpected one-liner tuple-return output" >&2
+    cat /tmp/aether_oneliner_tuple_ret.out >&2
+    exit 1
+fi
+
+# An array append (`xs = xs + [v];`) inside a one-liner loop body must hit
+# translateArrayAppendLine, not bare translateLine (which leaks ARRAY + ARRAY ->
+# runtime "Operands must be numbers").
+cat > /tmp/aether_oneliner_array_append.aether <<'AETH'
+fn main() -> Void {
+    let squares: Int[] = [];
+    loop i in 0..4 { squares = squares + [i * i]; }
+    let count: Int = length(squares);
+    fx { println("count = ", count); }
+    ret;
+}
+AETH
+"$AETHER_BIN" --no-cache /tmp/aether_oneliner_array_append.aether >/tmp/aether_oneliner_array_append.out 2>&1
+printf 'count = 4\n' >/tmp/aether_oneliner_array_append_expected.out
+if ! cmp -s /tmp/aether_oneliner_array_append_expected.out /tmp/aether_oneliner_array_append.out; then
+    echo "unexpected one-liner array-append output" >&2
+    cat /tmp/aether_oneliner_array_append.out >&2
+    exit 1
+fi
+
 echo "aether smoke tests passed"

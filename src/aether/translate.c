@@ -8068,24 +8068,76 @@ static const char *inlineSimpleStmtEnd(const char *start, const char *end) {
     return end;
 }
 
-/* Translate one [start,end) slice as a line and append it plus a newline. */
+/* Translate one [start,end) slice as a line and append it plus a newline.
+ * `start` is already trimmed of leading/trailing space by the caller, so it
+ * doubles as both the lineStart and the body for the per-statement handlers.
+ *
+ * `isLeafStmt` distinguishes a block header (`if c {`, `else {`, `fx {`) from a
+ * statement in a block body. A header is translated exactly as a leading line
+ * (via translateLineInMethod, the main loop's header path). A leaf statement is
+ * routed through the SAME specialized handlers the main rewrite loop applies in
+ * the same priority order -- tuple return, return object-init, array append --
+ * before falling back to translateLineInMethod. Bare translateLine (the old
+ * behavior) missed those handlers, so one-liner bodies needing them were
+ * mis-translated even though the identical multi-line body lowered fine. */
 static int appendInlineTranslatedLine(Buffer *out,
                                       const char *start,
                                       const char *end,
+                                      int isLeafStmt,
+                                      const FunctionContracts *fnState,
                                       JsonAliasState *jsonState,
                                       const ToonLiteralTable *toonTable,
                                       const AetherBindingTable *bindings,
                                       const AetherFunctionTable *functions,
                                       const AetherFieldTable *fields,
+                                      const TypeBlockState *typeState,
                                       const char *path,
                                       int lineNumber) {
-    char *t = translateLine(start, end, jsonState, bindings, functions, fields, path, lineNumber);
+    int isMethod = (fnState && fnState->active && fnState->isMethod);
+    char *t = NULL;
     char *aliased;
+
+    if (isLeafStmt && fnState && fnState->active &&
+        fnState->tupleTypeName && startsWithWord(start, end, "ret")) {
+        /* `ret (a, b);` in a tuple-returning fn: lower the tuple as the main
+         * loop does; translateLine alone leaks `return (a, b);` (SYN-001). */
+        t = translateTupleReturnLine(start, start, end, fnState, jsonState, toonTable);
+        if (!t) {
+            reportAetherRewriteError(path,
+                                     lineNumber,
+                                     "internal",
+                                     "tuple return rewrite failed.",
+                                     "this is a compiler defect; simplify the tuple return or report the issue.");
+            return 0;
+        }
+    } else if (isLeafStmt && fnState && fnState->active &&
+               startsWithWord(start, end, "ret")) {
+        t = translateReturnObjectInitLine(start, start, end, bindings, typeState, isMethod, lineNumber);
+        if (!t && fnState->postExpr) {
+            t = translateReturnWithPost(start, start, end, fnState, bindings, typeState, jsonState, toonTable);
+        }
+        if (!t) {
+            t = translateLineInMethod(start, end, jsonState, bindings, functions, fields,
+                                      typeState, isMethod, path, lineNumber);
+        }
+    } else if (isLeafStmt) {
+        /* array append (`xs = xs + [v];`) and every other in-body statement; the
+         * append handler no-ops (returns NULL) on non-append lines. */
+        t = translateArrayAppendLine(start, start, end, bindings, typeState, isMethod);
+        if (!t) {
+            t = translateLineInMethod(start, end, jsonState, bindings, functions, fields,
+                                      typeState, isMethod, path, lineNumber);
+        }
+    } else {
+        /* Block header line, or the degenerate unbalanced-remainder fallback. */
+        t = translateLineInMethod(start, end, jsonState, bindings, functions, fields,
+                                  typeState, isMethod, path, lineNumber);
+    }
     if (!t) {
         return 0;
     }
-    /* Apply the same JSON/TOON call aliasing the main loop applies after
-     * translateLine, so toon_* helpers in conditions/statements resolve. */
+    /* Apply the same JSON/TOON call aliasing the main loop applies after every
+     * handler, so toon_* helpers in conditions/statements resolve. */
     aliased = applyJsonAliasesToLine(t, jsonState, toonTable);
     free(t);
     if (!aliased) {
@@ -8104,11 +8156,13 @@ static int appendInlineTranslatedLine(Buffer *out,
 static int appendInlineExpanded(Buffer *out,
                                 const char *start,
                                 const char *end,
+                                const FunctionContracts *fnState,
                                 JsonAliasState *jsonState,
                                 const ToonLiteralTable *toonTable,
                                 const AetherBindingTable *bindings,
                                 const AetherFunctionTable *functions,
                                 const AetherFieldTable *fields,
+                                const TypeBlockState *typeState,
                                 const char *path,
                                 int lineNumber) {
     const char *p = skipSpacesInRange(start, end);
@@ -8119,13 +8173,15 @@ static int appendInlineExpanded(Buffer *out,
             if (!brace || !close) {
                 /* Unbalanced/unsupported: emit the remainder as one line and stop
                  * so we degrade to today's behavior rather than corrupt output. */
-                return appendInlineTranslatedLine(out, p, end, jsonState, toonTable,
-                                                  bindings, functions, fields, path, lineNumber);
+                return appendInlineTranslatedLine(out, p, end, /*isLeafStmt=*/0, fnState,
+                                                  jsonState, toonTable, bindings, functions,
+                                                  fields, typeState, path, lineNumber);
             }
-            if (!appendInlineTranslatedLine(out, p, brace + 1, jsonState, toonTable,
-                                            bindings, functions, fields, path, lineNumber) ||
-                !appendInlineExpanded(out, brace + 1, close, jsonState, toonTable,
-                                      bindings, functions, fields, path, lineNumber) ||
+            if (!appendInlineTranslatedLine(out, p, brace + 1, /*isLeafStmt=*/0, fnState,
+                                            jsonState, toonTable, bindings, functions,
+                                            fields, typeState, path, lineNumber) ||
+                !appendInlineExpanded(out, brace + 1, close, fnState, jsonState, toonTable,
+                                      bindings, functions, fields, typeState, path, lineNumber) ||
                 !bufferAppend(out, "}\n")) {
                 return 0;
             }
@@ -8142,8 +8198,9 @@ static int appendInlineExpanded(Buffer *out,
                 trimEnd--;
             }
             if (trimEnd > p &&
-                !appendInlineTranslatedLine(out, p, trimEnd, jsonState, toonTable,
-                                            bindings, functions, fields, path, lineNumber)) {
+                !appendInlineTranslatedLine(out, p, trimEnd, /*isLeafStmt=*/1, fnState,
+                                            jsonState, toonTable, bindings, functions,
+                                            fields, typeState, path, lineNumber)) {
                 return 0;
             }
             p = skipSpacesInRange(stmtEnd, end);
@@ -8156,16 +8213,18 @@ static int appendInlineExpanded(Buffer *out,
  * the caller appends the source line's newline). */
 static char *expandInlineBlockLine(const char *body,
                                    const char *end,
+                                   const FunctionContracts *fnState,
                                    JsonAliasState *jsonState,
                                    const ToonLiteralTable *toonTable,
                                    const AetherBindingTable *bindings,
                                    const AetherFunctionTable *functions,
                                    const AetherFieldTable *fields,
+                                   const TypeBlockState *typeState,
                                    const char *path,
                                    int lineNumber) {
     Buffer out = {0};
-    if (!appendInlineExpanded(&out, body, end, jsonState, toonTable, bindings, functions,
-                              fields, path, lineNumber)) {
+    if (!appendInlineExpanded(&out, body, end, fnState, jsonState, toonTable, bindings, functions,
+                              fields, typeState, path, lineNumber)) {
         free(out.data);
         return NULL;
     }
@@ -8273,9 +8332,9 @@ char *aetherRewriteSource(const char *source, const char *path) {
          * fnState/par/objectInit state machines, which only act at brace depths
          * a one-liner line never matches. */
         if (lineIsInlineBlock(body, lineEnd)) {
-            char *expanded = expandInlineBlockLine(body, lineEnd, &jsonState, &toonTable,
+            char *expanded = expandInlineBlockLine(body, lineEnd, &fnState, &jsonState, &toonTable,
                                                    &bindingTable, &functionTable,
-                                                   &fieldTable, path, lineNumber);
+                                                   &fieldTable, &typeState, path, lineNumber);
             int ok = (expanded != NULL);
             if (ok) {
                 size_t outLenBefore = out.len;
