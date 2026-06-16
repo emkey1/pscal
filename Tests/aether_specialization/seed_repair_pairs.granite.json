@@ -1,0 +1,18 @@
+{
+  "pairs": [
+    {
+      "id": "repair_granite_toon_get_nested_4arg",
+      "diagnostic": "Aether TOON error: toon_get_text_or takes 3 args (node, key, default); there is no 4-arg nested-path form. Descend one level with toon_has_key/toon_key.",
+      "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no\"); }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"meta\\\":{\\\"code\\\":\\\"A1\\\"}}\");\n    let root: ToonNode = toon_root(doc);\n    let code: Text = toon_get_text_or(root, \"meta\", \"code\", \"EMPTY\");\n    fx { println(\"code=\", code); }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no\"); }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"meta\\\":{\\\"code\\\":\\\"A1\\\"}}\");\n    let root: ToonNode = toon_root(doc);\n    let code: Text = \"EMPTY\";\n    if toon_has_key(root, \"meta\") {\n        let meta: ToonNode = toon_key(root, \"meta\");\n        if toon_has_key(meta, \"code\") {\n            code = toon_get_text_or(meta, \"code\", \"EMPTY\");\n        }\n    }\n    fx { println(\"code=\", code); }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "code=A1\n"
+    },
+    {
+      "id": "repair_granite_post_tuple_dot_index",
+      "diagnostic": "Aether annotation error: index a tuple result with dot syntax (result.0, result.1) in @post, not bracket syntax (result[0]).",
+      "broken_source": "@post result[0] >= result[1]\nfn ordered(a: Int, b: Int) -> (Int, Int) {\n    if a > b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (hi, lo) = ordered(3, 8);\n    fx { println(\"hi=\", hi); }\n    ret;\n}\n",
+      "fixed_source": "@post result.0 >= result.1\nfn ordered(a: Int, b: Int) -> (Int, Int) {\n    if a > b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (hi, lo) = ordered(3, 8);\n    fx { println(\"hi=\", hi); }\n    ret;\n}\n",
+      "expected_stdout": "hi=8\n"
+    }
+  ]
+}

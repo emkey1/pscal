@@ -360,6 +360,11 @@ def main() -> int:
                         help="mask the prompt; compute loss on assistant Aether only (default)")
     parser.add_argument("--no-train-on-responses-only", dest="train_on_responses_only",
                         action="store_false")
+    parser.add_argument("--instruction-part", default="<|im_start|>user\n",
+                        help="prompt-turn marker for response masking (default: ChatML/Qwen; "
+                             "Granite uses '<|start_of_role|>user<|end_of_role|>'). Supports \\n escapes.")
+    parser.add_argument("--response-part", default="<|im_start|>assistant\n",
+                        help="assistant-turn marker for response masking (default: ChatML/Qwen). Supports \\n escapes.")
     parser.add_argument("--export-merged-16bit", dest="export_merged_16bit",
                         action="store_true", default=True,
                         help="write a merged 16-bit HF checkpoint for vLLM / NVFP4 (default)")
@@ -523,8 +528,8 @@ def main() -> int:
             )
         trainer = train_on_responses_only(
             trainer,
-            instruction_part="<|im_start|>user\n",
-            response_part="<|im_start|>assistant\n",
+            instruction_part=args.instruction_part.encode().decode("unicode_escape"),
+            response_part=args.response_part.encode().decode("unicode_escape"),
         )
 
     trainer.add_callback(

@@ -1,0 +1,205 @@
+{
+  "pairs": [
+    {
+      "id": "repair_fx_required",
+      "diagnostic": "Aether effect error: call to 'println' requires an fx block.",
+      "broken_source": "fn main() -> Void {\n    println(\"hello\");\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    fx {\n        println(\"hello\");\n    }\n    ret;\n}\n",
+      "expected_stdout": "hello\n"
+    },
+    {
+      "id": "repair_return_to_ret",
+      "diagnostic": "identifier or keyword mismatch: use 'ret' instead of 'return'.",
+      "broken_source": "fn answer() -> Int {\n    return 42;\n}\n\nfn main() -> Void {\n    fx {\n        println(answer());\n    }\n    ret;\n}\n",
+      "fixed_source": "fn answer() -> Int {\n    ret 42;\n}\n\nfn main() -> Void {\n    fx {\n        println(answer());\n    }\n    ret;\n}\n",
+      "expected_stdout": "42\n"
+    },
+    {
+      "id": "repair_contract_placement",
+      "diagnostic": "Aether contract rewrite error: @pre must annotate the next function declaration.",
+      "broken_source": "fn clamp(score: Int) -> Int {\n    @pre score >= 0\n    if score > 100 {\n        ret 100;\n    }\n    ret score;\n}\n\nfn main() -> Void {\n    fx {\n        println(clamp(150));\n    }\n    ret;\n}\n",
+      "fixed_source": "@pre score >= 0\nfn clamp(score: Int) -> Int {\n    if score > 100 {\n        ret 100;\n    }\n    ret score;\n}\n\nfn main() -> Void {\n    fx {\n        println(clamp(150));\n    }\n    ret;\n}\n",
+      "expected_stdout": "100\n"
+    },
+    {
+      "id": "repair_invented_import",
+      "diagnostic": "Error: unable to open module 'helpers'.",
+      "broken_source": "use \"helpers\";\n\nfn main() -> Void {\n    fx {\n        println(42);\n    }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    fx {\n        println(42);\n    }\n    ret;\n}\n",
+      "expected_stdout": "42\n"
+    },
+    {
+      "id": "repair_method_self_parameter",
+      "diagnostic": "Aether method error: do not declare an explicit self parameter inside a type method; methods receive `self` implicitly.",
+      "broken_source": "type Counter {\n    value: Int;\n\n    fn bump(self: Counter) -> Int {\n        self.value = self.value + 1;\n        ret self.value;\n    }\n}\n\nfn main() -> Void {\n    let counter: Counter = new Counter();\n    counter.value = 0;\n    fx {\n        println(counter.bump());\n    }\n    ret;\n}\n",
+      "fixed_source": "type Counter {\n    value: Int;\n\n    fn bump() -> Int {\n        self.value = self.value + 1;\n        ret self.value;\n    }\n}\n\nfn main() -> Void {\n    let counter: Counter = new Counter();\n    counter.value = 0;\n    fx {\n        println(counter.bump());\n    }\n    ret;\n}\n",
+      "expected_stdout": "1\n"
+    },
+    {
+      "id": "repair_println_string_concat",
+      "diagnostic": "Type mismatch: do not build print text with `Text + Int`; pass mixed values directly to `println`.",
+      "broken_source": "fn main() -> Void {\n    let score: Int = 42;\n    fx {\n        println(\"score = \" + score);\n    }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let score: Int = 42;\n    fx {\n        println(\"score = \", score);\n    }\n    ret;\n}\n",
+      "expected_stdout": "score = 42\n"
+    },
+    {
+      "id": "repair_toon_guarded_intermediate",
+      "diagnostic": "TOON access error: `_or` helpers only protect the final lookup; guard intermediate object lookups before descending.",
+      "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"TOON unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse(\"{\\\"items\\\":[{\\\"id\\\":1,\\\"meta\\\":{\\\"code\\\":\\\"A\\\"}},{\\\"id\\\":2}]}\");\n    let root: ToonNode = toon_root(doc);\n    let items: ToonNode = toon_key(root, \"items\");\n\n    loop i in 0..toon_len(items) {\n        let item: ToonNode = toon_at(items, i);\n        let id: Int = toon_get_int(item, \"id\");\n        let code: Text = toon_get_text_or(toon_key(item, \"meta\"), \"code\", \"UNKNOWN\");\n        fx {\n            println(\"Item \", id, \" has code: \", code);\n        }\n    }\n\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"TOON unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse(\"{\\\"items\\\":[{\\\"id\\\":1,\\\"meta\\\":{\\\"code\\\":\\\"A\\\"}},{\\\"id\\\":2}]}\");\n    let root: ToonNode = toon_root(doc);\n    let items: ToonNode = toon_key(root, \"items\");\n\n    loop i in 0..toon_len(items) {\n        let item: ToonNode = toon_at(items, i);\n        let id: Int = toon_get_int(item, \"id\");\n        let code: Text = \"UNKNOWN\";\n\n        if toon_has_key(item, \"meta\") {\n            let meta: ToonNode = toon_key(item, \"meta\");\n            code = toon_get_text_or(meta, \"code\", \"MISSING\");\n        }\n\n        fx {\n            println(\"Item \", id, \" has code: \", code);\n        }\n    }\n\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "Item 1 has code: A\nItem 2 has code: UNKNOWN\n"
+    },
+    {
+      "id": "repair_float_formatting",
+      "diagnostic": "Formatting issue: default Real printing is verbose; use `value:width:precision` inside `println` when exact decimals matter.",
+      "broken_source": "fn main() -> Void {\n    let amount: Real = 19.99;\n    fx {\n        println(\"Amount: \", amount);\n    }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let amount: Real = 19.99;\n    fx {\n        println(\"Amount: \", amount:0:2);\n    }\n    ret;\n}\n",
+      "expected_stdout": "Amount: 19.99\n"
+    },
+    {
+      "id": "repair_type_for_toon_handle",
+      "diagnostic": "Aether declaration rewrite error: TOON handles should be bound with explicit `ToonDoc` or `ToonNode` types.",
+      "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n\n    let doc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42}\");\n    let root = toon_root(doc);\n    let name: Text = toon_get_text(root, \"name\");\n    let score: Int = toon_get_int(root, \"score\");\n    fx {\n        println(name, \" \", score);\n    }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42}\");\n    let root: ToonNode = toon_root(doc);\n    let name: Text = toon_get_text(root, \"name\");\n    let score: Int = toon_get_int(root, \"score\");\n    fx {\n        println(name, \" \", score);\n    }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "Aether 42\n"
+    },
+    {
+      "id": "repair_global_const_scope",
+      "diagnostic": "Runtime Error: Undefined global variable 'PI'.",
+      "broken_source": "fn main() -> Void {\n    const PI: Real = 3.14159265;\n    fn area(radius: Real) -> Real {\n        ret PI * radius * radius;\n    }\n    fx {\n        println(\"area=\", area(2.5):0:2);\n    }\n    ret;\n}\n",
+      "fixed_source": "const PI: Real = 3.14159265;\n\n@pure\nfn area(radius: Real) -> Real {\n    ret PI * radius * radius;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"area=\", area(2.5):0:2);\n    }\n    ret;\n}\n",
+      "expected_stdout": "area=19.63\n"
+    },
+    {
+      "id": "repair_benchmark_marker_leak",
+      "diagnostic": "[SCOPE-001] identifier '__AETHER_BENCH_START__' not in scope.",
+      "broken_source": "__AETHER_BENCH_START__\nuse \"bench_consts\";\n\nfn main() -> Void {\n    fx {\n        println(Greeting);\n        println(Answer);\n    }\n    ret;\n}\n",
+      "fixed_source": "use \"bench_consts\";\n\nfn main() -> Void {\n    fx {\n        println(Greeting);\n        println(Answer);\n    }\n    ret;\n}\n",
+      "expected_stdout": "Aether\n42\n",
+      "files": {
+        "bench_consts": "mod BenchConsts {\n    export const Greeting = \"Aether\";\n    export const Answer = 42;\n}\n"
+      }
+    },
+    {
+      "id": "repair_contract_nested_in_main",
+      "diagnostic": "[ANN-001] Aether contract rewrite error: @pre must annotate the next function declaration.",
+      "broken_source": "fn main() -> Void {\n    @pre score >= 0\n    @post result >= 0\n    fn normalize(score: Int) -> Int {\n        ret score;\n    }\n\n    let answer1: Int = normalize(150);\n    let answer2: Int = normalize(42);\n\n    fx {\n        println(\"150 => \", answer1);\n        println(\"42 => \", answer2);\n    }\n\n    ret;\n}\n",
+      "fixed_source": "@pre score >= 0\n@post result >= 0\nfn normalize(score: Int) -> Int {\n    ret score;\n}\n\nfn main() -> Void {\n    let answer1: Int = normalize(150);\n    let answer2: Int = normalize(42);\n\n    fx {\n        println(\"150 => \", answer1);\n        println(\"42 => \", answer2);\n    }\n\n    ret;\n}\n",
+      "expected_stdout": "150 => 150\n42 => 42\n"
+    },
+    {
+      "id": "repair_module_const_export_name",
+      "diagnostic": "[SCOPE-001] identifier 'FOURTY_TWO' not in scope.",
+      "broken_source": "use \"bench_consts\";\nfn main() -> Void {\n    fx {\n        println(\"Aether\");\n        println(FOURTY_TWO);\n    }\n    ret;\n}\n",
+      "fixed_source": "use \"bench_consts\";\n\nfn main() -> Void {\n    fx {\n        println(Greeting);\n        println(Answer);\n    }\n    ret;\n}\n",
+      "expected_stdout": "Aether\n42\n",
+      "files": {
+        "bench_consts": "mod BenchConsts {\n    export const Greeting = \"Aether\";\n    export const Answer = 42;\n}\n"
+      }
+    },
+    {
+      "id": "repair_toon_doc_vs_root",
+      "diagnostic": "[TOON-001] Aether type error: call to 'toon_get_text' expects a ToonNode handle, but 'doc' is ToonDoc.",
+      "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\"}\");\n    let name: Text = toon_get_text(doc, \"name\");\n\n    fx {\n        println(name);\n    }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\"}\");\n    let root: ToonNode = toon_root(doc);\n    let name: Text = toon_get_text(root, \"name\");\n\n    fx {\n        println(name);\n    }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "Aether\n"
+    },
+    {
+      "id": "repair_method_needs_context_param",
+      "diagnostic": "[SCOPE-001] identifier 'i' not in scope.",
+      "broken_source": "type Reporter {\n    fn emit(name: Text) -> Void {\n        fx {\n            println(\"row \", i, \" -> \", name);\n        }\n        ret;\n    }\n}\n\nfn main() -> Void {\n    let reporter: Reporter = new Reporter();\n    let names: Text[] = [\"Alpha\", \"Beta\"];\n    loop i in 0..length(names) {\n        reporter.emit(names[i]);\n    }\n    ret;\n}\n",
+      "fixed_source": "type Reporter {\n    fn emit(rowIndex: Int, name: Text) -> Void {\n        fx {\n            println(\"row \", rowIndex, \" -> \", name);\n        }\n        ret;\n    }\n}\n\nfn main() -> Void {\n    let reporter: Reporter = new Reporter();\n    let names: Text[] = [\"Alpha\", \"Beta\"];\n    loop i in 0..length(names) {\n        reporter.emit(i, names[i]);\n    }\n    ret;\n}\n",
+      "expected_stdout": "row 0 -> Alpha\nrow 1 -> Beta\n"
+    },
+    {
+      "id": "repair_module_exact_export_names",
+      "diagnostic": "[SCOPE-001] identifier 'normalize' not in scope.",
+      "broken_source": "use \"exact_exports\";\n\nfn main() -> Void {\n    let raw: Int = 120;\n    let score: Int = normalize(raw);\n    let status: Text = classify(score);\n    fx {\n        println(score, \" \", status);\n    }\n    ret;\n}\n",
+      "fixed_source": "use \"exact_exports\";\n\nfn main() -> Void {\n    let raw: Int = 120;\n    let score: Int = clampSupport(raw);\n    let status: Text = classifySupport(score);\n    fx {\n        println(score, \" \", status);\n    }\n    ret;\n}\n",
+      "expected_stdout": "100 ready\n",
+      "files": {
+        "exact_exports": "mod ExactExports {\n    @pure\n    export fn clampSupport(score: Int) -> Int {\n        if score > 100 {\n            ret 100;\n        }\n        ret score;\n    }\n\n    @pure\n    export fn classifySupport(score: Int) -> Text {\n        if score >= 90 {\n            ret \"ready\";\n        }\n        if score >= 70 {\n            ret \"review\";\n        }\n        ret \"blocked\";\n    }\n}\n"
+      }
+    },
+    {
+      "id": "repair_pre_above_fn",
+      "diagnostic": "Aether contract rewrite error: @pre must annotate the next function declaration.",
+      "broken_source": "fn cap(x: Int) -> Int {\n    @pre x >= 0\n    if x > 50 {\n        ret 50;\n    }\n    ret x;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"cap=\", cap(70));\n    }\n    ret;\n}\n",
+      "fixed_source": "@pre x >= 0\n@post result <= 50\nfn cap(x: Int) -> Int {\n    if x > 50 {\n        ret 50;\n    }\n    ret x;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"cap=\", cap(70));\n    }\n    ret;\n}\n",
+      "expected_stdout": "cap=50\n"
+    },
+    {
+      "id": "repair_toon_root_before_get",
+      "diagnostic": "Aether type error: call to 'toon_get_text_or' expects a ToonNode handle, but 'doc' is ToonDoc.",
+      "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"city\\\":\\\"Metro\\\"}\");\n    let city: Text = toon_get_text_or(doc, \"city\", \"NONE\");\n    fx {\n        println(\"city=\", city);\n    }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"city\\\":\\\"Metro\\\"}\");\n    let root: ToonNode = toon_root(doc);\n    let city: Text = toon_get_text_or(root, \"city\", \"NONE\");\n    fx {\n        println(\"city=\", city);\n    }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "city=Metro\n"
+    },
+    {
+      "id": "repair_use_module_direct_call",
+      "diagnostic": "identifier 'color_rules' not in scope.",
+      "broken_source": "use \"color_rules\";\n\nfn main() -> Void {\n    let shade: Text = color_rules.shadeFor(120);\n    fx {\n        println(\"shade=\", shade);\n    }\n    ret;\n}\n",
+      "fixed_source": "use \"color_rules\";\n\nfn main() -> Void {\n    let shade: Text = shadeFor(120);\n    fx {\n        println(\"shade=\", shade);\n    }\n    ret;\n}\n",
+      "expected_stdout": "shade=bright\n",
+      "files": {
+        "color_rules": "mod ColorRules {\n    @pure\n    export fn shadeFor(v: Int) -> Text {\n        if v >= 100 {\n            ret \"bright\";\n        }\n        ret \"dim\";\n    }\n}\n"
+      }
+    },
+    {
+      "id": "repair_pure_sigil",
+      "diagnostic": "Aether annotation error: purity must be written as `@pure` on its own line above the function. Bare `pure fn` is not valid.",
+      "broken_source": "pure fn isReady(score: Int) -> Bool {\n    ret score >= 70;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"ready: \", isReady(85));\n    }\n    ret;\n}\n",
+      "fixed_source": "@pure\nfn isReady(score: Int) -> Bool {\n    ret score >= 70;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"ready: \", isReady(85));\n    }\n    ret;\n}\n",
+      "expected_stdout": "ready: true\n"
+    },
+    {
+      "id": "repair_contract_in_body",
+      "diagnostic": "Aether contract rewrite error: @pre/@post must annotate the next function declaration. Place them on their own lines ABOVE `fn`, with no trailing semicolon -- not inside the function body.",
+      "broken_source": "fn cap(value: Int) -> Int {\n    @pre value >= 0;\n    @post result <= 60;\n    if value > 60 {\n        ret 60;\n    }\n    ret value;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"cap 90 = \", cap(90));\n    }\n    ret;\n}\n",
+      "fixed_source": "@pre value >= 0\n@post result <= 60\nfn cap(value: Int) -> Int {\n    if value > 60 {\n        ret 60;\n    }\n    ret value;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"cap 90 = \", cap(90));\n    }\n    ret;\n}\n",
+      "expected_stdout": "cap 90 = 60\n"
+    },
+    {
+      "id": "repair_post_on_signature",
+      "diagnostic": "Aether feature rewrite error: a @post contract must be on its own line above `fn`, not appended to the function signature after the return type.",
+      "broken_source": "fn ordered(a: Int, b: Int) -> (Int, Int) @post result.0 >= result.1 {\n    if a >= b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (hi, lo) = ordered(2, 7);\n    fx {\n        println(\"hi=\", hi);\n        println(\"lo=\", lo);\n    }\n    ret;\n}\n",
+      "fixed_source": "@post result.0 >= result.1\nfn ordered(a: Int, b: Int) -> (Int, Int) {\n    if a >= b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (hi, lo) = ordered(2, 7);\n    fx {\n        println(\"hi=\", hi);\n        println(\"lo=\", lo);\n    }\n    ret;\n}\n",
+      "expected_stdout": "hi=7\nlo=2\n"
+    },
+    {
+      "id": "repair_at_fx_to_block",
+      "diagnostic": "Aether effect error: output statements like println must live inside an `fx { ... }` block in the function body, not behind an `@fx` annotation. There is no `@fx` annotation.",
+      "broken_source": "@fx\nfn main() -> Void {\n    println(\"hi\");\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    fx {\n        println(\"hi\");\n    }\n    ret;\n}\n",
+      "expected_stdout": "hi\n"
+    },
+    {
+      "id": "repair_inclusive_range",
+      "diagnostic": "Aether range error: `loop` ranges are half-open with `..`; there is no inclusive `..=`. To iterate values 1..3 inclusive, write `1..4`.",
+      "broken_source": "fn main() -> Void {\n    loop i in 1..=3 {\n        fx { println(\"i=\", i); }\n    }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    loop i in 1..4 {\n        fx { println(\"i=\", i); }\n    }\n    ret;\n}\n",
+      "expected_stdout": "i=1\ni=2\ni=3\n"
+    },
+    {
+      "id": "repair_new_struct_init",
+      "diagnostic": "Aether record init error: construct a type with `TypeName { field: value, ... }`. Do not prefix with `new`.",
+      "broken_source": "type Point {\n    x: Int;\n    y: Int;\n}\n\nfn main() -> Void {\n    let p: Point = new Point { x: 3, y: 4 };\n    fx { println(\"x=\", p.x); }\n    ret;\n}\n",
+      "fixed_source": "type Point {\n    x: Int;\n    y: Int;\n}\n\nfn main() -> Void {\n    let p: Point = Point { x: 3, y: 4 };\n    fx { println(\"x=\", p.x); }\n    ret;\n}\n",
+      "expected_stdout": "x=3\n"
+    },
+    {
+      "id": "repair_toon_availability",
+      "diagnostic": "Aether TOON error: the availability guard is `has_toon()`. There is no `has_toon_parser`.",
+      "broken_source": "fn main() -> Void {\n    if !has_toon_parser() {\n        fx { println(\"no toon\"); }\n        ret;\n    }\n    fx { println(\"ok\"); }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no toon\"); }\n        ret;\n    }\n    fx { println(\"ok\"); }\n    ret;\n}\n",
+      "expected_stdout": "ok\n"
+    },
+    {
+      "id": "repair_const_module_scope",
+      "diagnostic": "Aether scope error: a constant used by a top-level `@pure` function must be declared at module scope (outside `main`), not inside `main`.",
+      "broken_source": "@pure\nfn taxed(n: Int) -> Int {\n    ret n + RATE;\n}\n\nfn main() -> Void {\n    const RATE: Int = 5;\n    fx { println(\"t=\", taxed(10)); }\n    ret;\n}\n",
+      "fixed_source": "const RATE: Int = 5;\n\n@pure\nfn taxed(n: Int) -> Int {\n    ret n + RATE;\n}\n\nfn main() -> Void {\n    fx { println(\"t=\", taxed(10)); }\n    ret;\n}\n",
+      "expected_stdout": "t=15\n"
+    }
+  ]
+}
