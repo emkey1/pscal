@@ -8,8 +8,16 @@ import json
 import pathlib
 import re
 import subprocess
+import sys
 import tempfile
 from typing import Any
+
+# Collapse multi-line guard/fx blocks to the compact one-liner form (valid since
+# the compiler expands one-liners). Lives alongside this script.
+_SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+from aether_collapse_oneliners import collapse_text  # noqa: E402
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -210,8 +218,10 @@ def build_corpus_instruction_records(
     *,
     aether_bin: pathlib.Path,
     fixtures_dir: pathlib.Path,
+    compact: bool = False,
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
+    compact_collapsed = compact_fallback = 0
     for item in payload.get("items", []):
         repo_path = item.get("repo_path")
         if not isinstance(repo_path, str) or not repo_path:
@@ -236,12 +246,33 @@ def build_corpus_instruction_records(
             continue
         source = source_path.read_text(encoding="utf-8")
         files = infer_support_files(source, fixtures_dir)
-        verification = verify_program(
-            aether_bin=aether_bin,
-            source=source,
-            expected_stdout=expected_stdout,
-            files=files,
-        )
+        verification = None
+        if compact:
+            # Teach the compact one-liner form. Collapse, then verify the
+            # collapsed source reproduces the expected stdout; if it doesn't
+            # (an unsupported shape), keep the multi-line original. With the
+            # hardened compiler this fallback should never fire.
+            collapsed, n_collapsed = collapse_text(source)
+            if n_collapsed > 0:
+                v = verify_program(
+                    aether_bin=aether_bin,
+                    source=collapsed,
+                    expected_stdout=expected_stdout,
+                    files=files,
+                )
+                if v.get("exact_stdout_match"):
+                    source, verification = collapsed, v
+                    compact_collapsed += 1
+                else:
+                    compact_fallback += 1
+                    print(f"  compact fallback (kept multi-line): {source_path.name}")
+        if verification is None:
+            verification = verify_program(
+                aether_bin=aether_bin,
+                source=source,
+                expected_stdout=expected_stdout,
+                files=files,
+            )
         corpus_id = source_path.name
         record = {
             "kind": "corpus_instruction_sft",
@@ -272,6 +303,11 @@ def build_corpus_instruction_records(
             "verification": verification,
         }
         records.append(record)
+    if compact:
+        print(
+            f"compact_oneliners: collapsed={compact_collapsed} "
+            f"fallback_to_multiline={compact_fallback}"
+        )
     return records
 
 
@@ -333,6 +369,14 @@ def main() -> int:
                         "Point at corpus_candidates_oneliner to train on the compact form.")
     parser.add_argument("--fixtures-dir", type=pathlib.Path, default=DEFAULT_FIXTURES_DIR)
     parser.add_argument(
+        "--compact-oneliners",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="collapse short multi-line guard/fx blocks to the compact one-liner form "
+        "(verified per-source; falls back to multi-line if a collapse changes output). "
+        "On by default; use --no-compact-oneliners for the verbose form.",
+    )
+    parser.add_argument(
         "--exclude-benchmark-tasks",
         action="append",
         type=pathlib.Path,
@@ -352,6 +396,7 @@ def main() -> int:
         read_json(args.corpus_manifest),
         aether_bin=args.aether_bin,
         fixtures_dir=args.fixtures_dir,
+        compact=args.compact_oneliners,
     )
     instruction_records.extend(corpus_instruction_records)
     repair_records = build_repair_records(read_json(args.repair_manifest), args.aether_bin)
