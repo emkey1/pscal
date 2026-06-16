@@ -1350,4 +1350,83 @@ else
     fi
 fi
 
+# --- One-liner block expansion (SYN-001 fix): `if c { fx {...} ret; }` and
+#     friends must parse and behave exactly like their multi-line form. ---
+cat > /tmp/aether_oneliner_guard.aether <<'AETH'
+fn main() -> Void {
+    let x: Int = 5;
+    if x > 3 { fx { println("big"); } ret; }
+    fx { println("end"); }
+    ret;
+}
+AETH
+"$AETHER_BIN" --no-cache /tmp/aether_oneliner_guard.aether >/tmp/aether_oneliner_guard.out 2>&1
+printf 'big\n' >/tmp/aether_oneliner_guard_expected.out
+if ! cmp -s /tmp/aether_oneliner_guard_expected.out /tmp/aether_oneliner_guard.out; then
+    echo "unexpected one-liner guard output" >&2
+    cat /tmp/aether_oneliner_guard.out >&2
+    exit 1
+fi
+
+cat > /tmp/aether_oneliner_ifelse.aether <<'AETH'
+fn main() -> Void {
+    let x: Int = 1;
+    if x > 3 { fx { println("big"); } } else { fx { println("small"); } }
+    ret;
+}
+AETH
+"$AETHER_BIN" --no-cache /tmp/aether_oneliner_ifelse.aether >/tmp/aether_oneliner_ifelse.out 2>&1
+printf 'small\n' >/tmp/aether_oneliner_ifelse_expected.out
+if ! cmp -s /tmp/aether_oneliner_ifelse_expected.out /tmp/aether_oneliner_ifelse.out; then
+    echo "unexpected one-liner if/else output" >&2
+    cat /tmp/aether_oneliner_ifelse.out >&2
+    exit 1
+fi
+
+# Error reported on a line *after* a one-liner must keep the original line
+# number (the expansion maps every produced line back to the source line).
+cat > /tmp/aether_oneliner_linemap.aether <<'AETH'
+fn main() -> Void {
+    let x: Int = 5;
+    if x > 3 { ret; }
+    writeln("oops");
+    ret;
+}
+AETH
+"$AETHER_BIN" --no-cache /tmp/aether_oneliner_linemap.aether >/tmp/aether_oneliner_linemap.out 2>&1 || true
+if ! grep -q ':4: \[FX-001\]' /tmp/aether_oneliner_linemap.out; then
+    echo "one-liner expansion shifted diagnostic line numbers" >&2
+    cat /tmp/aether_oneliner_linemap.out >&2
+    exit 1
+fi
+
+# One-liner condition with a toon_* capability call must still resolve.
+cat > /tmp/aether_oneliner_toon.aether <<'AETH'
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+    let doc: ToonDoc = toon_parse("{\"v\":7}");
+    let root: ToonNode = toon_root(doc);
+    let item: ToonNode = toon_key(root, "v");
+    let kind: Text = "other";
+    if toon_is_int(item) { kind = "int"; }
+    fx { println(kind); }
+    toon_close(doc);
+    ret;
+}
+AETH
+"$AETHER_BIN" --no-cache /tmp/aether_oneliner_toon.aether >/tmp/aether_oneliner_toon.out 2>&1
+if grep -qx "yyjson unavailable" /tmp/aether_oneliner_toon.out; then
+    :
+else
+    printf 'int\n' >/tmp/aether_oneliner_toon_expected.out
+    if ! cmp -s /tmp/aether_oneliner_toon_expected.out /tmp/aether_oneliner_toon.out; then
+        echo "unexpected one-liner toon-condition output" >&2
+        cat /tmp/aether_oneliner_toon.out >&2
+        exit 1
+    fi
+fi
+
 echo "aether smoke tests passed"

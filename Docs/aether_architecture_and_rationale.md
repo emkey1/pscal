@@ -270,32 +270,47 @@ post-conditions use dot indexing (`@post result.0 >= result.1`), **not** bracket
 
 A maintainer will hit these; pretending they don't exist wastes their day.
 
-### 6.1 The one-liner `if` / inline-`fx` parse failure (SYN-001)
+### 6.1 The one-liner `if` / inline-`fx` parse failure (SYN-001) — *fixed*
 
-A guard written on a single line **fails to parse**:
+Historical; kept because it's the canonical illustration of the line-orientation
+trap and how to fix that class of bug without touching the shared backend.
 
-```aether
-if x > 3 { fx { println("big"); } ret; }      // SYN-001: Unexpected token ')'
-```
-
-The identical guard written multi-line **works**:
+A guard written on a single line used to fail:
 
 ```aether
-if x > 3 {
-    fx { println("big"); }
-    ret;
-}
+if x > 3 { fx { println("big"); } ret; }      // was: SYN-001 / SCOPE-001
 ```
 
-The same bites a one-liner `loop` with an inline `fx` body. This is a
-**Rea-grammar limitation leaking through the bootstrap rewrite layer** — not an
-intentional Aether rule. Until Aether owns its own parser (DESIGN.md Phase 2),
-we do **not** have a clean fix, so the corpus instead teaches the multi-line
-guard as the canonical form. If you are tempted to "just fix the one-liner,"
-understand you are proposing to touch the shared Rea parser.
+while the identical multi-line guard worked. The cause was **not** the Rea
+grammar (multi-line lowers fine) — it was the line-oriented rewrite layer's
+one-construct-per-line assumption: `fx`/`ret` are only rewritten when the keyword
+*leads* a line, so a one-liner left the mid-line `fx`/`ret` untranslated (`ret`
+reached Rea verbatim → `SCOPE-001`; raw `fx {` → `SYN-001`).
 
-**Doc hygiene:** this is the single most common shape models get wrong from a
-clean prior. It is worth keeping a repair drill for it in every family overlay.
+**The fix** — `expandInlineBlockLine` in `translate.c`. When a line's leading
+block construct (`if`/`else`/`while`/`for`/`loop`/`fx`) has its opening brace
+matched **on the same line**, it is expanded into the canonical multi-line form
+and each header/statement is run through the normal `translateLine` +
+`applyJsonAliasesToLine` path (so `toon_*` calls in conditions still resolve).
+The expanded chunk is emitted via `trackRewriteOutputLines`, which maps every
+produced line back to the **single source line** — so diagnostics keep their
+original Aether line numbers (regression-tested). It is brace-balanced (net depth
+delta 0) and a strict no-op for already-multi-line code: a differential over all
+183 corpus candidates was byte-identical before/after. It does **not** touch the
+shared Rea grammar.
+
+This is why a pre-pass was the *wrong* shape (see §5-style reasoning): `lineNumber`
+advances once per preprocessed line, so adding lines before the main loop would
+desync the diagnostic line-map. Doing it *inside* the loop — one input line in,
+many output lines out, all mapped to that input line — is line-map-correct by
+construction, reusing the same machinery contract-annotation expansion already
+relies on.
+
+**Remaining one-liner gap:** a one-liner *type* declaration
+(`type Point { x: Int; y: Int; }`) still doesn't register its fields
+(`FIELD-002`). `type` is intentionally excluded from the expander (it's a
+declaration, not a control-flow body); declare types multi-line. Repair drills
+for the one-liner *guard* shape can now be dropped from the family overlays.
 
 ### 6.2 The bootstrap is the wart-factory
 
@@ -384,7 +399,7 @@ small model fails a task, the first hypothesis is that *Aether* is wrong — too
 spellings, a missing obvious builtin, a crash where degradation belonged, ceremony
 where a dotted path belonged. Fix the language and every model gets better for
 free; patch the corpus only when the model's prior, not the language, is the
-thing at fault. The warts that remain (chiefly the one-liner-`if` parse failure)
-are debts owed to the Rea-rewrite bootstrap, and they get paid down when Aether
-grows its own parser — not before, because the alternative is forking a grammar
-the whole suite shares.
+thing at fault. The warts are debts owed to the Rea-rewrite bootstrap — but, as
+the one-liner-`if` fix (§6.1) showed, most are payable *without* a new parser, by
+normalizing the surface into the form the existing line machinery already
+handles. Forking the shared grammar is the last resort, not the first.

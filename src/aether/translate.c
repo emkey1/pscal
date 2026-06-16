@@ -8010,6 +8010,172 @@ static char *translateLineInMethod(const char *lineStart,
     return lenRewritten;
 }
 
+/* ---- One-liner block expansion (Aether bootstrap) ----------------------
+ * The line-oriented rewriter assumes one construct per physical line, so a
+ * one-liner guard such as `if c { fx { writeln(x); } ret; }` never gets its
+ * inner `fx`/`ret` rewritten: those rewrites only fire when the keyword leads
+ * its own line. We detect a block construct whose opening brace is matched on
+ * the SAME line and expand it into the canonical multi-line form, translating
+ * each header/statement with translateLine (exactly what the multi-line form
+ * already feeds it). The expanded chunk is emitted through the normal
+ * trackRewriteOutputLines path, so every produced line maps back to the single
+ * source line and diagnostics stay correct. The chunk is brace-balanced, so it
+ * contributes a net brace delta of zero and never perturbs depth tracking. */
+
+static int lineWordIsBlockOpener(const char *body, const char *end) {
+    return startsWithWord(body, end, "if") ||
+           startsWithWord(body, end, "while") ||
+           startsWithWord(body, end, "for") ||
+           startsWithWord(body, end, "loop") ||
+           startsWithWord(body, end, "fx") ||
+           startsWithWord(body, end, "else");
+}
+
+/* Detects a line whose leading block construct opens and closes on this line. */
+static int lineIsInlineBlock(const char *body, const char *end) {
+    const char *brace;
+    if (!body || body >= end || !lineWordIsBlockOpener(body, end)) {
+        return 0;
+    }
+    brace = findCharInRange(body, end, '{');
+    if (!brace) {
+        return 0;
+    }
+    return findMatchingCloseBrace(brace, end) != NULL;
+}
+
+/* Position just past the ';' terminating the simple statement at `start`, or
+ * `end` if none. String- and brace-aware, only honors a ';' at depth 0. */
+static const char *inlineSimpleStmtEnd(const char *start, const char *end) {
+    const char *p = start;
+    int depth = 0;
+    while (p < end) {
+        char ch = *p;
+        if (ch == '"' || ch == '\'') {
+            char quote = *p++;
+            while (p < end) {
+                if (*p == '\\' && p + 1 < end) { p += 2; continue; }
+                if (*p == quote) { p++; break; }
+                p++;
+            }
+            continue;
+        }
+        if (ch == '{') { depth++; }
+        else if (ch == '}') { if (depth > 0) depth--; }
+        else if (ch == ';' && depth == 0) { return p + 1; }
+        p++;
+    }
+    return end;
+}
+
+/* Translate one [start,end) slice as a line and append it plus a newline. */
+static int appendInlineTranslatedLine(Buffer *out,
+                                      const char *start,
+                                      const char *end,
+                                      JsonAliasState *jsonState,
+                                      const ToonLiteralTable *toonTable,
+                                      const AetherBindingTable *bindings,
+                                      const AetherFunctionTable *functions,
+                                      const AetherFieldTable *fields,
+                                      const char *path,
+                                      int lineNumber) {
+    char *t = translateLine(start, end, jsonState, bindings, functions, fields, path, lineNumber);
+    char *aliased;
+    if (!t) {
+        return 0;
+    }
+    /* Apply the same JSON/TOON call aliasing the main loop applies after
+     * translateLine, so toon_* helpers in conditions/statements resolve. */
+    aliased = applyJsonAliasesToLine(t, jsonState, toonTable);
+    free(t);
+    if (!aliased) {
+        return 0;
+    }
+    if (!bufferAppend(out, aliased) || !bufferAppend(out, "\n")) {
+        free(aliased);
+        return 0;
+    }
+    free(aliased);
+    return 1;
+}
+
+/* Emit each statement in [start,end) on its own line, recursing into nested
+ * blocks so inner fx/ret/headers each become line-leading and get rewritten. */
+static int appendInlineExpanded(Buffer *out,
+                                const char *start,
+                                const char *end,
+                                JsonAliasState *jsonState,
+                                const ToonLiteralTable *toonTable,
+                                const AetherBindingTable *bindings,
+                                const AetherFunctionTable *functions,
+                                const AetherFieldTable *fields,
+                                const char *path,
+                                int lineNumber) {
+    const char *p = skipSpacesInRange(start, end);
+    while (p < end) {
+        if (lineWordIsBlockOpener(p, end)) {
+            const char *brace = findCharInRange(p, end, '{');
+            const char *close = brace ? findMatchingCloseBrace(brace, end) : NULL;
+            if (!brace || !close) {
+                /* Unbalanced/unsupported: emit the remainder as one line and stop
+                 * so we degrade to today's behavior rather than corrupt output. */
+                return appendInlineTranslatedLine(out, p, end, jsonState, toonTable,
+                                                  bindings, functions, fields, path, lineNumber);
+            }
+            if (!appendInlineTranslatedLine(out, p, brace + 1, jsonState, toonTable,
+                                            bindings, functions, fields, path, lineNumber) ||
+                !appendInlineExpanded(out, brace + 1, close, jsonState, toonTable,
+                                      bindings, functions, fields, path, lineNumber) ||
+                !bufferAppend(out, "}\n")) {
+                return 0;
+            }
+            p = skipSpacesInRange(close + 1, end);
+            if (p < end && *p == ';') {
+                p = skipSpacesInRange(p + 1, end);
+            }
+            continue;
+        }
+        {
+            const char *stmtEnd = inlineSimpleStmtEnd(p, end);
+            const char *trimEnd = stmtEnd;
+            while (trimEnd > p && isspace((unsigned char)trimEnd[-1])) {
+                trimEnd--;
+            }
+            if (trimEnd > p &&
+                !appendInlineTranslatedLine(out, p, trimEnd, jsonState, toonTable,
+                                            bindings, functions, fields, path, lineNumber)) {
+                return 0;
+            }
+            p = skipSpacesInRange(stmtEnd, end);
+        }
+    }
+    return 1;
+}
+
+/* Expand a one-liner block line into multi-line Rea text (no trailing newline;
+ * the caller appends the source line's newline). */
+static char *expandInlineBlockLine(const char *body,
+                                   const char *end,
+                                   JsonAliasState *jsonState,
+                                   const ToonLiteralTable *toonTable,
+                                   const AetherBindingTable *bindings,
+                                   const AetherFunctionTable *functions,
+                                   const AetherFieldTable *fields,
+                                   const char *path,
+                                   int lineNumber) {
+    Buffer out = {0};
+    if (!appendInlineExpanded(&out, body, end, jsonState, toonTable, bindings, functions,
+                              fields, path, lineNumber)) {
+        free(out.data);
+        return NULL;
+    }
+    if (out.len > 0 && out.data[out.len - 1] == '\n') {
+        out.data[out.len - 1] = '\0';
+        out.len--;
+    }
+    return out.data ? out.data : dupCString("");
+}
+
 char *aetherRewriteSource(const char *source, const char *path) {
     char *preprocessed = NULL;
     const char *cursor;
@@ -8080,6 +8246,54 @@ char *aetherRewriteSource(const char *source, const char *path) {
         if (body == lineEnd) {
             if (!bufferAppend(&out, "\n") ||
                 !trackRewriteOutputLines("\n", &outputLineNumber, lineNumber)) {
+                freePendingContracts(&pending);
+                clearFunctionContracts(&fnState);
+                clearParBlockState(&parState);
+                clearTypeBlockState(&typeState);
+                freeAetherBindingTable(&bindingTable);
+                freeAetherFunctionTable(&functionTable);
+                freeToonLiteralTable(&toonTable);
+                freeAetherTupleTable(&tupleTable);
+                free(preprocessed);
+                free(out.data);
+                return NULL;
+            }
+            if (*lineEnd == '\n') {
+                cursor = lineEnd + 1;
+                lineNumber++;
+            } else {
+                cursor = lineEnd;
+            }
+            continue;
+        }
+
+        /* One-liner block (`if c { fx {...} ret; }`): expand to canonical
+         * multi-line Rea so inner fx/ret become line-leading and get rewritten.
+         * Self-contained: emits + advances + continues without touching the
+         * fnState/par/objectInit state machines, which only act at brace depths
+         * a one-liner line never matches. */
+        if (lineIsInlineBlock(body, lineEnd)) {
+            char *expanded = expandInlineBlockLine(body, lineEnd, &jsonState, &toonTable,
+                                                   &bindingTable, &functionTable,
+                                                   &fieldTable, path, lineNumber);
+            int ok = (expanded != NULL);
+            if (ok) {
+                size_t outLenBefore = out.len;
+                ok = bufferAppend(&out, expanded) &&
+                     trackRewriteOutputLines(out.data + outLenBefore,
+                                             &outputLineNumber, lineNumber);
+                if (ok) {
+                    braceDepth += braceDeltaForLine(expanded);
+                }
+            }
+            free(expanded);
+            if (ok && *lineEnd == '\n') {
+                ok = bufferAppendN(&out, "\n", 1);
+                if (ok) {
+                    outputLineNumber++;
+                }
+            }
+            if (!ok) {
                 freePendingContracts(&pending);
                 clearFunctionContracts(&fnState);
                 clearParBlockState(&parState);
