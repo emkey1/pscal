@@ -3,6 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(python3 -c 'import os,sys; print(os.path.realpath(os.path.dirname(sys.argv[1])))' "${BASH_SOURCE[0]}")"
 ROOT_DIR="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$SCRIPT_DIR/..")"
+# Run from the repo root so examples that read cwd-relative data files (e.g. the
+# showcase's "agent_payload.json") resolve regardless of the caller's cwd (ctest
+# invokes this from the build tree). All fixtures below use absolute $ROOT_DIR paths.
+cd "$ROOT_DIR"
 AETHER_BIN="$ROOT_DIR/build/bin/aether"
 SMOKE_FIXTURE="$ROOT_DIR/Tests/aether/smoke.aether"
 CONTRACT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/contracts_pass.aether"
@@ -1264,7 +1268,7 @@ if ! "$AETHER_BIN" --no-cache --verbose-compat "$IMPORT_MISSING_FAIL_FIXTURE" >/
     cat /tmp/aether_import_missing_verbose.out >&2
     exit 1
 fi
-if ! grep -q "^$IMPORT_MISSING_FAIL_FIXTURE:1: warning: Aether ignored missing import 'definitely_missing_aether_module'\.$" /tmp/aether_import_missing_verbose.out; then
+if ! grep -q "^$IMPORT_MISSING_FAIL_FIXTURE:1: warning: \[IMP-001\] Aether ignored missing import 'definitely_missing_aether_module'\.$" /tmp/aether_import_missing_verbose.out; then
     echo "missing verbose-compat warning for ignored import" >&2
     cat /tmp/aether_import_missing_verbose.out >&2
     exit 1
