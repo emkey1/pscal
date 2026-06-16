@@ -426,14 +426,29 @@ static Value vmBuiltinYyjsonGetKey(struct VM_s *vm, int arg_count, Value *args) 
     }
 
     Value result = makeInt(YYJSON_UNUSED_HANDLE);
-    if (!yyjson_is_obj(val)) {
-        runtimeError(vm, "YyjsonGetKey requires an object value handle.");
-        goto cleanup;
-    }
-
     const char *key = args[1].s_val ? args[1].s_val : "";
-    yyjson_val *child = yyjson_obj_get(val, key);
-    if (!child) {
+    /* Dotted paths ("meta.code") walk nested objects. A missing key, an empty
+     * key, or a non-object anywhere along the path yields an absent (invalid)
+     * handle that downstream accessors degrade on -- so deep reads need no
+     * manual per-level staging, and toon_get_text_or(n, "a.b", d) just works. */
+    yyjson_val *child = val;
+    if (strchr(key, '.') != NULL) {
+        char *path = strdup(key);
+        if (path != NULL) {
+            char *save = NULL;
+            char *seg = strtok_r(path, ".", &save);
+            while (seg != NULL) {
+                child = (child != NULL && yyjson_is_obj(child)) ? yyjson_obj_get(child, seg) : NULL;
+                seg = strtok_r(NULL, ".", &save);
+            }
+            free(path);
+        } else {
+            child = NULL;
+        }
+    } else {
+        child = yyjson_is_obj(val) ? yyjson_obj_get(val, key) : NULL;
+    }
+    if (child == NULL) {
         goto cleanup;
     }
 
@@ -516,17 +531,28 @@ static Value vmBuiltinYyjsonHasKey(struct VM_s *vm, int arg_count, Value *args) 
     }
 
     Value result = makeInt(0);
-    if (!yyjson_is_obj(val)) {
-        runtimeError(vm, "YyjsonHasKey requires an object value handle.");
-        goto cleanup;
-    }
-
     {
         const char *key = args[1].s_val ? args[1].s_val : "";
-        result = makeInt(yyjson_obj_get(val, key) ? 1 : 0);
+        yyjson_val *child = val;
+        if (strchr(key, '.') != NULL) {
+            char *path = strdup(key);
+            if (path != NULL) {
+                char *save = NULL;
+                char *seg = strtok_r(path, ".", &save);
+                while (seg != NULL) {
+                    child = (child != NULL && yyjson_is_obj(child)) ? yyjson_obj_get(child, seg) : NULL;
+                    seg = strtok_r(NULL, ".", &save);
+                }
+                free(path);
+            } else {
+                child = NULL;
+            }
+        } else {
+            child = yyjson_is_obj(val) ? yyjson_obj_get(val, key) : NULL;
+        }
+        result = makeInt(child ? 1 : 0);
     }
 
-cleanup:
     jsonReleaseValue(handle);
     return result;
 }
