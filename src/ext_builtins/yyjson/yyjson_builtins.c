@@ -377,7 +377,6 @@ static Value vmBuiltinYyjsonFreeValue(struct VM_s *vm, int arg_count, Value *arg
     }
     int handle = (int)AS_INTEGER(args[0]);
     if (!jsonReleaseValueHandle(handle)) {
-        runtimeError(vm, "YyjsonFreeValue received an invalid value handle (%d).", handle);
     }
     return makeVoid();
 }
@@ -423,7 +422,6 @@ static Value vmBuiltinYyjsonGetKey(struct VM_s *vm, int arg_count, Value *args) 
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
     if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
-        runtimeError(vm, "YyjsonGetKey received an invalid value handle (%d).", handle);
         return makeInt(YYJSON_UNUSED_HANDLE);
     }
 
@@ -465,7 +463,6 @@ static Value vmBuiltinYyjsonGetIndex(struct VM_s *vm, int arg_count, Value *args
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
     if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
-        runtimeError(vm, "[AETH-RUNTIME-TOON-GET-INDEX-HANDLE] YyjsonGetIndex received an invalid value handle (%d).", handle);
         return makeInt(YYJSON_UNUSED_HANDLE);
     }
 
@@ -515,7 +512,6 @@ static Value vmBuiltinYyjsonHasKey(struct VM_s *vm, int arg_count, Value *args) 
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
     if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
-        runtimeError(vm, "YyjsonHasKey received an invalid value handle (%d).", handle);
         return makeInt(0);
     }
 
@@ -548,7 +544,6 @@ static Value vmBuiltinYyjsonHasIndex(struct VM_s *vm, int arg_count, Value *args
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
     if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
-        runtimeError(vm, "[AETH-RUNTIME-TOON-HAS-INDEX-HANDLE] YyjsonHasIndex received an invalid value handle (%d).", handle);
         return makeInt(0);
     }
 
@@ -587,7 +582,6 @@ static Value vmBuiltinYyjsonGetLength(struct VM_s *vm, int arg_count, Value *arg
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
     if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
-        runtimeError(vm, "YyjsonGetLength received an invalid value handle (%d).", handle);
         return makeInt(-1);
     }
 
@@ -617,7 +611,6 @@ static Value vmBuiltinYyjsonGetType(struct VM_s *vm, int arg_count, Value *args)
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
     if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
-        runtimeError(vm, "YyjsonGetType received an invalid value handle (%d).", handle);
         return makeString("");
     }
 
@@ -635,7 +628,6 @@ static Value vmBuiltinYyjsonGetString(struct VM_s *vm, int arg_count, Value *arg
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
     if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
-        runtimeError(vm, "[AETH-RUNTIME-TOON-GET-STRING-HANDLE] YyjsonGetString received an invalid value handle (%d).", handle);
         return makeString("");
     }
 
@@ -664,7 +656,6 @@ static Value vmBuiltinYyjsonGetNumber(struct VM_s *vm, int arg_count, Value *arg
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
     if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
-        runtimeError(vm, "[AETH-RUNTIME-TOON-GET-NUMBER-HANDLE] YyjsonGetNumber received an invalid value handle (%d).", handle);
         return makeDouble(0.0);
     }
 
@@ -696,7 +687,6 @@ static Value vmBuiltinYyjsonGetInt(struct VM_s *vm, int arg_count, Value *args) 
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
     if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
-        runtimeError(vm, "[AETH-RUNTIME-TOON-GET-INT-HANDLE] YyjsonGetInt received an invalid value handle (%d).", handle);
         return makeInt64(0);
     }
 
@@ -724,7 +714,6 @@ static Value vmBuiltinYyjsonGetBool(struct VM_s *vm, int arg_count, Value *args)
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
     if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
-        runtimeError(vm, "[AETH-RUNTIME-TOON-GET-BOOL-HANDLE] YyjsonGetBool received an invalid value handle (%d).", handle);
         return makeInt(0);
     }
 
@@ -752,7 +741,6 @@ static Value vmBuiltinYyjsonIsNull(struct VM_s *vm, int arg_count, Value *args) 
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
     if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
-        runtimeError(vm, "YyjsonIsNull received an invalid value handle (%d).", handle);
         return makeInt(0);
     }
 
