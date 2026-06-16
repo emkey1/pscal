@@ -357,6 +357,7 @@ Value vmBuiltinCosh(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinTanh(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinMax(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinMin(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinClamp(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinFloor(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinCeil(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinTrunc(struct VM_s* vm, int arg_count, Value* args);

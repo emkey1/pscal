@@ -1819,7 +1819,8 @@ VarType getBuiltinReturnType(const char* name) {
         strcasecmp(name, "cosh")   == 0 ||
         strcasecmp(name, "tanh")   == 0 ||
         strcasecmp(name, "max")    == 0 ||
-        strcasecmp(name, "min")    == 0) {
+        strcasecmp(name, "min")    == 0 ||
+        strcasecmp(name, "clamp")  == 0) {
         return TYPE_REAL;
     }
 

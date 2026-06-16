@@ -1825,6 +1825,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"lowvideo", vmBuiltinLowvideo},
     {"max", vmBuiltinMax},
     {"min", vmBuiltinMin},
+    {"clamp", vmBuiltinClamp},
     {"mkdir", vmBuiltinDosMkdir},
     {"mstreamcreate", vmBuiltinMstreamcreate},
     {"mstreamfree", vmBuiltinMstreamfree},
@@ -6424,6 +6425,24 @@ Value vmBuiltinMin(VM* vm, int arg_count, Value* args) {
     }
 }
 
+Value vmBuiltinClamp(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 3) { runtimeError(vm, "clamp expects 3 arguments (value, lo, hi)."); return makeInt(0); }
+    if (IS_INTLIKE(args[0]) && IS_INTLIKE(args[1]) && IS_INTLIKE(args[2])) {
+        long long x = AS_INTEGER(args[0]);
+        long long lo = AS_INTEGER(args[1]);
+        long long hi = AS_INTEGER(args[2]);
+        if (x < lo) return makeInt(lo);
+        if (x > hi) return makeInt(hi);
+        return makeInt(x);
+    }
+    double x = IS_INTLIKE(args[0]) ? (double)AS_INTEGER(args[0]) : AS_REAL(args[0]);
+    double lo = IS_INTLIKE(args[1]) ? (double)AS_INTEGER(args[1]) : AS_REAL(args[1]);
+    double hi = IS_INTLIKE(args[2]) ? (double)AS_INTEGER(args[2]) : AS_REAL(args[2]);
+    if (x < lo) return makeReal(lo);
+    if (x > hi) return makeReal(hi);
+    return makeReal(x);
+}
+
 Value vmBuiltinFloor(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "floor expects 1 argument."); return makeInt(0); }
     double x = IS_INTLIKE(args[0]) ? (double)AS_INTEGER(args[0]) : (double)AS_REAL(args[0]);
@@ -10674,6 +10693,7 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("Low", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Max", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Min", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("clamp", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("mkDir", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("MStreamCreate", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("MStreamFree", AST_PROCEDURE_DECL, NULL);
