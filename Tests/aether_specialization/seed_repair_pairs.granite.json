@@ -13,6 +13,34 @@
       "broken_source": "@post result[0] >= result[1]\nfn ordered(a: Int, b: Int) -> (Int, Int) {\n    if a > b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (hi, lo) = ordered(3, 8);\n    fx { println(\"hi=\", hi); }\n    ret;\n}\n",
       "fixed_source": "@post result.0 >= result.1\nfn ordered(a: Int, b: Int) -> (Int, Int) {\n    if a > b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (hi, lo) = ordered(3, 8);\n    fx { println(\"hi=\", hi); }\n    ret;\n}\n",
       "expected_stdout": "hi=8\n"
+    },
+    {
+      "id": "repair_granite_toon_prefix_parse_root",
+      "diagnostic": "Aether TOON error: the builtins are toon_parse() and toon_root(), not parse_json()/root_node(). All TOON builtins use the toon_ prefix.",
+      "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no\"); }\n        ret;\n    }\n    let doc: ToonDoc = parse_json(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42,\\\"ok\\\":true}\");\n    let root: ToonNode = root_node(doc);\n    let name: Text = toon_get_text_or(root, \"name\", \"?\");\n    fx { println(\"name=\", name); }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no\"); }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42,\\\"ok\\\":true}\");\n    let root: ToonNode = toon_root(doc);\n    let name: Text = toon_get_text_or(root, \"name\", \"?\");\n    fx { println(\"name=\", name); }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "name=Aether\n"
+    },
+    {
+      "id": "repair_granite_toon_prefix_haskey_gettext",
+      "diagnostic": "Aether TOON error: use toon_has_key() and toon_get_text(), not has_key()/get_text(). All TOON builtins use the toon_ prefix.",
+      "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no\"); }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42,\\\"ok\\\":true}\");\n    let root: ToonNode = toon_root(doc);\n    let name: Text = \"unknown\";\n    if has_key(root, \"name\") {\n        name = get_text(root, \"name\");\n    }\n    fx { println(\"name=\", name); }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no\"); }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42,\\\"ok\\\":true}\");\n    let root: ToonNode = toon_root(doc);\n    let name: Text = \"unknown\";\n    if toon_has_key(root, \"name\") {\n        name = toon_get_text(root, \"name\");\n    }\n    fx { println(\"name=\", name); }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "name=Aether\n"
+    },
+    {
+      "id": "repair_granite_toon_prefix_getint",
+      "diagnostic": "Aether TOON error: use toon_get_int()/toon_get_int_or(), not get_int(). All TOON builtins use the toon_ prefix.",
+      "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no\"); }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42,\\\"ok\\\":true}\");\n    let root: ToonNode = toon_root(doc);\n    let score: Int = get_int(root, \"score\");\n    fx { println(\"score=\", score); }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no\"); }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42,\\\"ok\\\":true}\");\n    let root: ToonNode = toon_root(doc);\n    let score: Int = toon_get_int_or(root, \"score\", 0);\n    fx { println(\"score=\", score); }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "score=42\n"
+    },
+    {
+      "id": "repair_granite_post_dot_minmax",
+      "diagnostic": "Aether annotation error: index tuple results with dot syntax in @post (result.0, result.1), never bracket syntax (result[0]).",
+      "broken_source": "@post result[0] <= result[1]\nfn minmax(a: Int, b: Int) -> (Int, Int) {\n    if a <= b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (lo, hi) = minmax(8, 3);\n    fx { println(\"lo=\", lo); }\n    ret;\n}\n",
+      "fixed_source": "@post result.0 <= result.1\nfn minmax(a: Int, b: Int) -> (Int, Int) {\n    if a <= b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (lo, hi) = minmax(8, 3);\n    fx { println(\"lo=\", lo); }\n    ret;\n}\n",
+      "expected_stdout": "lo=3\n"
     }
   ]
 }
