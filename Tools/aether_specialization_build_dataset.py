@@ -225,7 +225,13 @@ def build_corpus_instruction_records(
         if not isinstance(expected_stdout, str) or not expected_stdout:
             continue
 
-        source_path = REPO_ROOT / repo_path
+        # Resolve the module source from --corpus-dir (by basename) so an
+        # alternate corpus form (e.g. corpus_candidates_oneliner) can be trained
+        # on; fall back to the manifest's repo_path. The stdout is verified
+        # against expected below, so a semantically-identical variant is safe.
+        source_path = CORPUS_DIR / pathlib.Path(repo_path).name
+        if not source_path.exists():
+            source_path = REPO_ROOT / repo_path
         if not source_path.exists():
             continue
         source = source_path.read_text(encoding="utf-8")
@@ -314,6 +320,7 @@ def write_jsonl(path: pathlib.Path, records: list[dict[str, Any]]) -> None:
 
 
 def main() -> int:
+    global CORPUS_DIR
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--instruction-manifest", type=pathlib.Path, required=True)
     parser.add_argument("--repair-manifest", type=pathlib.Path, required=True)
@@ -321,6 +328,9 @@ def main() -> int:
     parser.add_argument("--repair-jsonl", type=pathlib.Path, required=True)
     parser.add_argument("--aether-bin", type=pathlib.Path, default=DEFAULT_AETHER_BIN)
     parser.add_argument("--corpus-manifest", type=pathlib.Path, default=DEFAULT_CORPUS_MANIFEST)
+    parser.add_argument("--corpus-dir", type=pathlib.Path, default=CORPUS_DIR,
+                        help="directory holding the corpus module sources (default: corpus_candidates). "
+                        "Point at corpus_candidates_oneliner to train on the compact form.")
     parser.add_argument("--fixtures-dir", type=pathlib.Path, default=DEFAULT_FIXTURES_DIR)
     parser.add_argument(
         "--exclude-benchmark-tasks",
@@ -331,6 +341,8 @@ def main() -> int:
         "(keeps the benchmark an honest held-out test). Repeatable.",
     )
     args = parser.parse_args()
+
+    CORPUS_DIR = args.corpus_dir
 
     if not args.aether_bin.exists():
         raise SystemExit(f"missing aether binary: {args.aether_bin}")
