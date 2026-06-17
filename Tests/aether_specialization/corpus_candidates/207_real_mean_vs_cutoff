@@ -1,0 +1,27 @@
+// real_mean_vs_cutoff
+// Same data, two means: a Real for display, an Int for a threshold.
+// expect: mean = 67.50
+// expect: cutoff = 67
+// expect: above cutoff = 2
+fn main() -> Void {
+    let xs: Int[] = [40, 60, 80, 90];
+    let n: Int = length(xs);
+    let sum: Int = 0;
+    loop i in 0..n {
+        sum = sum + xs[i];
+    }
+    let mean: Real = sum / n;
+    let cutoff: Int = sum / n;
+    let above: Int = 0;
+    loop i in 0..n {
+        if xs[i] > cutoff {
+            above = above + 1;
+        }
+    }
+    fx {
+        println("mean = ", mean:0:2);
+        println("cutoff = ", cutoff);
+        println("above cutoff = ", above);
+    }
+    ret;
+}

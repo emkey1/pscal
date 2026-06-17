@@ -567,7 +567,7 @@
           "formatting",
           "postcondition"
         ],
-        "notes": "end-to-end shape \u2014 pure classification, contract-guarded normalization, record construction from TOON rows, effectful report"
+        "notes": "end-to-end shape — pure classification, contract-guarded normalization, record construction from TOON rows, effectful report"
       }
     },
     {
@@ -869,8 +869,8 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/84_array_two_pass",
       "repo_path": "Tests/aether_specialization/corpus_candidates/84_array_two_pass",
-      "sha256": "95ebc4f50e12560c2aa2dac1d91745551ffc820fc18056b0ce5c32ad9221cd9c",
-      "stdout": "above avg: 9\nabove avg: 16\nsum = 30\navg = 6\n",
+      "sha256": "73b8ebd0243b82b6d954256e7b2400a7649cdf515b0248415aabbeaa9b854744",
+      "stdout": "above cutoff: 9\nabove cutoff: 16\nsum = 30\ncutoff = 6\n",
       "metadata": {
         "canonical": true,
         "fixture_required": false,
@@ -2914,6 +2914,134 @@
           "method"
         ],
         "notes": "Method-bearing type, two T{..} literals + method calls. v7.8 round-2 (stubborn-revert target)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/200_real_mean_list",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/200_real_mean_list",
+      "sha256": "3d1e1cf033a0ad49137f4c0c1568871ca7fe34254213ec5919f3bde789f7ee40",
+      "stdout": "average = 78.75\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "real",
+          "average",
+          "arithmetic"
+        ]
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/201_real_mean_three",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/201_real_mean_three",
+      "sha256": "f2ddf9b513a6fa62b612cb9b5ebcb143e3b9f29a08ddb50429bf7fd3ad350739",
+      "stdout": "average = 72.33\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "real",
+          "average",
+          "arithmetic"
+        ]
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/202_real_mean_range",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/202_real_mean_range",
+      "sha256": "8cd09cc849f5717174bef1c0eabcee781b362387217fd0bc2c5a2f726561c3f0",
+      "stdout": "average = 4.50\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "real",
+          "average",
+          "arithmetic"
+        ]
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/203_real_mean_guarded",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/203_real_mean_guarded",
+      "sha256": "7b0d5672b57a72f25189bb2baca6ded4c366a48777067f527772685508f9a5f5",
+      "stdout": "average = 70.33\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "real",
+          "average",
+          "arithmetic"
+        ]
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/204_real_mean_two_groups",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/204_real_mean_two_groups",
+      "sha256": "de0be2c6fd0f4859062432bea4f4483237c38392579aaab6e110d0a5e87daa24",
+      "stdout": "average = 61.40\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "real",
+          "average",
+          "arithmetic"
+        ]
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/205_real_mean_precision1",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/205_real_mean_precision1",
+      "sha256": "0a883d03bfdf97565c147632a374a8fe83e4355bee16ef63d42cf44965479873",
+      "stdout": "average = 42.3\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "real",
+          "average",
+          "arithmetic"
+        ]
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/206_real_mean_of_reals",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/206_real_mean_of_reals",
+      "sha256": "c7384c21b58d7306c5889c7eefdb7dd4fbd2b2c6aa264ad7807fc5f66a0139a3",
+      "stdout": "average = 2.67\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "real",
+          "average",
+          "arithmetic"
+        ]
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/207_real_mean_vs_cutoff",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/207_real_mean_vs_cutoff",
+      "sha256": "3f1dbc061b9156aeaed070b6d8040d5767691e93d4997a95081abd534fc7b667",
+      "stdout": "mean = 67.50\ncutoff = 67\nabove cutoff = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "real",
+          "average",
+          "arithmetic"
+        ]
       }
     }
   ]

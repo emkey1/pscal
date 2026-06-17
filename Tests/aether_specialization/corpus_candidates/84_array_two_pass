@@ -1,34 +1,30 @@
 // a5_two_pass  (wishlist 1)
-// First pass builds squares; second pass computes the mean and reports
-// elements above it.
-// expect: above avg: 9
-// expect: above avg: 16
+// First pass builds squares; second pass computes the integer cutoff (the mean)
+// and reports elements above it. The cutoff is an Int because it is only used as
+// a threshold; a displayed average would bind Real (see real_mean_* examples).
+// expect: above cutoff: 9
+// expect: above cutoff: 16
 // expect: sum = 30
-// expect: avg = 6
-
+// expect: cutoff = 6
 fn main() -> Void {
     let xs: Int[] = [];
     loop i in 0..5 {
         xs = xs + [i * i];
     }
-
     let n: Int = length(xs);
     let sum: Int = 0;
     loop i in 0..n {
         sum = sum + xs[i];
     }
-    let avg: Int = sum / n;
-
+    let cutoff: Int = sum / n;
     loop i in 0..n {
-        if xs[i] > avg {
-            fx {
-                println("above avg: ", xs[i]);
-            }
+        if xs[i] > cutoff {
+            fx { println("above cutoff: ", xs[i]); }
         }
     }
     fx {
         println("sum = ", sum);
-        println("avg = ", avg);
+        println("cutoff = ", cutoff);
     }
     ret;
 }

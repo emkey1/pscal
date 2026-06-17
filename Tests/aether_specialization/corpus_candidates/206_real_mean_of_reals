@@ -1,0 +1,13 @@
+// real_mean_of_reals
+// expect: average = 2.67
+fn main() -> Void {
+    let ys: Real[] = [1.5, 2.5, 4.0];
+    let n: Int = length(ys);
+    let sum: Real = 0.0;
+    loop i in 0..n {
+        sum = sum + ys[i];
+    }
+    let average: Real = sum / n;
+    fx { println("average = ", average:0:2); }
+    ret;
+}

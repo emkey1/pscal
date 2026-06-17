@@ -1,0 +1,11 @@
+// real_mean_range
+// expect: average = 4.50
+fn main() -> Void {
+    let sum: Int = 0;
+    loop i in 0..10 {
+        sum = sum + i;
+    }
+    let average: Real = sum / 10;
+    fx { println("average = ", average:0:2); }
+    ret;
+}
