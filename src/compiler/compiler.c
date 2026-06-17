@@ -5089,7 +5089,11 @@ Value evaluateCompileTimeValue(AST* node) {
                 }
 
                 if (node->token->type == TOKEN_MINUS) {
-                    if (operand_val.type == TYPE_INTEGER) {
+                    if (isIntegerFamilyType(operand_val.type)) {
+                        // REA integer literals are 64-bit (TYPE_INT64), so match the
+                        // whole integer family here, not just TYPE_INTEGER — otherwise
+                        // `-5` in a compile-time context (e.g. an array literal element)
+                        // falls through to makeVoid().
                         operand_val.i_val = -operand_val.i_val;
                         return operand_val; // Return the modified value
                     } else if (isRealType(operand_val.type)) {
