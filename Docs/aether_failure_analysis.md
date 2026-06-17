@@ -40,6 +40,12 @@ would be exactly the kludges to avoid.
   primarily a training gap** — teach the int→real mean idiom. Worth a quick
   ergonomics check that `real(sum) / count` is actually clean in Aether (if the
   int→real conversion is awkward, *that* would be a language nit — see §2).
+  **Confirmed empirically (wild-eval, 2026-06-17):** the generator of
+  `aether_benchmark_gaps.md` §8 reproduced this with no prompting — Qwen-7B, asked
+  for the mean of four integers, declared `let mean: Int = s / n;` and hand-rolled
+  the fractional part (`50 * rem / n + adj`), emitting `mean = 39.26.000000` for an
+  expected `39.50`. It was the *only* recurring miss on an otherwise-80%-clean
+  novel set (16/20), so it is the top training-gap priority.
 
 ## 2. Language candidates — clean (non-kludgy) fixes worth considering
 

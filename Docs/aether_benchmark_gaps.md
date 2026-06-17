@@ -223,3 +223,17 @@ scale, generate ~50 candidates, and run them against the v8e models. CPU-only �
 contention with training. The output is the first empirical check on whether §5/§7
 are right: it either ratifies the hand-written v2 proposal or rewrites it with
 evidence.
+
+**Result (2026-06-17) — done, and it ratified the proposal.** The prototype is
+`Tools/aether_wild_eval.py` (mean / sum / clamp / max / count_above templates, each
+with a trusted Python oracle; **20/20** reference-vs-oracle self-validation at seed
+7). Run in `score` mode against **Qwen2.5-Coder-7B** (the `none`=26 model) on 20
+never-seen tasks: **16/20 (80%), and every program compiled** — strong evidence the
+7B's benchmark score is genuine generalization, not overfit to the 29 task shapes.
+The misses concentrated in `mean` (2/4): the 7B wrote `let mean: Int = s / n;` and
+hand-reconstructed the decimals, printing `mean = 39.26.000000` for an expected
+`39.50`. So the generator **independently rediscovered the real-mean gap**
+(`aether_failure_analysis.md` §1) and ratified v2's dedicated `real_mean_format`
+task — exactly the empirical check this section called for. (The one-liner `@pure`
+expansion wart also resurfaced during reference generation — a compiler-class
+finding, per "two products" above.)
