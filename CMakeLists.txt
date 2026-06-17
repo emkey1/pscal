@@ -1155,6 +1155,7 @@ set(PSCAL_CORE_SOURCES
     src/core/types.c src/core/utils.c src/core/list.c src/core/preproc.c src/core/version.c
     src/ast/ast.c src/ast/closure_registry.c
     src/symbol/symbol.c
+    src/lexer/lexer.c
     src/backend_ast/builtin.c
     ${PSCAL_NETWORK_IMPL_SOURCE}
     src/backend_ast/shell_runtime_stub.c
@@ -1773,7 +1774,6 @@ endif()
 
 set(PASCAL_FRONTEND_SOURCES
     src/Pascal/main.c
-    src/Pascal/lexer.c
     src/Pascal/parser.c
     src/Pascal/semantic.c
     src/Pascal/opt.c
@@ -2338,7 +2338,7 @@ set(REA_SOURCES
 if(NOT PSCAL_PLATFORM_IOS)
     add_executable(rea ${REA_SOURCES})
     target_compile_definitions(rea PRIVATE FRONTEND_REA)
-    target_link_libraries(rea PRIVATE pscal_pascal_static)
+    target_link_libraries(rea PRIVATE pscal_core_static)
     if(PSCAL_HAS_LIBCURL)
         if(TARGET CURL::libcurl)
             target_link_libraries(rea PRIVATE CURL::libcurl)

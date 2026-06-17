@@ -4,7 +4,7 @@
 //
 //  Created by Michael Miller on 3/25/25.
 //
-#include "Pascal/lexer.h"
+#include "lexer/lexer.h"
 #include "core/utils.h"
 #include "Pascal/globals.h"
 #include <string.h>

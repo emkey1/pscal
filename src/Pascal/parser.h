@@ -2,7 +2,7 @@
 #define PARSER_H
 
 #include "types.h"
-#include "lexer.h"
+#include "lexer/lexer.h"
 #include "ast/ast.h"
 #include "core/list.h"
 #include <stdbool.h>

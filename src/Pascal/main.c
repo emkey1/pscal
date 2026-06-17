@@ -24,7 +24,7 @@
  * Note: PSCAL versions prior to 2.22 were released under the Unlicense.
  */
 
-#include "lexer.h"
+#include "lexer/lexer.h"
 #include "parser.h"
 #include "Pascal/semantic.h"
 #include "ast/ast.h"

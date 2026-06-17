@@ -56,8 +56,6 @@
 #endif
 #include "aether/state.h"
 #include "aether/semantic.h"
-#include "Pascal/lexer.h"
-#include "Pascal/parser.h"
 #include "ext_builtins/dump.h"
 #include "common/path_virtualization.h"
 
@@ -758,115 +756,14 @@ static bool importsAreFresh(AST* node, time_t cache_mtime) {
     return true;
 }
 
-static void processUnitList(List* unit_list, BytecodeChunk* chunk) {
-    if (!unit_list) return;
-    for (int i = 0; i < listSize(unit_list); i++) {
-        char *used_unit_name_str_from_list = (char*)listGet(unit_list, i);
-        if (!used_unit_name_str_from_list) continue;
-
-        char lower_used_unit_name[MAX_SYMBOL_LENGTH];
-        strncpy(lower_used_unit_name, used_unit_name_str_from_list, MAX_SYMBOL_LENGTH - 1);
-        lower_used_unit_name[MAX_SYMBOL_LENGTH - 1] = '\0';
-        for (int k = 0; lower_used_unit_name[k]; k++) {
-            lower_used_unit_name[k] = tolower((unsigned char)lower_used_unit_name[k]);
-        }
-
-        char *unit_file_path = findUnitFile(lower_used_unit_name);
-        if (!unit_file_path) {
-            if (!isUnitDocumented(lower_used_unit_name)) {
-                fprintf(stderr, "Warning: unit '%s' not found. Skipping.\n", used_unit_name_str_from_list);
-            }
-            continue; // skip missing unit regardless
-        }
-
-        // Read unit file
-        char* unit_source_buffer = NULL;
-        FILE *unit_file = fopen(unit_file_path, "r");
-        if (unit_file) {
-            fseek(unit_file, 0, SEEK_END);
-            long fsize = ftell(unit_file);
-            rewind(unit_file);
-            unit_source_buffer = malloc(fsize + 1);
-            if (!unit_source_buffer) { fclose(unit_file); free(unit_file_path); EXIT_FAILURE_HANDLER(); }
-            size_t bytes_read = fread(unit_source_buffer, 1, fsize, unit_file);
-            if (bytes_read != (size_t)fsize) {
-                fprintf(stderr, "Error reading unit file '%s'.\n", unit_file_path);
-                free(unit_source_buffer);
-                fclose(unit_file);
-                free(unit_file_path);
-                EXIT_FAILURE_HANDLER();
-            }
-            unit_source_buffer[fsize] = '\0';
-            fclose(unit_file);
-        } else {
-            fprintf(stderr, "Error opening unit file '%s'.\n", unit_file_path);
-            free(unit_file_path);
-            EXIT_FAILURE_HANDLER();
-        }
-        free(unit_file_path);
-
-        // Parse the unit using Pascal's unit parser
-        Lexer nested_lexer;
-        initLexer(&nested_lexer, unit_source_buffer);
-        Parser nested_parser_instance;
-        nested_parser_instance.lexer = &nested_lexer;
-        nested_parser_instance.current_token = getNextToken(&nested_lexer);
-        nested_parser_instance.current_unit_name_context = lower_used_unit_name;
-        nested_parser_instance.dependency_paths = NULL;
-
-        AST *parsed_unit_ast = unitParser(&nested_parser_instance, 1, lower_used_unit_name, chunk);
-
-        if (nested_parser_instance.current_token) freeToken(nested_parser_instance.current_token);
-        if (unit_source_buffer) free(unit_source_buffer);
-
-        if (parsed_unit_ast) {
-            // Annotate and compile implementation to assign addresses
-            annotateTypes(parsed_unit_ast, NULL, parsed_unit_ast);
-            compileUnitImplementation(parsed_unit_ast, chunk);
-            // Link globals and alias unqualified names
-            linkUnit(parsed_unit_ast, 1);
-            freeAST(parsed_unit_ast);
-        }
-    }
-}
-
-static void walkUsesClauses(AST* node, BytecodeChunk* chunk) {
-    if (!node) return;
-    if (node->type == AST_USES_CLAUSE && node->unit_list) {
-        processUnitList(node->unit_list, chunk);
-    }
-    if (node->left) walkUsesClauses(node->left, chunk);
-    if (node->right) walkUsesClauses(node->right, chunk);
-    if (node->extra) walkUsesClauses(node->extra, chunk);
-    for (int i = 0; i < node->child_count; i++) {
-        if (node->children[i]) walkUsesClauses(node->children[i], chunk);
-    }
-}
-
-static void collectUnitListPaths(List* unit_list, List* out) {
-    if (!unit_list || !out) return;
-    for (int i = 0; i < listSize(unit_list); i++) {
-        char *used_unit_name = (char*)listGet(unit_list, i);
-        if (!used_unit_name) continue;
-
-        char lower[MAX_SYMBOL_LENGTH];
-        strncpy(lower, used_unit_name, MAX_SYMBOL_LENGTH - 1);
-        lower[MAX_SYMBOL_LENGTH - 1] = '\0';
-        for (int k = 0; lower[k]; k++) lower[k] = tolower((unsigned char)lower[k]);
-
-        char *unit_file_path = findUnitFile(lower);
-        if (unit_file_path) {
-            listAppend(out, unit_file_path);
-            free(unit_file_path);
-        }
-    }
-}
-
+/*
+ * Rea has its own native module system (module / #import, compiled via
+ * compileModuleAST). The legacy Pascal-unit path that borrowed Pascal's
+ * unitParser was unreachable here (Rea never populates AST_USES_CLAUSE.unit_list)
+ * and has been removed, so Rea no longer depends on the Pascal front end.
+ */
 static void collectUsesClauses(AST* node, List* out) {
     if (!node) return;
-    if (node->type == AST_USES_CLAUSE && node->unit_list) {
-        collectUnitListPaths(node->unit_list, out);
-    }
     if (node->type == AST_IMPORT && node->token && node->token->value) {
         char *resolved = PSCAL_FRONTEND_RESOLVE_IMPORT_PATH(node->token->value);
         if (resolved) {
@@ -1196,9 +1093,6 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
     InterpretResult result = INTERPRET_COMPILE_ERROR;
     bool compilation_ok = true;
     if (!used_cache) {
-        // Handle #import directives by loading and linking Pascal units before compiling the main program
-        walkUsesClauses(program, &chunk);
-
         int moduleCount = PSCAL_FRONTEND_GET_LOADED_MODULE_COUNT();
         for (int i = 0; i < moduleCount && compilation_ok; i++) {
             AST *moduleAST = PSCAL_FRONTEND_GET_MODULE_AST(i);
