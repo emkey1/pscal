@@ -49,7 +49,7 @@ bool shellRuntimeIsSharedFileStream(FILE *stream) {
 }
 
 #if defined(PSCAL_TARGET_IOS)
-#include "ios/vproc.h"
+#include "runtime/vproc/vproc.h"
 #define PATH_VIRTUALIZATION_NO_MACROS 1
 #include "common/path_virtualization.h"
 #undef PATH_VIRTUALIZATION_NO_MACROS

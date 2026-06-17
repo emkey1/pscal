@@ -1,4 +1,4 @@
-#include "ios/tty/pscal_tty_host.h"
+#include "runtime/vproc/tty/pscal_tty_host.h"
 
 #if defined(PSCAL_TARGET_IOS)
 #define PSCAL_WEAK __attribute__((weak))

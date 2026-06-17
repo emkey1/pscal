@@ -41,7 +41,7 @@
 #include <os/log.h>
 #endif
 #if defined(PSCAL_TARGET_IOS)
-#include "ios/vproc.h"
+#include "runtime/vproc/vproc.h"
 #endif
 
 static bool vmHandleGlobalInterrupt(VM* vm);

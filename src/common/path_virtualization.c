@@ -32,8 +32,8 @@ extern void pscalRuntimeDebugLog(const char *message);
 #include <unistd.h>
 #include <sys/stat.h>
 #include "common/path_truncate.h"
-#include "ios/vproc.h"
-#include "ios/tty/pscal_fd.h"
+#include "runtime/vproc/vproc.h"
+#include "runtime/vproc/tty/pscal_fd.h"
 
 #if defined(PSCAL_TARGET_IOS)
 __attribute__((weak)) int pscalHostOpenRaw(const char *path, int flags, mode_t mode);

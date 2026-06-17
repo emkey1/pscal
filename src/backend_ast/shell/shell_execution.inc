@@ -1,11 +1,11 @@
 /* Auto-generated include: command execution and pipeline management. Included from shell.c. */
 
-#include "ios/vproc.h"
+#include "runtime/vproc/vproc.h"
 #include "backend_ast/builtin.h"
 #if defined(PSCAL_TARGET_IOS)
 #include "smallclue/smallclue.h"
 #include "common/path_virtualization.h"
-#include "ios/tty/pscal_fd.h"
+#include "runtime/vproc/tty/pscal_fd.h"
 #include <unistd.h>
 #include <fcntl.h>
 #include <limits.h>

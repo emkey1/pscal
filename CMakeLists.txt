@@ -101,16 +101,16 @@ if(PSCAL_PLATFORM_IOS)
     if(VPROC_ENABLE_STUBS_FOR_TESTS)
         add_compile_definitions(VPROC_ENABLE_STUBS_FOR_TESTS)
     endif()
-    add_compile_options(-include ${CMAKE_SOURCE_DIR}/src/ios/vproc_shim.h)
+    add_compile_options(-include ${CMAKE_SOURCE_DIR}/src/runtime/vproc/vproc_shim.h)
     # vproc implementation compiles without the global shim overrides to avoid macro pollution.
-    set_property(SOURCE src/ios/vproc.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
+    set_property(SOURCE src/runtime/vproc/vproc.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
     # path virtualization helpers must call the real syscalls to avoid recursion with vproc shim macros.
     set_property(SOURCE src/common/path_virtualization.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
     # path truncation helpers should bypass vproc shims to avoid recursive syscalls.
     set_property(SOURCE src/common/path_truncate.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
     # low-level tty/pty helpers must bypass vproc shim macros to avoid recursive interpose calls.
-    set_property(SOURCE src/ios/tty/pscal_fd.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
-    set_property(SOURCE src/ios/tty/pscal_pty.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
+    set_property(SOURCE src/runtime/vproc/tty/pscal_fd.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
+    set_property(SOURCE src/runtime/vproc/tty/pscal_pty.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
 elseif(VPROC_ENABLE_STUBS_FOR_TESTS)
     add_compile_definitions(VPROC_ENABLE_STUBS_FOR_TESTS)
 endif()
@@ -1762,13 +1762,13 @@ list(APPEND PSCAL_CORE_SOURCES src/third_party/yyjson/yyjson.c)
 if(PSCAL_PLATFORM_IOS)
     list(APPEND PSCAL_CORE_SOURCES
         src/common/frontend_symbol_wrappers.c
-        src/ios/vproc.c
-        src/ios/vproc_tree.c
-        src/ios/tty/ish_compat.c
-        src/ios/tty/pscal_fd.c
-        src/ios/tty/pscal_tty.c
-        src/ios/tty/pscal_pty.c
-        src/ios/tty/pscal_tty_host.c
+        src/runtime/vproc/vproc.c
+        src/runtime/vproc/vproc_tree.c
+        src/runtime/vproc/tty/ish_compat.c
+        src/runtime/vproc/tty/pscal_fd.c
+        src/runtime/vproc/tty/pscal_tty.c
+        src/runtime/vproc/tty/pscal_pty.c
+        src/runtime/vproc/tty/pscal_tty_host.c
     )
 endif()
 

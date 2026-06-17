@@ -1,4 +1,4 @@
-#include "ios/tty/ish_compat.h"
+#include "runtime/vproc/tty/ish_compat.h"
 
 void cond_init(cond_t *cond) {
     pthread_condattr_t attr;

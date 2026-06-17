@@ -13,8 +13,8 @@
 #include <stdbool.h>
 #include "common/frontend_symbol_aliases.h"
 #if defined(PSCAL_TARGET_IOS)
-#include "ios/vproc.h"
-#include "ios/vproc_stdio_shim.h"
+#include "runtime/vproc/vproc.h"
+#include "runtime/vproc/vproc_stdio_shim.h"
 #endif
 
 // Default record size used for untyped files when RESET/REWRITE omit an

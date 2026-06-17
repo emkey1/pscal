@@ -1,5 +1,5 @@
-#include "ios/tty/pscal_tty.h"
-#include "ios/tty/pscal_tty_host.h"
+#include "runtime/vproc/tty/pscal_tty.h"
+#include "runtime/vproc/tty/pscal_tty_host.h"
 
 #include <assert.h>
 #include <errno.h>

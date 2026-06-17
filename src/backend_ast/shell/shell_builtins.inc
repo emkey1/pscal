@@ -8,15 +8,15 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include "ios/vproc.h"
-#include "ios/vproc_tree.h"
+#include "runtime/vproc/vproc.h"
+#include "runtime/vproc/vproc_tree.h"
 #include <sys/types.h>
 #include <sys/stat.h>
 #if defined(PSCAL_TARGET_IOS)
 #include "common/path_virtualization.h"
 #include "common/path_truncate.h"
 #include "smallclue/smallclue.h"
-#include "ios/vproc.h"
+#include "runtime/vproc/vproc.h"
 #endif
 #if !defined(PSCAL_TAB_TITLE_SUPPORT)
 #if defined(PSCAL_TARGET_IOS) || (defined(TARGET_OS_MACCATALYST) && TARGET_OS_MACCATALYST)

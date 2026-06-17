@@ -4,7 +4,7 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #if defined(PSCAL_TARGET_IOS)
-#include "ios/vproc.h"
+#include "runtime/vproc/vproc.h"
 #endif
 
 bool pscalRuntimeFdIsInteractive(int fd) {

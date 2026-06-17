@@ -1,6 +1,6 @@
-#include "ios/tty/pscal_pty.h"
-#include "ios/tty/pscal_fd.h"
-#include "ios/vproc.h"
+#include "runtime/vproc/tty/pscal_pty.h"
+#include "runtime/vproc/tty/pscal_fd.h"
+#include "runtime/vproc/vproc.h"
 
 #include <assert.h>
 #include <errno.h>

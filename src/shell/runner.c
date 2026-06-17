@@ -24,7 +24,7 @@
 #if defined(PSCAL_TARGET_IOS)
 #include <spawn.h>
 #include <sys/wait.h>
-#include "ios/vproc.h"
+#include "runtime/vproc/vproc.h"
 extern char **environ;
 #endif
 

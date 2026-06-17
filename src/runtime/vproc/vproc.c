@@ -1,4 +1,4 @@
-#include "ios/vproc.h"
+#include "runtime/vproc/vproc.h"
 
 #if defined(PSCAL_TARGET_IOS) || defined(VPROC_ENABLE_STUBS_FOR_TESTS)
 
@@ -43,9 +43,9 @@
 #include <mach/thread_act.h>
 #endif
 #include "common/runtime_tty.h"
-#include "ios/tty/ish_compat.h"
-#include "ios/tty/pscal_pty.h"
-#include "ios/tty/pscal_tty_host.h"
+#include "runtime/vproc/tty/ish_compat.h"
+#include "runtime/vproc/tty/pscal_pty.h"
+#include "runtime/vproc/tty/pscal_tty_host.h"
 
 typedef struct PSCALRuntimeContext PSCALRuntimeContext;
 typedef enum {

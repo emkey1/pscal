@@ -10,7 +10,7 @@
 #include "core/globals.h"
 #include "pscal_paths.h"
 #include "common/runtime_tty.h"
-#include "ios/vproc.h"
+#include "runtime/vproc/vproc.h"
 
 #include <ctype.h>
 #include <errno.h>

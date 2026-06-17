@@ -50,8 +50,8 @@ void shellHistoryLoadFromFile(void);
 #define PATH_VIRTUALIZATION_NO_MACROS 1
 #include "common/path_virtualization.h"
 #undef PATH_VIRTUALIZATION_NO_MACROS
-#include "ios/vproc.h"
-#include "ios/tty/pscal_pty.h"
+#include "runtime/vproc/vproc.h"
+#include "runtime/vproc/tty/pscal_pty.h"
 #if defined(__has_include)
 #  if __has_include("PSCALRuntime.h")
 #    include "PSCALRuntime.h"

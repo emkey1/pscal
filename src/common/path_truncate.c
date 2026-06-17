@@ -37,7 +37,7 @@
 #include <time.h>
 #include <pthread.h>
 #include "vm/vm.h"
-#include "ios/vproc.h"
+#include "runtime/vproc/vproc.h"
 
 static char g_pathTruncatePrimary[PATH_MAX];
 static size_t g_pathTruncatePrimaryLen = 0;
