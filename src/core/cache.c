@@ -3,7 +3,7 @@
 #include "core/globals.h"
 #include "core/version.h"
 #include "symbol/symbol.h"
-#include "shell/function.h"
+#include "core/compiled_function.h"
 #include "vm/string_sentinels.h"
 #include "ast/ast.h"
 #include <sys/stat.h>
