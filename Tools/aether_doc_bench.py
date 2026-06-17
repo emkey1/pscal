@@ -538,8 +538,43 @@ def build_guide_block(doc_name: str, doc_text: str) -> str:
     ).strip()
 
 
+def _build_bytelevel_decode_map() -> dict[str, int]:
+    bs = (list(range(ord("!"), ord("~") + 1))
+          + list(range(ord("¡"), ord("¬") + 1))
+          + list(range(ord("®"), ord("ÿ") + 1)))
+    cs = bs[:]
+    n = 0
+    for b in range(256):
+        if b not in bs:
+            bs.append(b)
+            cs.append(256 + n)
+            n += 1
+    return {chr(c): b for b, c in zip(bs, cs)}
+
+
+_BYTELEVEL_DECODE_MAP = _build_bytelevel_decode_map()
+
+
+def decode_bytelevel_artifacts(text: str) -> str:
+    """Some model servers (seen with DeepSeek-Coder under vLLM) return GPT-2
+    byte-level-BPE artifacts (space=Ġ, newline=Ċ) instead of decoded
+    text, which makes every program fail to parse. Detect a fully byte-level
+    encoded string and reverse it back to real bytes. No-op for normal output
+    (the other model families return clean text, so this never fires)."""
+    if "Ġ" not in text and "Ċ" not in text:
+        return text
+    table = _BYTELEVEL_DECODE_MAP
+    if text and all(ch in table for ch in text):
+        try:
+            return bytes(table[ch] for ch in text).decode("utf-8", "replace")
+        except Exception:
+            return text
+    return text
+
+
 def sanitize_code(raw: str) -> str:
-    text = strip_reasoning_block(raw)
+    text = decode_bytelevel_artifacts(raw)
+    text = strip_reasoning_block(text)
     marker_idx = text.find(OUTPUT_END_MARKER)
     if marker_idx != -1:
         text = text[:marker_idx]
