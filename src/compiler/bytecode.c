@@ -12,7 +12,7 @@
 #include "core/globals.h"
 #include "backend_ast/builtin.h"
 #include "core/version.h"
-#include "aether/translate.h"
+#include "core/diagmap.h"
 
 // initBytecodeChunk, freeBytecodeChunk, reallocate, writeBytecodeChunk,
 // addConstantToChunk, emitShort, patchShort from your provided file.

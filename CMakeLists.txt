@@ -1173,7 +1173,7 @@ set(PSCAL_CORE_SOURCES
     src/common/frontend_kind.c
     src/common/runtime_paths.c
     src/common/pascal_state.c
-    src/aether/diagmap.c
+    src/core/diagmap.c
     src/vm/vm.c
     lib/noise/noise.c
     src/runtime/terrain/terrain_generator.c
