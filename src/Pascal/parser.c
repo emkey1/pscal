@@ -4,10 +4,10 @@
 #include "core/list.h"
 #include "compiler/compiler.h"
 #include "Pascal/parser.h"
-#include "Pascal/type_registry.h"
+#include "core/type_registry.h"
 #include "core/utils.h"
 #include "core/types.h"
-#include "globals.h"
+#include "core/globals.h"
 #include "backend_ast/builtin.h"
 #include "symbol/symbol.h"
 #include <stdbool.h>

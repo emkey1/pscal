@@ -10,7 +10,7 @@
 #include "compiler/bytecode.h"
 #include "backend_ast/builtin.h"
 #include "symbol/symbol.h"
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include "core/cache.h"
 #include "core/utils.h"
 #include "common/frontend_kind.h"

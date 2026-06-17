@@ -3,7 +3,7 @@
 #include "core/types.h"
 #include "symbol/symbol.h"
 #include "core/utils.h"
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include "aether/diagnostics.h"
 #include "rea/semantic.h"
 #include <stdlib.h>

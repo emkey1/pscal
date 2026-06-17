@@ -2,7 +2,7 @@
 // This file defines and initializes the global variables used throughout Pascal 
 
 // Include the globals header file, which declares the global variables.
-#include "globals.h"
+#include "core/globals.h"
 #include <pthread.h>
 #include <stdatomic.h>
 

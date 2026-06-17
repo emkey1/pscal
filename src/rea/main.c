@@ -40,7 +40,7 @@
 #include "symbol/symbol.h"
 #include <fcntl.h>
 #include <errno.h>
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include "ast/ast.h"
 #include "compiler/bytecode.h"
 #include "compiler/compiler.h"

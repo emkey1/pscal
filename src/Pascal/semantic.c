@@ -1,7 +1,7 @@
 #include "Pascal/semantic.h"
 
-#include "Pascal/globals.h"
-#include "Pascal/type_registry.h"
+#include "core/globals.h"
+#include "core/type_registry.h"
 #include "ast/closure_registry.h"
 #include "core/utils.h"
 #include "symbol/symbol.h"

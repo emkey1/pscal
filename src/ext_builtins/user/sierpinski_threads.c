@@ -1,7 +1,7 @@
 #include "backend_ast/builtin.h"
 #include "core/utils.h"
 #include "vm/vm.h"
-#include "Pascal/globals.h"
+#include "core/globals.h"
 
 #include <pthread.h>
 #include <stdbool.h>

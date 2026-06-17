@@ -1,4 +1,4 @@
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include "Pascal/parser.h"
 #include "compiler/compiler.h"
 #include "ast/ast.h"

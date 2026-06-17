@@ -23,7 +23,7 @@
 #include <errno.h>
 #endif
 #include "backend_ast/builtin.h"
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include "core/utils.h"
 #include "vm/vm.h"
 #include "vm/string_sentinels.h"

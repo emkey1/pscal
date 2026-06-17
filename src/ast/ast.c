@@ -2,7 +2,7 @@
 #include "core/utils.h"
 #include "core/list.h"
 #include "ast.h"
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include "symbol/symbol.h"
 #include "Pascal/parser.h"
 #include "backend_ast/builtin.h"

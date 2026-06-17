@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include "aether/diagnostics.h"
 #include "aether/parser.h"
 #include "rea/semantic.h"

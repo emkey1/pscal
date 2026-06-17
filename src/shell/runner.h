@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #if defined(PSCAL_TARGET_IOS)
 #include "common/path_virtualization.h"
 #endif

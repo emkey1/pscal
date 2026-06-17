@@ -12,8 +12,8 @@
 #include "backend_ast/builtin.h" // For isBuiltin
 #include "core/utils.h"
 #include "core/types.h"
-#include "Pascal/globals.h"
-#include "Pascal/type_registry.h"
+#include "core/globals.h"
+#include "core/type_registry.h"
 #include "common/frontend_kind.h"
 #include "ast/ast.h"
 #include "symbol/symbol.h" // For access to the main global symbol table, if needed,

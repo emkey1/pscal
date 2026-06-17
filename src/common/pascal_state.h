@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdatomic.h>
 
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include "symbol/symbol.h"
 
 #ifdef __cplusplus

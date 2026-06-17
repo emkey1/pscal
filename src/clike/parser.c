@@ -2,7 +2,7 @@
 #include "clike/errors.h"
 #include "clike/opt.h"
 #include "ast/ast.h"
-#include "Pascal/type_registry.h"
+#include "core/type_registry.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

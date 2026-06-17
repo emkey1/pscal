@@ -124,7 +124,7 @@ static void sdlLogEvent(const char *label, const SDL_Event *event) {
 #endif
 
 #include "pscal_sdl_runtime.h" // Includes SDL family headers and SDL declarations
-#include "Pascal/globals.h" // Includes SDL.h and SDL_ttf.h via its includes, and audio.h
+#include "core/globals.h" // Includes SDL.h and SDL_ttf.h via its includes, and audio.h
 
 #include <ctype.h>
 #include <limits.h>

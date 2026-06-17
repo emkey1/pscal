@@ -1150,8 +1150,8 @@ endif()
 
 # ---- Source Files ----
 set(PSCAL_CORE_SOURCES
-    src/Pascal/globals.c
-    src/Pascal/type_registry.c
+    src/core/globals.c
+    src/core/type_registry.c
     src/core/types.c src/core/utils.c src/core/list.c src/core/preproc.c src/core/version.c
     src/ast/ast.c src/ast/closure_registry.c
     src/symbol/symbol.c

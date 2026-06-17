@@ -1,4 +1,4 @@
-#include "Pascal/type_registry.h"
+#include "core/type_registry.h"
 
 #include <stdlib.h>
 #include <string.h>

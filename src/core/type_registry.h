@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include "ast/ast.h"
 
 TypeEntry *findTypeEntry(const char *name);

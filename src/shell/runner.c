@@ -11,7 +11,7 @@
 #include "symbol/symbol.h"
 #include "backend_ast/builtin.h"
 #include "vm/vm.h"
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include "common/path_virtualization.h"
 
 #include <errno.h>

@@ -3,7 +3,7 @@
 #include "clike/errors.h"
 #include "clike/parser.h"
 #include "clike/semantics.h"
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include "ast/ast.h"
 #include "compiler/compiler.h"
 #include "core/utils.h"

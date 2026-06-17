@@ -47,7 +47,7 @@
 #include "core/utils.h"
 #include "core/build_info.h"
 #include "symbol/symbol.h"
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include "backend_ast/builtin.h"
 #include "ext_builtins/dump.h"
 #include "common/frontend_kind.h"

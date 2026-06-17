@@ -1,6 +1,6 @@
 #include "rea/semantic.h"
 #include "symbol/symbol.h"
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include "core/types.h"
 #include "core/utils.h"
 #include "rea/parser.h"

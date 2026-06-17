@@ -1,5 +1,5 @@
 #include "utils.h"
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>

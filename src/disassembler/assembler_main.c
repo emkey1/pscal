@@ -33,8 +33,8 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "Pascal/globals.h"
-#include "Pascal/type_registry.h"
+#include "core/globals.h"
+#include "core/type_registry.h"
 #include "ast/ast.h"
 #include "common/frontend_kind.h"
 #include "compiler/bytecode.h"

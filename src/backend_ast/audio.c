@@ -1,7 +1,7 @@
 // src/backend_ast/audio.c
 
 #include "audio.h"
-#include "Pascal/globals.h" // For EXIT_FAILURE_HANDLER
+#include "core/globals.h" // For EXIT_FAILURE_HANDLER
 #include "core/utils.h" // For EXIT_FAILURE_HANDLER
 #include <pscal_paths.h>
 #include <limits.h>

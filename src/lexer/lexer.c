@@ -2,7 +2,7 @@
 
 #include "lexer/lexer.h"
 #include "core/utils.h"
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include <string.h>
 #include <ctype.h>
 #include <stdbool.h>

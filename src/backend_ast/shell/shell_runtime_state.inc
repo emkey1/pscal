@@ -7,7 +7,7 @@
 #include "shell/builtins.h"
 #include "shell/runner.h"
 #include "vm/vm.h"
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include "pscal_paths.h"
 #include "common/runtime_tty.h"
 #include "ios/vproc.h"

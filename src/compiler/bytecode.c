@@ -9,7 +9,7 @@
 #include "core/utils.h"    // For freeValue, varTypeToString
 #include "symbol/symbol.h" // For Symbol struct, HashTable, lookupSymbolIn
 #include "vm/vm.h"         // For HostFunctionID type (used in CALL_HOST cast)
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include "backend_ast/builtin.h"
 #include "core/version.h"
 #include "aether/translate.h"

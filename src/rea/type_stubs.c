@@ -1,7 +1,7 @@
 #include "ast/ast.h"
 #include "core/types.h"
 #include "core/utils.h"
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include <strings.h>
 
 #ifdef FRONTEND_REA

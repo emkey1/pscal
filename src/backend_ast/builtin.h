@@ -3,7 +3,7 @@
 
 #include "core/types.h"
 #include "ast/ast.h"
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>

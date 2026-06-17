@@ -40,7 +40,7 @@ void shellHistoryLoadFromFile(void);
 #include "compiler/bytecode.h"
 #include "backend_ast/builtin.h"
 #include "ext_builtins/register.h"
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include "vm/vm.h"
 #include "symbol/symbol.h"
 #include "common/frontend_kind.h"

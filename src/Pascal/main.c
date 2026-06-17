@@ -36,7 +36,7 @@
 #include "core/build_info.h"
 #include "common/frontend_kind.h"
 #include "common/pascal_state.h"
-#include "globals.h"
+#include "core/globals.h"
 #include "backend_ast/builtin.h"
 #include "ext_builtins/dump.h"
 #include "compiler/bytecode.h"

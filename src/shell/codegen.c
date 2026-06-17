@@ -5,7 +5,7 @@
 #include "vm/string_sentinels.h"
 #include "core/utils.h"
 #include "vm/vm.h"
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

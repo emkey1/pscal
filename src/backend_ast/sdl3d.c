@@ -2,7 +2,7 @@
 #include "pscal_sdl_runtime.h"
 #include "backend_ast/graphics_3d_backend.h"
 #include "core/utils.h"
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include "vm/vm.h"
 #include "sdl_ios_dispatch.h"
 #include <stdlib.h>

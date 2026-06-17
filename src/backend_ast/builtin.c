@@ -2,7 +2,7 @@
 #include "core/utils.h"
 #include "core/version.h"
 #include "symbol/symbol.h"
-#include "Pascal/globals.h"                  // Assuming globals.h is directly in src/
+#include "core/globals.h"                  // Assuming globals.h is directly in src/
 #include "common/frontend_kind.h"
 #include "common/runtime_tty.h"
 #include "backend_ast/builtin_network_api.h"

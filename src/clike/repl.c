@@ -15,7 +15,7 @@
 #include "core/cache.h"
 #include "core/utils.h"
 #include "symbol/symbol.h"
-#include "Pascal/globals.h"
+#include "core/globals.h"
 #include "backend_ast/builtin.h"
 #include "common/frontend_kind.h"
 int clike_error_count = 0;
