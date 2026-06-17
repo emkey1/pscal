@@ -659,9 +659,9 @@ static Value vmBuiltinYyjsonGetString(struct VM_s *vm, int arg_count, Value *arg
 
     Value result = makeString("");
     if (!yyjson_is_str(val)) {
-        runtimeError(vm,
-                     "[AETH-RUNTIME-TOON-GET-STRING-TYPE] YyjsonGetString requires a string value handle, got %s.",
-                     jsonTypeToString(val));
+        /* Type mismatch degrades to the default (empty), mirroring the missing-key
+           / invalid-handle degrade from c30d16260: a defensible program must not
+           crash because a field holds an unexpected type. */
         goto cleanup;
     }
 
@@ -695,9 +695,8 @@ static Value vmBuiltinYyjsonGetNumber(struct VM_s *vm, int arg_count, Value *arg
         goto cleanup;
     }
 
-    runtimeError(vm,
-                 "[AETH-RUNTIME-TOON-GET-NUMBER-TYPE] YyjsonGetNumber requires a numeric value handle, got %s.",
-                 jsonTypeToString(val));
+    /* Type mismatch degrades to the default (0.0), mirroring the missing-key /
+       invalid-handle degrade from c30d16260. */
 
 cleanup:
     jsonReleaseValue(handle);
@@ -718,9 +717,8 @@ static Value vmBuiltinYyjsonGetInt(struct VM_s *vm, int arg_count, Value *args) 
 
     Value result = makeInt64(0);
     if (!yyjson_is_int(val)) {
-        runtimeError(vm,
-                     "[AETH-RUNTIME-TOON-GET-INT-TYPE] YyjsonGetInt requires an integer value handle, got %s.",
-                     jsonTypeToString(val));
+        /* Type mismatch degrades to the default (0), mirroring the missing-key /
+           invalid-handle degrade from c30d16260. */
         goto cleanup;
     }
 
@@ -745,9 +743,8 @@ static Value vmBuiltinYyjsonGetBool(struct VM_s *vm, int arg_count, Value *args)
 
     Value result = makeInt(0);
     if (!yyjson_is_bool(val)) {
-        runtimeError(vm,
-                     "[AETH-RUNTIME-TOON-GET-BOOL-TYPE] YyjsonGetBool requires a boolean value handle, got %s.",
-                     jsonTypeToString(val));
+        /* Type mismatch degrades to the default (false), mirroring the missing-key
+           / invalid-handle degrade from c30d16260. */
         goto cleanup;
     }
 
