@@ -31,8 +31,10 @@
 #include <sys/types.h>
 #include <signal.h>
 #include "compiler/bytecode.h"
+#include "compiler/compiler.h"
+#include "ast/ast.h"
 #include "clike/parser.h"
-#include "clike/codegen.h"
+#include "clike/translate.h"
 #include "clike/builtins.h"
 #include "clike/semantics.h"
 #include "clike/state.h"
@@ -369,7 +371,11 @@ int clike_main(int argc, char **argv) {
 #undef PSCAL_STAT_SEC
     }
     if (!used_cache) {
-        clikeCompile(prog, &chunk);
+        /* Lower the CLike AST into the shared AST and drive the common
+         * bytecode compiler, mirroring the Rea front end. */
+        AST *shared_ast = translateClikeToShared(prog);
+        annotateTypes(shared_ast, NULL, shared_ast);
+        compileASTToBytecode(shared_ast, &chunk);
         saveBytecodeToCache(path, kClikeCompilerId, &chunk);
         if (verbose_flag) {
             fprintf(stderr, "Compilation successful. Bytecode size: %d bytes, Constants: %d\n",

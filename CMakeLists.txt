@@ -2216,7 +2216,7 @@ set(CLIKE_SOURCES
     src/clike/builtins.c
     src/clike/builtins/thread.c
     src/clike/semantics.c
-    src/clike/codegen.c
+    src/clike/translate.c
     src/clike/opt.c
     src/clike/preproc.c
     src/clike/state.c

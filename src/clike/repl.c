@@ -4,7 +4,9 @@
 #include <termios.h>
 #include <unistd.h>
 #include "clike/parser.h"
-#include "clike/codegen.h"
+#include "clike/translate.h"
+#include "compiler/compiler.h"
+#include "ast/ast.h"
 #include "clike/builtins.h"
 #include "clike/semantics.h"
 #include "clike/opt.h"
@@ -147,7 +149,10 @@ int clike_repl_main(void) {
             CLIKE_REPL_RETURN(EXIT_FAILURE);
         }
         if (clike_error_count == 0) {
-            BytecodeChunk chunk; clikeCompile(prog, &chunk);
+            BytecodeChunk chunk; initBytecodeChunk(&chunk);
+            AST *shared_ast = translateClikeToShared(prog);
+            annotateTypes(shared_ast, NULL, shared_ast);
+            compileASTToBytecode(shared_ast, &chunk);
             VM vm; initVM(&vm);
             interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
             freeVM(&vm);
