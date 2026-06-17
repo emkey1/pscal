@@ -72,6 +72,15 @@ fix extends an existing Aether principle rather than bolting on a special case.
   the fix is clean. If the model wrote a genuinely void-returning function, it's a
   model error. Worth resolving because a model printing `<VOID_TYPE>` instead of
   erroring is a bad failure mode regardless.
+  **Update (2026-06-17):** a *second*, language-level source of `<VOID_TYPE>` was
+  found and fixed (commit `4d475cda5`) — negative literals in `Int[]` array
+  literals (`let xs: Int[] = [-5, ...]`) printed `<VOID_TYPE>` at index 0 (or
+  leaked a `Real` at index >0, e.g. `clamp(xs[1],0,100) = 0.000000`), because
+  `evaluateCompileTimeValue`'s unary-minus case matched only `TYPE_INTEGER` while
+  REA integer literals are `TYPE_INT64`. Lesson: `<VOID_TYPE>` is **not** a
+  reliable model-error signal — it can be a genuine compiler bug. (The Bool-helper
+  case above is still plausibly model error, but should be re-confirmed against the
+  actual 14B source rather than assumed.)
 - **`default` is a reserved token.** (granite, `module_toon_report`):
   `[SYN-001] Unexpected token DEFAULT 'default'` — the model used `default` as a
   field/identifier. **Verdict: investigate** — if `default` is reserved for a

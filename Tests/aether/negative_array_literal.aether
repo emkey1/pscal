@@ -1,0 +1,16 @@
+// Regression (commit 4d475cda5): negative literals in Int[] array literals must
+// round-trip as Int. Before the fix, evaluateCompileTimeValue's unary-minus case
+// matched only TYPE_INTEGER (not the TYPE_INT64 that REA literals produce), so a
+// negative element printed <VOID_TYPE> at index 0 / leaked a Real at index >0.
+fn main() -> Void {
+    let xs: Int[] = [-5, 3, -2];
+    let n: Int = length(xs);
+    let sum: Int = 0;
+    loop i in 0..n {
+        sum = sum + xs[i];
+    }
+    fx {
+        println("neg_array = ", xs[0], ",", xs[2], ",", sum);
+    }
+    ret;
+}

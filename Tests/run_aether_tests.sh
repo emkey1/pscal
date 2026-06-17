@@ -9,6 +9,7 @@ ROOT_DIR="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$S
 cd "$ROOT_DIR"
 AETHER_BIN="$ROOT_DIR/build/bin/aether"
 SMOKE_FIXTURE="$ROOT_DIR/Tests/aether/smoke.aether"
+NEG_ARRAY_FIXTURE="$ROOT_DIR/Tests/aether/negative_array_literal.aether"
 CONTRACT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/contracts_pass.aether"
 CONTRACT_LAYOUT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/contract_layout_pass.aether"
 CONTRACT_STRING_LEN_PASS_FIXTURE="$ROOT_DIR/Tests/aether/contract_string_len_pass.aether"
@@ -272,6 +273,12 @@ fi
 if ! grep -qx "42" /tmp/aether_inline_if_expr_pass.out; then
     echo "unexpected inline if expression output" >&2
     cat /tmp/aether_inline_if_expr_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$NEG_ARRAY_FIXTURE" >/tmp/aether_neg_array_pass.out
+if ! grep -qx "neg_array = -5,-2,-4" /tmp/aether_neg_array_pass.out; then
+    echo "unexpected negative array literal output (regression: negative Int[] elements)" >&2
+    cat /tmp/aether_neg_array_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$INLINE_IF_CALL_ARGS_PASS_FIXTURE" >/tmp/aether_inline_if_call_args_pass.out
