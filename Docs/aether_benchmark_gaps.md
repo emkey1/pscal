@@ -119,16 +119,22 @@ diagnostic measure of Aether fluency — and the negative tier turns the languag
 deliberate rejections (a real part of the design) into things the benchmark
 actually defends.
 
-**Status — a first verified increment is drafted** in
-`Tests/aether_doc_bench/tasks_v2_additions.json`: five single-skill splits of
-`release_board` (`real_mean_format`, `clamp_scores`, `classify_threshold`,
-`count_by_category`) plus the recursion hole (`recursion_factorial`), and a
-two-task **negative-invariant tier** (`reject_inclusive_range` for `..=`,
-`effect_boundary_reject` for an effectful call outside `fx`). Each was compiled
-and run against `build/bin/aether` — the five positives match their
-`expected_stdout` exactly; the two negatives are rejected with the expected error
-codes (`SYN-001`, `FX-001`). The negative tier needs a `should_fail` scorer path
-(compile, pass iff rejected with `expected_error_code`).
+**Status (2026-06-17): the full v2 suite is assembled.**
+`Tests/aether_doc_bench/tasks_v2.json` holds 32 tasks: 30 positive
+model-generation tasks plus a 2-task negative-invariant tier
+(`reject_inclusive_range` for `..=`, `effect_boundary_reject` for an effectful
+call outside `fx`). The three kitchen-sink TOON tasks (`config_validator`,
+`release_board`, `module_toon_report`) are dropped in favour of the verified
+single-skill splits (`real_mean_format`, `clamp_scores`, `count_by_category`)
+plus the recursion hole; the TOON share falls from 28% to 16%. The negatives are
+scored by `Tools/aether_negative_tier.py` (compile the fixed program, pass iff
+rejected with `expected_error_code`; verified 2/2).
+
+Three proposed holes turned out to be language-shaped rather than
+benchmark-addressable, and were dropped: concurrency (`task_spawn` rejects user
+`fn`s and only accepts registered builtins), rich string ops (Text supports only
+`+`, `==`, and `len`), and error/fail paths (no such construct exists). The one
+remaining step is to re-baseline the model families on v2.
 
 ## 8. Authoring v2 with generation assistance (methodology)
 
