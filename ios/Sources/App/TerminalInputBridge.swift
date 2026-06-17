@@ -87,7 +87,11 @@ struct TerminalInputBridge: UIViewRepresentable {
 }
 
 @MainActor
-final class TerminalKeyInputView: UITextView {
+final class TerminalKeyInputView: UITextView, UIInputViewAudioFeedback {
+    var enableInputClicksWhenVisible: Bool {
+        return true
+    }
+
     var onInput: ((String) -> Void)?
     var onPaste: ((String) -> Void)?
     var onCopy: (() -> Void)?
@@ -893,50 +897,62 @@ final class TerminalKeyInputView: UITextView {
 
     // MARK: - Accessory button actions
     @objc private func handleEsc() {
+        UIDevice.current.playInputClick()
         onInput?("\u{1B}")
     }
     
     @objc private func handleTab() {
+        UIDevice.current.playInputClick()
         onInput?("\t")
     }
 
     @objc private func handleCtrlToggle(_ sender: UIButton) {
+        UIDevice.current.playInputClick()
         controlLatch.toggle()
     }
 
     @objc private func handleAltToggle(_ sender: UIButton) {
+        UIDevice.current.playInputClick()
         optionLatch.toggle()
     }
 
     @objc private func handleUp() {
+        UIDevice.current.playInputClick()
         onInput?(arrowSequence("A"))
     }
 
     @objc private func handleDown() {
+        UIDevice.current.playInputClick()
         onInput?(arrowSequence("B"))
     }
 
     @objc private func handleLeft() {
+        UIDevice.current.playInputClick()
         onInput?(arrowSequence("D"))
     }
 
     @objc private func handleRight() {
+        UIDevice.current.playInputClick()
         onInput?(arrowSequence("C"))
     }
 
     @objc private func handleFSlash() {
+        UIDevice.current.playInputClick()
         onInput?("/")
     }
 
     @objc private func handleDot() {
+        UIDevice.current.playInputClick()
         onInput?(".")
     }
 
     @objc private func handleMinus() {
+        UIDevice.current.playInputClick()
         onInput?("-")
     }
    
     @objc private func handlePipe() {
+        UIDevice.current.playInputClick()
         onInput?("|")
     }
     
