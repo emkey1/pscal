@@ -1155,6 +1155,7 @@ def invoke_command(
             shell=True,
             cwd=str(cwd),
             text=True,
+            errors="replace",
             capture_output=True,
             timeout=timeout_seconds,
         )
@@ -1207,6 +1208,7 @@ def run_destination_cleanup(destination: Destination, task: Task, doc_name: str,
             shell=True,
             cwd=str(REPO_ROOT),
             text=True,
+            errors="replace",
             capture_output=True,
             timeout=destination.after_each_timeout_seconds,
         )
@@ -1290,6 +1292,7 @@ def compile_and_run(task: Task, source_code: str, args: argparse.Namespace) -> d
             cmd,
             cwd=str(work_dir),
             text=True,
+            errors="replace",
             capture_output=True,
             timeout=task.timeout_seconds,
         )
@@ -1306,6 +1309,7 @@ def compile_and_run(task: Task, source_code: str, args: argparse.Namespace) -> d
                 diag_cmd,
                 cwd=str(work_dir),
                 text=True,
+                errors="replace",
                 capture_output=True,
                 timeout=task.timeout_seconds,
             )
@@ -1342,6 +1346,7 @@ def run_python_task(task: Task, source_code: str) -> dict[str, Any]:
             cmd,
             cwd=str(work_dir),
             text=True,
+            errors="replace",
             capture_output=True,
             timeout=task.timeout_seconds,
         )
