@@ -118,3 +118,97 @@ Net: the headline `none` number becomes a broader, less TOON-skewed, more
 diagnostic measure of Aether fluency — and the negative tier turns the language's
 deliberate rejections (a real part of the design) into things the benchmark
 actually defends.
+
+## 8. Authoring v2 with generation assistance (methodology)
+
+*§5 and §7 above are hand-reasoned from five models' failures — i.e. the author's
+best guess at what's missing. This section proposes using random task generation to
+put that guess on an empirical footing, and is deliberate about where generation
+helps and where it actively hurts.*
+
+**Authoring ≠ evaluation — and the difference dissolves the oracle problem.** A
+generator used to *score* models must auto-grade thousands of throwaway tasks, so a
+flaky or ambiguous oracle (no trusted expected output) poisons the result — this is
+the central obstacle to generation-based *eval*. A generator used to *author*
+instead produces a large candidate pool that is **curated down to ~20–30 tasks**,
+each of whose expected output is hand-verified exactly once and then frozen. That
+one-time verification amortizes over every future eval run, and a maintainer in the
+loop rejects the infeasible and the ambiguous before they ever enter the suite. The
+oracle problem is therefore nearly absent in generation-based *authoring*.
+
+**What generation uniquely contributes — the holes the author cannot see.** The §5
+hole list (par, recursion, strings, clamp, …) is the *obvious* set: an author can
+only enumerate the features they already know are under-tested. What a broad
+generator adds is the **combinatorial interaction space** — e.g. "loop +
+tuple-return + real-format *together* fails although each works in isolation." No
+hand-authored suite probes feature interactions, because authors test one mechanism
+at a time. Running a candidate pool against the v8e models thus does something §5
+cannot: it **empirically ratifies or corrects the hand-authored proposal**. If
+generation only re-surfaces holes already in §5, that is confidence; if it surfaces
+others, §5 was incomplete. Two secondary wins: generation mass-produces the
+**mid-difficulty single-skill tasks** §6 asks for (the graded ramp), and it
+**counteracts author bias** — a hand author writes tasks in the same idioms the
+corpus already favors, so the suite inherits the corpus's blind spots; a
+differently-sourced generator writes shapes the author wouldn't.
+
+**What generation cannot do — the intent-driven precision work.** Several v2 items
+in §7 require *knowing what the language deliberately rejects*, which a random
+generator has no representation of:
+
+- the **negative-invariant tier** (`1..=3`, `new T{}`, 4-arg `toon_get_*_or`,
+  one-liner `type` must be *rejected*) — a generator cannot author a "this should
+  fail to compile" task because it has no model of intent;
+- the **effect-boundary should-fail** test (an effectful call outside `fx` or
+  inside `@pure` must be rejected) — same reason;
+- **splitting the kitchen-sink tasks** (`release_board`, `module_toon_report`) —
+  that is surgical decomposition of *existing* tasks, not generation;
+- the **single-reading spec audit** (§4) — that is editorial review; generation
+  *creates* ambiguity (`release_board`'s "normalize" is exactly the phrasing a
+  generator emits), it does not remove it.
+
+These stay hand-authored from the language design. v2 is therefore necessarily a
+**hybrid**: hand-authored targeted tasks for the intent-driven holes, plus a
+curated generated subset for coverage breadth and the difficulty ramp.
+
+**The contamination constraint — stricter for a benchmark than for eval.** If the
+generator is the same model family being trained, or draws on the corpus's idioms,
+v2 becomes a mirror of the training distribution and silently reintroduces the
+overfit it was meant to detect. The discipline: an **Aether-naïve frontier model**
+generates **natural-language specs only** — a problem statement, sample input, and
+intended behavior in prose, *never Aether code*. The task stays language-agnostic;
+the only Aether-aware step is the trusted Python reference that produces the
+expected output, and that is the curator's job, not the generator's. This keeps v2
+a genuine held-out instrument rather than a second copy of the corpus.
+
+**The pipeline (run once, to produce a frozen v2):**
+
+1. **Spec generation** — an Aether-naïve model emits NL specs sampling the §1
+   mechanism inventory at a target difficulty (skewed toward the thin middle of §6).
+2. **Feasibility + oracle pass** — for each candidate, write a Python reference and
+   run it for the expected output; discard anything not expressible in Aether's
+   surface.
+3. **Unambiguity gate** — require two independently-written references to agree on
+   the output; disagreement means the spec has more than one reading (the §4 failure
+   mode) and it is dropped.
+4. **Difficulty + dedup filter** — bin by mechanism tag, drop near-duplicates of
+   each other and of v1, fill the graded ramp.
+5. **Curation** — the maintainer promotes survivors, hand-verifies each oracle,
+   tags mechanisms.
+6. **Hand-authored additions** — the negative-invariant tier, the effect-boundary
+   test, and any §5 holes the generator missed are written directly.
+7. **Freeze** — the union is frozen as v2; it is *not* regenerated per run
+   (regeneration would make scores incomparable across time).
+
+**Same generator, two products.** The only thing separating a benchmark from a
+wild-eval probe is whether the output is frozen. Curate-and-freeze → a stable,
+comparable benchmark (this section). Regenerate-every-run → the continuous
+generalization probe. And the candidates that *don't* make the cut are not waste:
+those that break trained models become the wild-eval finding log, and those that
+break the *compiler* are candidate language bugs (the same class as
+`aether_failure_analysis.md` §2).
+
+**Cheap first step.** Build the spec-generator + Python-oracle pipeline at small
+scale, generate ~50 candidates, and run them against the v8e models. CPU-only — no
+contention with training. The output is the first empirical check on whether §5/§7
+are right: it either ratifies the hand-written v2 proposal or rewrites it with
+evidence.
