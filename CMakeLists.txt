@@ -103,14 +103,14 @@ if(PSCAL_PLATFORM_IOS)
     endif()
     add_compile_options(-include ${CMAKE_SOURCE_DIR}/src/runtime/vproc/vproc_shim.h)
     # vproc implementation compiles without the global shim overrides to avoid macro pollution.
-    set_property(SOURCE src/runtime/vproc/vproc.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
+    set_property(SOURCE components/pscal-core/src/runtime/vproc/vproc.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
     # path virtualization helpers must call the real syscalls to avoid recursion with vproc shim macros.
-    set_property(SOURCE src/common/path_virtualization.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
+    set_property(SOURCE components/pscal-core/src/common/path_virtualization.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
     # path truncation helpers should bypass vproc shims to avoid recursive syscalls.
-    set_property(SOURCE src/common/path_truncate.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
+    set_property(SOURCE components/pscal-core/src/common/path_truncate.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
     # low-level tty/pty helpers must bypass vproc shim macros to avoid recursive interpose calls.
-    set_property(SOURCE src/runtime/vproc/tty/pscal_fd.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
-    set_property(SOURCE src/runtime/vproc/tty/pscal_pty.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
+    set_property(SOURCE components/pscal-core/src/runtime/vproc/tty/pscal_fd.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
+    set_property(SOURCE components/pscal-core/src/runtime/vproc/tty/pscal_pty.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
 elseif(VPROC_ENABLE_STUBS_FOR_TESTS)
     add_compile_definitions(VPROC_ENABLE_STUBS_FOR_TESTS)
 endif()
@@ -188,7 +188,7 @@ endif()
 set(PSCAL_INSTALL_ROOT "${_pscal_install_root_default}" CACHE PATH "Default PSCAL runtime asset directory")
 string(REGEX REPLACE "/$" "" PSCAL_INSTALL_ROOT "${PSCAL_INSTALL_ROOT}")
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
-configure_file(src/core/pscal_paths.h.in "${CMAKE_BINARY_DIR}/generated/pscal_paths.h" @ONLY)
+configure_file(components/pscal-core/src/core/pscal_paths.h.in "${CMAKE_BINARY_DIR}/generated/pscal_paths.h" @ONLY)
 include_directories("${CMAKE_BINARY_DIR}/generated")
 
 if(PSCAL_PLATFORM_IOS AND NOT PSCAL_USE_HOST_OPENSSL)
@@ -552,7 +552,7 @@ if(ENABLE_EXT_BUILTIN_SQLITE)
     endif()
 endif()
 if(APPLE)
-    set_property(SOURCE src/backend_ast/graphics_3d_metal_apple.m
+    set_property(SOURCE components/pscal-core/src/backend_ast/graphics_3d_metal_apple.m
         APPEND PROPERTY COMPILE_OPTIONS -fobjc-arc)
 endif()
 
@@ -573,15 +573,17 @@ endif()
 # ---- Include Directories (Project Structure) ----
 include_directories(
     src
-    src/core
+    components/pscal-core/src
+    components/pscal-core/src/core
     src/Pascal
     components/clike/src
-    src/symbol
-    src/backend_ast
-    src/compiler
-    src/vm
-    src/third_party/yyjson
+    components/pscal-core/src/symbol
+    components/pscal-core/src/backend_ast
+    components/pscal-core/src/compiler
+    components/pscal-core/src/vm
+    components/pscal-core/src/third_party/yyjson
     lib
+    components/pscal-core/lib
 )
 if(PSCAL_PLATFORM_IOS)
     include_directories(
@@ -1143,44 +1145,44 @@ endif()
 find_package(Threads REQUIRED)
 
 if(PSCAL_HAS_LIBCURL)
-    set(PSCAL_NETWORK_IMPL_SOURCE src/backend_ast/builtin_network_api.c)
+    set(PSCAL_NETWORK_IMPL_SOURCE components/pscal-core/src/backend_ast/builtin_network_api.c)
 else()
-    set(PSCAL_NETWORK_IMPL_SOURCE src/backend_ast/builtin_network_api_stub.c)
+    set(PSCAL_NETWORK_IMPL_SOURCE components/pscal-core/src/backend_ast/builtin_network_api_stub.c)
 endif()
 
 # ---- Source Files ----
 set(PSCAL_CORE_SOURCES
-    src/core/globals.c
-    src/core/type_registry.c
-    src/core/types.c src/core/utils.c src/core/list.c src/core/preproc.c src/core/version.c
-    src/ast/ast.c src/ast/closure_registry.c
-    src/symbol/symbol.c
-    src/lexer/lexer.c
-    src/backend_ast/builtin.c
+    components/pscal-core/src/core/globals.c
+    components/pscal-core/src/core/type_registry.c
+    components/pscal-core/src/core/types.c components/pscal-core/src/core/utils.c components/pscal-core/src/core/list.c components/pscal-core/src/core/preproc.c components/pscal-core/src/core/version.c
+    components/pscal-core/src/ast/ast.c components/pscal-core/src/ast/closure_registry.c
+    components/pscal-core/src/symbol/symbol.c
+    components/pscal-core/src/lexer/lexer.c
+    components/pscal-core/src/backend_ast/builtin.c
     ${PSCAL_NETWORK_IMPL_SOURCE}
-    src/backend_ast/shell_runtime_stub.c
-    src/backend_ast/thread_wrappers.c
-    src/compiler/bytecode.c src/compiler/compiler.c
-    src/core/cache.c
-    src/common/runtime_params.c
-    src/common/runtime_tty.c
-    src/common/runtime_clipboard.c
-    src/common/env_snapshot.c
-    src/common/pscal_hosts.c
-    src/common/path_truncate.c
-    src/common/path_virtualization.c
-    src/common/pscal_terminal_host.c
-    src/common/frontend_kind.c
-    src/common/runtime_paths.c
-    src/common/pascal_state.c
-    src/core/diagmap.c
-    src/vm/vm.c
-    lib/noise/noise.c
-    src/runtime/terrain/terrain_generator.c
-    src/runtime/shaders/shader_common.c
-    src/runtime/shaders/terrain/terrain_shader.c
-    src/runtime/shaders/sky/sky_dome.c
-    src/runtime/shaders/sky/cloud_layer.c
+    components/pscal-core/src/backend_ast/shell_runtime_stub.c
+    components/pscal-core/src/backend_ast/thread_wrappers.c
+    components/pscal-core/src/compiler/bytecode.c components/pscal-core/src/compiler/compiler.c
+    components/pscal-core/src/core/cache.c
+    components/pscal-core/src/common/runtime_params.c
+    components/pscal-core/src/common/runtime_tty.c
+    components/pscal-core/src/common/runtime_clipboard.c
+    components/pscal-core/src/common/env_snapshot.c
+    components/pscal-core/src/common/pscal_hosts.c
+    components/pscal-core/src/common/path_truncate.c
+    components/pscal-core/src/common/path_virtualization.c
+    components/pscal-core/src/common/pscal_terminal_host.c
+    components/pscal-core/src/common/frontend_kind.c
+    components/pscal-core/src/common/runtime_paths.c
+    components/pscal-core/src/common/pascal_state.c
+    components/pscal-core/src/core/diagmap.c
+    components/pscal-core/src/vm/vm.c
+    components/pscal-core/lib/noise/noise.c
+    components/pscal-core/src/runtime/terrain/terrain_generator.c
+    components/pscal-core/src/runtime/shaders/shader_common.c
+    components/pscal-core/src/runtime/shaders/terrain/terrain_shader.c
+    components/pscal-core/src/runtime/shaders/sky/sky_dome.c
+    components/pscal-core/src/runtime/shaders/sky/cloud_layer.c
 )
 
 set(SMALLCLUE_SOURCES
@@ -1499,27 +1501,27 @@ set_property(SOURCE ${PSCAL_OPENRSYNC_ROOT}/main.c
 # --- Conditionally add SDL source files ---
 if(SDL)
     list(APPEND PSCAL_CORE_SOURCES
-        src/backend_ast/sdl.c
-        src/backend_ast/sdl3d.c
-        src/backend_ast/gl.c
-        src/backend_ast/audio.c
+        components/pscal-core/src/backend_ast/sdl.c
+        components/pscal-core/src/backend_ast/sdl3d.c
+        components/pscal-core/src/backend_ast/gl.c
+        components/pscal-core/src/backend_ast/audio.c
     )
     if(PSCAL_PLATFORM_IOS OR APPLE)
         list(APPEND PSCAL_CORE_SOURCES
-            src/backend_ast/graphics_3d_backend_ios.c
-            src/backend_ast/graphics_3d_metal_apple.m
+            components/pscal-core/src/backend_ast/graphics_3d_backend_ios.c
+            components/pscal-core/src/backend_ast/graphics_3d_metal_apple.m
         )
     else()
         list(APPEND PSCAL_CORE_SOURCES
-            src/backend_ast/graphics_3d_backend_gl.c
+            components/pscal-core/src/backend_ast/graphics_3d_backend_gl.c
         )
     endif()
 endif()
 
-set(NEXTVI_CORE_SOURCES third-party/nextvi/vi.c)
+set(NEXTVI_CORE_SOURCES components/pscal-core/third-party/nextvi/vi.c)
 list(APPEND PSCAL_CORE_SOURCES ${NEXTVI_CORE_SOURCES})
-set_property(SOURCE third-party/nextvi/vi.c APPEND PROPERTY COMPILE_DEFINITIONS "main=nextvi_main_entry")
-set_property(SOURCE third-party/nextvi/vi.c APPEND PROPERTY COMPILE_OPTIONS -Wno-gnu-folding-constant)
+set_property(SOURCE components/pscal-core/third-party/nextvi/vi.c APPEND PROPERTY COMPILE_DEFINITIONS "main=nextvi_main_entry")
+set_property(SOURCE components/pscal-core/third-party/nextvi/vi.c APPEND PROPERTY COMPILE_OPTIONS -Wno-gnu-folding-constant)
 
 option(SMALLCLUE_WITH_DVTM "Enable the dvtm front end as the smallclue 'dvtm' applet (host builds)." OFF)
 if(PSCAL_PLATFORM_IOS)
@@ -1751,24 +1753,24 @@ if(PSCAL_REAL_IOS)
         src/ios/hosts_override.c)
     # When using the custom resolver/interposer, suppress the portable wrapper
     # definitions in pscal_hosts.c to avoid duplicate symbols.
-    set_property(SOURCE src/common/pscal_hosts.c APPEND PROPERTY COMPILE_DEFINITIONS PSCAL_HOSTS_CUSTOM_IMPL)
+    set_property(SOURCE components/pscal-core/src/common/pscal_hosts.c APPEND PROPERTY COMPILE_DEFINITIONS PSCAL_HOSTS_CUSTOM_IMPL)
 endif()
 
 # ---- Extended builtins ----
 # Allow selectively enabling categories of extended builtins.
-add_subdirectory(src/ext_builtins)
+add_subdirectory(components/pscal-core/src/ext_builtins)
 list(APPEND PSCAL_CORE_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
-list(APPEND PSCAL_CORE_SOURCES src/third_party/yyjson/yyjson.c)
+list(APPEND PSCAL_CORE_SOURCES components/pscal-core/src/third_party/yyjson/yyjson.c)
 if(PSCAL_PLATFORM_IOS)
     list(APPEND PSCAL_CORE_SOURCES
-        src/common/frontend_symbol_wrappers.c
-        src/runtime/vproc/vproc.c
-        src/runtime/vproc/vproc_tree.c
-        src/runtime/vproc/tty/ish_compat.c
-        src/runtime/vproc/tty/pscal_fd.c
-        src/runtime/vproc/tty/pscal_tty.c
-        src/runtime/vproc/tty/pscal_pty.c
-        src/runtime/vproc/tty/pscal_tty_host.c
+        components/pscal-core/src/common/frontend_symbol_wrappers.c
+        components/pscal-core/src/runtime/vproc/vproc.c
+        components/pscal-core/src/runtime/vproc/vproc_tree.c
+        components/pscal-core/src/runtime/vproc/tty/ish_compat.c
+        components/pscal-core/src/runtime/vproc/tty/pscal_fd.c
+        components/pscal-core/src/runtime/vproc/tty/pscal_tty.c
+        components/pscal-core/src/runtime/vproc/tty/pscal_pty.c
+        components/pscal-core/src/runtime/vproc/tty/pscal_tty_host.c
     )
 endif()
 
@@ -1904,7 +1906,7 @@ if(PSCAL_PLATFORM_IOS)
         COMMENT "Embedding required static archives into libpscal_core_static.a for iOS")
 endif()
 target_include_directories(pscal_core_static BEFORE PRIVATE
-    third-party/nextvi
+    components/pscal-core/third-party/nextvi
 )
 if(PSCAL_DVTM_ENABLED)
     add_dependencies(pscal_core_static pscal_dvtm_static)
@@ -2083,7 +2085,7 @@ endif()
 # add_pscal_executable(hscal) // Lets not build this normally
 
 # Standalone VM binary
-set(PSCAL_VM_SOURCES src/vm/vm_main.c)
+set(PSCAL_VM_SOURCES components/pscal-core/src/vm/vm_main.c)
 if(NOT PSCAL_PLATFORM_IOS)
     add_pscal_executable(pscalvm ${PSCAL_VM_SOURCES})
 endif()
@@ -2127,12 +2129,12 @@ set(SHELL_SOURCES
     src/shell/runner.c
     src/shell/opt.c
     src/shell/stubs.c
-    src/backend_ast/shell.c
+    components/pscal-core/src/backend_ast/shell.c
 )
 
 list(APPEND SHELL_SOURCES
-    src/common/ast_shared.c
-    src/common/builtin_shared.c
+    components/pscal-core/src/common/ast_shared.c
+    components/pscal-core/src/common/builtin_shared.c
 )
 
 list(APPEND SHELL_SOURCES ${EXSH_EXT_BUILTIN_SOURCES})
@@ -2634,9 +2636,9 @@ if(NOT PSCAL_PLATFORM_IOS)
             PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
                         GROUP_READ GROUP_EXECUTE
                         WORLD_READ WORLD_EXECUTE)
-    install(FILES src/compiler/bytecode.h
+    install(FILES components/pscal-core/src/compiler/bytecode.h
             DESTINATION "${_pscal_runtime_root}/src/compiler")
-    install(FILES src/core/version.h
+    install(FILES components/pscal-core/src/core/version.h
             DESTINATION "${_pscal_runtime_root}/src/core")
     install(DIRECTORY Tests/libs/
             DESTINATION "${_pscal_runtime_root}/etc/tests"

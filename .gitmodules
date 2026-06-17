@@ -19,3 +19,6 @@
 [submodule "components/clike"]
 	path = components/clike
 	url = https://github.com/emkey1/clike.git
+[submodule "components/pscal-core"]
+	path = components/pscal-core
+	url = https://github.com/emkey1/pscal-core.git
