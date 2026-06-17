@@ -575,7 +575,7 @@ include_directories(
     src
     src/core
     src/Pascal
-    src/clike
+    components/clike/src
     src/symbol
     src/backend_ast
     src/compiler
@@ -2207,24 +2207,25 @@ if(SMALLCLUE_WITH_EXSH AND NOT TARGET pscal_exsh_static)
     target_link_libraries(pscal_exsh_static PUBLIC pscal_core_static)
 endif()
 
-# Tiny C front-end executable
+# Tiny C front-end executable (sources consumed from the clike submodule)
+set(CLIKE_SRC components/clike/src/clike)
 set(CLIKE_SOURCES
-    src/clike/main.c
-    src/clike/lexer.c
-    src/clike/parser.c
-    src/clike/ast.c
-    src/clike/builtins.c
-    src/clike/builtins/thread.c
-    src/clike/semantics.c
-    src/clike/translate.c
-    src/clike/opt.c
-    src/clike/preproc.c
-    src/clike/state.c
+    ${CLIKE_SRC}/main.c
+    ${CLIKE_SRC}/lexer.c
+    ${CLIKE_SRC}/parser.c
+    ${CLIKE_SRC}/ast.c
+    ${CLIKE_SRC}/builtins.c
+    ${CLIKE_SRC}/builtins/thread.c
+    ${CLIKE_SRC}/semantics.c
+    ${CLIKE_SRC}/translate.c
+    ${CLIKE_SRC}/opt.c
+    ${CLIKE_SRC}/preproc.c
+    ${CLIKE_SRC}/state.c
 )
 
 set(CLIKE_REPL_SOURCES ${CLIKE_SOURCES})
-list(REMOVE_ITEM CLIKE_REPL_SOURCES src/clike/main.c)
-list(APPEND CLIKE_REPL_SOURCES src/clike/repl.c)
+list(REMOVE_ITEM CLIKE_REPL_SOURCES ${CLIKE_SRC}/main.c)
+list(APPEND CLIKE_REPL_SOURCES ${CLIKE_SRC}/repl.c)
 
 if(NOT PSCAL_PLATFORM_IOS)
     add_executable(clike ${CLIKE_SOURCES})

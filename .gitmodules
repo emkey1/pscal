@@ -16,3 +16,6 @@
 [submodule "third-party/openrsync"]
 	path = third-party/openrsync
 	url = https://github.com/emkey1/openrsync.git
+[submodule "components/clike"]
+	path = components/clike
+	url = https://github.com/emkey1/clike.git
