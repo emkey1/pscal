@@ -2425,7 +2425,7 @@ if(NOT PSCAL_PLATFORM_IOS)
         PSCAL_FRONTEND_GET_MODULE_PATH=aetherGetModulePath
         PSCAL_FRONTEND_GET_MODULE_NAME=aetherGetModuleName
         PSCAL_FRONTEND_RESOLVE_IMPORT_PATH=aetherResolveImportPath)
-    target_link_libraries(aether PRIVATE pscal_pascal_static)
+    target_link_libraries(aether PRIVATE pscal_core_static)
     if(PSCAL_HAS_LIBCURL)
         if(TARGET CURL::libcurl)
             target_link_libraries(aether PRIVATE CURL::libcurl)
