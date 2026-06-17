@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Auto-deploy the Aether compiler to the claw2 eval box whenever a commit changes
+# it, so benchmark runs always use the current language. Installed into
+# .git/hooks/post-commit by tools/install_claw2_autodeploy.sh.
+#
+# Runs in the background (non-blocking); see /tmp/claw2_autodeploy.log. Skips
+# commits that don't touch the compiler. Set CLAW2_AUTODEPLOY=0 to disable.
+[ "${CLAW2_AUTODEPLOY:-1}" = "0" ] && exit 0
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+if git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | grep -qE '^(src/|CMakeLists\.txt$)'; then
+    echo "[post-commit] compiler source changed -> deploying to claw2 (background; log: /tmp/claw2_autodeploy.log)"
+    nohup bash "$ROOT/tools/deploy_aether_to_claw2.sh" > /tmp/claw2_autodeploy.log 2>&1 &
+fi
+exit 0
