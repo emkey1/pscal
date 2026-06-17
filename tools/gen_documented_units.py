@@ -13,7 +13,7 @@ def main():
     units = re.findall(r'^###\s+(\w+)', section, flags=re.MULTILINE)
     units_lower = [u.lower() for u in units]
 
-    header_path = Path('src/documented_units.h')
+    header_path = Path('src/core/documented_units.h')
     with header_path.open('w', encoding='utf-8') as f:
         f.write('// Generated from Docs/pscal_overview.md; do not edit manually.\n')
         f.write('#ifndef DOCUMENTED_UNITS_H\n#define DOCUMENTED_UNITS_H\n\n')

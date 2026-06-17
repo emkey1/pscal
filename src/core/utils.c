@@ -6,7 +6,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include "ast/ast.h"
-#include "Pascal/documented_units.h"
+#include "core/documented_units.h"
 #include "compiler/compiler.h"
 #include <stdio.h>
 #include "symbol/symbol.h"

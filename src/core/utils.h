@@ -1,6 +1,6 @@
 #ifndef UTILS_H
 #define UTILS_H
-#include "Pascal/parser.h"
+#include "core/type_registry.h"
 #include "symbol/symbol.h"
 #include "vm/vm.h"
 
@@ -294,7 +294,6 @@ void freeProcedureTable(void);
 void freeTypeTable(void);
 int getTerminalSize(int *rows, int *cols);
 void toLowerString(char *str);
-void parseError(Parser *parser, const char *message);
 void debugASTFile(AST *node);
 Value makeEnum(const char *enum_name, int ordinal);
 void freeValue(Value *v);

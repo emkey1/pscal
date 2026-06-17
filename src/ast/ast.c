@@ -4,7 +4,6 @@
 #include "ast.h"
 #include "core/globals.h"
 #include "symbol/symbol.h"
-#include "Pascal/parser.h"
 #include "backend_ast/builtin.h"
 #include <string.h>
 

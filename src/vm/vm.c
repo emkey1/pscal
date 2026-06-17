@@ -25,7 +25,6 @@
 #include "common/frontend_kind.h"
 #include "common/runtime_tty.h"
 #include "backend_ast/audio.h"
-#include "Pascal/parser.h"
 #include "ast/ast.h"
 #include "vm/string_sentinels.h"
 #include <termios.h>
