@@ -3043,6 +3043,102 @@
           "arithmetic"
         ]
       }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/208_clamp_varied_bounds",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/208_clamp_varied_bounds",
+      "sha256": "44b3320c743bd79f2e91748472ebaae1a361cefc58014bdf78140c5e9115bad9",
+      "stdout": "50\n20\n80\n-3\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "clamp",
+          "builtin",
+          "arithmetic"
+        ]
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/209_clamp_loop",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/209_clamp_loop",
+      "sha256": "5a2e46ee10473ba6607d19efb89e2237eba1740d78d0d1c72b28b3d5175538b2",
+      "stdout": "100\n5\n100\n73\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "clamp",
+          "builtin",
+          "arithmetic"
+        ]
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/210_clamp_to_score",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/210_clamp_to_score",
+      "sha256": "01739aa0514c9009a749f811f24e49a2182472fca94c70e67e337ebb2dd56327",
+      "stdout": "score = 100\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "clamp",
+          "builtin",
+          "arithmetic"
+        ]
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/211_clamp_negative_range",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/211_clamp_negative_range",
+      "sha256": "b409f4a06b08e9673343a81c76045d878031db076ca6d888b2e2ea8aaa23d65d",
+      "stdout": "-10\n0\n10\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "clamp",
+          "builtin",
+          "arithmetic"
+        ]
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/212_clamp_real",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/212_clamp_real",
+      "sha256": "394ed5501eb2863d0f783e2b6fd494bd92c5de1860c4e2f203d15cfcb790e2db",
+      "stdout": "clamped = 1.00\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "clamp",
+          "builtin",
+          "arithmetic"
+        ]
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/213_clamp_readings",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/213_clamp_readings",
+      "sha256": "9438494bc16736577d788d3ef977167220e99c64e31e95dabde77d227f352bf0",
+      "stdout": "reading 0: 105\nreading 1: 0\nreading 2: 72\nreading 3: 120\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "clamp",
+          "builtin",
+          "arithmetic"
+        ]
+      }
     }
   ]
 }

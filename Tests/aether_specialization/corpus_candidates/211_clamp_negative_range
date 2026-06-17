@@ -1,0 +1,12 @@
+// clamp_negative_range
+// expect: -10
+// expect: 0
+// expect: 10
+fn main() -> Void {
+    fx {
+        println(clamp(-50, -10, 10));
+        println(clamp(0, -10, 10));
+        println(clamp(25, -10, 10));
+    }
+    ret;
+}
