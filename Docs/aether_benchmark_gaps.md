@@ -119,6 +119,17 @@ diagnostic measure of Aether fluency — and the negative tier turns the languag
 deliberate rejections (a real part of the design) into things the benchmark
 actually defends.
 
+**Status — a first verified increment is drafted** in
+`Tests/aether_doc_bench/tasks_v2_additions.json`: five single-skill splits of
+`release_board` (`real_mean_format`, `clamp_scores`, `classify_threshold`,
+`count_by_category`) plus the recursion hole (`recursion_factorial`), and a
+two-task **negative-invariant tier** (`reject_inclusive_range` for `..=`,
+`effect_boundary_reject` for an effectful call outside `fx`). Each was compiled
+and run against `build/bin/aether` — the five positives match their
+`expected_stdout` exactly; the two negatives are rejected with the expected error
+codes (`SYN-001`, `FX-001`). The negative tier needs a `should_fail` scorer path
+(compile, pass iff rejected with `expected_error_code`).
+
 ## 8. Authoring v2 with generation assistance (methodology)
 
 *§5 and §7 above are hand-reasoned from five models' failures — i.e. the author's
