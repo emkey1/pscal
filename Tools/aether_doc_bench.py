@@ -903,7 +903,7 @@ def http_json_request(
 
         try:
             with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+                return json.loads(resp.read().decode("utf-8", errors="replace"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             if attempt < max_retries and should_retry_http_status(exc.code):
@@ -975,7 +975,7 @@ def http_json_get(url: str, api_key: str | None) -> dict[str, Any]:
 
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            return json.loads(resp.read().decode("utf-8", errors="replace"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"HTTP API error {exc.code}: {detail}") from exc
