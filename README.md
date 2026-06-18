@@ -11,6 +11,12 @@ an extensible builtin mechanism. The AST-JSON → bytecode tool
 (`pscaljson2bc`) makes the VM a public compilation target, so new front ends
 can be prototyped in any language.
 
+That design is now reflected in the repositories themselves: the shared backend
+is its own repo ([pscal-core](https://github.com/emkey1/pscal-core)) and so is
+each front end. This **umbrella** repo wires them together as git submodules and
+drives the full build (graphics, networking, the iOS app). See
+[Repository layout](#repository-layout-git).
+
 ## Front ends
 
 - **Aether** *(new, experimental)*: a compact language designed from the start
@@ -193,7 +199,26 @@ See `ios/README.md` and `Docs/ios_build.md` for a full walkthrough.
 
 ## Repository layout (git)
 
-PSCAL uses a mix of submodules and vendored source trees:
+PSCAL is split into focused repositories. This repo (`emkey1/pscal`) is the
+**umbrella**: it integrates the shared core and the front ends as git
+submodules under `components/` and drives the full build. Each component is its
+own public repo and also builds standalone via CMake `FetchContent`:
+
+| Path | Repository | What it is |
+| --- | --- | --- |
+| `components/pscal-core` | [emkey1/pscal-core](https://github.com/emkey1/pscal-core) | The shared VM, bytecode compiler, AST, lexer, symbol table and builtin backend. Every front end links it. |
+| `components/pascal` | [emkey1/pascal](https://github.com/emkey1/pascal) | The Pascal front end. |
+| `components/clike` | [emkey1/clike](https://github.com/emkey1/clike) | The CLike front end. |
+| `components/rea` | [emkey1/rea](https://github.com/emkey1/rea) | The Rea front end, which doubles as the shared engine Aether builds on. |
+| `components/aether` | [emkey1/aether](https://github.com/emkey1/aether) | The Aether front end; layers onto the Rea engine through a runtime hook seam. |
+| `components/exsh` | [emkey1/exsh](https://github.com/emkey1/exsh) | The exsh shell front end. |
+
+The umbrella consumes each component's *sources* (not a prebuilt library), so a
+single `cmake --build` rebuilds everything consistently. To hack on one
+component alone, clone its repo and run `cmake -S . -B build` — FetchContent
+pulls in `pscal-core` (and, for `aether`, `rea`) automatically.
+
+PSCAL also uses other submodules and vendored source trees:
 
 - Submodules (pinned in `.gitmodules`): `src/smallclue`, `third-party/SDL`,
   `third-party/micro`, `third-party/dvtm`, `third-party/libgit2`,
