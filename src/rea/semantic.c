@@ -5,7 +5,7 @@
 #include "core/utils.h"
 #include "rea/parser.h"
 #include "aether/parser.h"
-#include "aether/diagnostics.h"
+#include "rea/frontend_hooks.h"
 #include "aether/state.h"
 #include "aether/translate.h"
 #include "common/frontend_kind.h"
@@ -195,7 +195,7 @@ static void reportReaLineError(int line, const char *fmt, ...) {
     va_end(args);
 
     if (frontendIsAether()) {
-        code = aetherInferDiagnosticCode(NULL, message);
+        code = reaFrontendInferDiagnosticCode(NULL, message);
     }
 
     if (gReaSourcePath && *gReaSourcePath) {
@@ -225,7 +225,7 @@ static void reportReaLineWarning(int line, const char *fmt, ...) {
     va_end(args);
 
     if (frontendIsAether()) {
-        code = aetherInferDiagnosticCode("compatibility", message);
+        code = reaFrontendInferDiagnosticCode("compatibility", message);
     }
 
     if (gReaSourcePath && *gReaSourcePath) {
@@ -1181,7 +1181,7 @@ static void collectImportBindings(AST *decls, ReaModuleBindingList *bindings) {
             ReaModuleInfo *mod = loadModuleRecursive(path);
             if (!mod) {
                 if (frontendIsAether()) {
-                    if (aetherGetVerboseCompatibilityDiagnostics()) {
+                    if (reaFrontendGetVerboseCompatibilityDiagnostics()) {
                         reportReaLineWarning(line,
                                              "Aether ignored missing import '%s'.",
                                              path);

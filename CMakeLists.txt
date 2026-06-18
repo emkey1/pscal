@@ -2335,7 +2335,7 @@ set(REA_SOURCES
     src/rea/state.c
     src/rea/builtins/thread.c
     src/rea/type_stubs.c
-    src/aether/diagnostics.c
+    src/rea/frontend_hooks.c
 )
 
 if(NOT PSCAL_PLATFORM_IOS)
@@ -2400,6 +2400,7 @@ endif()
 # Aether front-end executable (bootstrapped on the shared Rea implementation)
 set(AETHER_SOURCES
     ${REA_SOURCES}
+    src/aether/diagnostics.c
     src/aether/translate.c
     src/aether/parser.c
     src/aether/semantic.c

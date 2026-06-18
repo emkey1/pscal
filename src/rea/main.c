@@ -50,6 +50,7 @@
 #include "rea/parser.h"
 #include "rea/state.h"
 #include "rea/semantic.h"
+#include "rea/frontend_hooks.h"
 #include "aether/parser.h"
 #ifdef PSCAL_FRONTEND_HAS_REWRITE_DUMP
 #include "aether/translate.h"
@@ -948,12 +949,12 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
     char *preprocessed_source = preprocessConditionals(src, defines, define_count);
     const char *effective_src = preprocessed_source ? preprocessed_source : src;
 
-    aetherSetVerboseCompatibilityDiagnostics(
+    reaFrontendSetVerboseCompatibilityDiagnostics(
         frontendGetKind() == FRONTEND_KIND_AETHER ? verbose_compat : 0);
 
 #ifdef PSCAL_FRONTEND_HAS_REWRITE_DUMP
     if (dump_rewrite) {
-        char *rewritten = aetherRewriteSource(effective_src, path);
+        char *rewritten = reaFrontendRewriteSource(effective_src, path);
         if (!rewritten) {
             if (preprocessed_source) free(preprocessed_source);
             free(src);

@@ -4,7 +4,7 @@
 #include "symbol/symbol.h"
 #include "core/utils.h"
 #include "core/globals.h"
-#include "aether/diagnostics.h"
+#include "rea/frontend_hooks.h"
 #include "rea/semantic.h"
 #include <stdlib.h>
 #include <string.h>
@@ -4149,7 +4149,7 @@ AST *parseRea(const char *source) {
             }
             if (frontendIsAether()) {
                 const char *path = reaSemanticGetSourcePath();
-                const char *code = aetherInferDiagnosticCode("parser", "Unexpected token");
+                const char *code = reaFrontendInferDiagnosticCode("parser", "Unexpected token");
                 if (path && *path) {
                     fprintf(stderr, "%s:%d: ", path, p.current.line);
                 }
