@@ -579,6 +579,7 @@ include_directories(
     components/clike/src
     components/rea/src
     components/aether/src
+    components/exsh/src
     components/pscal-core/src/symbol
     components/pscal-core/src/backend_ast
     components/pscal-core/src/compiler
@@ -2122,17 +2123,20 @@ if(BUILD_PSCALD)
 endif()
 
 # exsh front-end executable
+# exsh front-end sources, consumed from the exsh submodule. The shared shell
+# pieces (backend shell.c, common ast/builtin helpers) live in pscal-core.
+set(EXSH_SRC components/exsh/src/shell)
 set(SHELL_SOURCES
-    src/shell/main.c
-    src/shell/lexer.c
-    src/shell/parser.c
-    src/shell/ast.c
-    src/shell/semantics.c
-    src/shell/codegen.c
-    src/shell/builtins.c
-    src/shell/runner.c
-    src/shell/opt.c
-    src/shell/stubs.c
+    ${EXSH_SRC}/main.c
+    ${EXSH_SRC}/lexer.c
+    ${EXSH_SRC}/parser.c
+    ${EXSH_SRC}/ast.c
+    ${EXSH_SRC}/semantics.c
+    ${EXSH_SRC}/codegen.c
+    ${EXSH_SRC}/builtins.c
+    ${EXSH_SRC}/runner.c
+    ${EXSH_SRC}/opt.c
+    ${EXSH_SRC}/stubs.c
     components/pscal-core/src/backend_ast/shell.c
 )
 

@@ -31,3 +31,6 @@
 [submodule "components/pascal"]
 	path = components/pascal
 	url = https://github.com/emkey1/pascal.git
+[submodule "components/exsh"]
+	path = components/exsh
+	url = https://github.com/emkey1/exsh.git
