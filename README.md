@@ -82,21 +82,17 @@ fn main() -> Void {
 }
 ```
 
-Documentation and examples:
+Documentation and examples now live in the [aether](https://github.com/emkey1/aether) repo:
 
-- Full reference: `Docs/` [VERIFY: exact filename — the two Aether docs
-  cross-reference each other as `aether_for_humans_and_llms.md` and
-  `aether_for_llms_and_others.md`; settle on one name and link it here]
-- Small-context LLM guide: `Docs/aether_for_llms_with_small_contexts.md`
-- Examples: `Examples/aether/base/`, `Examples/aether/showcase/`
-  (`agent_report`, `release_board`)
+- Full reference: [`docs/aether_for_llms_and_others.md`](components/aether/docs/aether_for_llms_and_others.md)
+- Small-context LLM guide: [`docs/aether_for_llms_with_small_contexts.md`](components/aether/docs/aether_for_llms_with_small_contexts.md)
+- Examples: [`components/aether/examples/`](components/aether/examples) (`base/`, `showcase/agent_report`, `showcase/release_board`)
+- Training and benchmark notes: [aether-infrastructure](https://github.com/emkey1/aether-infrastructure)
 
 Example usage:
 
 ```
-[VERIFY: invocation — dedicated binary (e.g. build/bin/aether
-Examples/aether/showcase/agent_report) or via another front end's binary?
-Show the exact command a new user should run first.]
+build/bin/aether --no-cache components/aether/examples/showcase/agent_report
 ```
 
 Early internal testing suggests LLMs given only the Aether reference produce

@@ -1,8 +1,0 @@
-{
-  "jobs": [
-    { "name": "planner", "score": 95 },
-    { "name": "writer", "score": 81 },
-    { "name": "tester" },
-    { "name": "auditor", "score": 55 }
-  ]
-}

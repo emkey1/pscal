@@ -29,7 +29,7 @@ Start here to explore the available guides and references in this directory.
 - [rea_tutorial.md](rea_tutorial.md): build and run the Rea compiler with an SDL sample.
 
 ## Aether front end
-- [aether_for_llms_and_others.md](aether_for_llms_and_others.md): practical guide for humans and LLMs writing current Aether code, with examples and supported patterns.
+The Aether language docs now live in the [aether](https://github.com/emkey1/aether) repo under [`components/aether/docs/`](../components/aether/docs); training and benchmark notes are in [aether-infrastructure](https://github.com/emkey1/aether-infrastructure).
 
 ## Tiny compiler
 - [tools/tiny](../tools/tiny): educational Python-based compiler front end.

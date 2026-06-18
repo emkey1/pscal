@@ -1,4 +1,0 @@
-@cost 0ms
-fn main() -> Void {
-    ret;
-}

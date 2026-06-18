@@ -1,9 +1,0 @@
-use module_math;
-
-fn main() -> Void {
-    let value: Int = Math.answer();
-    fx {
-        writeln("module answer = ", value);
-    }
-    ret;
-}

@@ -11,8 +11,8 @@ models toward much longer answers.
 
 The benchmark compares document variants such as:
 
-- `Docs/aether_for_llms_and_others.md`
-- `Docs/aether_for_llms_with_small_contexts.md`
+- `components/aether/docs/aether_for_llms_and_others.md`
+- `components/aether/docs/aether_for_llms_with_small_contexts.md`
 - no guide at all (`--docs none`)
 
 against the same set of programming tasks.
@@ -268,7 +268,7 @@ For smaller local models, it is often better to treat them as a
 small-context core lane rather than forcing them through the larger guide.
 In practice that means:
 
-- run them against `Docs/aether_for_llms_with_small_contexts.md`
+- run them against `components/aether/docs/aether_for_llms_with_small_contexts.md`
 - keep only one local model loaded at a time
 - unload a model before loading the next one
 - count stability as part of the result, not just final exact-match rate

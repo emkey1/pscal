@@ -1,5 +1,0 @@
-@cost 5 ops
-@cost 7ms
-fn main() -> Void {
-    ret;
-}

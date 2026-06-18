@@ -46,8 +46,8 @@ DEFAULT_TASKS = REPO_ROOT / "Tests" / "aether_doc_bench" / "tasks.json"
 DEFAULT_AETHER_BIN = REPO_ROOT / "build" / "bin" / "aether"
 DEFAULT_DESTINATIONS_CONFIG = REPO_ROOT / "Tests" / "aether_doc_bench" / "destinations.template.json"
 DOC_VARIANTS: dict[str, pathlib.Path | None] = {
-    "full": REPO_ROOT / "Docs" / "aether_for_llms_and_others.md",
-    "small": REPO_ROOT / "Docs" / "aether_for_llms_with_small_contexts.md",
+    "full": REPO_ROOT / "components" / "aether" / "docs" / "aether_for_llms_and_others.md",
+    "small": REPO_ROOT / "components" / "aether" / "docs" / "aether_for_llms_with_small_contexts.md",
     "none": None,
 }
 _DESTINATION_CONTEXT_CACHE: dict[tuple[str, str, str], int | None] = {}

@@ -1,7 +1,0 @@
-fn main() -> Void {
-    fx {
-        print("Aether ");
-        println("print aliases");
-    }
-    ret;
-}

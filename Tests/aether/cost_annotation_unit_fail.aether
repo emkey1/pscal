@@ -1,4 +1,0 @@
-@cost 5ticks
-fn main() -> Void {
-    ret;
-}

@@ -1,9 +1,0 @@
-mod FunctionInference {
-    export fn localBase() -> Int {
-        ret 40;
-    }
-
-    export fn label() -> Text {
-        ret "Aether";
-    }
-}

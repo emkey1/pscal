@@ -10,10 +10,10 @@ import pathlib
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_DOCS = [
-    REPO_ROOT / "Docs" / "aether_for_llms_with_small_contexts.md",
+    REPO_ROOT / "components" / "aether" / "docs" / "aether_for_llms_with_small_contexts.md",
 ]
 OPTIONAL_DOCS = [
-    REPO_ROOT / "Docs" / "aether_for_llms_and_others.md",
+    REPO_ROOT / "components" / "aether" / "docs" / "aether_for_llms_and_others.md",
 ]
 
 

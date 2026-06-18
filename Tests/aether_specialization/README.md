@@ -83,7 +83,7 @@ and are not referenced by the manifest or the training export pipeline.
 
 The separate reference corpus currently pulls from:
 
-- `Docs/aether_for_llms_with_small_contexts.md`
+- `components/aether/docs/aether_for_llms_with_small_contexts.md`
 
 By default, only the small-context guide is exported into the reference corpus.
 Use `tools/aether_specialization_export_reference_corpus.py --include-full-guide`

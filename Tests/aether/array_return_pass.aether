@@ -1,7 +1,0 @@
-fn passthrough(values: Int[]) -> Int[] {
-    ret values;
-}
-
-fn main() -> Void {
-    ret;
-}

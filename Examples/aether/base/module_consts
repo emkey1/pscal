@@ -1,4 +1,0 @@
-mod ModuleConsts {
-    export const Greeting = "Aether";
-    export const Answer = 42;
-}

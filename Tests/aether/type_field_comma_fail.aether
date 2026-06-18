@@ -1,8 +1,0 @@
-type BadFields {
-    name: Text,
-    count: Int;
-}
-
-fn main() -> Void {
-    ret;
-}

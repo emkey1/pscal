@@ -1,7 +1,0 @@
-fn main() -> Void {
-    let id: Int = task_spawn("delay", "bad_worker", 1);
-    fx {
-        println(id);
-    }
-    ret;
-}

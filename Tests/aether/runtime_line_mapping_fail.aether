@@ -1,7 +1,0 @@
-fn main() -> Void {
-    let note: Text = "";
-    fx {
-        note = ai_chat("hello ", "world");
-    }
-    ret;
-}

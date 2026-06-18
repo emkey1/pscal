@@ -1,4 +1,0 @@
-@pre
-fn main() -> Void {
-    ret;
-}

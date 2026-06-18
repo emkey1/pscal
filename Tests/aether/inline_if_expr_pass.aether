@@ -1,8 +1,0 @@
-fn main() -> Void {
-    let value: Int = 10;
-    let score: Int = if value > 5 { 42 } else { 7 };
-    fx {
-        println(score);
-    }
-    ret;
-}
