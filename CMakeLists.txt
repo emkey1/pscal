@@ -2417,18 +2417,10 @@ if(NOT PSCAL_PLATFORM_IOS)
         PSCAL_FRONTEND_USAGE_NAME=\"aether\"
         PSCAL_FRONTEND_COMPILER_ID=\"aether\"
         PSCAL_FRONTEND_HAS_REWRITE_DUMP=1
-        PSCAL_FRONTEND_PARSE_SOURCE=parseAether
-        PSCAL_FRONTEND_PARSE_MODULE_SOURCE=parseAether
-        PSCAL_FRONTEND_SET_STRICT_MODE=aetherSetStrictMode
-        PSCAL_FRONTEND_RESET_SYMBOL_STATE=aetherResetSymbolState
-        PSCAL_FRONTEND_INVALIDATE_GLOBAL_STATE=aetherInvalidateGlobalState
-        PSCAL_FRONTEND_SEMANTIC_SET_SOURCE_PATH=aetherSemanticSetSourcePath
-        PSCAL_FRONTEND_PERFORM_SEMANTIC_ANALYSIS=aetherPerformSemanticAnalysis
-        PSCAL_FRONTEND_GET_LOADED_MODULE_COUNT=aetherGetLoadedModuleCount
-        PSCAL_FRONTEND_GET_MODULE_AST=aetherGetModuleAST
-        PSCAL_FRONTEND_GET_MODULE_PATH=aetherGetModulePath
-        PSCAL_FRONTEND_GET_MODULE_NAME=aetherGetModuleName
-        PSCAL_FRONTEND_RESOLVE_IMPORT_PATH=aetherResolveImportPath)
+        PSCAL_FRONTEND_INSTALL_HOOKS=aetherInstallFrontendHooks)
+    # Aether installs its parse/semantic/module + diagnostic hooks at startup via
+    # reaSetFrontendHooks() (src/aether/state.c); main() calls the installer named
+    # here, which also forces that TU to link inside the static library.
     target_link_libraries(aether PRIVATE pscal_core_static)
     if(PSCAL_HAS_LIBCURL)
         if(TARGET CURL::libcurl)
@@ -2490,18 +2482,10 @@ if(PSCAL_BUILD_STATIC_LIBS)
         PSCAL_FRONTEND_USAGE_NAME=\"aether\"
         PSCAL_FRONTEND_COMPILER_ID=\"aether\"
         PSCAL_FRONTEND_HAS_REWRITE_DUMP=1
-        PSCAL_FRONTEND_PARSE_SOURCE=parseAether
-        PSCAL_FRONTEND_PARSE_MODULE_SOURCE=parseAether
-        PSCAL_FRONTEND_SET_STRICT_MODE=aetherSetStrictMode
-        PSCAL_FRONTEND_RESET_SYMBOL_STATE=aetherResetSymbolState
-        PSCAL_FRONTEND_INVALIDATE_GLOBAL_STATE=aetherInvalidateGlobalState
-        PSCAL_FRONTEND_SEMANTIC_SET_SOURCE_PATH=aetherSemanticSetSourcePath
-        PSCAL_FRONTEND_PERFORM_SEMANTIC_ANALYSIS=aetherPerformSemanticAnalysis
-        PSCAL_FRONTEND_GET_LOADED_MODULE_COUNT=aetherGetLoadedModuleCount
-        PSCAL_FRONTEND_GET_MODULE_AST=aetherGetModuleAST
-        PSCAL_FRONTEND_GET_MODULE_PATH=aetherGetModulePath
-        PSCAL_FRONTEND_GET_MODULE_NAME=aetherGetModuleName
-        PSCAL_FRONTEND_RESOLVE_IMPORT_PATH=aetherResolveImportPath)
+        PSCAL_FRONTEND_INSTALL_HOOKS=aetherInstallFrontendHooks)
+    # Aether installs its parse/semantic/module + diagnostic hooks at startup via
+    # reaSetFrontendHooks() (src/aether/state.c); main() calls the installer named
+    # here, which also forces that TU to link inside the static library.
     target_link_libraries(pscal_aether_static PUBLIC pscal_core_static)
 endif()
 

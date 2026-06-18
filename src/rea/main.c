@@ -51,12 +51,6 @@
 #include "rea/state.h"
 #include "rea/semantic.h"
 #include "rea/frontend_hooks.h"
-#include "aether/parser.h"
-#ifdef PSCAL_FRONTEND_HAS_REWRITE_DUMP
-#include "aether/translate.h"
-#endif
-#include "aether/state.h"
-#include "aether/semantic.h"
 #include "ext_builtins/dump.h"
 #include "common/path_virtualization.h"
 
@@ -80,49 +74,9 @@
 #define PSCAL_FRONTEND_COMPILER_ID "rea"
 #endif
 
-#ifndef PSCAL_FRONTEND_PARSE_SOURCE
-#define PSCAL_FRONTEND_PARSE_SOURCE(source) parseRea(source)
-#endif
-
-#ifndef PSCAL_FRONTEND_SET_STRICT_MODE
-#define PSCAL_FRONTEND_SET_STRICT_MODE(enable) reaSetStrictMode(enable)
-#endif
-
-#ifndef PSCAL_FRONTEND_RESET_SYMBOL_STATE
-#define PSCAL_FRONTEND_RESET_SYMBOL_STATE() reaResetSymbolState()
-#endif
-
-#ifndef PSCAL_FRONTEND_INVALIDATE_GLOBAL_STATE
-#define PSCAL_FRONTEND_INVALIDATE_GLOBAL_STATE() reaInvalidateGlobalState()
-#endif
-
-#ifndef PSCAL_FRONTEND_SEMANTIC_SET_SOURCE_PATH
-#define PSCAL_FRONTEND_SEMANTIC_SET_SOURCE_PATH(path) reaSemanticSetSourcePath(path)
-#endif
-
-#ifndef PSCAL_FRONTEND_PERFORM_SEMANTIC_ANALYSIS
-#define PSCAL_FRONTEND_PERFORM_SEMANTIC_ANALYSIS(root) reaPerformSemanticAnalysis(root)
-#endif
-
-#ifndef PSCAL_FRONTEND_GET_LOADED_MODULE_COUNT
-#define PSCAL_FRONTEND_GET_LOADED_MODULE_COUNT() reaGetLoadedModuleCount()
-#endif
-
-#ifndef PSCAL_FRONTEND_GET_MODULE_AST
-#define PSCAL_FRONTEND_GET_MODULE_AST(index) reaGetModuleAST(index)
-#endif
-
-#ifndef PSCAL_FRONTEND_GET_MODULE_PATH
-#define PSCAL_FRONTEND_GET_MODULE_PATH(index) reaGetModulePath(index)
-#endif
-
-#ifndef PSCAL_FRONTEND_GET_MODULE_NAME
-#define PSCAL_FRONTEND_GET_MODULE_NAME(index) reaGetModuleName(index)
-#endif
-
-#ifndef PSCAL_FRONTEND_RESOLVE_IMPORT_PATH
-#define PSCAL_FRONTEND_RESOLVE_IMPORT_PATH(path) reaResolveImportPath(path)
-#endif
+/* The per-front-end entry points (parse, semantic analysis, module access, ...)
+ * are reached through the reaFrontend*() accessors in rea/frontend_hooks.h. The
+ * plain Rea build needs no overrides; Aether installs them via reaSetFrontendHooks(). */
 
 static void initSymbolSystem(void) {
     globalSymbols = createHashTable();
@@ -766,7 +720,7 @@ static bool importsAreFresh(AST* node, time_t cache_mtime) {
 static void collectUsesClauses(AST* node, List* out) {
     if (!node) return;
     if (node->type == AST_IMPORT && node->token && node->token->value) {
-        char *resolved = PSCAL_FRONTEND_RESOLVE_IMPORT_PATH(node->token->value);
+        char *resolved = reaFrontendResolveImportPath(node->token->value);
         if (resolved) {
             listAppend(out, resolved);
             free(resolved);
@@ -783,9 +737,17 @@ static void collectUsesClauses(AST* node, List* out) {
 }
 
 int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
+#ifdef PSCAL_FRONTEND_INSTALL_HOOKS
+    /* Install the active front end's hooks before the engine first uses them.
+     * Declared via the macro so the engine needs no front-end header; the
+     * explicit call also forces the installer's translation unit to link, which
+     * a static-library build would otherwise drop. */
+    void PSCAL_FRONTEND_INSTALL_HOOKS(void);
+    PSCAL_FRONTEND_INSTALL_HOOKS();
+#endif
     /* Always start from a clean slate in case a prior in-process run aborted
      * early (e.g., exit()/halt during startup). */
-    PSCAL_FRONTEND_INVALIDATE_GLOBAL_STATE();
+    reaFrontendInvalidateGlobalState();
 
     /* Skip process-wide fd redirection on iOS; background jobs share descriptors with the shell. */
 #if !defined(PSCAL_TARGET_IOS)
@@ -818,7 +780,7 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
     do {                                            \
         int __rea_rc = (value);                     \
         if (reaSymbolStateActive) {                 \
-            PSCAL_FRONTEND_RESET_SYMBOL_STATE();    \
+            reaFrontendResetSymbolState();    \
             reaSymbolStateActive = false;           \
         }                                           \
         frontendPopKind(previousKind);              \
@@ -1015,9 +977,9 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
         REA_RETURN(vmExitWithCleanup(EXIT_FAILURE));
     }
 
-    if (strict_mode) PSCAL_FRONTEND_SET_STRICT_MODE(1);
-    PSCAL_FRONTEND_SEMANTIC_SET_SOURCE_PATH(path);
-    AST *program = PSCAL_FRONTEND_PARSE_SOURCE(effective_src);
+    if (strict_mode) reaFrontendSetStrictMode(1);
+    reaFrontendSemanticSetSourcePath(path);
+    AST *program = reaFrontendParseSource(effective_src);
     if (!program) {
         diagnosticCaptureEnd(&diagCapture);
         if (diagnostics_json || diagnostics_toon) {
@@ -1030,7 +992,7 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
         free(src);
         REA_RETURN(vmExitWithCleanup(EXIT_FAILURE));
     }
-    PSCAL_FRONTEND_PERFORM_SEMANTIC_ANALYSIS(program);
+    reaFrontendPerformSemanticAnalysis(program);
     if (pascal_semantic_error_count > 0 && !dump_ast_json) {
         diagnosticCaptureEnd(&diagCapture);
         if (diagnostics_json || diagnostics_toon) {
@@ -1094,17 +1056,17 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
     InterpretResult result = INTERPRET_COMPILE_ERROR;
     bool compilation_ok = true;
     if (!used_cache) {
-        int moduleCount = PSCAL_FRONTEND_GET_LOADED_MODULE_COUNT();
+        int moduleCount = reaFrontendGetLoadedModuleCount();
         for (int i = 0; i < moduleCount && compilation_ok; i++) {
-            AST *moduleAST = PSCAL_FRONTEND_GET_MODULE_AST(i);
+            AST *moduleAST = reaFrontendGetModuleAST(i);
             if (!moduleAST) continue;
             annotateTypes(moduleAST, NULL, moduleAST);
             if (!compileModuleAST(moduleAST, &chunk)) {
                 compilation_ok = false;
                 fprintf(stderr, "Compilation failed while processing module '%s'.\n",
-                        PSCAL_FRONTEND_GET_MODULE_NAME(i)
-                            ? PSCAL_FRONTEND_GET_MODULE_NAME(i)
-                            : PSCAL_FRONTEND_GET_MODULE_PATH(i));
+                        reaFrontendGetModuleName(i)
+                            ? reaFrontendGetModuleName(i)
+                            : reaFrontendGetModulePath(i));
             }
         }
 

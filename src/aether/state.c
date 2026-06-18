@@ -2,6 +2,7 @@
 
 #include "aether/parser.h"
 #include "aether/diagnostics.h"
+#include "aether/semantic.h"
 #include "aether/translate.h"
 #include "rea/state.h"
 #include "rea/frontend_hooks.h"
@@ -26,11 +27,23 @@ int aetherGetVerboseCompatibilityDiagnostics(void) {
 }
 
 /* Install the Aether implementations of the shared engine's frontend hooks.
- * Runs before main(); the plain Rea front end does not compile this translation
- * unit, so it falls back to the engine's no-op defaults. */
-__attribute__((constructor))
-static void aetherInstallFrontendHooks(void) {
+ * Called explicitly from the engine's main() via PSCAL_FRONTEND_INSTALL_HOOKS, so
+ * the call site forces this translation unit to link even inside a static library
+ * (a constructor could be dropped). The plain Rea front end omits this unit and
+ * uses the engine's built-in defaults. */
+void aetherInstallFrontendHooks(void) {
     static const ReaFrontendHooks hooks = {
+        .parseSource = parseAether,
+        .setStrictMode = aetherSetStrictMode,
+        .resetSymbolState = aetherResetSymbolState,
+        .invalidateGlobalState = aetherInvalidateGlobalState,
+        .semanticSetSourcePath = aetherSemanticSetSourcePath,
+        .performSemanticAnalysis = aetherPerformSemanticAnalysis,
+        .getLoadedModuleCount = aetherGetLoadedModuleCount,
+        .getModuleAST = aetherGetModuleAST,
+        .getModulePath = aetherGetModulePath,
+        .getModuleName = aetherGetModuleName,
+        .resolveImportPath = aetherResolveImportPath,
         .inferDiagnosticCode = aetherInferDiagnosticCode,
         .rewriteSource = aetherRewriteSource,
         .setVerboseCompatibilityDiagnostics = aetherSetVerboseCompatibilityDiagnostics,

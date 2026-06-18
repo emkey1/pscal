@@ -4,10 +4,8 @@
 #include "core/types.h"
 #include "core/utils.h"
 #include "rea/parser.h"
-#include "aether/parser.h"
 #include "rea/frontend_hooks.h"
-#include "aether/state.h"
-#include "aether/translate.h"
+#include "core/diagmap.h"
 #include "common/frontend_kind.h"
 #include "ast/ast.h"
 #include "ast/closure_registry.h"
@@ -26,9 +24,7 @@
 #include <unistd.h>
 #endif
 
-#ifndef PSCAL_FRONTEND_PARSE_MODULE_SOURCE
-#define PSCAL_FRONTEND_PARSE_MODULE_SOURCE(source) parseRea(source)
-#endif
+/* Module parsing goes through reaFrontendParseSource() (see rea/frontend_hooks.h). */
 
 // Forward declaration from core/utils.c
 Token *newToken(TokenType type, const char *value, int line, int column);
@@ -1244,7 +1240,7 @@ static ReaModuleInfo *loadModuleRecursive(const char *path) {
         return NULL;
     }
 
-    AST *ast = PSCAL_FRONTEND_PARSE_MODULE_SOURCE(source);
+    AST *ast = reaFrontendParseSource(source);
     if (!ast) {
         free(source);
         free(resolved);
