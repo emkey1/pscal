@@ -25,3 +25,6 @@
 [submodule "components/rea"]
 	path = components/rea
 	url = https://github.com/emkey1/rea.git
+[submodule "components/aether"]
+	path = components/aether
+	url = https://github.com/emkey1/aether.git

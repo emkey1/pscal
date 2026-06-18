@@ -578,6 +578,7 @@ include_directories(
     src/Pascal
     components/clike/src
     components/rea/src
+    components/aether/src
     components/pscal-core/src/symbol
     components/pscal-core/src/backend_ast
     components/pscal-core/src/compiler
@@ -2402,13 +2403,16 @@ if(PSCAL_BUILD_STATIC_LIBS)
 endif()
 
 # Aether front-end executable (bootstrapped on the shared Rea implementation)
+# Aether overrides, consumed from the aether submodule; layered on the shared
+# Rea engine (REA_SOURCES) and installed at startup via the frontend-hook seam.
+set(AETHER_SRC components/aether/src/aether)
 set(AETHER_SOURCES
     ${REA_SOURCES}
-    src/aether/diagnostics.c
-    src/aether/translate.c
-    src/aether/parser.c
-    src/aether/semantic.c
-    src/aether/state.c
+    ${AETHER_SRC}/diagnostics.c
+    ${AETHER_SRC}/translate.c
+    ${AETHER_SRC}/parser.c
+    ${AETHER_SRC}/semantic.c
+    ${AETHER_SRC}/state.c
 )
 
 if(NOT PSCAL_PLATFORM_IOS)
