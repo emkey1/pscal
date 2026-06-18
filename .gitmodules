@@ -22,3 +22,6 @@
 [submodule "components/pscal-core"]
 	path = components/pscal-core
 	url = https://github.com/emkey1/pscal-core.git
+[submodule "components/rea"]
+	path = components/rea
+	url = https://github.com/emkey1/rea.git

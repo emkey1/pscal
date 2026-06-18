@@ -577,6 +577,7 @@ include_directories(
     components/pscal-core/src/core
     src/Pascal
     components/clike/src
+    components/rea/src
     components/pscal-core/src/symbol
     components/pscal-core/src/backend_ast
     components/pscal-core/src/compiler
@@ -2327,15 +2328,18 @@ if(PSCAL_BUILD_STATIC_LIBS)
 endif()
 
 # Rea front-end executable (placeholder)
+# Rea front-end engine sources, consumed from the rea submodule. Aether reuses
+# these (AETHER_SOURCES below) and installs its overrides via the hook seam.
+set(REA_SRC components/rea/src/rea)
 set(REA_SOURCES
-    src/rea/main.c
-    src/rea/lexer.c
-    src/rea/parser.c
-    src/rea/semantic.c
-    src/rea/state.c
-    src/rea/builtins/thread.c
-    src/rea/type_stubs.c
-    src/rea/frontend_hooks.c
+    ${REA_SRC}/main.c
+    ${REA_SRC}/lexer.c
+    ${REA_SRC}/parser.c
+    ${REA_SRC}/semantic.c
+    ${REA_SRC}/state.c
+    ${REA_SRC}/builtins/thread.c
+    ${REA_SRC}/type_stubs.c
+    ${REA_SRC}/frontend_hooks.c
 )
 
 if(NOT PSCAL_PLATFORM_IOS)
@@ -2697,7 +2701,7 @@ endif()
 set(JSON2BC_SOURCES
     src/tools/json2bc.c
     src/tools/ast_json_loader.c
-    src/rea/type_stubs.c
+    ${REA_SRC}/type_stubs.c
 )
 if(NOT PSCAL_PLATFORM_IOS)
     add_executable(pscaljson2bc ${JSON2BC_SOURCES})
