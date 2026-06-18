@@ -1,0 +1,15 @@
+// Regression: the string/parse stdlib that models reach for when turning text
+// into scalars (split / parse_int / parse_bool / itoa). Mirrors the over-engineered
+// shape that used to fail eligibility_bool_logic with SCOPE-001.
+fn main() -> Void {
+    let parts: Text[] = split("12,7,5", ",");
+    let a: Int = parse_int(parts[0]);
+    let b: Int = parse_int(parts[1]);
+    let flag: Bool = parse_bool("true");
+    fx {
+        println(a + b);
+        println(flag);
+        println(itoa(99));
+    }
+    ret;
+}

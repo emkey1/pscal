@@ -10,6 +10,8 @@ cd "$ROOT_DIR"
 AETHER_BIN="$ROOT_DIR/build/bin/aether"
 SMOKE_FIXTURE="$ROOT_DIR/Tests/aether/smoke.aether"
 NEG_ARRAY_FIXTURE="$ROOT_DIR/Tests/aether/negative_array_literal.aether"
+STRING_PARSE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/string_parse_pass.aether"
+TOON_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_alias_pass.aether"
 CONTRACT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/contracts_pass.aether"
 CONTRACT_LAYOUT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/contract_layout_pass.aether"
 CONTRACT_STRING_LEN_PASS_FIXTURE="$ROOT_DIR/Tests/aether/contract_string_len_pass.aether"
@@ -279,6 +281,21 @@ fi
 if ! grep -qx "neg_array = -5,-2,-4" /tmp/aether_neg_array_pass.out; then
     echo "unexpected negative array literal output (regression: negative Int[] elements)" >&2
     cat /tmp/aether_neg_array_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$STRING_PARSE_PASS_FIXTURE" >/tmp/aether_string_parse_pass.out
+printf '19\ntrue\n99\n' >/tmp/aether_string_parse_expected.out
+if ! cmp -s /tmp/aether_string_parse_expected.out /tmp/aether_string_parse_pass.out; then
+    echo "unexpected string/parse stdlib output (split/parse_int/parse_bool/itoa)" >&2
+    cat /tmp/aether_string_parse_pass.out >&2
+    exit 1
+fi
+# TOON aliases must resolve and dispatch to the canonical toon_* API. Accept the
+# no-yyjson fallback too, since the point is that the alias names compile + run.
+"$AETHER_BIN" --no-cache "$TOON_ALIAS_PASS_FIXTURE" >/tmp/aether_toon_alias_pass.out
+if ! grep -qxE 'Aether 42|toon unavailable' /tmp/aether_toon_alias_pass.out; then
+    echo "unexpected TOON alias output (parse_json/root_node/lookup_string/lookup_int/close_doc)" >&2
+    cat /tmp/aether_toon_alias_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$INLINE_IF_CALL_ARGS_PASS_FIXTURE" >/tmp/aether_inline_if_call_args_pass.out

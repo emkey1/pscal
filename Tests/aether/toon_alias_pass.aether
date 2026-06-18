@@ -1,0 +1,20 @@
+// Regression: the JSON-flavored TOON aliases models reach for (parse_json /
+// root_node / lookup_string / lookup_int / close_doc) normalize to the canonical
+// toon_* API and produce identical results.
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("toon unavailable");
+        }
+        ret;
+    }
+    let doc: ToonDoc = parse_json("{\"name\":\"Aether\",\"score\":42}");
+    let root: ToonNode = root_node(doc);
+    let name: Text = lookup_string(root, "name");
+    let score: Int = lookup_int(root, "score");
+    fx {
+        println(name, " ", score);
+    }
+    close_doc(doc);
+    ret;
+}
