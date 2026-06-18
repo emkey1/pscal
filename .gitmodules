@@ -28,3 +28,6 @@
 [submodule "components/aether"]
 	path = components/aether
 	url = https://github.com/emkey1/aether.git
+[submodule "components/pascal"]
+	path = components/pascal
+	url = https://github.com/emkey1/pascal.git

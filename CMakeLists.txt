@@ -575,7 +575,7 @@ include_directories(
     src
     components/pscal-core/src
     components/pscal-core/src/core
-    src/Pascal
+    components/pascal/src
     components/clike/src
     components/rea/src
     components/aether/src
@@ -1776,11 +1776,13 @@ if(PSCAL_PLATFORM_IOS)
     )
 endif()
 
+# Pascal front-end sources, consumed from the pascal submodule.
+set(PASCAL_SRC components/pascal/src/Pascal)
 set(PASCAL_FRONTEND_SOURCES
-    src/Pascal/main.c
-    src/Pascal/parser.c
-    src/Pascal/semantic.c
-    src/Pascal/opt.c
+    ${PASCAL_SRC}/main.c
+    ${PASCAL_SRC}/parser.c
+    ${PASCAL_SRC}/semantic.c
+    ${PASCAL_SRC}/opt.c
 )
 
 # ---- Toolchain feature detection ----
