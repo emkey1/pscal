@@ -79,7 +79,7 @@ Fixed
 Enhancements
 - Pascal: Introduced address-of operator `@` for routines and first-class procedure/function pointer types.
 - Pascal: Added indirect procedure-pointer calls in both expression and statement contexts.
-- Rea (experimental): Added a new object‑oriented front end with classes, fields, methods, constructors, single inheritance via `extends`, virtual dispatch, and `my`/`myself`/`super` semantics. See `Docs/rea_*` and `Examples/rea/base` or `Examples/rea/sdl`.
+- Rea (experimental): Added a new object‑oriented front end with classes, fields, methods, constructors, single inheritance via `extends`, virtual dispatch, and `my`/`myself`/`super` semantics. See `components/rea/docs/rea_*` and `components/rea/examples/base` or `components/rea/examples/sdl`.
 - Threads: Added `CreateThread(@Proc, arg)` and `WaitForThread(thread)` builtins; `CreateThread` remains backward-compatible with the 1‑arg form.
 - VM: Implemented indirect call opcodes and support for passing an initial pointer argument to new threads.
 - Tools: Added standalone bytecode decompiler `pscald` and AST JSON → Bytecode compiler `pscaljson2bc` (with optional Bash/Zsh completions).
@@ -126,7 +126,7 @@ Changed
 - CLike examples: `chudnovsky_native` constant updated to a real literal to satisfy `long double` typing.
 - Documentation:
   - README: front-end options, operator semantics, environment variables, SDL headless guidance.
-  - Docs/clike_tutorial: options, semantics (short-circuit, shifts, `~`), `#ifdef SDL_ENABLED`, imports, env vars.
+  - components/clike/docs/clike_tutorial: options, semantics (short-circuit, shifts, `~`), `#ifdef SDL_ENABLED`, imports, env vars.
 
 Fixed
 - Build: eliminated an unused local variable warning in CLike code generation for a clean release build.

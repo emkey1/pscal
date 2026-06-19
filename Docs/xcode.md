@@ -59,7 +59,7 @@ schemes:
    extra tweaks. If your installation lives somewhere else, add its parent folder to
    **Header Search Paths**.
 5. Clean and rebuild; SDL-only examples such as
-   `Examples/pascal/sdl/MultiBouncingBalls` will now launch from within Xcode.
+   `components/pascal/examples/sdl/MultiBouncingBalls` will now launch from within Xcode.
 
 To disable SDL again, remove the frameworks and the `SDL` macro entry—no other
 changes are required.

@@ -1,6 +1,6 @@
 # Turing Machine Example
 
-`Examples/pascal/base/TuringMachine` is an interactive single-tape Turing machine
+`components/pascal/examples/base/TuringMachine` is an interactive single-tape Turing machine
 simulator written in PSCAL Pascal. It started as a fixed 3-state busy-beaver
 demo and has been expanded into a more general teaching/example program.
 
@@ -51,7 +51,7 @@ Built-in machines currently include:
 From the repository root:
 
 ```sh
-build/bin/pascal Examples/pascal/base/TuringMachine
+build/bin/pascal components/pascal/examples/base/TuringMachine
 ```
 
 The main menu lets you choose a built-in machine or load one from disk.

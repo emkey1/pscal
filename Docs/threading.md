@@ -57,8 +57,8 @@ Interactive shells can export the shell-specific variable in `~/.exshrc`; the
 repository template shows a commented example that also wires in a helper for
 printing worker summaries.【F:etc/skel/.exshrc†L118-L160】 Pascal code can consult
 `PSCAL_THREAD_POOL_SIZE` (or emit hints for operators) before queueing work; the
-`threading_config` sample demonstrates a portable pattern for reading the
-variable and reporting the configured cap alongside `ThreadStatsCount`.【F:Examples/pascal/base/docs_examples/threading_config†L1-L44】
+`ThreadingConfig` sample demonstrates a portable pattern for reading the
+variable and reporting the configured cap alongside `ThreadStatsCount`.【F:components/pascal/examples/base/docs_examples/ThreadingConfig†L1-L44】
 
 ## Cooperative cancellation and reuse
 
@@ -114,16 +114,16 @@ pool_generation, name, active/ready/status fields at a glance.
 Manual smoke tests help confirm concurrency changes before committing to a full
 bench run:
 
-- Run `build/bin/exsh Examples/exsh/threading_demo` to confirm thread names,
+- Run `build/bin/exsh components/exsh/examples/exsh/threading_demo` to confirm thread names,
   status handling, and cooperative cancellation behave as expected for the
-  builtins allowed on worker threads.【F:Examples/exsh/threading_demo†L1-L30】
-- Run `build/bin/exsh Examples/exsh/parallel-check github.com example.com` to
+  builtins allowed on worker threads.【F:components/exsh/examples/exsh/threading_demo†L1-L30】
+- Run `build/bin/exsh components/exsh/examples/exsh/parallel-check github.com example.com` to
   queue DNS probes in parallel, tag workers with `ThreadSetName`, and release
   cached status/result pairs via `ThreadGetResult(..., true)` while the shell
-  keeps running foreground commands.【F:Examples/exsh/parallel-check†L1-L74】
-- Run `build/bin/exsh Examples/exsh/context_smoke` to exercise nested `exsh`
-  launches that each install an isolated shell runtime context.【F:Examples/exsh/context_smoke†L1-L5】
-- Execute `build/bin/pascal Examples/pascal/base/docs_examples/threading_config`
+  keeps running foreground commands.【F:components/exsh/examples/exsh/parallel-check†L1-L74】
+- Run `build/bin/exsh components/exsh/examples/exsh/context_smoke` to exercise nested `exsh`
+  launches that each install an isolated shell runtime context.【F:components/exsh/examples/exsh/context_smoke†L1-L5】
+- Execute `build/bin/pascal components/pascal/examples/base/docs_examples/ThreadingConfig`
   after exporting `PSCAL_THREAD_POOL_SIZE=<n>` to verify Pascal observes the
   configured limit and reports worker usage through `ThreadStatsCount`.
 - When adjusting pool sizing heuristics, compare throughput with Bash via the
@@ -150,6 +150,6 @@ Status legend: [ ] pending, [~] in progress, [x] done
 - [x] Harden cancellation/cleanup paths: ensure `status_ready`/`result_consumed` are cleared and slots return to idle; add tests (threadpool_smoke).
 - [x] Verify env overrides are startup-only and add regression notes for pool sizing/env bounds (documented quick check).
 - [x] Add shell-level diagnostics: a concise `threadpool` helper in exsh showing names, generation, and ready/status fields.
-- [x] Benchmark/smoke tests: `Examples/exsh/threading_demo`, `threadpool_smoke`, and `parallel-check` all pass (the DNS run requires network access to resolve hosts); shellbench rerun via `tools/shellbench_cacheable/shellbench -s ../../build/bin/exsh,bash ...` with all benchmarks returning numeric counts.
+- [x] Benchmark/smoke tests: `components/exsh/examples/exsh/threading_demo`, `threadpool_smoke`, and `parallel-check` all pass (the DNS run requires network access to resolve hosts); shellbench rerun via `tools/shellbench_cacheable/shellbench -s ../../build/bin/exsh,bash ...` with all benchmarks returning numeric counts.
 - [x] Per-VM shell context scaffold: allocate/free shell runtime state per VM, swap contexts when a VM is active, and ensure nested shell calls reuse the caller’s context so each exsh instance stays isolated.
 - [x] Migrate remaining global shell state (jobs/arrays/traps/history) into the per-VM context and expose multi-instance entry points for iOS multi-window shells/background tasks.  Shell tool threads now install an isolated shell runtime context before running `exsh_main`, and new helpers `shellRuntimeActivateContext`/`shellRuntimeCurrentContext` let the iOS host select a context per window.

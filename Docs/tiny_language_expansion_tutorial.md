@@ -13,7 +13,7 @@ It focuses on practical changes: tokenizer, parser, AST, and bytecode generation
 
 Recommended read first:
 
-- `Docs/clike_tiny_compiler.md`
+- `components/clike/docs/clike_tiny_compiler.md`
 
 ## Compiler Structure (Where To Edit)
 

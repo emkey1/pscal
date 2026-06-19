@@ -9,7 +9,7 @@
 
 1. Launch the demo:
    ```
-   ./build/bin/rea Examples/rea/sdl/landscape
+   ./build/bin/rea components/rea/examples/sdl/landscape
    ```
 2. Confirm the HUD shows entries for **FAST DRAW**, **BIOME TOUR**, **SCREENSHOT**, and **FRAME**. The tour/screenshot lines should read `N/A` when the relevant helpers are unavailable.
 3. Press **B** to start the biome tour. Observe the camera follow a smooth spline between at least three distinct vistas while palette/lighting presets change. The HUD should report the tour as `ON` during playback.

@@ -1,6 +1,6 @@
 # GoStyleClosureInterfaceDemo Walkthrough
 
-The `Examples/pascal/base/GoStyleClosureInterfaceDemo` sample still shows the
+The `components/pascal/examples/base/GoStyleClosureInterfaceDemo` sample still shows the
 core PSCAL idea set clearly:
 
 * closure values can capture state and escape their defining scope

@@ -49,9 +49,9 @@ Legend: Open, In Progress, Needs Verification, Fixed, Blocked
 - 2026-01-02: `xcodebuild -project ios/PSCAL.xcodeproj -scheme PscalApp -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/DerivedData-ios build` succeeded (hterm + runtime output logging instrumentation).
 - 2026-01-02: `xcodebuild -project ios/PSCAL.xcodeproj -scheme PscalApp -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/DerivedData-ios build` succeeded (hterm reload/reset handling + color fallback + JS error logging).
 - 2026-01-02: `xcodebuild -project ios/PSCAL.xcodeproj -scheme PscalApp -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/DerivedData-ios build` succeeded (prompt/output buffering changes).
-- 2026-01-02: `RUN_VPROC_TESTS=1 python Tests/exsh/exsh_test_harness.py --executable build/ios-host/bin/exsh --only jobs_wait_all` failed (stdout mismatch: only one active job listed after wait).
+- 2026-01-02: `RUN_VPROC_TESTS=1 python components/exsh/tests/exsh_test_harness.py --executable build/ios-host/bin/exsh --only jobs_wait_all` failed (stdout mismatch: only one active job listed after wait).
 - 2026-01-02: Jobspec kill regression stabilized (job id collision guard + terminate cleanup); `jobspec_kill` suite passes in ios-host build.
-- 2026-01-02: `RUN_VPROC_TESTS=1 python Tests/exsh/exsh_test_harness.py --executable build/ios-host/bin/exsh --only jobspec_kill` passed.
+- 2026-01-02: `RUN_VPROC_TESTS=1 python components/exsh/tests/exsh_test_harness.py --executable build/ios-host/bin/exsh --only jobspec_kill` passed.
 - 2026-01-02: `cmake --build build/ios-host --target exsh` succeeded (post jobspec fixes).
 - 2026-01-02: `cmake --build build/ios-host --target exsh` succeeded (runtime session stub made weak to avoid duplicate symbol).
 - 2026-01-01: `cmake --build build/ios-device` succeeded (smallclue link check after session-context stubs).
@@ -66,7 +66,7 @@ Legend: Open, In Progress, Needs Verification, Fixed, Blocked
 - 2026-01-01: `Tests/run_exsh_ios_host_tests.sh` failed while building OpenSSL (missing sysroot headers, `sys/types.h`).
 - 2026-01-01: `Tests/run_exsh_ios_host_tests.sh` built `exsh` but failed jobspec kill cases (`jobspec_kill_stability`, `jobspec_kill_vproc_required`, `jobspec_kill_shell_vproc`) with return code 1.
 - 2026-01-01: `xcodebuild -project ios/PSCAL.xcodeproj -scheme PscalApp -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/DerivedData-ios build` failed (CoreSimulator connection invalid; actool reports no available simulator runtimes).
-- 2026-01-01: Bash parity check shows `Tests/exsh/tests/jobspec_kill.exsh` fails under bash (killed job still appears as Terminated), so expectations may need adjustment alongside vproc job id fixes.
+- 2026-01-01: Bash parity check shows `components/exsh/tests/tests/jobspec_kill.exsh` fails under bash (killed job still appears as Terminated), so expectations may need adjustment alongside vproc job id fixes.
 - 2026-01-01: `cmake --build build/ios-host --target exsh` succeeded after P0 fixes.
 - 2026-01-01: `xcodebuild -project ios/PSCAL.xcodeproj -scheme PscalApp -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/DerivedData-ios build` failed (CoreSimulator connection invalid; no simulator runtimes for asset catalog).
 - 2026-01-01: `cmake --build --preset ios-simulator --target pscal_core_static pscal_exsh_static pscal_pascal_static pscal_clike_static pscal_rea_static pscal_vm_static pscal_json2bc_static pscal_pscald_static pscal_tool_runner` succeeded (rebuild triggered OpenSSL/curl; warnings in `src/backend_ast/shell.c` about unused helpers).

@@ -251,7 +251,7 @@ working directory.
   ```
 
 - **Network tests** are guarded for CI determinism; set `RUN_NET_TESTS=1` to
-  enable them (e.g. `Examples/pascal/base/HttpHeadersNetDemo`; the CLike
+  enable them (e.g. `components/pascal/examples/base/HttpHeadersNetDemo`; the CLike
   runner skips tests with a `.net` sentinel file unless it is set).
 
 Note: on macOS you may see benign LaunchServices/XPC warnings on stderr when
@@ -313,7 +313,7 @@ build/bin/clike components/clike/examples/base/simple_web_server [port] [/path/t
 
 Implements a significant subset of classic Pascal. A demo exercising
 procedure/function pointers and the `CreateThread(@Proc, arg)` /
-`WaitForThread(t)` APIs lives at `Examples/pascal/base/ThreadsProcPtrDemo`:
+`WaitForThread(t)` APIs lives at `components/pascal/examples/base/ThreadsProcPtrDemo`:
 
 ```
 cmake --build build --target run_threads_procptr_demo
@@ -330,9 +330,9 @@ available via the `builtin` command. Prefix arguments with `int:`,
 `float:`/`double:`/`real:`, `bool:`, `str:` or `nil` to coerce shell tokens.
 
 ```
-build/bin/exsh Examples/exsh/pipeline
-build/bin/exsh --dump-bytecode Examples/exsh/functions
-build/bin/exsh Examples/exsh/builtins
+build/bin/exsh components/exsh/examples/exsh/pipeline
+build/bin/exsh --dump-bytecode components/exsh/examples/exsh/functions
+build/bin/exsh components/exsh/examples/exsh/builtins
 ```
 
 Bytecode is cached in `~/.pscal/bc_cache` (`--no-cache` to force
@@ -343,8 +343,8 @@ not yet expanded. **Known limitation**: control-flow helpers (`if`, loop
 syntax) are currently placeholders that execute both branches — gate behavior
 with `EXSH_LAST_STATUS` until the VM gains jump support for exsh.
 
-Threading demos: `Examples/exsh/threading_demo` and
-`Examples/exsh/parallel-check` show `ThreadSpawnBuiltin` / `WaitForThread` /
+Threading demos: `components/exsh/examples/exsh/threading_demo` and
+`components/exsh/examples/exsh/parallel-check` show `ThreadSpawnBuiltin` / `WaitForThread` /
 `ThreadGetResult` / `ThreadSetName`.
 
 For iOS/vproc parity testing on macOS and the release sanity sweep, see
