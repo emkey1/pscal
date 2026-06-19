@@ -5,13 +5,19 @@
 set -u
 W=/home/claw/training/aether-qwen-coder-30b-unsloth
 cd "$W" || exit 2
+# Resolve local snapshot dirs (Unsloth can't resolve the bare HF id offline).
+M7B=$(ls -d /storage/hf/hub/models--Qwen--Qwen2.5-Coder-7B-Instruct/snapshots/*/ 2>/dev/null | head -1)
+M14B=$(ls -d /storage/hf/hub/models--Qwen--Qwen2.5-Coder-14B-Instruct/snapshots/*/ 2>/dev/null | head -1)
 say() { echo "$(date '+%H:%M:%S') $*"; }
 say "=== SWEEP START ==="
+say "7B model:  $M7B"
+say "14B model: $M14B"
+[ -d "$M7B" ] && [ -d "$M14B" ] || { say "!! missing snapshot dir; abort"; exit 3; }
 
 run_one() {
   local TAG=$1 MODEL=$2 R=$3 ALPHA=$4 DATA=$5 EP=$6
   say ""
-  say "### TRAIN $TAG  model=$MODEL r=$R a=$ALPHA data=$DATA ep=$EP ###"
+  say "### TRAIN $TAG  r=$R a=$ALPHA data=$DATA ep=$EP ###"
   if [ ! -f "$W/$DATA/aether_instruction_sft.jsonl" ]; then
     say "!! MISSING dataset $W/$DATA — skipping $TAG"; return 1
   fi
@@ -32,10 +38,10 @@ run_one() {
   say "### RUN COMPLETE $TAG ###"
 }
 
-run_one qwen7b-ml1x  "Qwen/Qwen2.5-Coder-7B-Instruct"  32 64  data_qwen_ml1x 3
-run_one qwen7b-ml2x  "Qwen/Qwen2.5-Coder-7B-Instruct"  32 64  data_qwen_ml2x 3
-run_one qwen14b-ml1x "Qwen/Qwen2.5-Coder-14B-Instruct" 64 128 data_qwen_ml1x 4
-run_one qwen14b-ml2x "Qwen/Qwen2.5-Coder-14B-Instruct" 64 128 data_qwen_ml2x 4
+run_one qwen7b-ml1x  "$M7B"  32 64  data_qwen_ml1x 3
+run_one qwen7b-ml2x  "$M7B"  32 64  data_qwen_ml2x 3
+run_one qwen14b-ml1x "$M14B" 64 128 data_qwen_ml1x 4
+run_one qwen14b-ml2x "$M14B" 64 128 data_qwen_ml2x 4
 
 say ""
 say "=== SWEEP DONE — eval JSONs at /tmp/<tag>_v2_none.json; text-summaries above ==="
