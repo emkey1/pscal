@@ -1,9 +1,0 @@
-program StrBuiltinTest;
-var
-  n: integer;
-  s: string;
-begin
-  n := 42;
-  Str(n, s);
-  writeln('n=' + s);
-end.

@@ -1,7 +1,0 @@
-echo "multi-exec:start"
-for idx in 1 2 3; do
-    result=$(printf '%s' "$idx")
-    echo "loop:${idx}:${result}"
-done
-echo "multi-exec:end"
-

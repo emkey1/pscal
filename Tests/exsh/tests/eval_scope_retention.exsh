@@ -1,8 +1,0 @@
-echo "eval-retain:start"
-greeting="outer"
-greet() { echo "greet:$greeting"; }
-eval 'echo "eval-first:$greeting"; greet; greeting="inner"; newvar="from-eval"; echo "eval-second:$greeting"; greet'
-greet
-echo "after-greeting:$greeting"
-echo "newvar:$newvar"
-echo "eval-retain:end"

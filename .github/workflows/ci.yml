@@ -40,36 +40,36 @@ jobs:
           frontends = {
               "clike": [
                   "src/clike/**",
-                  "Tests/clike/**",
+                  "components/clike/**",
                   "Tests/libs/clike/**",
                   "Tests/run_clike_tests.sh",
                   "Tests/scope_verify/clike/**",
-                  "Examples/clike/**",
+                  "components/clike/examples/**",
                   "lib/clike/**",
               ],
               "exsh": [
                   "src/shell/**",
-                  "Tests/exsh/**",
+                  "components/exsh/**",
                   "Tests/run_shell_tests.sh",
-                  "Examples/exsh/**",
+                  "components/exsh/examples/**",
               ],
               "pascal": [
                   "src/Pascal/**",
-                  "Tests/Pascal/**",
+                  "components/pascal/**",
                   "Tests/libs/pascal/**",
                   "Tests/run_pascal_tests.sh",
                   "Tests/scope_verify/pascal/**",
-                  "Examples/pascal/**",
+                  "components/pascal/examples/**",
                   "lib/pascal/**",
               ],
               "rea": [
                   "src/rea/**",
-                  "Tests/rea/**",
+                  "components/rea/**",
                   "Tests/rea_negatives/**",
                   "Tests/libs/rea/**",
                   "Tests/run_rea_tests.sh",
                   "Tests/scope_verify/rea/**",
-                  "Examples/rea/**",
+                  "components/rea/examples/**",
                   "lib/rea/**",
               ],
           }
@@ -188,7 +188,7 @@ jobs:
         run: |
           set -e
           export SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
-          export CLIKE_LIB_DIR="$GITHUB_WORKSPACE/Examples/clike"
+          export CLIKE_LIB_DIR="$GITHUB_WORKSPACE/components/clike/examples"
           python3 Tests/examples/compile_all_examples.py --languages clike --fail-on-empty
       - name: Compile exsh examples (dump-only)
         if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.run_exsh == 'true'

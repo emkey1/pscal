@@ -1,7 +1,0 @@
-#!/usr/bin/env exsh
-# Ensure the ':' builtin executes in-place without spawning a process.
-: "first no-op"
-while :; do
-    echo "tick"
-    break
-done

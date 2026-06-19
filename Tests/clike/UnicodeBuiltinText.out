@@ -1,6 +1,0 @@
-dns=127.0.0.1
-http=200 雪山
-open=1
-bind=0
-sql=雪山
-thread=1

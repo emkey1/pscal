@@ -1,7 +1,0 @@
-int main() {
-    str s = "雪山";
-    printf("len=%d\n", length(s));
-    printf("copy=%s\n", copy(s, 2, 1));
-    printf("cmp=%d\n", s > "雪");
-    return 0;
-}

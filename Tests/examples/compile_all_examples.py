@@ -57,7 +57,7 @@ SKIP_BASENAMES = {
 
 # Intentionally-negative examples that should fail compilation.
 EXPECTED_COMPILE_FAILURES = {
-    "Examples/pascal/base/ClosureEscapeError",
+    "components/pascal/examples/base/ClosureEscapeError",
 }
 
 
@@ -141,7 +141,8 @@ def run_compile_sweep(
     for language in languages:
         config = LANG_CONFIG[language]
         binary = config["binary"]
-        root = REPO_ROOT / "Examples" / language
+        # Examples moved into the component submodules during the repo split.
+        root = REPO_ROOT / "components" / language / "examples"
         source_suffixes = config["source_suffixes"]
 
         if not binary.exists():

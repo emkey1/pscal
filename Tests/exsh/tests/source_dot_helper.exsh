@@ -1,3 +1,0 @@
-echo "source-dot-helper:start"
-DOT_VALUE="from-dot"
-echo "source-dot-helper:end"

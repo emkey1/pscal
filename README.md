@@ -278,10 +278,10 @@ lacks a user definition.
 build/bin/clike program.cl
 ```
 
-Sample programs live in `Examples/clike/base`; see `Docs/clike_tutorial.md`
+Sample programs live in `components/clike/examples/base`; see `components/clike/docs/clike_tutorial.md`
 for a step-by-step guide. An interactive session is available via
 `build/bin/clike-repl` (wraps a line in `int main() { ... }` and executes it;
-see `Docs/clike_repl_tutorial.md`).
+see `components/clike/docs/clike_repl_tutorial.md`).
 
 Options and semantics:
 
@@ -301,12 +301,12 @@ Environment variables:
 - `RUN_NET_TESTS=1`: enables network-dependent tests and demos.
 
 A minimal HTTP server written in CLike lives at
-`Examples/clike/base/simple_web_server` (worker pool, metrics, `index.html`
+`components/clike/examples/base/simple_web_server` (worker pool, metrics, `index.html`
 auto-detection; docs in `Docs/simple_web_server.md`; a basic `htdocs` lives
 under `lib/misc/simple_web_server/htdocs`):
 
 ```
-build/bin/clike Examples/clike/base/simple_web_server [port] [/path/to/htdocs] [threads] [queue]
+build/bin/clike components/clike/examples/base/simple_web_server [port] [/path/to/htdocs] [threads] [queue]
 ```
 
 ### Pascal
@@ -349,7 +349,7 @@ Threading demos: `Examples/exsh/threading_demo` and
 
 For iOS/vproc parity testing on macOS and the release sanity sweep, see
 `Tests/run_exsh_ios_host_tests.sh`, `Tests/run_ios_release_sanity.sh`, and
-`Docs/exsh_overview.md`.
+`components/exsh/docs/exsh_overview.md`.
 
 ### tiny
 
@@ -377,14 +377,14 @@ external front ends.
   `--dump-bytecode-only` disassembles and exits.
 
 ```
-build/bin/pascal --dump-ast-json Tests/Pascal/BoolTest | build/bin/pscaljson2bc -o out.bc
+build/bin/pascal --dump-ast-json components/pascal/tests/Pascal/BoolTest | build/bin/pscaljson2bc -o out.bc
 build/bin/pscalvm out.bc
 build/bin/pscald out.bc
 ```
 
 Installed alongside `pascal` and `pscalvm` by `cmake --install`. Shell
 completions live in `tools/completions` (bash and zsh; CMake can install them
-via `PSCAL_INSTALL_COMPLETIONS`). Full guide: `Docs/pscaljson2bc.md`.
+via `PSCAL_INSTALL_COMPLETIONS`). Full guide: `components/pscal-core/docs/pscaljson2bc.md`.
 
 ## HTTP networking
 

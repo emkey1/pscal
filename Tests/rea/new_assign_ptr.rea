@@ -1,4 +1,0 @@
-class Point { int x; }
-Point p;
-p = new Point();
-

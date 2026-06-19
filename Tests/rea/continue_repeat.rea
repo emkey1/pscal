@@ -1,7 +1,0 @@
-int i = 0;
-do {
-  i = i + 1;
-  if (i < 3) { continue; }
-  writeln(i);
-} while (i < 5);
-

@@ -1,9 +1,0 @@
-echo "parser-function-valid:start"
-
-function greet() {
-  echo "parser-function-valid:body"
-}
-
-greet
-
-echo "parser-function-valid:end"

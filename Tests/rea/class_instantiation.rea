@@ -1,3 +1,0 @@
-class Dummy {}
-Dummy d = new Dummy();
-writeln(1);

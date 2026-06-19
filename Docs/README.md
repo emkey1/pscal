@@ -7,41 +7,31 @@ Start here to explore the available guides and references in this directory.
 - [Architecture](Architecture): Mermaid diagram of system components (rendered as [Architecture.png](Architecture.png)).
 
 ## Pascal front end
-- [pascal_overview.md](pascal_overview.md): architecture and language features of the Pascal-style compiler.
-- [pascal_language_reference.md](pascal_language_reference.md): full specification of the Pascal-like language.
-- [pascal_closures_for_dummies.md](pascal_closures_for_dummies.md): practical guide to closures, function pointers, interface boxing, and current receiver rules.
+The Pascal language docs now live in the [pascal](https://github.com/emkey1/pascal) repo under [`components/pascal/docs/`](../components/pascal/docs).
 - [go_style_closure_interface_demo.md](go_style_closure_interface_demo.md): walkthrough of PSCAL's composition-first record/interface model and how closures fit into it.
 
 ## C-like front end
-- [clike_overview.md](clike_overview.md): semantics and capabilities of the compact C-style language.
-- [clike_language_reference.md](clike_language_reference.md): detailed specification of the C-like language.
-- [clike_tutorial.md](clike_tutorial.md): build and run the C-like compiler.
-- [clike_repl_tutorial.md](clike_repl_tutorial.md): interact with the language through the REPL.
+The CLike language docs now live in the [clike](https://github.com/emkey1/clike) repo under [`components/clike/docs/`](../components/clike/docs).
 
 ## exsh front end
-- [exsh_overview.md](exsh_overview.md): running shell scripts on the PSCAL VM, caching and builtin integration for exsh.
+The exsh docs now live in the [exsh](https://github.com/emkey1/exsh) repo under [`components/exsh/docs/`](../components/exsh/docs).
 - [exsh_debug_log.md](exsh_debug_log.md): enabling and reading the structured debug log.
 
 ## Rea front end
-- [rea_overview.md](rea_overview.md): architecture and roadmap of the experimental Rea compiler.
-- [rea_language_reference.md](rea_language_reference.md): full specification of the Rea language.
-- [rea_programmers_guide.md](rea_programmers_guide.md): practical workflows for building, testing, and extending Rea.
-- [rea_tutorial.md](rea_tutorial.md): build and run the Rea compiler with an SDL sample.
+The Rea language docs now live in the [rea](https://github.com/emkey1/rea) repo under [`components/rea/docs/`](../components/rea/docs).
 
 ## Aether front end
 The Aether language docs now live in the [aether](https://github.com/emkey1/aether) repo under [`components/aether/docs/`](../components/aether/docs); training and benchmark notes are in [aether-infrastructure](https://github.com/emkey1/aether-infrastructure).
 
 ## Tiny compiler
 - [tools/tiny](../tools/tiny): educational Python-based compiler front end.
-- [clike_tiny_compiler.md](clike_tiny_compiler.md): Tiny compiler implemented in CLike (`bin/tiny.clike`) and wrapper usage (`bin/tiny`).
+- [clike_tiny_compiler.md](../components/clike/docs/clike_tiny_compiler.md): Tiny compiler implemented in CLike (`bin/tiny.clike`) and wrapper usage (`bin/tiny`).
 - [tiny_language_expansion_tutorial.md](tiny_language_expansion_tutorial.md): practical guide for adding new Tiny language features to `bin/tiny.clike`.
 
 ## Virtual machine
-- [pscal_vm_overview.md](pscal_vm_overview.md): stack-based VM architecture and opcode reference.
-- [pscal_vm_builtins.md](pscal_vm_builtins.md): catalog of built-in functions provided by the VM.
+The VM reference (overview, builtins, assembler) now lives in the [pscal-core](https://github.com/emkey1/pscal-core) repo under [`components/pscal-core/docs/`](../components/pscal-core/docs).
 - [extended_builtins.md](extended_builtins.md): how to add custom built-in routines.
 - [standalone_vm_frontends.md](standalone_vm_frontends.md): writing external frontends that emit Pscal bytecode.
-- [pscalasm.md](pscalasm.md): assemble `.pbc` files from canonical `PSCALASM2` text (`pscald --emit-asm`), with legacy `--asm` block compatibility.
 
 ## Networking and security
 - [http_security.md](http_security.md): TLS, pinning, and proxy configuration for the HTTP APIs.
@@ -49,4 +39,4 @@ The Aether language docs now live in the [aether](https://github.com/emkey1/aeth
 - [simple_web_server.md](simple_web_server.md): minimal CLike HTTP server for demos and local testing.
 
 ## Object model
-- [object_layout.md](object_layout.md): runtime memory layout of objects.
+- [object_layout.md](../components/pscal-core/docs/object_layout.md): runtime memory layout of objects.
