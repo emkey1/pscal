@@ -206,22 +206,6 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/14_factorial_loop",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/14_factorial_loop",
-      "sha256": "6f92b260a31735c10287620212619c27c42036cadc293aeea2d2d21f6b226891",
-      "stdout": "5! = 120\n",
-      "metadata": {
-        "canonical": true,
-        "fixture_required": false,
-        "assumption_bearing": false,
-        "tags": [
-          "pure",
-          "loop"
-        ],
-        "notes": "iterative computation inside a pure function"
-      }
-    },
-    {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/15_counter_type",
       "repo_path": "Tests/aether_specialization/corpus_candidates/15_counter_type",
       "sha256": "46f29466921721b460cad6657be3068b1446064b3de661333f03b7c27c7c2d74",
@@ -572,23 +556,6 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/59_range_loop_squares_typed",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/59_range_loop_squares_typed",
-      "sha256": "0ae2c408e5d14e4e548d258966c30dbb7d8056690b3272a290447fe4061b041e",
-      "stdout": "0 => 0\n1 => 1\n2 => 4\n3 => 9\n4 => 16\n",
-      "metadata": {
-        "canonical": true,
-        "fixture_required": false,
-        "assumption_bearing": false,
-        "tags": [
-          "loop",
-          "typing",
-          "arithmetic"
-        ],
-        "notes": "Canonical typed loop-local arithmetic example."
-      }
-    },
-    {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/60_module_function_import_quoted",
       "repo_path": "Tests/aether_specialization/corpus_candidates/60_module_function_import_quoted",
       "sha256": "e99edfa75466142abfcda94b6b8ee08f12a210a55e8ad602f1a5998c8ad810f8",
@@ -620,42 +587,6 @@
           "const"
         ],
         "notes": "Canonical quoted module import with direct exported const access. Imported module reconstructed 2026-06-12 from golden stdout; verified with build/bin/aether."
-      }
-    },
-    {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/62_toon_parse_file_simple",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/62_toon_parse_file_simple",
-      "sha256": "5bc4fee88a8f77965b3fda335383bbe22fa1c6cad4634f0c93c04a278f92a602",
-      "stdout": "Aether\ntrue\n2\n",
-      "metadata": {
-        "canonical": true,
-        "fixture_required": true,
-        "assumption_bearing": false,
-        "tags": [
-          "toon",
-          "file",
-          "object-root",
-          "scalars"
-        ],
-        "notes": "Minimal object-root toon_parse_file scalar extraction. Fixture reconstructed 2026-06-12 from source + golden stdout; verified with build/bin/aether."
-      }
-    },
-    {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/63_toon_safe_nested_codes_file",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/63_toon_safe_nested_codes_file",
-      "sha256": "47d2ab19eb4732d7bf38b00cd8afc5b7b1c4650d99502bdef238b21ea71564ad",
-      "stdout": "row 0 = A1\nrow 1 = EMPTY\nrow 2 = EMPTY\nmissing = 2\n",
-      "metadata": {
-        "canonical": true,
-        "fixture_required": true,
-        "assumption_bearing": false,
-        "tags": [
-          "toon",
-          "file",
-          "nested",
-          "guards"
-        ],
-        "notes": "Staged nested TOON lookup with guarded fallback. Fixture reconstructed 2026-06-12 from source + golden stdout; verified with build/bin/aether."
       }
     },
     {
@@ -1756,40 +1687,6 @@
       }
     },
     {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/108_name_validation_exact",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/108_name_validation_exact",
-      "sha256": "327323b7706fc82ce751c134c1660b56cbb42128337f3308938bd1269002ddaf",
-      "stdout": "alpha=true\nempty=false\nbad=false\n",
-      "metadata": {
-        "canonical": true,
-        "fixture_required": false,
-        "assumption_bearing": false,
-        "tags": [
-          "text",
-          "bool",
-          "output"
-        ],
-        "notes": "Direct Bool printing with string_len and text equality, shaped to the benchmark validation task."
-      }
-    },
-    {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/109_inline_average_exact",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/109_inline_average_exact",
-      "sha256": "5355582625954a132684e342e5c0ee7fa1487f652e4c808aeebb3b180c6fc66a",
-      "stdout": "avg0=0\navg2=4\n",
-      "metadata": {
-        "canonical": true,
-        "fixture_required": false,
-        "assumption_bearing": false,
-        "tags": [
-          "inline-if",
-          "arithmetic",
-          "output"
-        ],
-        "notes": "Inline if-expression on the RHS only, with exact integer output labels."
-      }
-    },
-    {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/110_jobs_summary_file_exact",
       "repo_path": "Tests/aether_specialization/corpus_candidates/110_jobs_summary_file_exact",
       "sha256": "dbc3f4571baca1b72c7eb2cad115ddd4d15fa837dc23d2257c1f6767876c68e1",
@@ -2820,21 +2717,6 @@
           "real"
         ],
         "notes": "Module-scope Real const in @pure fn. Verified v7.7c reinforcement (confirmed none-failure target)."
-      }
-    },
-    {
-      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/v77c_struct_method",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/v77c_struct_method",
-      "sha256": "c6e268a99f59378e7e0d44ddc7f6307e230254e8b3282340663e259cf9bf01a9",
-      "stdout": "sum=7\n",
-      "metadata": {
-        "canonical": true,
-        "fixture_required": false,
-        "assumption_bearing": false,
-        "tags": [
-          "type"
-        ],
-        "notes": "Construct a method-bearing type with T{field:val} (no new). Verified v7.7c reinforcement (confirmed none-failure target)."
       }
     },
     {

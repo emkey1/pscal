@@ -1,0 +1,58 @@
+// 300_ledger_031
+// Concepts: Real arithmetic, helper functions, overdraft guard, percentage interest, fx formatted output, multi-step state
+// expect: Starting balance: $500.00
+// expect: Withdraw $27.00: $473.00
+// expect: Interest 2%: $482.46
+// expect: Deposit $200.00: $682.46
+// expect: Withdraw $151.00: $531.46
+// expect: Withdraw $213.00: $318.46
+// expect: Withdraw $38.00: $280.46
+// expect: Withdraw $104.00: $176.46
+// expect: Deposit $103.00: $279.46
+// expect: Deposit $26.00: $305.46
+// expect: Withdraw $117.00: $188.46
+// expect: Withdraw $180.00: $8.46
+// expect: Deposit $94.00: $102.46
+
+fn deposit(balance: Real, amount: Real) -> Real {
+    ret balance + amount;
+}
+
+fn withdraw(balance: Real, amount: Real) -> Real {
+    if balance >= amount { ret balance - amount; }
+    ret balance;
+}
+
+fn applyInterest(balance: Real, rate: Real) -> Real {
+    ret balance * (1.0 + rate);
+}
+
+fn main() -> Void {
+    let balance: Real = 500.0;
+    fx { println("Starting balance: $", balance:0:2); }
+    balance = withdraw(balance, 27.0);
+    fx { println("Withdraw $27.00: $", balance:0:2); }
+    balance = applyInterest(balance, 0.02);
+    fx { println("Interest 2%: $", balance:0:2); }
+    balance = deposit(balance, 200.0);
+    fx { println("Deposit $200.00: $", balance:0:2); }
+    balance = withdraw(balance, 151.0);
+    fx { println("Withdraw $151.00: $", balance:0:2); }
+    balance = withdraw(balance, 213.0);
+    fx { println("Withdraw $213.00: $", balance:0:2); }
+    balance = withdraw(balance, 38.0);
+    fx { println("Withdraw $38.00: $", balance:0:2); }
+    balance = withdraw(balance, 104.0);
+    fx { println("Withdraw $104.00: $", balance:0:2); }
+    balance = deposit(balance, 103.0);
+    fx { println("Deposit $103.00: $", balance:0:2); }
+    balance = deposit(balance, 26.0);
+    fx { println("Deposit $26.00: $", balance:0:2); }
+    balance = withdraw(balance, 117.0);
+    fx { println("Withdraw $117.00: $", balance:0:2); }
+    balance = withdraw(balance, 180.0);
+    fx { println("Withdraw $180.00: $", balance:0:2); }
+    balance = deposit(balance, 94.0);
+    fx { println("Deposit $94.00: $", balance:0:2); }
+    ret;
+}

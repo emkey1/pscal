@@ -1,7 +1,7 @@
 // 37_module_dual_helpers
 // Concepts: one main file plus two support modules; exported pure helpers;
 // variadic println with imported label helper
-// expect: Result: 15
+// expect: Result:15
 
 use "95_math_utils";
 use "96_text_utils";

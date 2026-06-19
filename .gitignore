@@ -10,6 +10,14 @@ third-party/SDL/*
 Tests/edge_input.txt
 Tests/readln_test.txt
 Tests/async_test_src.txt
+
+# Aether fine-tuning scratch + caches (local working dirs / eval outputs)
+.cache/
+Testing/
+Tests/aether_specialization/out/
+__pycache__/
+Tests/aether_doc_bench/destinations.*.json
+Tests/aether_doc_bench/*.local.json
 Tests/async_test_dst.txt
 Tests/src_to_file.txt
 Tests/dst_to_file.txt

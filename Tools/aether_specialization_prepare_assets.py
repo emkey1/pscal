@@ -14,6 +14,7 @@ DEFAULT_AETHER_BIN = REPO_ROOT / "build" / "bin" / "aether"
 DEFAULT_INSTRUCTION_MANIFEST = REPO_ROOT / "Tests" / "aether_specialization" / "seed_instruction_pairs.json"
 DEFAULT_REPAIR_MANIFEST = REPO_ROOT / "Tests" / "aether_specialization" / "seed_repair_pairs.json"
 DEFAULT_BENCHMARK_TASKS = REPO_ROOT / "Tests" / "aether_doc_bench" / "tasks.json"
+DEFAULT_CORPUS_MANIFEST = REPO_ROOT / "Tests" / "aether_specialization" / "corpus_candidates_manifest.json"
 
 
 def run(argv: list[str]) -> None:
@@ -30,7 +31,14 @@ def main() -> int:
                         help="benchmark task manifest used to de-contaminate training data")
     parser.add_argument("--include-benchmark-overlap", action="store_true", default=False,
                         help="train on records that reproduce benchmark outputs (contaminates tasks.json as a metric)")
+    parser.add_argument("--corpus-manifest", type=pathlib.Path, default=DEFAULT_CORPUS_MANIFEST,
+                        help="corpus manifest passed through to build_dataset (selects which corpus "
+                        "candidates are promoted to instruction pairs).")
+    parser.add_argument("--validate-manifest", type=pathlib.Path, default=None,
+                        help="manifest used for the strict corpus-layout validation step "
+                        "(default: the --corpus-manifest value).")
     args = parser.parse_args()
+    validate_manifest = args.validate_manifest if args.validate_manifest is not None else args.corpus_manifest
 
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -45,6 +53,8 @@ def main() -> int:
             "python3",
             str(REPO_ROOT / "tools" / "aether_specialization_validate_corpus.py"),
             "--strict",
+            "--manifest",
+            str(validate_manifest),
         ]
     )
     run(
@@ -81,6 +91,8 @@ def main() -> int:
         str(repair_jsonl),
         "--aether-bin",
         str(args.aether_bin),
+        "--corpus-manifest",
+        str(args.corpus_manifest),
     ]
     if not args.include_benchmark_overlap:
         build_dataset_cmd += ["--exclude-benchmark-tasks", str(args.benchmark_tasks)]
