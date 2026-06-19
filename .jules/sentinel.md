@@ -1,0 +1,4 @@
+## 2026-06-19 - Removed insecure popen() invocation for bash error formats
+**Vulnerability:** A command injection vulnerability was present in `src/backend_ast/shell/shell_builtins.inc` within `shellTypesetArithmeticErrorFormat`. The `BASH` environment variable was used to dynamically construct a shell command executed via `popen` to check the format of syntax error strings from Bash. An attacker controlling the `BASH` environment variable could inject arbitrary commands.
+**Learning:** Checking error formats by dynamically executing a user-provided shell path using `popen` introduces unnecessary command injection risks for a cosmetic feature.
+**Prevention:** Avoid using `popen` to execute commands derived from environment variables, especially for simple runtime format checks. Rely on static string definitions or safer environment probing mechanisms where possible.

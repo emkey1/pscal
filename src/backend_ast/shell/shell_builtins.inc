@@ -247,53 +247,6 @@ static void shellInvalidateFrontendState(FrontendKind kind) {
 #endif
 
 static const char *shellTypesetArithmeticErrorFormat(void) {
-    static int cached_style = -1;
-    if (cached_style < 0) {
-        cached_style = 0;
-        const char *bash_path = shellSafeGetenv("BASH");
-        if (!bash_path || bash_path[0] == '\0') {
-            bash_path = "/bin/bash";
-        }
-        if (bash_path && bash_path[0] != '\0') {
-            char quoted[768];
-            size_t qlen = 0;
-            quoted[qlen++] = '\'';
-            const char *p = bash_path;
-            for (; *p && qlen + 4 < sizeof(quoted); ++p) {
-                if (*p == '\'') {
-                    quoted[qlen++] = '\'';
-                    quoted[qlen++] = '\\';
-                    quoted[qlen++] = '\'';
-                    quoted[qlen++] = '\'';
-                } else {
-                    quoted[qlen++] = *p;
-                }
-            }
-            if (*p == '\0' && qlen + 2 < sizeof(quoted)) {
-                quoted[qlen++] = '\'';
-                quoted[qlen] = '\0';
-
-                char command[1024];
-                snprintf(command,
-                         sizeof(command),
-                         "%s --noprofile --norc -c 'typeset -i __pscaltmp=1+' 2>&1",
-                         quoted);
-                FILE *pipe = popen(command, "r");
-                if (pipe) {
-                    char buffer[256];
-                    size_t length = fread(buffer, 1, sizeof(buffer) - 1, pipe);
-                    buffer[length] = '\0';
-                    if (strstr(buffer, "arithmetic syntax error") != NULL) {
-                        cached_style = 1;
-                    }
-                    pclose(pipe);
-                }
-            }
-        }
-    }
-    if (cached_style == 1) {
-        return "%s: %s: arithmetic syntax error: operand expected (error token is \"%s\")";
-    }
     return "%s: %s: syntax error: operand expected (error token is \"%s\")";
 }
 Value vmBuiltinShellExec(VM *vm, int arg_count, Value *args) {
