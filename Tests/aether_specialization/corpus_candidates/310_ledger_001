@@ -1,0 +1,55 @@
+// 310_ledger_001
+// Concepts: Real arithmetic, helper functions, overdraft guard, percentage interest, fx formatted output, multi-step state
+// expect: Starting balance: $100.00
+// expect: Interest 1%: $101.00
+// expect: Deposit $278.00: $379.00
+// expect: Deposit $125.00: $504.00
+// expect: Deposit $53.00: $557.00
+// expect: Interest 2%: $568.14
+// expect: Withdraw $237.00: $331.14
+// expect: Deposit $257.00: $588.14
+// expect: Withdraw $57.00: $531.14
+// expect: Deposit $130.00: $661.14
+// expect: Deposit $230.00: $891.14
+// expect: Deposit $187.00: $1078.14
+
+fn deposit(balance: Real, amount: Real) -> Real {
+    ret balance + amount;
+}
+
+fn withdraw(balance: Real, amount: Real) -> Real {
+    if balance >= amount { ret balance - amount; }
+    ret balance;
+}
+
+fn applyInterest(balance: Real, rate: Real) -> Real {
+    ret balance * (1.0 + rate);
+}
+
+fn main() -> Void {
+    let balance: Real = 100.0;
+    fx { println("Starting balance: $", balance:0:2); }
+    balance = applyInterest(balance, 0.01);
+    fx { println("Interest 1%: $", balance:0:2); }
+    balance = deposit(balance, 278.0);
+    fx { println("Deposit $278.00: $", balance:0:2); }
+    balance = deposit(balance, 125.0);
+    fx { println("Deposit $125.00: $", balance:0:2); }
+    balance = deposit(balance, 53.0);
+    fx { println("Deposit $53.00: $", balance:0:2); }
+    balance = applyInterest(balance, 0.02);
+    fx { println("Interest 2%: $", balance:0:2); }
+    balance = withdraw(balance, 237.0);
+    fx { println("Withdraw $237.00: $", balance:0:2); }
+    balance = deposit(balance, 257.0);
+    fx { println("Deposit $257.00: $", balance:0:2); }
+    balance = withdraw(balance, 57.0);
+    fx { println("Withdraw $57.00: $", balance:0:2); }
+    balance = deposit(balance, 130.0);
+    fx { println("Deposit $130.00: $", balance:0:2); }
+    balance = deposit(balance, 230.0);
+    fx { println("Deposit $230.00: $", balance:0:2); }
+    balance = deposit(balance, 187.0);
+    fx { println("Deposit $187.00: $", balance:0:2); }
+    ret;
+}

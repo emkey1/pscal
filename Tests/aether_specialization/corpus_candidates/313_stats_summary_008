@@ -1,0 +1,54 @@
+// 313_stats_summary_008
+// Concepts: Int[] readings, reduction helpers (sum/min/max), real mean, second pass counting values above the mean, fx summary block
+// expect: count: 10
+// expect: sum: 436
+// expect: min: 9
+// expect: max: 83
+// expect: mean: 43.60
+// expect: above mean: 4
+
+fn sumOf(xs: Int[]) -> Int {
+    let total: Int = 0;
+    loop i in 0..length(xs) {
+        total = total + xs[i];
+    }
+    ret total;
+}
+
+fn minOf(xs: Int[]) -> Int {
+    let m: Int = xs[0];
+    loop i in 0..length(xs) {
+        if xs[i] < m { m = xs[i]; }
+    }
+    ret m;
+}
+
+fn maxOf(xs: Int[]) -> Int {
+    let m: Int = xs[0];
+    loop i in 0..length(xs) {
+        if xs[i] > m { m = xs[i]; }
+    }
+    ret m;
+}
+
+fn main() -> Void {
+    let xs: Int[] = [39, 25, 32, 83, 81, 51, 9, 40, 25, 51];
+    let n: Int = length(xs);
+    let total: Int = sumOf(xs);
+    let lo: Int = minOf(xs);
+    let hi: Int = maxOf(xs);
+    let mean: Real = total * 1.0 / n;
+    let above: Int = 0;
+    loop i in 0..n {
+        if xs[i] * 1.0 > mean { above = above + 1; }
+    }
+    fx {
+        println("count: ", n);
+        println("sum: ", total);
+        println("min: ", lo);
+        println("max: ", hi);
+        println("mean: ", mean:0:2);
+        println("above mean: ", above);
+    }
+    ret;
+}

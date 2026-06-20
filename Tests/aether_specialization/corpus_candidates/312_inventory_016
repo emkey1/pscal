@@ -1,0 +1,39 @@
+// 312_inventory_016
+// Concepts: parallel Text/Int/Real arrays, Int*Real line totals, running real grand total, threshold flag helper, formatted currency output, summary counts
+// expect: Spring: 15 x $21.96 = $329.40
+// expect: Bolt: 38 x $36.80 = $1398.40
+// expect: Bearing: 5 x $2.03 = $10.15
+// expect: Plate: 5 x $25.51 = $127.55
+// expect: Bracket: 11 x $11.20 = $123.20
+// expect: Gear: 32 x $24.76 = $792.32
+// expect: Screw: 10 x $31.89 = $318.90
+// expect: Rod: 29 x $24.41 = $707.89
+// expect: Nut: 10 x $17.15 = $171.50
+// expect: Washer: 19 x $39.31 = $746.89
+// expect: grand total: $4726.20
+// expect: low-stock items: 0
+
+fn lowFlag(qty: Int, threshold: Int) -> Text {
+    if qty < threshold { ret " LOW"; }
+    ret "";
+}
+
+fn main() -> Void {
+    let names: Text[] = ["Spring", "Bolt", "Bearing", "Plate", "Bracket", "Gear", "Screw", "Rod", "Nut", "Washer"];
+    let qtys: Int[] = [15, 38, 5, 5, 11, 32, 10, 29, 10, 19];
+    let prices: Real[] = [21.96, 36.80, 2.03, 25.51, 11.20, 24.76, 31.89, 24.41, 17.15, 39.31];
+    let threshold: Int = 5;
+    let n: Int = length(qtys);
+    let grand: Real = 0.0;
+    let low: Int = 0;
+    loop i in 0..n {
+        let line: Real = qtys[i] * prices[i];
+        grand = grand + line;
+        let flag: Text = lowFlag(qtys[i], threshold);
+        if qtys[i] < threshold { low = low + 1; }
+        fx { println(names[i], ": ", qtys[i], " x $", prices[i]:0:2, " = $", line:0:2, flag); }
+    }
+    fx { println("grand total: $", grand:0:2); }
+    fx { println("low-stock items: ", low); }
+    ret;
+}
