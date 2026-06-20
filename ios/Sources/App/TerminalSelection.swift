@@ -192,17 +192,38 @@ final class TerminalSelectionMenuView: UIView {
         layoutIfNeeded()
     }
 
+    private func showTransientFeedback(on button: UIButton, title: String) {
+        let originalTitle = button.title(for: .normal)
+        UIView.transition(with: button, duration: 0.2, options: .transitionCrossDissolve, animations: {
+            button.setTitle(title, for: .normal)
+        })
+
+        let generator = UINotificationFeedbackGenerator()
+        generator.notificationOccurred(.success)
+
+        UIAccessibility.post(notification: .announcement, argument: title)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            UIView.transition(with: button, duration: 0.2, options: .transitionCrossDissolve, animations: {
+                button.setTitle(originalTitle, for: .normal)
+            })
+        }
+    }
+
     @objc private func didTapCopy() {
         copyHandler?()
+        showTransientFeedback(on: copyButton, title: "Copied!")
     }
 
     @objc private func didTapCopyAll() {
         copyAllHandler?()
+        showTransientFeedback(on: copyAllButton, title: "Copied!")
     }
 
     @objc private func didTapPaste() {
         if isPasteEnabled {
             pasteHandler?()
+            showTransientFeedback(on: pasteButton, title: "Pasted!")
         }
     }
 }
