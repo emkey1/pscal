@@ -193,15 +193,18 @@ final class TerminalSelectionMenuView: UIView {
     }
 
     @objc private func didTapCopy() {
+        UIAccessibility.post(notification: .announcement, argument: "Copied selection")
         copyHandler?()
     }
 
     @objc private func didTapCopyAll() {
+        UIAccessibility.post(notification: .announcement, argument: "Copied all text")
         copyAllHandler?()
     }
 
     @objc private func didTapPaste() {
         if isPasteEnabled {
+            UIAccessibility.post(notification: .announcement, argument: "Pasted text")
             pasteHandler?()
         }
     }
