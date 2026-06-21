@@ -579,12 +579,25 @@ def sanitize_code(raw: str) -> str:
     if marker_idx != -1:
         text = text[:marker_idx]
     text = text.strip()
+    # Many models ignore OUT-001 and wrap the program in a Markdown code fence,
+    # often with prose before and/or after it (a leading ```aether and a trailing
+    # ``` followed by an explanation). Extract the contents of the FIRST fenced
+    # block and discard everything outside it. No-op for models that already
+    # return raw source (no fence -> the regex never matches).
+    fence = re.search(r"```[ \t]*[A-Za-z0-9_.+-]*[ \t]*\r?\n(.*?)\r?\n[ \t]*```", text, re.S)
+    if fence:
+        text = fence.group(1).strip()
+    else:
+        lines = text.splitlines()
+        if lines and lines[0].lstrip().startswith("```"):
+            lines = lines[1:]
+        while lines and lines[-1].strip() == "```":
+            lines.pop()
+        text = "\n".join(lines).strip()
+    # Drop a stray leading bare language tag (e.g. a line "aether") if present.
     lines = text.splitlines()
-    if lines and lines[0].startswith("```"):
-        lines = lines[1:]
-    while lines and lines[-1].strip() == "```":
-        lines.pop()
-    text = "\n".join(lines).strip()
+    if lines and lines[0].strip().lower() in ("aether", "rust", "python", "c", "go", "text"):
+        text = "\n".join(lines[1:]).strip()
     return text
 
 
@@ -1887,11 +1900,31 @@ def run_aether_cases_for_repeat(
         return case_record
 
     if batch_size <= 1:
-        for task in tasks:
-            case_record = run_single_task(task)
-            results.append(case_record)
-            if on_case_complete:
-                on_case_complete(case_record)
+        workers = max(1, int(os.environ.get("AETHER_BENCH_WORKERS", "1") or "1"))
+        if workers <= 1 or len(tasks) <= 1:
+            for task in tasks:
+                case_record = run_single_task(task)
+                results.append(case_record)
+                if on_case_complete:
+                    on_case_complete(case_record)
+            return results, batch_runs
+        # Concurrent fan-out: the loaded model serves several requests at once
+        # (LM Studio PARALLEL); keep original task order and serialize the
+        # checkpoint callback so the incremental JSON stays consistent.
+        import concurrent.futures as _cf
+        import threading as _th
+        _cb_lock = _th.Lock()
+        _by_idx: dict[int, dict[str, Any]] = {}
+        with _cf.ThreadPoolExecutor(max_workers=workers) as _ex:
+            _fut = {_ex.submit(run_single_task, t): i for i, t in enumerate(tasks)}
+            for _f in _cf.as_completed(_fut):
+                _i = _fut[_f]
+                _rec = _f.result()
+                _by_idx[_i] = _rec
+                if on_case_complete:
+                    with _cb_lock:
+                        on_case_complete(_rec)
+        results = [_by_idx[i] for i in range(len(tasks))]
         return results, batch_runs
 
     for task_group in chunk_list(tasks, batch_size):
