@@ -1,0 +1,48 @@
+// hard_b_log_levels
+// Group a TOON array of log events by level (info/warn/error), report per-level
+// counts, the single most frequent level (argmax over the three buckets), and
+// the index of the first error event.
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("events_hard_b.json");
+    let root: ToonNode = toon_root(doc);
+    let events: ToonNode = toon_key(root, "events");
+    let n: Int = toon_len(events);
+
+    let info: Int = 0;
+    let warn: Int = 0;
+    let error: Int = 0;
+    let firstError: Int = -1;
+
+    loop i in 0..n {
+        let ev: ToonNode = toon_at(events, i);
+        let level: Text = toon_get_text_or(ev, "level", "info");
+        let msg: Text = toon_get_text_or(ev, "msg", "");
+        if level == "info" { info = info + 1; }
+        if level == "warn" { warn = warn + 1; }
+        if level == "error" {
+            error = error + 1;
+            if firstError < 0 { firstError = i; }
+        }
+        fx { println("event ", i, ": ", level, " / ", msg); }
+    }
+
+    let dom: Text = "info";
+    let domCount: Int = info;
+    if warn > domCount { dom = "warn"; domCount = warn; }
+    if error > domCount { dom = "error"; domCount = error; }
+
+    fx {
+        println("info = ", info);
+        println("warn = ", warn);
+        println("error = ", error);
+        println("dominant = ", dom);
+    }
+    if firstError < 0 { fx { println("first error: none"); } }
+    if firstError >= 0 { fx { println("first error at index ", firstError); } }
+
+    toon_close(doc);
+    ret;
+}

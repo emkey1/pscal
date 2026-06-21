@@ -1,0 +1,146 @@
+{
+  "tasks": [
+    {
+      "id": "hard_expense_outliers",
+      "title": "Two-pass expense outlier report",
+      "mechanisms": [
+        "hard",
+        "two_pass",
+        "toon_file",
+        "real_format",
+        "type_method"
+      ],
+      "prompt": "A JSON file named `expenses_hard_a.json` is provided in the working directory, shaped `{\"expenses\": [{\"name\": Text, \"amount\": Int}, ...]}`. Write an Aether program that checks `has_toon()`; if TOON support is missing, print `yyjson unavailable` and return. Otherwise first compute the mean of all `amount` values; then, for each expense in order, compute its absolute deviation from the mean and mark it an outlier when that deviation exceeds half the mean. Print one line per expense as `expense <i>: <name> / <amount> / dev <deviation> / <isOutlier>` where `<i>` is the zero-based index, `<deviation>` has exactly two decimals, and `<isOutlier>` is `true`/`false`. Then print `count = <n>`, `mean = <mean>` (two decimals), `outliers = <count>`, and `maxDev = <largest deviation>` (two decimals), each on its own line. Close the document and return.",
+      "expected_stdout": "expense 0: a / 100 / dev 29.29 / false\nexpense 1: b / 110 / dev 19.29 / false\nexpense 2: c / 90 / dev 39.29 / false\nexpense 3: d / 105 / dev 24.29 / false\nexpense 4: e / 95 / dev 34.29 / false\nexpense 5: big / 400 / dev 270.71 / true\nexpense 6: tiny / 5 / dev 124.29 / true\ncount = 7\nmean = 129.29\noutliers = 2\nmaxDev = 270.71\n",
+      "files": {
+        "expenses_hard_a.json": "{\n  \"expenses\": [\n    {\"name\": \"a\", \"amount\": 100},\n    {\"name\": \"b\", \"amount\": 110},\n    {\"name\": \"c\", \"amount\": 90},\n    {\"name\": \"d\", \"amount\": 105},\n    {\"name\": \"e\", \"amount\": 95},\n    {\"name\": \"big\", \"amount\": 400},\n    {\"name\": \"tiny\", \"amount\": 5}\n  ]\n}\n"
+      },
+      "reference_solution": "// hard_a_expense_outliers\n// Two-pass over a TOON array: pass 1 computes the mean amount, pass 2 flags\n// each expense whose absolute deviation from the mean exceeds half the mean,\n// then reports the outlier count and the largest deviation.\n\n@pure\nfn absReal(x: Real) -> Real {\n    if x < 0.0 { ret 0.0 - x; }\n    ret x;\n}\n\ntype Stats {\n    outliers: Int;\n    maxDev: Real;\n\n    fn note(dev: Real, isOut: Bool) -> Void {\n        if isOut { self.outliers = self.outliers + 1; }\n        if dev > self.maxDev { self.maxDev = dev; }\n        ret;\n    }\n}\n\nfn main() -> Void {\n    if !has_toon() { fx { println(\"yyjson unavailable\"); } ret; }\n\n    let doc: ToonDoc = toon_parse_file(\"expenses_hard_a.json\");\n    let root: ToonNode = toon_root(doc);\n    let items: ToonNode = toon_key(root, \"expenses\");\n    let n: Int = toon_len(items);\n\n    let total: Int = 0;\n    loop i in 0..n {\n        let e: ToonNode = toon_at(items, i);\n        total = total + toon_get_int_or(e, \"amount\", 0);\n    }\n\n    let mean: Real = 0.0;\n    if n > 0 { mean = total * 1.0 / n; }\n    let threshold: Real = mean * 0.5;\n\n    let stats: Stats = new Stats();\n\n    loop i in 0..n {\n        let e: ToonNode = toon_at(items, i);\n        let name: Text = toon_get_text_or(e, \"name\", \"UNKNOWN\");\n        let amount: Int = toon_get_int_or(e, \"amount\", 0);\n        let dev: Real = absReal(amount * 1.0 - mean);\n        let isOut: Bool = false;\n        if dev > threshold { isOut = true; }\n        stats.note(dev, isOut);\n        fx { println(\"expense \", i, \": \", name, \" / \", amount, \" / dev \", dev:0:2, \" / \", isOut); }\n    }\n\n    fx {\n        println(\"count = \", n);\n        println(\"mean = \", mean:0:2);\n        println(\"outliers = \", stats.outliers);\n        println(\"maxDev = \", stats.maxDev:0:2);\n    }\n\n    toon_close(doc);\n    ret;\n}\n",
+      "achievability": "model-verified"
+    },
+    {
+      "id": "hard_log_levels",
+      "title": "Log-level grouping with dominant level",
+      "mechanisms": [
+        "hard",
+        "group",
+        "argmax",
+        "first_match",
+        "toon_file"
+      ],
+      "prompt": "A JSON file named `events_hard_b.json` is provided in the working directory, shaped `{\"events\": [{\"level\": Text, \"msg\": Text}, ...]}` where `level` is one of `info`, `warn`, or `error`. Write an Aether program that checks `has_toon()`; if TOON support is missing, print `yyjson unavailable` and return. Otherwise print one line per event as `event <i>: <level> / <msg>`. Track the count of each level and the index of the first `error` event. After the events print `info = <n>`, `warn = <n>`, `error = <n>`, then `dominant = <level>` where dominant is the level with the strictly highest count (on a tie prefer `info`, then `warn`). Finally print `first error at index <i>`, or `first error: none` if there were no errors. Close the document and return.",
+      "expected_stdout": "event 0: info / start\nevent 1: warn / slow\nevent 2: error / oops\nevent 3: info / retry\nevent 4: error / fail\nevent 5: warn / degraded\nevent 6: error / crash\ninfo = 2\nwarn = 2\nerror = 3\ndominant = error\nfirst error at index 2\n",
+      "files": {
+        "events_hard_b.json": "{\n  \"events\": [\n    {\"level\": \"info\", \"msg\": \"start\"},\n    {\"level\": \"warn\", \"msg\": \"slow\"},\n    {\"level\": \"error\", \"msg\": \"oops\"},\n    {\"level\": \"info\", \"msg\": \"retry\"},\n    {\"level\": \"error\", \"msg\": \"fail\"},\n    {\"level\": \"warn\", \"msg\": \"degraded\"},\n    {\"level\": \"error\", \"msg\": \"crash\"}\n  ]\n}\n"
+      },
+      "reference_solution": "// hard_b_log_levels\n// Group a TOON array of log events by level (info/warn/error), report per-level\n// counts, the single most frequent level (argmax over the three buckets), and\n// the index of the first error event.\n\nfn main() -> Void {\n    if !has_toon() { fx { println(\"yyjson unavailable\"); } ret; }\n\n    let doc: ToonDoc = toon_parse_file(\"events_hard_b.json\");\n    let root: ToonNode = toon_root(doc);\n    let events: ToonNode = toon_key(root, \"events\");\n    let n: Int = toon_len(events);\n\n    let info: Int = 0;\n    let warn: Int = 0;\n    let error: Int = 0;\n    let firstError: Int = -1;\n\n    loop i in 0..n {\n        let ev: ToonNode = toon_at(events, i);\n        let level: Text = toon_get_text_or(ev, \"level\", \"info\");\n        let msg: Text = toon_get_text_or(ev, \"msg\", \"\");\n        if level == \"info\" { info = info + 1; }\n        if level == \"warn\" { warn = warn + 1; }\n        if level == \"error\" {\n            error = error + 1;\n            if firstError < 0 { firstError = i; }\n        }\n        fx { println(\"event \", i, \": \", level, \" / \", msg); }\n    }\n\n    let dom: Text = \"info\";\n    let domCount: Int = info;\n    if warn > domCount { dom = \"warn\"; domCount = warn; }\n    if error > domCount { dom = \"error\"; domCount = error; }\n\n    fx {\n        println(\"info = \", info);\n        println(\"warn = \", warn);\n        println(\"error = \", error);\n        println(\"dominant = \", dom);\n    }\n    if firstError < 0 { fx { println(\"first error: none\"); } }\n    if firstError >= 0 { fx { println(\"first error at index \", firstError); } }\n\n    toon_close(doc);\n    ret;\n}\n",
+      "achievability": "model-verified"
+    },
+    {
+      "id": "hard_account_ledger",
+      "title": "Stateful account ledger simulation",
+      "mechanisms": [
+        "hard",
+        "stateful_sim",
+        "branch_on_state",
+        "clamp",
+        "type_method",
+        "toon_file"
+      ],
+      "prompt": "A JSON file named `ops_hard_c.json` is provided in the working directory, shaped `{\"cap\": Int, \"operations\": [{\"kind\": Text, \"amount\": Int}, ...]}` where `kind` is `deposit`, `withdraw`, or `interest`. Write an Aether program that checks `has_toon()`; if TOON support is missing, print `yyjson unavailable` and return. Otherwise simulate an account starting at balance 0, processing operations in order: a `deposit` adds `amount` then clamps the balance down to `cap` if it would exceed it; a `withdraw` succeeds only if the balance is at least `amount` (subtracting it), otherwise it is rejected and the balance is unchanged; `interest` adds `amount` percent of the current balance using integer division. Print one line per operation: deposits as `op <i>: deposit <amount> -> <balance>`, successful withdrawals as `op <i>: withdraw <amount> -> <balance>`, rejected withdrawals as `op <i>: withdraw <amount> REJECTED (balance <balance>)`, and interest as `op <i>: interest <amount>% -> <balance>`. Count an operation as applied when it changes state and as rejected otherwise. After all operations print `final balance = <balance>`, `applied = <n>`, and `rejected = <n>`, each on its own line. Close the document and return.",
+      "expected_stdout": "op 0: deposit 200 -> 200\nop 1: withdraw 50 -> 150\nop 2: withdraw 1000 REJECTED (balance 150)\nop 3: deposit 400 -> 500\nop 4: interest 10% -> 550\nop 5: withdraw 100 -> 450\nfinal balance = 450\napplied = 5\nrejected = 1\n",
+      "files": {
+        "ops_hard_c.json": "{\n  \"cap\": 500,\n  \"operations\": [\n    {\"kind\": \"deposit\", \"amount\": 200},\n    {\"kind\": \"withdraw\", \"amount\": 50},\n    {\"kind\": \"withdraw\", \"amount\": 1000},\n    {\"kind\": \"deposit\", \"amount\": 400},\n    {\"kind\": \"interest\", \"amount\": 10},\n    {\"kind\": \"withdraw\", \"amount\": 100}\n  ]\n}\n"
+      },
+      "reference_solution": "// hard_c_account_ledger\n// Stateful sequential simulation: process a TOON array of operations against an\n// account. Deposits add then clamp to a cap; withdrawals succeed only if funds\n// suffice (else rejected, balance unchanged); interest applies a percentage.\n// Tracks running balance and applied/rejected counts, with a per-op trace.\n\ntype Account {\n    balance: Int;\n    applied: Int;\n    rejected: Int;\n\n    fn deposit(amount: Int, cap: Int) -> Void {\n        self.balance = self.balance + amount;\n        if self.balance > cap { self.balance = cap; }\n        self.applied = self.applied + 1;\n        ret;\n    }\n\n    fn withdraw(amount: Int) -> Bool {\n        if amount > self.balance {\n            self.rejected = self.rejected + 1;\n            ret false;\n        }\n        self.balance = self.balance - amount;\n        self.applied = self.applied + 1;\n        ret true;\n    }\n\n    fn interest(pct: Int) -> Void {\n        let gain: Int = self.balance * pct / 100;\n        self.balance = self.balance + gain;\n        self.applied = self.applied + 1;\n        ret;\n    }\n}\n\nfn main() -> Void {\n    if !has_toon() { fx { println(\"yyjson unavailable\"); } ret; }\n\n    let doc: ToonDoc = toon_parse_file(\"ops_hard_c.json\");\n    let root: ToonNode = toon_root(doc);\n    let ops: ToonNode = toon_key(root, \"operations\");\n    let cap: Int = toon_get_int_or(root, \"cap\", 1000000);\n\n    let acct: Account = new Account();\n\n    loop i in 0..toon_len(ops) {\n        let op: ToonNode = toon_at(ops, i);\n        let kind: Text = toon_get_text_or(op, \"kind\", \"\");\n        let amount: Int = toon_get_int_or(op, \"amount\", 0);\n\n        if kind == \"deposit\" {\n            acct.deposit(amount, cap);\n            fx { println(\"op \", i, \": deposit \", amount, \" -> \", acct.balance); }\n        }\n        if kind == \"withdraw\" {\n            let ok: Bool = acct.withdraw(amount);\n            if ok { fx { println(\"op \", i, \": withdraw \", amount, \" -> \", acct.balance); } }\n            if !ok { fx { println(\"op \", i, \": withdraw \", amount, \" REJECTED (balance \", acct.balance, \")\"); } }\n        }\n        if kind == \"interest\" {\n            acct.interest(amount);\n            fx { println(\"op \", i, \": interest \", amount, \"% -> \", acct.balance); }\n        }\n    }\n\n    fx {\n        println(\"final balance = \", acct.balance);\n        println(\"applied = \", acct.applied);\n        println(\"rejected = \", acct.rejected);\n    }\n\n    toon_close(doc);\n    ret;\n}\n",
+      "achievability": "model-verified"
+    },
+    {
+      "id": "hard_collatz_recursion",
+      "title": "Recursive Collatz stopping times",
+      "mechanisms": [
+        "hard",
+        "recursion",
+        "helper_call",
+        "argmax",
+        "toon_file"
+      ],
+      "prompt": "A JSON file named `numbers_hard_d.json` is provided in the working directory, shaped `{\"numbers\": [{\"n\": Int}, ...]}`. Write an Aether program that checks `has_toon()`; if TOON support is missing, print `yyjson unavailable` and return. Otherwise for each number compute its Collatz stopping time: the number of steps to reach 1, where an even value `v` maps to `v / 2` and an odd value maps to `3 * v + 1` (a value of 1 or less has 0 steps). Implement this with a recursive function. Print one line per number as `number <i>: <n> -> <steps> steps`. After the list print `max steps = <maxSteps> (number <n>)`, naming the number that produced the maximum (the first to reach it on a tie). Close the document and return.",
+      "expected_stdout": "number 0: 6 -> 8 steps\nnumber 1: 7 -> 16 steps\nnumber 2: 11 -> 14 steps\nnumber 3: 27 -> 111 steps\nnumber 4: 9 -> 19 steps\nmax steps = 111 (number 27)\n",
+      "files": {
+        "numbers_hard_d.json": "{\n  \"numbers\": [{\"n\": 6}, {\"n\": 7}, {\"n\": 11}, {\"n\": 27}, {\"n\": 9}]\n}\n"
+      },
+      "reference_solution": "// hard_d_collatz\n// For each number in a TOON array, compute its Collatz stopping time with a\n// recursive helper (which itself calls an isEven helper), then report each and\n// the maximum stopping time together with the number that produced it.\n\n@pure\nfn isEven(n: Int) -> Bool {\n    let half: Int = n / 2;\n    if half * 2 == n { ret true; }\n    ret false;\n}\n\nfn collatz(n: Int) -> Int {\n    if n <= 1 { ret 0; }\n    if isEven(n) { ret 1 + collatz(n / 2); }\n    ret 1 + collatz(3 * n + 1);\n}\n\nfn main() -> Void {\n    if !has_toon() { fx { println(\"yyjson unavailable\"); } ret; }\n\n    let doc: ToonDoc = toon_parse_file(\"numbers_hard_d.json\");\n    let root: ToonNode = toon_root(doc);\n    let nums: ToonNode = toon_key(root, \"numbers\");\n    let n: Int = toon_len(nums);\n\n    let maxSteps: Int = -1;\n    let maxNum: Int = 0;\n\n    loop i in 0..n {\n        let elem: ToonNode = toon_at(nums, i);\n        let num: Int = toon_get_int_or(elem, \"n\", 0);\n        let steps: Int = collatz(num);\n        if steps > maxSteps { maxSteps = steps; maxNum = num; }\n        fx { println(\"number \", i, \": \", num, \" -> \", steps, \" steps\"); }\n    }\n\n    fx { println(\"max steps = \", maxSteps, \" (number \", maxNum, \")\"); }\n\n    toon_close(doc);\n    ret;\n}\n",
+      "achievability": "model-verified"
+    },
+    {
+      "id": "hard_payroll_nested",
+      "title": "Nested department payroll rollup",
+      "mechanisms": [
+        "hard",
+        "nested_traversal",
+        "argmax",
+        "toon_file"
+      ],
+      "prompt": "A JSON file named `org_hard_e.json` is provided in the working directory, shaped `{\"departments\": [{\"name\": Text, \"members\": [{\"name\": Text, \"salary\": Int}, ...]}, ...]}`. Write an Aether program that checks `has_toon()`; if TOON support is missing, print `yyjson unavailable` and return. Otherwise for each department compute its member count and the sum of member salaries. Print one line per department as `dept <i>: <name> / <count> members / payroll <sum>`. After all departments print `total members = <n>`, `total payroll = <n>`, and `top department = <name> (<payroll>)`, naming the department with the highest payroll (the first on a tie). Close the document and return.",
+      "expected_stdout": "dept 0: eng / 2 members / payroll 220\ndept 1: sales / 1 members / payroll 90\ndept 2: ops / 3 members / payroll 285\ntotal members = 6\ntotal payroll = 595\ntop department = ops (285)\n",
+      "files": {
+        "org_hard_e.json": "{\n  \"departments\": [\n    {\"name\": \"eng\", \"members\": [{\"name\": \"ana\", \"salary\": 100}, {\"name\": \"ben\", \"salary\": 120}]},\n    {\"name\": \"sales\", \"members\": [{\"name\": \"cy\", \"salary\": 90}]},\n    {\"name\": \"ops\", \"members\": [{\"name\": \"dee\", \"salary\": 110}, {\"name\": \"eli\", \"salary\": 80}, {\"name\": \"fin\", \"salary\": 95}]}\n  ]\n}\n"
+      },
+      "reference_solution": "// hard_e_payroll\n// Nested TOON traversal: each department holds an array of members. For every\n// department report its member count and payroll sum, then the grand totals and\n// the department with the highest payroll (argmax over departments).\n\nfn main() -> Void {\n    if !has_toon() { fx { println(\"yyjson unavailable\"); } ret; }\n\n    let doc: ToonDoc = toon_parse_file(\"org_hard_e.json\");\n    let root: ToonNode = toon_root(doc);\n    let depts: ToonNode = toon_key(root, \"departments\");\n\n    let totalMembers: Int = 0;\n    let totalPayroll: Int = 0;\n    let topPayroll: Int = -1;\n    let topName: Text = \"none\";\n\n    loop d in 0..toon_len(depts) {\n        let dept: ToonNode = toon_at(depts, d);\n        let name: Text = toon_get_text_or(dept, \"name\", \"UNKNOWN\");\n        let members: ToonNode = toon_key(dept, \"members\");\n        let count: Int = toon_len(members);\n\n        let payroll: Int = 0;\n        loop m in 0..count {\n            let person: ToonNode = toon_at(members, m);\n            payroll = payroll + toon_get_int_or(person, \"salary\", 0);\n        }\n\n        totalMembers = totalMembers + count;\n        totalPayroll = totalPayroll + payroll;\n        if payroll > topPayroll { topPayroll = payroll; topName = name; }\n\n        fx { println(\"dept \", d, \": \", name, \" / \", count, \" members / payroll \", payroll); }\n    }\n\n    fx {\n        println(\"total members = \", totalMembers);\n        println(\"total payroll = \", totalPayroll);\n        println(\"top department = \", topName, \" (\", topPayroll, \")\");\n    }\n\n    toon_close(doc);\n    ret;\n}\n",
+      "achievability": "model-verified"
+    },
+    {
+      "id": "hard_sensor_streak",
+      "title": "Adjacent reading deltas and longest run",
+      "mechanisms": [
+        "hard",
+        "adjacent_pairs",
+        "streak",
+        "toon_file"
+      ],
+      "prompt": "A JSON file named `readings_hard_f.json` is provided in the working directory, shaped `{\"readings\": [{\"value\": Int}, ...]}`. Write an Aether program that checks `has_toon()`; if TOON support is missing, print `yyjson unavailable` and return. Otherwise walk the readings in order and, for each reading after the first, print `step <i>: <prev> -> <curr> (<delta>)` where `<delta>` is `<curr> - <prev>` (which may be negative) and `<i>` is the zero-based index of the current reading. Track the largest single-step increase and the length of the longest run of consecutive non-decreasing readings (a single reading is a run of length 1). After the steps print `maxJump = <n>` and `longest non-decreasing run = <n>`, each on its own line. Close the document and return.",
+      "expected_stdout": "step 1: 10 -> 12 (2)\nstep 2: 12 -> 12 (0)\nstep 3: 12 -> 9 (-3)\nstep 4: 9 -> 11 (2)\nstep 5: 11 -> 15 (4)\nmaxJump = 4\nlongest non-decreasing run = 3\n",
+      "files": {
+        "readings_hard_f.json": "{\n  \"readings\": [{\"value\": 10}, {\"value\": 12}, {\"value\": 12}, {\"value\": 9}, {\"value\": 11}, {\"value\": 15}]\n}\n"
+      },
+      "reference_solution": "// hard_f_sensor_streak\n// Adjacent-record analysis over a TOON array of readings: print each step's\n// delta to the previous reading, and report the largest single-step increase\n// and the length of the longest non-decreasing run.\n\nfn main() -> Void {\n    if !has_toon() { fx { println(\"yyjson unavailable\"); } ret; }\n\n    let doc: ToonDoc = toon_parse_file(\"readings_hard_f.json\");\n    let root: ToonNode = toon_root(doc);\n    let readings: ToonNode = toon_key(root, \"readings\");\n    let n: Int = toon_len(readings);\n\n    let prev: Int = 0;\n    let havePrev: Bool = false;\n    let maxJump: Int = 0;\n    let run: Int = 1;\n    let bestRun: Int = 1;\n\n    loop i in 0..n {\n        let r: ToonNode = toon_at(readings, i);\n        let v: Int = toon_get_int_or(r, \"value\", 0);\n        if havePrev {\n            let jump: Int = v - prev;\n            if jump > maxJump { maxJump = jump; }\n            if v >= prev { run = run + 1; }\n            if v < prev { run = 1; }\n            if run > bestRun { bestRun = run; }\n            fx { println(\"step \", i, \": \", prev, \" -> \", v, \" (\", jump, \")\"); }\n        }\n        prev = v;\n        havePrev = true;\n    }\n\n    fx {\n        println(\"maxJump = \", maxJump);\n        println(\"longest non-decreasing run = \", bestRun);\n    }\n\n    toon_close(doc);\n    ret;\n}\n",
+      "achievability": "model-verified"
+    },
+    {
+      "id": "hard_turnstile_fsm",
+      "title": "Turnstile state machine",
+      "mechanisms": [
+        "hard",
+        "fsm",
+        "branch_on_state",
+        "toon_file"
+      ],
+      "prompt": "A JSON file named `events_hard_g.json` is provided in the working directory, shaped `{\"events\": [{\"e\": Text}, ...]}` where `e` is `coin` or `push`. Write an Aether program that checks `has_toon()`; if TOON support is missing, print `yyjson unavailable` and return. Otherwise drive a turnstile that starts `locked`. For each event: when `locked`, a `coin` unlocks it (print `event <i>: coin -> unlocked`) and a `push` is denied (print `event <i>: push -> DENIED`); when `unlocked`, a `push` passes through and relocks it (print `event <i>: push -> PASS`) and a `coin` is thanked without changing state (print `event <i>: coin -> thanks`). Count the passes and the denials. After all events print `passes = <n>`, `denied = <n>`, and `final state = <state>`, each on its own line. Close the document and return.",
+      "expected_stdout": "event 0: push -> DENIED\nevent 1: coin -> unlocked\nevent 2: push -> PASS\nevent 3: push -> DENIED\nevent 4: coin -> unlocked\nevent 5: coin -> thanks\nevent 6: push -> PASS\npasses = 2\ndenied = 2\nfinal state = locked\n",
+      "files": {
+        "events_hard_g.json": "{\n  \"events\": [{\"e\": \"push\"}, {\"e\": \"coin\"}, {\"e\": \"push\"}, {\"e\": \"push\"}, {\"e\": \"coin\"}, {\"e\": \"coin\"}, {\"e\": \"push\"}]\n}\n"
+      },
+      "reference_solution": "// hard_g_turnstile\n// Drive a two-state turnstile FSM (locked/unlocked) from a TOON array of events\n// (coin/push), printing each transition's outcome and reporting the number of\n// successful passes and denied pushes plus the final state. The current state is\n// snapshotted per event so a transition does not cascade into the other branch.\n\nfn main() -> Void {\n    if !has_toon() { fx { println(\"yyjson unavailable\"); } ret; }\n\n    let doc: ToonDoc = toon_parse_file(\"events_hard_g.json\");\n    let root: ToonNode = toon_root(doc);\n    let events: ToonNode = toon_key(root, \"events\");\n\n    let state: Text = \"locked\";\n    let passes: Int = 0;\n    let denied: Int = 0;\n\n    loop i in 0..toon_len(events) {\n        let ev: ToonNode = toon_at(events, i);\n        let e: Text = toon_get_text_or(ev, \"e\", \"\");\n        let cur: Text = state;\n\n        if cur == \"locked\" {\n            if e == \"coin\" { state = \"unlocked\"; fx { println(\"event \", i, \": coin -> unlocked\"); } }\n            if e == \"push\" { denied = denied + 1; fx { println(\"event \", i, \": push -> DENIED\"); } }\n        }\n        if cur == \"unlocked\" {\n            if e == \"coin\" { fx { println(\"event \", i, \": coin -> thanks\"); } }\n            if e == \"push\" { state = \"locked\"; passes = passes + 1; fx { println(\"event \", i, \": push -> PASS\"); } }\n        }\n    }\n\n    fx {\n        println(\"passes = \", passes);\n        println(\"denied = \", denied);\n        println(\"final state = \", state);\n    }\n\n    toon_close(doc);\n    ret;\n}\n",
+      "achievability": "model-verified"
+    },
+    {
+      "id": "hard_word_lengths",
+      "title": "Word length buckets and longest word",
+      "mechanisms": [
+        "hard",
+        "bucket",
+        "argmax_element",
+        "string_len",
+        "toon_file"
+      ],
+      "prompt": "A JSON file named `words_hard_h.json` is provided in the working directory, shaped `{\"words\": [{\"w\": Text}, ...]}`. Write an Aether program that checks `has_toon()`; if TOON support is missing, print `yyjson unavailable` and return. Otherwise classify each word by its character length: `short` when length < 4, `long` when length > 7, and `medium` otherwise. Print one line per word as `word <i>: <w> (<length>) <kind>`. Sum the total characters across all words and track the single longest word. After the list print `short = <n>`, `medium = <n>`, `long = <n>`, `total chars = <n>`, and `longest = <word> (<length>)` (the first word to reach the maximum length on a tie). Close the document and return.",
+      "expected_stdout": "word 0: hi (2) short\nword 1: hello (5) medium\nword 2: a (1) short\nword 3: wonderful (9) long\nword 4: cat (3) short\nword 5: elephantine (11) long\nword 6: dog (3) short\nshort = 4\nmedium = 1\nlong = 2\ntotal chars = 34\nlongest = elephantine (11)\n",
+      "files": {
+        "words_hard_h.json": "{\n  \"words\": [{\"w\": \"hi\"}, {\"w\": \"hello\"}, {\"w\": \"a\"}, {\"w\": \"wonderful\"}, {\"w\": \"cat\"}, {\"w\": \"elephantine\"}, {\"w\": \"dog\"}]\n}\n"
+      },
+      "reference_solution": "// hard_h_word_lengths\n// Classify each word in a TOON array by length (short <4, medium 4-7, long >7),\n// summing total characters and tracking the single longest word (argmax over\n// string_len, returning the word itself, not just its length).\n\nfn main() -> Void {\n    if !has_toon() { fx { println(\"yyjson unavailable\"); } ret; }\n\n    let doc: ToonDoc = toon_parse_file(\"words_hard_h.json\");\n    let root: ToonNode = toon_root(doc);\n    let words: ToonNode = toon_key(root, \"words\");\n\n    let shortN: Int = 0;\n    let medN: Int = 0;\n    let longN: Int = 0;\n    let totalChars: Int = 0;\n    let maxLen: Int = -1;\n    let longest: Text = \"none\";\n\n    loop i in 0..toon_len(words) {\n        let wn: ToonNode = toon_at(words, i);\n        let w: Text = toon_get_text_or(wn, \"w\", \"\");\n        let wlen: Int = string_len(w);\n        totalChars = totalChars + wlen;\n        let kind: Text = \"medium\";\n        if wlen < 4 { kind = \"short\"; }\n        if wlen > 7 { kind = \"long\"; }\n        if kind == \"short\" { shortN = shortN + 1; }\n        if kind == \"medium\" { medN = medN + 1; }\n        if kind == \"long\" { longN = longN + 1; }\n        if wlen > maxLen { maxLen = wlen; longest = w; }\n        fx { println(\"word \", i, \": \", w, \" (\", wlen, \") \", kind); }\n    }\n\n    fx {\n        println(\"short = \", shortN);\n        println(\"medium = \", medN);\n        println(\"long = \", longN);\n        println(\"total chars = \", totalChars);\n        println(\"longest = \", longest, \" (\", maxLen, \")\");\n    }\n\n    toon_close(doc);\n    ret;\n}\n",
+      "achievability": "model-verified"
+    }
+  ]
+}

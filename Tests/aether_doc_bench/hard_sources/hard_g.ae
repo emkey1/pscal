@@ -1,0 +1,41 @@
+// hard_g_turnstile
+// Drive a two-state turnstile FSM (locked/unlocked) from a TOON array of events
+// (coin/push), printing each transition's outcome and reporting the number of
+// successful passes and denied pushes plus the final state. The current state is
+// snapshotted per event so a transition does not cascade into the other branch.
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("events_hard_g.json");
+    let root: ToonNode = toon_root(doc);
+    let events: ToonNode = toon_key(root, "events");
+
+    let state: Text = "locked";
+    let passes: Int = 0;
+    let denied: Int = 0;
+
+    loop i in 0..toon_len(events) {
+        let ev: ToonNode = toon_at(events, i);
+        let e: Text = toon_get_text_or(ev, "e", "");
+        let cur: Text = state;
+
+        if cur == "locked" {
+            if e == "coin" { state = "unlocked"; fx { println("event ", i, ": coin -> unlocked"); } }
+            if e == "push" { denied = denied + 1; fx { println("event ", i, ": push -> DENIED"); } }
+        }
+        if cur == "unlocked" {
+            if e == "coin" { fx { println("event ", i, ": coin -> thanks"); } }
+            if e == "push" { state = "locked"; passes = passes + 1; fx { println("event ", i, ": push -> PASS"); } }
+        }
+    }
+
+    fx {
+        println("passes = ", passes);
+        println("denied = ", denied);
+        println("final state = ", state);
+    }
+
+    toon_close(doc);
+    ret;
+}

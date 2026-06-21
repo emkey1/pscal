@@ -1,0 +1,7 @@
+{
+  "departments": [
+    {"name": "eng", "members": [{"name": "ana", "salary": 100}, {"name": "ben", "salary": 120}]},
+    {"name": "sales", "members": [{"name": "cy", "salary": 90}]},
+    {"name": "ops", "members": [{"name": "dee", "salary": 110}, {"name": "eli", "salary": 80}, {"name": "fin", "salary": 95}]}
+  ]
+}

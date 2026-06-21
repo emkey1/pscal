@@ -1,0 +1,45 @@
+// hard_e_payroll
+// Nested TOON traversal: each department holds an array of members. For every
+// department report its member count and payroll sum, then the grand totals and
+// the department with the highest payroll (argmax over departments).
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("org_hard_e.json");
+    let root: ToonNode = toon_root(doc);
+    let depts: ToonNode = toon_key(root, "departments");
+
+    let totalMembers: Int = 0;
+    let totalPayroll: Int = 0;
+    let topPayroll: Int = -1;
+    let topName: Text = "none";
+
+    loop d in 0..toon_len(depts) {
+        let dept: ToonNode = toon_at(depts, d);
+        let name: Text = toon_get_text_or(dept, "name", "UNKNOWN");
+        let members: ToonNode = toon_key(dept, "members");
+        let count: Int = toon_len(members);
+
+        let payroll: Int = 0;
+        loop m in 0..count {
+            let person: ToonNode = toon_at(members, m);
+            payroll = payroll + toon_get_int_or(person, "salary", 0);
+        }
+
+        totalMembers = totalMembers + count;
+        totalPayroll = totalPayroll + payroll;
+        if payroll > topPayroll { topPayroll = payroll; topName = name; }
+
+        fx { println("dept ", d, ": ", name, " / ", count, " members / payroll ", payroll); }
+    }
+
+    fx {
+        println("total members = ", totalMembers);
+        println("total payroll = ", totalPayroll);
+        println("top department = ", topName, " (", topPayroll, ")");
+    }
+
+    toon_close(doc);
+    ret;
+}

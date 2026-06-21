@@ -1,0 +1,11 @@
+{
+  "events": [
+    {"level": "info", "msg": "start"},
+    {"level": "warn", "msg": "slow"},
+    {"level": "error", "msg": "oops"},
+    {"level": "info", "msg": "retry"},
+    {"level": "error", "msg": "fail"},
+    {"level": "warn", "msg": "degraded"},
+    {"level": "error", "msg": "crash"}
+  ]
+}

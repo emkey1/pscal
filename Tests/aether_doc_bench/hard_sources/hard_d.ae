@@ -1,0 +1,42 @@
+// hard_d_collatz
+// For each number in a TOON array, compute its Collatz stopping time with a
+// recursive helper (which itself calls an isEven helper), then report each and
+// the maximum stopping time together with the number that produced it.
+
+@pure
+fn isEven(n: Int) -> Bool {
+    let half: Int = n / 2;
+    if half * 2 == n { ret true; }
+    ret false;
+}
+
+fn collatz(n: Int) -> Int {
+    if n <= 1 { ret 0; }
+    if isEven(n) { ret 1 + collatz(n / 2); }
+    ret 1 + collatz(3 * n + 1);
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("numbers_hard_d.json");
+    let root: ToonNode = toon_root(doc);
+    let nums: ToonNode = toon_key(root, "numbers");
+    let n: Int = toon_len(nums);
+
+    let maxSteps: Int = -1;
+    let maxNum: Int = 0;
+
+    loop i in 0..n {
+        let elem: ToonNode = toon_at(nums, i);
+        let num: Int = toon_get_int_or(elem, "n", 0);
+        let steps: Int = collatz(num);
+        if steps > maxSteps { maxSteps = steps; maxNum = num; }
+        fx { println("number ", i, ": ", num, " -> ", steps, " steps"); }
+    }
+
+    fx { println("max steps = ", maxSteps, " (number ", maxNum, ")"); }
+
+    toon_close(doc);
+    ret;
+}

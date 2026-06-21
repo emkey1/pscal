@@ -1,0 +1,63 @@
+// hard_a_expense_outliers
+// Two-pass over a TOON array: pass 1 computes the mean amount, pass 2 flags
+// each expense whose absolute deviation from the mean exceeds half the mean,
+// then reports the outlier count and the largest deviation.
+
+@pure
+fn absReal(x: Real) -> Real {
+    if x < 0.0 { ret 0.0 - x; }
+    ret x;
+}
+
+type Stats {
+    outliers: Int;
+    maxDev: Real;
+
+    fn note(dev: Real, isOut: Bool) -> Void {
+        if isOut { self.outliers = self.outliers + 1; }
+        if dev > self.maxDev { self.maxDev = dev; }
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("expenses_hard_a.json");
+    let root: ToonNode = toon_root(doc);
+    let items: ToonNode = toon_key(root, "expenses");
+    let n: Int = toon_len(items);
+
+    let total: Int = 0;
+    loop i in 0..n {
+        let e: ToonNode = toon_at(items, i);
+        total = total + toon_get_int_or(e, "amount", 0);
+    }
+
+    let mean: Real = 0.0;
+    if n > 0 { mean = total * 1.0 / n; }
+    let threshold: Real = mean * 0.5;
+
+    let stats: Stats = new Stats();
+
+    loop i in 0..n {
+        let e: ToonNode = toon_at(items, i);
+        let name: Text = toon_get_text_or(e, "name", "UNKNOWN");
+        let amount: Int = toon_get_int_or(e, "amount", 0);
+        let dev: Real = absReal(amount * 1.0 - mean);
+        let isOut: Bool = false;
+        if dev > threshold { isOut = true; }
+        stats.note(dev, isOut);
+        fx { println("expense ", i, ": ", name, " / ", amount, " / dev ", dev:0:2, " / ", isOut); }
+    }
+
+    fx {
+        println("count = ", n);
+        println("mean = ", mean:0:2);
+        println("outliers = ", stats.outliers);
+        println("maxDev = ", stats.maxDev:0:2);
+    }
+
+    toon_close(doc);
+    ret;
+}

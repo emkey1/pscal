@@ -1,0 +1,11 @@
+{
+  "cap": 500,
+  "operations": [
+    {"kind": "deposit", "amount": 200},
+    {"kind": "withdraw", "amount": 50},
+    {"kind": "withdraw", "amount": 1000},
+    {"kind": "deposit", "amount": 400},
+    {"kind": "interest", "amount": 10},
+    {"kind": "withdraw", "amount": 100}
+  ]
+}

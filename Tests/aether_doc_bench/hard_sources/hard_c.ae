@@ -1,0 +1,75 @@
+// hard_c_account_ledger
+// Stateful sequential simulation: process a TOON array of operations against an
+// account. Deposits add then clamp to a cap; withdrawals succeed only if funds
+// suffice (else rejected, balance unchanged); interest applies a percentage.
+// Tracks running balance and applied/rejected counts, with a per-op trace.
+
+type Account {
+    balance: Int;
+    applied: Int;
+    rejected: Int;
+
+    fn deposit(amount: Int, cap: Int) -> Void {
+        self.balance = self.balance + amount;
+        if self.balance > cap { self.balance = cap; }
+        self.applied = self.applied + 1;
+        ret;
+    }
+
+    fn withdraw(amount: Int) -> Bool {
+        if amount > self.balance {
+            self.rejected = self.rejected + 1;
+            ret false;
+        }
+        self.balance = self.balance - amount;
+        self.applied = self.applied + 1;
+        ret true;
+    }
+
+    fn interest(pct: Int) -> Void {
+        let gain: Int = self.balance * pct / 100;
+        self.balance = self.balance + gain;
+        self.applied = self.applied + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("ops_hard_c.json");
+    let root: ToonNode = toon_root(doc);
+    let ops: ToonNode = toon_key(root, "operations");
+    let cap: Int = toon_get_int_or(root, "cap", 1000000);
+
+    let acct: Account = new Account();
+
+    loop i in 0..toon_len(ops) {
+        let op: ToonNode = toon_at(ops, i);
+        let kind: Text = toon_get_text_or(op, "kind", "");
+        let amount: Int = toon_get_int_or(op, "amount", 0);
+
+        if kind == "deposit" {
+            acct.deposit(amount, cap);
+            fx { println("op ", i, ": deposit ", amount, " -> ", acct.balance); }
+        }
+        if kind == "withdraw" {
+            let ok: Bool = acct.withdraw(amount);
+            if ok { fx { println("op ", i, ": withdraw ", amount, " -> ", acct.balance); } }
+            if !ok { fx { println("op ", i, ": withdraw ", amount, " REJECTED (balance ", acct.balance, ")"); } }
+        }
+        if kind == "interest" {
+            acct.interest(amount);
+            fx { println("op ", i, ": interest ", amount, "% -> ", acct.balance); }
+        }
+    }
+
+    fx {
+        println("final balance = ", acct.balance);
+        println("applied = ", acct.applied);
+        println("rejected = ", acct.rejected);
+    }
+
+    toon_close(doc);
+    ret;
+}
