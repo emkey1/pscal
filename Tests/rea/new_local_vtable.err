@@ -11,13 +11,13 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0011    2 JUMP               15 (to 0029)
 
 --- Procedure run (at 0014) ---
-0014    3 INIT_LOCAL_POINTER    0 (slot)    3 'MixedCase'
+0014    3 INIT_LOCAL_POINTER    1 (slot)    3 'MixedCase'
 0018    | ALLOC_OBJECT        2 (fields)
 0020    | DUP
 0021    | GET_FIELD_OFFSET    0 (index)
 0023    | GET_GLOBAL_ADDRESS    4 'mixedcase_vtable'
 0025    | SET_INDIRECT
-0026    | SET_LOCAL           0 (slot)
+0026    | SET_LOCAL           1 (slot)
 0028    2 RETURN
 0029    0 CONSTANT            5 'Value type ARRAY'
 0031    | DEFINE_GLOBAL    NameIdx:4   'mixedcase_vtable' Type:ARRAY Dims:1 [0..0] of INTEGER ('integer')
