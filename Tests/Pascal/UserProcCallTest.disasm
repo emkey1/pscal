@@ -44,21 +44,25 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0097    0 SWAP
 0098    | SET_INDIRECT
 0099   24 CONST_1
-0100    | SET_GLOBAL          7 'i' cache=0x0
-0110    | GET_GLOBAL          7 'i' cache=0x0
-0120    | PUSH_IMM_I8         3
-0122    | LESS_EQUAL
-0123    | JUMP_IF_FALSE      43 (to 0169)
-0126   25 GET_GLOBAL          7 'i' cache=0x0
-0136    | GET_GLOBAL_ADDRESS    3 'data'
-0138    | LOAD_ELEMENT_VALUE    1 (dims)
-0140    | CALL_USER_PROC      15 'printvalue' @0039 (1 args)
-0144   24 GET_GLOBAL          7 'i' cache=0x0
-0154    | CONST_1
-0155    | ADD
-0156    | SET_GLOBAL          7 'i' cache=0x0
-0166    | JUMP              -59 (to 0110)
-0169    1 HALT
+0100    | GET_GLOBAL_ADDRESS    7 'i'
+0102    | SWAP
+0103    | SET_INDIRECT
+0104    | GET_GLOBAL          7 'i' cache=0x0
+0114    | PUSH_IMM_I8         3
+0116    | LESS_EQUAL
+0117    | JUMP_IF_FALSE      37 (to 0157)
+0120   25 GET_GLOBAL          7 'i' cache=0x0
+0130    | GET_GLOBAL_ADDRESS    3 'data'
+0132    | LOAD_ELEMENT_VALUE    1 (dims)
+0134    | CALL_USER_PROC      15 'printvalue' @0039 (1 args)
+0138   24 GET_GLOBAL          7 'i' cache=0x0
+0148    | CONST_1
+0149    | ADD
+0150    | GET_GLOBAL_ADDRESS    7 'i'
+0152    | SWAP
+0153    | SET_INDIRECT
+0154    | JUMP              -53 (to 0104)
+0157    1 HALT
 == End Disassembly: Pascal/UserProcCallTest ==
 
 Constants (16):\n  0000: STR   "myself"

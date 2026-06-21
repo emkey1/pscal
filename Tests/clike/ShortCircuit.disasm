@@ -92,8 +92,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0195    4 RETURN
 == End Disassembly: clike/ShortCircuit.cl ==
 
-Constants (20):
-  0000: STR   "main"
+Constants (20):\n  0000: STR   "main"
   0001: INT   2
   0002: STR   "R1\n"
   0003: STR   "write"
