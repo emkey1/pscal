@@ -73,7 +73,7 @@ Additional source-of-truth rules:
 Validate corpus structure explicitly:
 
 ```bash
-python3 Tools/aether_specialization_validate_corpus.py --strict
+python3 tools/aether_specialization_validate_corpus.py --strict
 ```
 
 `corpus_candidates/` contains only corpus entries — every file is listed in
@@ -131,7 +131,7 @@ python3 tools/spark_qwen3_base_train_remote.py --run-name sft-seed-smoke-v1 stat
 Start the convenience wrapper:
 
 ```bash
-bash Tools/run_qwen3_base_spark_training.sh sft-seed-v1
+bash tools/run_qwen3_base_spark_training.sh sft-seed-v1
 ```
 
 Current first-pass trainer:

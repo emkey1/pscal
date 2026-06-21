@@ -1,6 +1,6 @@
 {
   "version": "v2-positive",
-  "description": "v2 positive (model-generation) tasks; the 2 should_fail negatives are scored by Tools/aether_negative_tier.py",
+  "description": "v2 positive (model-generation) tasks; the 2 should_fail negatives are scored by tools/aether_negative_tier.py",
   "tasks": [
     {
       "id": "hello_fx",

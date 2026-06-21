@@ -41,13 +41,13 @@ That makes the tool useful in two different ways:
 Use:
 
 ```bash
-python3 Tools/aether_doc_bench.py --text-summary
+python3 tools/aether_doc_bench.py --text-summary
 ```
 
 Write a JSON report:
 
 ```bash
-python3 Tools/aether_doc_bench.py \
+python3 tools/aether_doc_bench.py \
   --output-json Tests/aether_doc_bench/out/latest.json \
   --text-summary
 ```
@@ -55,13 +55,13 @@ python3 Tools/aether_doc_bench.py \
 Run one task only:
 
 ```bash
-python3 Tools/aether_doc_bench.py --task hello_fx --text-summary
+python3 tools/aether_doc_bench.py --task hello_fx --text-summary
 ```
 
 Enable one repair attempt after an initial failure:
 
 ```bash
-python3 Tools/aether_doc_bench.py \
+python3 tools/aether_doc_bench.py \
   --task hello_fx \
   --repair-attempts 1 \
   --text-summary
@@ -70,7 +70,7 @@ python3 Tools/aether_doc_bench.py \
 Batch several Aether tasks behind one shared-guide prompt:
 
 ```bash
-python3 Tools/aether_doc_bench.py \
+python3 tools/aether_doc_bench.py \
   --destination command-template \
   --shared-guide-batch-size 4 \
   --text-summary
@@ -79,7 +79,7 @@ python3 Tools/aether_doc_bench.py \
 Run the no-guide baseline:
 
 ```bash
-python3 Tools/aether_doc_bench.py \
+python3 tools/aether_doc_bench.py \
   --docs none \
   --text-summary
 ```
@@ -87,7 +87,7 @@ python3 Tools/aether_doc_bench.py \
 List configured destinations:
 
 ```bash
-python3 Tools/aether_doc_bench.py --list-destinations
+python3 tools/aether_doc_bench.py --list-destinations
 ```
 
 ## Providers
@@ -134,7 +134,7 @@ They are also useful for hosted APIs that enforce rate limits, such as Gemini.
 Set `OPENAI_API_KEY`, then run:
 
 ```bash
-python3 Tools/aether_doc_bench.py \
+python3 tools/aether_doc_bench.py \
   --destination openai-gpt-5-mini \
   --text-summary
 ```
@@ -164,7 +164,7 @@ Add a destination like this:
 Then run:
 
 ```bash
-python3 Tools/aether_doc_bench.py \
+python3 tools/aether_doc_bench.py \
   --destinations-config Tests/aether_doc_bench/destinations.local.json \
   --destination my-local-model \
   --text-summary
@@ -193,7 +193,7 @@ This repository also includes a fake model so the harness itself can be tested
 without any network calls:
 
 ```bash
-python3 Tools/aether_doc_bench.py \
+python3 tools/aether_doc_bench.py \
   --tasks Tests/aether_doc_bench/smoke_tasks.json \
   --destination command-template \
   --text-summary
@@ -202,7 +202,7 @@ python3 Tools/aether_doc_bench.py \
 Batch-mode self-test:
 
 ```bash
-python3 Tools/aether_doc_bench.py \
+python3 tools/aether_doc_bench.py \
   --tasks Tests/aether_doc_bench/smoke_tasks.json \
   --destination command-template \
   --shared-guide-batch-size 2 \
@@ -212,7 +212,7 @@ python3 Tools/aether_doc_bench.py \
 There is also a repair-path self-test:
 
 ```bash
-python3 Tools/aether_doc_bench.py \
+python3 tools/aether_doc_bench.py \
   --tasks Tests/aether_doc_bench/smoke_tasks.json \
   --destinations-config Tests/aether_doc_bench/repair_test_destinations.json \
   --destination command-repair-template \
@@ -359,7 +359,7 @@ Matching usage rollups also exist for final attempts:
 There is also an optional Python comparison lane:
 
 ```bash
-python3 Tools/aether_doc_bench.py --python-baseline --text-summary
+python3 tools/aether_doc_bench.py --python-baseline --text-summary
 ```
 
 When enabled, each case also asks the same model for a Python 3 solution,

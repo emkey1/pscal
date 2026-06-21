@@ -166,8 +166,8 @@ Binaries are written to `build/bin` (e.g. `pascal`).
 If you use submodules, verify pinned commits are fetchable before pushing:
 
 ```
-Tools/check_submodule_refs.sh
-Tools/check_submodule_refs.sh --protected-refs   # both protected branches
+tools/check_submodule_refs.sh
+tools/check_submodule_refs.sh --protected-refs   # both protected branches
 ```
 
 To build without SDL explicitly:

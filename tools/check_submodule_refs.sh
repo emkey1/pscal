@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: Tools/check_submodule_refs.sh [--ref <git-ref>] [--protected-refs] [--remote <name>] [--offline]
+Usage: tools/check_submodule_refs.sh [--ref <git-ref>] [--protected-refs] [--remote <name>] [--offline]
 
 Checks that submodule commits pinned by one or more refs are fetchable.
 

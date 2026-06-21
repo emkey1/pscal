@@ -6,7 +6,7 @@ single headline number. Repeat-aware: when a report has --repeats > 1, each
 task's verdict is the MAJORITY across its repeats (noise-robust), and tasks that
 pass some-but-not-all repeats are flagged as FLAKY (the temp-0 noise band).
 
-  python3 Tools/aether_doc_bench_mechanisms.py <report.json> [--doc none] [--tasks tasks.json]
+  python3 tools/aether_doc_bench_mechanisms.py <report.json> [--doc none] [--tasks tasks.json]
 """
 from __future__ import annotations
 

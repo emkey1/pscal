@@ -13,7 +13,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Verify protected-branch submodule refs
-        run: Tools/check_submodule_refs.sh --protected-refs --remote origin
+        run: tools/check_submodule_refs.sh --protected-refs --remote origin
       - name: Run submodule checker regression tests
         run: bash Tests/tools/test_check_submodule_refs.sh
 
