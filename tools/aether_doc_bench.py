@@ -88,6 +88,7 @@ class Destination:
     request_max_retries: int = 0
     retry_backoff_seconds: float = 2.0
     extra_body: dict | None = None
+    extra_headers: dict | None = None
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -415,6 +416,7 @@ def load_destinations(path: pathlib.Path) -> list[Destination]:
                 request_max_retries=int(item.get("request_max_retries", 0)),
                 retry_backoff_seconds=float(item.get("retry_backoff_seconds", 2.0)),
                 extra_body=item.get("extra_body"),
+                extra_headers=item.get("extra_headers"),
             )
         )
     return destinations
@@ -933,12 +935,15 @@ def http_json_request(
     timeout_seconds: int = 120,
     max_retries: int = 0,
     retry_backoff_seconds: float = 2.0,
+    extra_headers: dict | None = None,
 ) -> dict[str, Any]:
     headers = {
         "Content-Type": "application/json",
     }
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+    if extra_headers:
+        headers.update({str(k): str(v) for k, v in extra_headers.items()})
     attempts = max_retries + 1
 
     for attempt in range(attempts):
@@ -1133,6 +1138,7 @@ def invoke_openai_chat_completions(prompt: str, destination: Destination) -> dic
         timeout_seconds=destination.request_timeout_seconds,
         max_retries=destination.request_max_retries,
         retry_backoff_seconds=destination.retry_backoff_seconds,
+        extra_headers=destination.extra_headers,
     )
     choices = payload.get("choices") or []
     if not choices:
@@ -2175,12 +2181,40 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def capture_aether_version(aether_bin: pathlib.Path) -> tuple[str, str]:
+    """Run ``aether --version`` once; return (version_token, raw_first_line).
+
+    The token is the date-stamp the build carries (YYYY-MM-DD-N, see
+    components/aether/VERSION); the raw line is the full first line of output.
+    Best-effort: returns ("unknown", "") if the binary cannot be queried, so a
+    missing or old binary never aborts a run -- it just records "unknown".
+    """
+    try:
+        proc = subprocess.run(
+            [str(aether_bin), "--version"],
+            text=True,
+            errors="replace",
+            capture_output=True,
+            timeout=30,
+        )
+    except Exception:
+        return "unknown", ""
+    lines = (proc.stdout or proc.stderr or "").strip().splitlines()
+    raw = lines[0].strip() if lines else ""
+    match = re.search(r"Version:\s*(\S+)", raw)
+    return (match.group(1) if match else (raw or "unknown")), raw
+
+
 def main() -> int:
     parser = build_arg_parser()
     args = parser.parse_args()
 
     if not args.aether_bin.exists():
         raise SystemExit(f"missing aether binary: {args.aether_bin}")
+
+    # Capture the Aether language version once, so every result is traceable to
+    # the language build it ran against (components/aether/VERSION + CHANGELOG.md).
+    aether_version, aether_version_raw = capture_aether_version(args.aether_bin)
 
     tasks = load_tasks(args.tasks)
     task_bucket_stats: dict[str, dict[str, Any]] = {}
@@ -2283,6 +2317,9 @@ def main() -> int:
         "tasks_file": str(args.tasks),
         "destinations_config": str(args.destinations_config),
         "created_at_unix": int(time.time()),
+        "aether_version": aether_version,
+        "aether_version_raw": aether_version_raw,
+        "aether_bin": str(args.aether_bin),
         "summary": {
             "total_cases_per_destination": len(tasks) * args.repeats,
             "doc_variants": len(doc_variants),
