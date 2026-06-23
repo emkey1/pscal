@@ -28,3 +28,6 @@
 ## 2025-03-20 - Redundant Visual Values and Slider Accessibility
 **Learning:** SwiftUI Sliders often rely on separate text views (e.g., in an HStack) to display their current value. Screen readers will read the slider and then redundantly read the visual text label as a separate element, causing confusion.
 **Action:** When implementing Sliders with visual value labels, always add `.accessibilityValue(...)` to the Slider itself, and add `.accessibilityHidden(true)` to the redundant text element so it is hidden from VoiceOver.
+## 2024-06-23 - iOS Custom Keyboard Accessory Sounds
+**Learning:** Custom `UIInputView` keyboard accessory bars on iOS do not automatically produce the expected typing click sounds when users interact with them.
+**Action:** The view must conform to `UIInputViewAudioFeedback` with `enableInputClicksWhenVisible` returning `true`, and each key press action must manually invoke `UIDevice.current.playInputClick()` to match native keyboard UX.
