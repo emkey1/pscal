@@ -1130,6 +1130,12 @@ def invoke_openai_chat_completions(prompt: str, destination: Destination) -> dic
         body["temperature"] = destination.temperature
     if destination.extra_body:
         body.update(destination.extra_body)
+    # OpenAI reasoning models (o-series, gpt-5) reject max_tokens; honor
+    # max_completion_tokens from extra_body and drop the incompatible field.
+    if "max_completion_tokens" in body:
+        body.pop("max_tokens", None)
+    if body.get("stop") is None:
+        body.pop("stop", None)
 
     payload = http_json_request(
         f"{base_url}/chat/completions",
