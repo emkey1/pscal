@@ -1,0 +1,204 @@
+{
+  "version": "2026-06-23-1",
+  "description": "CS-classics / algorithms set: classic computer-science problems implemented in Aether, exact-stdout scored. Tests algorithmic implementation capability (distinct from v2 language-feature fluency and the large-compositional hard set). v4: added graph algorithms (BFS, Dijkstra), recursive sorts (merge + quick, completing the bubble/merge/quick triad), and a naive substring search, for coverage of the four pillars (sorting, searching, graphs, DP) plus recursion, backtracking, strings, and language probes.",
+  "tasks": [
+    {
+      "id": "cs_factorial",
+      "title": "Factorial (iterative or recursive)",
+      "mechanisms": [
+        "recursion",
+        "arithmetic"
+      ],
+      "prompt": "Write an Aether program that computes 10! (ten factorial) and prints it on one line in exactly the form `10! = N`, where N is the computed value, followed by a newline. Do not hard-code the result; compute it.",
+      "expected_stdout": "10! = 3628800\n"
+    },
+    {
+      "id": "cs_gcd",
+      "title": "Euclidean GCD",
+      "mechanisms": [
+        "loop",
+        "modulo"
+      ],
+      "prompt": "Write an Aether program that computes the greatest common divisor of 48 and 36 using the Euclidean algorithm, and prints it on one line in exactly the form `gcd(48, 36) = N`, followed by a newline.",
+      "expected_stdout": "gcd(48, 36) = 12\n"
+    },
+    {
+      "id": "cs_fizzbuzz",
+      "title": "FizzBuzz 1..15",
+      "mechanisms": [
+        "loop",
+        "branching",
+        "modulo"
+      ],
+      "prompt": "Write an Aether program that prints FizzBuzz for the integers 1 through 15 inclusive, one value per line. For each integer: print `Fizz` if it is divisible by 3, `Buzz` if divisible by 5, `FizzBuzz` if divisible by both 3 and 5, otherwise print the integer itself. End each line with a newline.",
+      "expected_stdout": "1\n2\nFizz\n4\nBuzz\nFizz\n7\n8\nFizz\nBuzz\n11\nFizz\n13\n14\nFizzBuzz\n"
+    },
+    {
+      "id": "cs_fibonacci",
+      "title": "First 10 Fibonacci numbers",
+      "mechanisms": [
+        "loop",
+        "sequence"
+      ],
+      "prompt": "Write an Aether program that prints the first 10 Fibonacci numbers, starting with 0 and 1, on a single line. Separate consecutive numbers with `, ` (a comma followed by a space). Do not print a trailing separator. End the line with a newline.",
+      "expected_stdout": "0, 1, 1, 2, 3, 5, 8, 13, 21, 34\n"
+    },
+    {
+      "id": "cs_sieve_primes",
+      "title": "Sieve of Eratosthenes (< 30)",
+      "mechanisms": [
+        "array",
+        "sieve"
+      ],
+      "prompt": "Write an Aether program that uses the Sieve of Eratosthenes to find all prime numbers strictly less than 30, and prints them in ascending order on a single line, separated by `, ` (comma and space), with no trailing separator, followed by a newline.",
+      "expected_stdout": "2, 3, 5, 7, 11, 13, 17, 19, 23, 29\n"
+    },
+    {
+      "id": "cs_collatz",
+      "title": "Collatz step count from 27",
+      "mechanisms": [
+        "loop",
+        "int_recursion"
+      ],
+      "prompt": "Write an Aether program that counts how many steps it takes for the Collatz sequence starting at 27 to reach 1. Each step replaces n with n/2 if n is even, or 3*n+1 if n is odd. Print the count on one line in exactly the form `steps = N`, followed by a newline.",
+      "expected_stdout": "steps = 111\n"
+    },
+    {
+      "id": "cs_hanoi",
+      "title": "Towers of Hanoi (3 disks)",
+      "mechanisms": [
+        "recursion"
+      ],
+      "prompt": "Write an Aether program that solves the Towers of Hanoi puzzle for 3 disks. Disks are numbered 1 (smallest) to 3 (largest). Move all disks from peg A to peg C, using peg B as the auxiliary peg, following the standard recursive solution. Print each move on its own line in exactly the form `move disk N from X to Y` (for example `move disk 1 from A to C`). End each line with a newline.",
+      "expected_stdout": "move disk 1 from A to C\nmove disk 2 from A to B\nmove disk 1 from C to B\nmove disk 3 from A to C\nmove disk 1 from B to A\nmove disk 2 from B to C\nmove disk 1 from A to C\n"
+    },
+    {
+      "id": "cs_bubble_sort",
+      "title": "Bubble sort",
+      "mechanisms": [
+        "array",
+        "sort",
+        "nested_loop"
+      ],
+      "prompt": "Write an Aether program that sorts the list of integers [5, 2, 8, 1, 9, 3] into ascending order using bubble sort, then prints the sorted list on a single line separated by `, ` (comma and space), with no trailing separator, followed by a newline.",
+      "expected_stdout": "1, 2, 3, 5, 8, 9\n"
+    },
+    {
+      "id": "cs_binary_search",
+      "title": "Binary search",
+      "mechanisms": [
+        "array",
+        "search"
+      ],
+      "prompt": "Write an Aether program that performs a binary search for the value 7 in the sorted list [1, 3, 5, 7, 9, 11], and prints the 0-based index where it is found on one line in exactly the form `index = N`, followed by a newline.",
+      "expected_stdout": "index = 3\n"
+    },
+    {
+      "id": "cs_nqueens",
+      "title": "N-Queens solution count (N=6)",
+      "mechanisms": [
+        "recursion",
+        "backtracking"
+      ],
+      "prompt": "Write an Aether program that counts the number of distinct solutions to the N-Queens problem for a 6x6 board (6 queens, none attacking another), using backtracking. Print the count on one line in exactly the form `solutions = N`, followed by a newline.",
+      "expected_stdout": "solutions = 4\n"
+    },
+    {
+      "id": "cs_coin_change",
+      "title": "Coin change (min coins, 1D DP)",
+      "mechanisms": [
+        "dp",
+        "array"
+      ],
+      "prompt": "Write an Aether program that computes the minimum number of coins needed to make the amount 11 using coin denominations 1, 2, and 5 (each denomination usable any number of times), via dynamic programming. Print the result on one line in exactly the form `coins = N`, followed by a newline.",
+      "expected_stdout": "coins = 3\n"
+    },
+    {
+      "id": "cs_lis",
+      "title": "Longest increasing subsequence (1D DP)",
+      "mechanisms": [
+        "dp",
+        "array"
+      ],
+      "prompt": "Write an Aether program that computes the length of the longest strictly increasing subsequence of the list [10, 9, 2, 5, 3, 7, 101, 18], via dynamic programming. Print it on one line in exactly the form `lis = N`, followed by a newline.",
+      "expected_stdout": "lis = 4\n"
+    },
+    {
+      "id": "cs_lcs",
+      "title": "Longest common subsequence length (2D DP)",
+      "mechanisms": [
+        "dp",
+        "strings"
+      ],
+      "prompt": "Write an Aether program that computes the length of the longest common subsequence of the two strings `ABCBDAB` and `BDCAB` using dynamic programming, and prints it on one line in exactly the form `lcs = N`, followed by a newline.",
+      "expected_stdout": "lcs = 4\n"
+    },
+    {
+      "id": "cs_edit_distance",
+      "title": "Levenshtein edit distance (2D DP)",
+      "mechanisms": [
+        "dp",
+        "strings"
+      ],
+      "prompt": "Write an Aether program that computes the Levenshtein edit distance between the strings `kitten` and `sitting` (insertions, deletions, substitutions each cost 1) using dynamic programming, and prints it on one line in exactly the form `distance = N`, followed by a newline.",
+      "expected_stdout": "distance = 3\n"
+    },
+    {
+      "id": "cs_merge_sort",
+      "title": "Merge sort (recursive)",
+      "mechanisms": [
+        "array",
+        "sort",
+        "recursion",
+        "divide_and_conquer"
+      ],
+      "prompt": "Write an Aether program that sorts the list of integers [38, 27, 43, 3, 9, 82, 10] into ascending order using merge sort (recursively split the list, then merge the sorted halves), then prints the sorted list on a single line separated by `, ` (comma and space), with no trailing separator, followed by a newline.",
+      "expected_stdout": "3, 9, 10, 27, 38, 43, 82\n"
+    },
+    {
+      "id": "cs_quick_sort",
+      "title": "Quicksort (recursive partition)",
+      "mechanisms": [
+        "array",
+        "sort",
+        "recursion",
+        "partition"
+      ],
+      "prompt": "Write an Aether program that sorts the list of integers [6, 3, 9, 1, 7, 4, 8, 2, 5] into ascending order using quicksort (choose a pivot, partition, then recurse on the partitions), then prints the sorted list on a single line separated by `, ` (comma and space), with no trailing separator, followed by a newline.",
+      "expected_stdout": "1, 2, 3, 4, 5, 6, 7, 8, 9\n"
+    },
+    {
+      "id": "cs_bfs",
+      "title": "Breadth-first search traversal",
+      "mechanisms": [
+        "graph",
+        "bfs",
+        "queue"
+      ],
+      "prompt": "Write an Aether program that performs a breadth-first search (BFS) starting from node 0 on the undirected graph with adjacency lists 0:[1,4], 1:[0,2,5], 2:[1,3], 3:[2,6], 4:[0,5], 5:[1,4,6], 6:[3,5]. When visiting a node, consider its neighbors in ascending order. Print the order in which nodes are first visited on a single line, separated by single spaces, followed by a newline.",
+      "expected_stdout": "0 1 4 2 5 3 6\n"
+    },
+    {
+      "id": "cs_dijkstra",
+      "title": "Dijkstra shortest path",
+      "mechanisms": [
+        "graph",
+        "dijkstra",
+        "shortest_path"
+      ],
+      "prompt": "Write an Aether program that computes the shortest path distance from node 0 to node 4 in the undirected weighted graph whose edges (given as u, v, weight) are (0,1,4), (0,2,1), (1,2,2), (1,3,1), (2,3,5), (3,4,3), using Dijkstra's algorithm. Print the result on one line in exactly the form `distance = N`, followed by a newline.",
+      "expected_stdout": "distance = 7\n"
+    },
+    {
+      "id": "cs_substring",
+      "title": "Naive substring search",
+      "mechanisms": [
+        "strings",
+        "search",
+        "pattern_matching"
+      ],
+      "prompt": "Write an Aether program that finds the 0-based index of the first occurrence of the pattern `sip` within the text `mississippi` using a naive character-by-character substring search. Print the result on one line in exactly the form `index = N`, followed by a newline.",
+      "expected_stdout": "index = 6\n"
+    }
+  ]
+}

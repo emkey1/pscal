@@ -2217,6 +2217,15 @@ def main() -> int:
     aether_version, aether_version_raw = capture_aether_version(args.aether_bin)
 
     tasks = load_tasks(args.tasks)
+
+    # Record the dataset's own version stamp (YYYY-MM-DD-N), parallel to the
+    # language version, so a score ties to the exact dataset revision too.
+    try:
+        _traw = json.loads(read_text(args.tasks))
+        tasks_version = _traw.get("version") if isinstance(_traw, dict) else None
+    except Exception:
+        tasks_version = None
+
     task_bucket_stats: dict[str, dict[str, Any]] = {}
     if args.bucket_report:
         destination_filter = set(args.bucket_destination) if args.bucket_destination else None
@@ -2315,6 +2324,7 @@ def main() -> int:
 
     report: dict[str, Any] = {
         "tasks_file": str(args.tasks),
+        "tasks_version": tasks_version,
         "destinations_config": str(args.destinations_config),
         "created_at_unix": int(time.time()),
         "aether_version": aether_version,

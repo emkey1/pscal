@@ -1,5 +1,5 @@
 {
-  "version": "v2-positive",
+  "version": "2026-06-21-1",
   "description": "v2 positive (model-generation) tasks; the 2 should_fail negatives are scored by tools/aether_negative_tier.py",
   "tasks": [
     {
