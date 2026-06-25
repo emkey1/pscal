@@ -1,3 +1,6 @@
 ## 2024-05-18 - [Optimization of INT_DIV and MOD]
 **Learning:** When adding fast paths for arithmetic in the VM using smaller data types (like 32-bit math for `TYPE_INT32`), you must be extremely careful to preserve the original semantics of the fallback path. In this codebase, the standard integer types are backed by 64-bit `long long`. Therefore, an operation that overflows a 32-bit integer (like `INT32_MIN / -1`) should *not* trap or throw an error; it needs to be promoted cleanly to its valid 64-bit result to avoid breaking valid language semantics.
 **Action:** Always verify that edge cases in numerical fast paths yield the exact same result as the slower generic path, rather than naively enforcing the bounds of the smaller optimized type.
+## 2024-06-25 - [Optimization of ADD, SUBTRACT, MULTIPLY]
+**Learning:** `TYPE_INT32` is commonly used in `ADD`, `SUBTRACT` and `MULTIPLY` operations inside `vm.c` inside `for` loops. The fallback `BINARY_OP` macro incurs a performance penalty when doing type checks and popping off stack items. Adding in-place operations for `TYPE_INT32` directly accessing and mutating the values on stack increases performance.
+**Action:** When adding arithmetic operators fast path check if you can just access stack pointer by offsets (`vm->stackTop[-1]`, `vm->stackTop[-2]`) and decrement `stackTop`.
