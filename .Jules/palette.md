@@ -28,3 +28,6 @@
 ## 2025-03-20 - Redundant Visual Values and Slider Accessibility
 **Learning:** SwiftUI Sliders often rely on separate text views (e.g., in an HStack) to display their current value. Screen readers will read the slider and then redundantly read the visual text label as a separate element, causing confusion.
 **Action:** When implementing Sliders with visual value labels, always add `.accessibilityValue(...)` to the Slider itself, and add `.accessibilityHidden(true)` to the redundant text element so it is hidden from VoiceOver.
+## 2025-03-22 - Transient Animations and Toolbar Button Accessibility
+**Learning:** Found that secondary screens like App Diagnostics lacked graceful transitions when presenting temporary states (like 'Copied' text for reports) and lacked `accessibilityHint`s on primary navigation and action buttons (like Close and Run).
+**Action:** When adding transient text or modifying states in secondary view toolbars, always wrap the boolean assignments in `withAnimation` blocks. Additionally, verify that every `Button` element without inherently obvious text (like an icon or brief verb) has an `accessibilityHint` attached, dynamically updating its `accessibilityLabel` when transient state dictates it.
