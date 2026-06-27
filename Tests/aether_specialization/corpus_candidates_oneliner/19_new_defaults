@@ -1,0 +1,16 @@
+// 19_new_defaults
+// Concepts: new Type() default initialization (Int 0, Text empty)
+// expect: value = 0
+// expect: label length = 0
+
+type Gauge {
+    value: Int;
+    label: Text;
+}
+
+fn main() -> Void {
+    let gauge: Gauge = new Gauge();
+    let labelLen: Int = string_len(gauge.label);
+    fx { println("value = ", gauge.value); println("label length = ", labelLen); }
+    ret;
+}

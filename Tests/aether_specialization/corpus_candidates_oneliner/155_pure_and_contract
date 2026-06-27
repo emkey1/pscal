@@ -1,0 +1,20 @@
+// 155_pure_and_contract
+@pure
+fn isPositive(n: Int) -> Bool {
+    ret n > 0;
+}
+
+@pre count >= 0
+@post result >= 0
+fn doubleUp(count: Int) -> Int {
+    ret count * 2;
+}
+
+fn main() -> Void {
+    fx {
+        println("pos 5: ", isPositive(5));
+        println("pos -2: ", isPositive(0 - 2));
+        println("double 7 = ", doubleUp(7));
+    }
+    ret;
+}

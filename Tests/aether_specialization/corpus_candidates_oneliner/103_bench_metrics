@@ -1,0 +1,19 @@
+// bench_metrics  (module file; not runnable alone)
+// Consumed via use "bench_metrics"; by m1_use_module and m2_module_toon.
+// Verified: place `@pure` on the line above `export fn` inside the module.
+
+mod BenchMetrics {
+    export const PassMark: Int = 70;
+
+    @pure
+    export fn isPass(score: Int) -> Bool {
+        ret score >= PassMark;
+    }
+
+    @pure
+    export fn band(score: Int) -> Text {
+        if score >= 90 { ret "high"; }
+        if score >= 70 { ret "mid"; }
+        ret "low";
+    }
+}

@@ -1,0 +1,17 @@
+// 12_tuple_pair
+// Concepts: tuple return from a top-level helper, destructured directly
+// (never bind a tuple-return call to a single name)
+// expect: lo = 3
+// expect: hi = 8
+
+fn minMax(a: Int, b: Int) -> (Int, Int) {
+    let lo: Int = if a < b { a } else { b };
+    let hi: Int = if a < b { b } else { a };
+    ret (lo, hi);
+}
+
+fn main() -> Void {
+    let (lo, hi) = minMax(8, 3);
+    fx { println("lo = ", lo); println("hi = ", hi); }
+    ret;
+}

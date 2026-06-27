@@ -1,0 +1,32 @@
+// 103_toon_object_array_extraction
+// Concepts: object root, named array extraction, guarded intermediate object,
+// _or only on final lookup
+// expect: row 0 = A1
+// expect: row 1 = EMPTY
+// expect: row 2 = B7
+// expect: missing = 1
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse("{\"rows\":[{\"meta\":{\"code\":\"A1\"}},{\"meta\":{}},{\"meta\":{\"code\":\"B7\"}}]}");
+    let root: ToonNode = toon_root(doc);
+    let rows: ToonNode = toon_key(root, "rows");
+    let missing: Int = 0;
+
+    loop i in 0..toon_len(rows) {
+        let row: ToonNode = toon_at(rows, i);
+        let code: Text = "EMPTY";
+        if toon_has_key(row, "meta") {
+            let meta: ToonNode = toon_key(row, "meta");
+            code = toon_get_text_or(meta, "code", "EMPTY");
+        }
+        if code == "EMPTY" { missing = missing + 1; }
+        fx { println("row ", i, " = ", code); }
+    }
+
+    fx { println("missing = ", missing); }
+
+    toon_close(doc);
+    ret;
+}

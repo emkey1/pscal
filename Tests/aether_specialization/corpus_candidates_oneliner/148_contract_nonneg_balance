@@ -1,0 +1,11 @@
+// 148_contract_nonneg_balance
+@post result >= 0
+fn settle(balance: Int, charge: Int) -> Int {
+    let next: Int = balance - charge;
+    if next < 0 { ret 0; }
+    ret next;
+}
+fn main() -> Void {
+    fx { println("100-30 => ", settle(100, 30)); println("20-50 => ", settle(20, 50)); }
+    ret;
+}

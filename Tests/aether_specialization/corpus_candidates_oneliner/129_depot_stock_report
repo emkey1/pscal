@@ -1,0 +1,35 @@
+// 129_depot_stock_report
+// Concepts: importing a provided module (use "130_stock_rules"), calling its
+// exact exported fn (stockStatus) and const (SafetyStock), object-root TOON,
+// ok-bin counter, summary
+// expect: bin 0: Z1 / 25 / ok
+// expect: bin 1: Z2 / 5 / low
+// expect: bin 2: Z3 / 0 / out
+// expect: safety stock = 10
+// expect: ok bins = 1
+
+use "130_stock_rules";
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("depot129.json");
+    let root: ToonNode = toon_root(doc);
+    let bins: ToonNode = toon_key(root, "bins");
+    let okCount: Int = 0;
+
+    loop i in 0..toon_len(bins) {
+        let bin: ToonNode = toon_at(bins, i);
+        let code: Text = toon_get_text_or(bin, "code", "UNKNOWN");
+        let qty: Int = toon_get_int_or(bin, "qty", 0);
+        let status: Text = stockStatus(qty);
+        if status == "ok" { okCount = okCount + 1; }
+
+        fx { println("bin ", i, ": ", code, " / ", qty, " / ", status); }
+    }
+
+    fx { println("safety stock = ", SafetyStock); println("ok bins = ", okCount); }
+
+    toon_close(doc);
+    ret;
+}

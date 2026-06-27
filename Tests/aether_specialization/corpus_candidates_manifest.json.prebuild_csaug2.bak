@@ -5038,6 +5038,374 @@
       }
     },
     {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_009",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_009",
+      "sha256": "b4597568b92f2980daabcc76398dcd7cdc4af463d20351d2cb84ac506f2bbaaf",
+      "stdout": "power(4, 6) = 4096\ndigit_sum(897085) = 37\ncount_digits(6572387) = 7\nsum_to(21) = 231\nreverse_int(104026) = 620401\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_010",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_010",
+      "sha256": "33e086880c872c58aa0160f9b6f8e29d060f00f1f0cb4ecff2369f34d601a79c",
+      "stdout": "power(2, 7) = 128\ndigit_sum(998226) = 36\ncount_digits(5460588) = 7\nsum_to(33) = 561\nreverse_int(5258142) = 2418525\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_011",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_011",
+      "sha256": "873de0f538ef5a73f7997bd386750db93f8c35a0789973e9ca7c9369a7f0fc13",
+      "stdout": "power(4, 9) = 262144\ndigit_sum(686565) = 36\ncount_digits(3540555) = 7\nsum_to(16) = 136\nreverse_int(3261684) = 4861623\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_012",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_012",
+      "sha256": "e4bd8628dbb5dd00d10dd9688c26df4e858f636e4f9c1e3df68f230fea1c7733",
+      "stdout": "power(5, 4) = 625\ndigit_sum(628498) = 37\ncount_digits(2902517) = 7\nsum_to(16) = 136\nreverse_int(1622441) = 1442261\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_013",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_013",
+      "sha256": "b3bb51c57f2f9cee197c2f507730ba3699d21ca68e6cbda15bc7a4f3531de204",
+      "stdout": "power(2, 9) = 512\ndigit_sum(926998) = 43\ncount_digits(6413972) = 7\nsum_to(11) = 66\nreverse_int(3295665) = 5665923\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_014",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_014",
+      "sha256": "126ab4d68cca54c441a83964dfc19ecfee53cb5b11c097a7491715556c32a626",
+      "stdout": "power(2, 3) = 8\ndigit_sum(206108) = 17\ncount_digits(4426827) = 7\nsum_to(23) = 276\nreverse_int(9128848) = 8488219\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_015",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_015",
+      "sha256": "e309eef8db4e60026ee2b786d8ea041f5cbd0323c9c98236c7c4df2ff7b1cd96",
+      "stdout": "power(3, 8) = 6561\ndigit_sum(196503) = 24\ncount_digits(4400751) = 7\nsum_to(25) = 325\nreverse_int(9929382) = 2839299\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_016",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_016",
+      "sha256": "ccd6b55d30801b707a96f5249bbb6c2e052913d2f17e623cbcafc13490e49781",
+      "stdout": "power(2, 3) = 8\ndigit_sum(145096) = 25\ncount_digits(8326497) = 7\nsum_to(33) = 561\nreverse_int(5256444) = 4446525\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_017",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_017",
+      "sha256": "db21d8c11e2f0df3f3ab4a00fba0f9e9732e4d6fae0fa5dec2a22f8ba46c1ca3",
+      "stdout": "power(7, 6) = 117649\ndigit_sum(167298) = 33\ncount_digits(7804610) = 7\nsum_to(36) = 666\nreverse_int(7134407) = 7044317\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_018",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_018",
+      "sha256": "19b4b8f939144770f9d2bd6b8d63e76eb51f12f078cce0a015d1764adb4b0a96",
+      "stdout": "power(4, 9) = 262144\ndigit_sum(667085) = 32\ncount_digits(2467777) = 7\nsum_to(16) = 136\nreverse_int(2513646) = 6463152\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_019",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_019",
+      "sha256": "bb4c32bb4ac8f17be0e8ebcd8b115670180b09643ff3fede7f0f4a1bb7651135",
+      "stdout": "power(2, 5) = 32\ndigit_sum(662109) = 24\ncount_digits(5730294) = 7\nsum_to(37) = 703\nreverse_int(1469244) = 4429641\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_020",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_020",
+      "sha256": "c8975ecdaf364217700e3f4a2c901a453ae16f9aa45a0dc9123c8f190495e081",
+      "stdout": "power(2, 3) = 8\ndigit_sum(174920) = 23\ncount_digits(6747215) = 7\nsum_to(9) = 45\nreverse_int(7068430) = 348607\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_021",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_021",
+      "sha256": "187b04187e1052da96efe20aa3fbd514936aefc5ff3123503a278a34528082e2",
+      "stdout": "power(5, 5) = 3125\ndigit_sum(646549) = 34\ncount_digits(2059134) = 7\nsum_to(37) = 703\nreverse_int(4989884) = 4889894\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_022",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_022",
+      "sha256": "5ced100bc4bb2b391b419ea137053f5dec1fd28aa5af7df3ac823a685a41a993",
+      "stdout": "power(2, 5) = 32\ndigit_sum(629319) = 30\ncount_digits(1011575) = 7\nsum_to(9) = 45\nreverse_int(7859144) = 4419587\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_023",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_023",
+      "sha256": "3e70de640e42006ddd4f6d21a90c833c27e2eb90f17ac8254296dfa2f8c719e3",
+      "stdout": "power(4, 7) = 16384\ndigit_sum(398923) = 34\ncount_digits(9519952) = 7\nsum_to(5) = 15\nreverse_int(8194911) = 1194918\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_024",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_024",
+      "sha256": "927c29cd76e0d3be245ae9f45db72b07735e104fe4f4886aaab3e17b3932031b",
+      "stdout": "power(6, 6) = 46656\ndigit_sum(151434) = 18\ncount_digits(1740880) = 7\nsum_to(7) = 28\nreverse_int(2884942) = 2494882\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_025",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_025",
+      "sha256": "8835a64592d2c50bf8c68920b0d9ebcac73cdf196b8acc28ae59245f8d05a6a0",
+      "stdout": "power(6, 4) = 1296\ndigit_sum(158903) = 26\ncount_digits(1483983) = 7\nsum_to(11) = 66\nreverse_int(9157825) = 5287519\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_026",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_026",
+      "sha256": "dabcfe00a78259a3be2cfcb38b6d1d36d9b46d4e45f15b227137b5f4ca6a5f10",
+      "stdout": "power(7, 8) = 5764801\ndigit_sum(349585) = 34\ncount_digits(5683046) = 7\nsum_to(27) = 378\nreverse_int(6143521) = 1253416\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_027",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_027",
+      "sha256": "54ad4d1408cdcc54585a108ba8b5bf5f89033f80a87faf775ddcebb24c5bae7b",
+      "stdout": "power(5, 7) = 78125\ndigit_sum(548593) = 34\ncount_digits(517302) = 6\nsum_to(31) = 496\nreverse_int(3833085) = 5803383\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_028",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_028",
+      "sha256": "799027b988feca3591208426f52665bad7c493c326d05fc07adb95e8ee74c65e",
+      "stdout": "power(7, 6) = 117649\ndigit_sum(178323) = 24\ncount_digits(5648885) = 7\nsum_to(17) = 153\nreverse_int(6392796) = 6972936\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_029",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_029",
+      "sha256": "341267145f7a19ef919bcb06a50c145810c3ccc65a0d0160df53a240b08708bb",
+      "stdout": "power(4, 6) = 4096\ndigit_sum(552518) = 26\ncount_digits(9614518) = 7\nsum_to(6) = 21\nreverse_int(3140360) = 630413\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_030",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_030",
+      "sha256": "4e72d96e3a63064d61c3973561927677b6a773e6198aec7471b40e75e27f03e9",
+      "stdout": "power(3, 5) = 243\ndigit_sum(36030) = 12\ncount_digits(622225) = 6\nsum_to(19) = 190\nreverse_int(7636035) = 5306367\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/306_recursion_031",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/306_recursion_031",
+      "sha256": "51129b8745b52342e3bec5d360a3116001aa6e1c6bcf4ea63a190c48c55a18fd",
+      "stdout": "power(4, 9) = 262144\ndigit_sum(16915) = 22\ncount_digits(1363865) = 7\nsum_to(5) = 15\nreverse_int(7087155) = 5517807\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "recursion",
+          "single-recursion"
+        ],
+        "notes": "classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases"
+      }
+    },
+    {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_000",
       "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_000",
       "sha256": "896c25c39faa01fdc31623601d9d3564540e81d7d29f57b41d3fec4962f5f26f",
@@ -5170,6 +5538,374 @@
       "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_008",
       "sha256": "390b9a0e9df86b252931d249da5658f9cb17e4f43a4d1af7e4f32a402705fea4",
       "stdout": "input: 19 67 17 17 57 53 70 80 74\nalgorithm: selection\nsorted[0] = 17\nsorted[1] = 17\nsorted[2] = 19\nsorted[3] = 53\nsorted[4] = 57\nsorted[5] = 67\nsorted[6] = 70\nsorted[7] = 74\nsorted[8] = 80\nmin: 17\nmax: 80\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_009",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_009",
+      "sha256": "8a5a832d12738eb2c03e2f1d9856ec8a214c130a4f4dfda0f549bb60b29b0081",
+      "stdout": "input: 30 3 97 7 99 95 42 1 82\nalgorithm: selection\nsorted[0] = 1\nsorted[1] = 3\nsorted[2] = 7\nsorted[3] = 30\nsorted[4] = 42\nsorted[5] = 82\nsorted[6] = 95\nsorted[7] = 97\nsorted[8] = 99\nmin: 1\nmax: 99\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_010",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_010",
+      "sha256": "10dc51dc80c9d06851d64f509de1e09bdb859185e9024e4e58da247dc79963bb",
+      "stdout": "input: 13 17 17 27 35 97\nalgorithm: insertion\nsorted[0] = 13\nsorted[1] = 17\nsorted[2] = 17\nsorted[3] = 27\nsorted[4] = 35\nsorted[5] = 97\nmin: 13\nmax: 97\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_011",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_011",
+      "sha256": "7c1b6c91d7d69ffd5d62bb72387402380b1f8bbd08ae0a4e012b18f8a3b7e7fd",
+      "stdout": "input: 17 5 37 41 34 7 15 35\nalgorithm: insertion\nsorted[0] = 5\nsorted[1] = 7\nsorted[2] = 15\nsorted[3] = 17\nsorted[4] = 34\nsorted[5] = 35\nsorted[6] = 37\nsorted[7] = 41\nmin: 5\nmax: 41\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_012",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_012",
+      "sha256": "6684b02c66b2c64dba5d153a0917c421a04d99c23c84e9db84c6132ac2f741ec",
+      "stdout": "input: 66 85 36 30 24 68\nalgorithm: selection\nsorted[0] = 24\nsorted[1] = 30\nsorted[2] = 36\nsorted[3] = 66\nsorted[4] = 68\nsorted[5] = 85\nmin: 24\nmax: 85\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_013",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_013",
+      "sha256": "423724a27615d7aa1ade7a3324a8050c709a781c382841efa99dc097e2265c5e",
+      "stdout": "input: 84 47 63 94 1\nalgorithm: selection\nsorted[0] = 1\nsorted[1] = 47\nsorted[2] = 63\nsorted[3] = 84\nsorted[4] = 94\nmin: 1\nmax: 94\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_014",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_014",
+      "sha256": "1be33883fe1161c9e5a5513679888dd75968293bc93644988fcaef51adbef1ab",
+      "stdout": "input: 64 19 9 64 65 52 95 77\nalgorithm: insertion\nsorted[0] = 9\nsorted[1] = 19\nsorted[2] = 52\nsorted[3] = 64\nsorted[4] = 64\nsorted[5] = 65\nsorted[6] = 77\nsorted[7] = 95\nmin: 9\nmax: 95\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_015",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_015",
+      "sha256": "4ef6e820836e80fc8b55b8f3cfecbb2652b520e05b2bade10f6a9142df6b22ae",
+      "stdout": "input: 88 66 23 11 26\nalgorithm: insertion\nsorted[0] = 11\nsorted[1] = 23\nsorted[2] = 26\nsorted[3] = 66\nsorted[4] = 88\nmin: 11\nmax: 88\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_016",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_016",
+      "sha256": "ca79eaef72e49ba304fdbb24fb931e1c1f200ec2b6900b6197a6e1cbf2791378",
+      "stdout": "input: 17 15 66 25 11 71 33 80 1\nalgorithm: insertion\nsorted[0] = 1\nsorted[1] = 11\nsorted[2] = 15\nsorted[3] = 17\nsorted[4] = 25\nsorted[5] = 33\nsorted[6] = 66\nsorted[7] = 71\nsorted[8] = 80\nmin: 1\nmax: 80\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_017",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_017",
+      "sha256": "edeac4f6312c133adf036d60358754d407eb7f214ce8445a9c145085b501d589",
+      "stdout": "input: 89 92 2 94 77 21 45\nalgorithm: insertion\nsorted[0] = 2\nsorted[1] = 21\nsorted[2] = 45\nsorted[3] = 77\nsorted[4] = 89\nsorted[5] = 92\nsorted[6] = 94\nmin: 2\nmax: 94\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_018",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_018",
+      "sha256": "390a26e185e6a77d4c68a0b91a1ad0b4f75308f09e8812d642b1be5b152c97c3",
+      "stdout": "input: 51 28 73 6 5\nalgorithm: insertion\nsorted[0] = 5\nsorted[1] = 6\nsorted[2] = 28\nsorted[3] = 51\nsorted[4] = 73\nmin: 5\nmax: 73\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_019",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_019",
+      "sha256": "0548fe6b9ea81b9721ad35302cd2e45d87319a3841a598fd207f1c56bc53a746",
+      "stdout": "input: 49 14 86 20 29 32 70 69\nalgorithm: insertion\nsorted[0] = 14\nsorted[1] = 20\nsorted[2] = 29\nsorted[3] = 32\nsorted[4] = 49\nsorted[5] = 69\nsorted[6] = 70\nsorted[7] = 86\nmin: 14\nmax: 86\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_020",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_020",
+      "sha256": "e482793268e3dc539f0b3d222745794cfe6e44471666fc458411910733aab356",
+      "stdout": "input: 33 16 86 40 33 55\nalgorithm: insertion\nsorted[0] = 16\nsorted[1] = 33\nsorted[2] = 33\nsorted[3] = 40\nsorted[4] = 55\nsorted[5] = 86\nmin: 16\nmax: 86\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_021",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_021",
+      "sha256": "1733f65df832de22dde926731bedaa775f2627abe891f90a582eaa906a5bb181",
+      "stdout": "input: 56 66 67 25 50 23 71 54\nalgorithm: selection\nsorted[0] = 23\nsorted[1] = 25\nsorted[2] = 50\nsorted[3] = 54\nsorted[4] = 56\nsorted[5] = 66\nsorted[6] = 67\nsorted[7] = 71\nmin: 23\nmax: 71\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_022",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_022",
+      "sha256": "be599d3aae9ecde834298fd5084abf68d5f822fc2f0e98d2e94fba3d795b2e4e",
+      "stdout": "input: 46 89 25 81 56\nalgorithm: selection\nsorted[0] = 25\nsorted[1] = 46\nsorted[2] = 56\nsorted[3] = 81\nsorted[4] = 89\nmin: 25\nmax: 89\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_023",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_023",
+      "sha256": "b7a09102df13adfc6e2e15ff16372031b2613b5a0cc2ebbb360d11c82f779a50",
+      "stdout": "input: 19 89 20 96 15 13\nalgorithm: selection\nsorted[0] = 13\nsorted[1] = 15\nsorted[2] = 19\nsorted[3] = 20\nsorted[4] = 89\nsorted[5] = 96\nmin: 13\nmax: 96\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_024",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_024",
+      "sha256": "d346e2b3eb6e3b1c906a017a504c01edfedcf8379ba0dc2a8d6423540f7aa198",
+      "stdout": "input: 97 46 50 85 11 28 12 94\nalgorithm: insertion\nsorted[0] = 11\nsorted[1] = 12\nsorted[2] = 28\nsorted[3] = 46\nsorted[4] = 50\nsorted[5] = 85\nsorted[6] = 94\nsorted[7] = 97\nmin: 11\nmax: 97\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_025",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_025",
+      "sha256": "274abd282e03f714ec67663c64925e5dae0f7dc05a233d6d35b1d298bc83b78f",
+      "stdout": "input: 62 58 83 93 73 34\nalgorithm: selection\nsorted[0] = 34\nsorted[1] = 58\nsorted[2] = 62\nsorted[3] = 73\nsorted[4] = 83\nsorted[5] = 93\nmin: 34\nmax: 93\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_026",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_026",
+      "sha256": "796a50ed3f38203ad83a5c60d0e6a211e8994fc8e960739208700affb3d7c8af",
+      "stdout": "input: 31 5 13 94 20 5 22\nalgorithm: selection\nsorted[0] = 5\nsorted[1] = 5\nsorted[2] = 13\nsorted[3] = 20\nsorted[4] = 22\nsorted[5] = 31\nsorted[6] = 94\nmin: 5\nmax: 94\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_027",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_027",
+      "sha256": "d62324c6a4708b8bf690d66fd68f8253af2d5694adc9a316f5f9afe095c36ba3",
+      "stdout": "input: 68 98 61 14 88 82 70 89 33 47\nalgorithm: insertion\nsorted[0] = 14\nsorted[1] = 33\nsorted[2] = 47\nsorted[3] = 61\nsorted[4] = 68\nsorted[5] = 70\nsorted[6] = 82\nsorted[7] = 88\nsorted[8] = 89\nsorted[9] = 98\nmin: 14\nmax: 98\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_028",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_028",
+      "sha256": "279a8fa360a16647becb4297613d29828433b251e49599ab36a9a48261b41870",
+      "stdout": "input: 15 61 56 50 53 47 45 83 80 61\nalgorithm: insertion\nsorted[0] = 15\nsorted[1] = 45\nsorted[2] = 47\nsorted[3] = 50\nsorted[4] = 53\nsorted[5] = 56\nsorted[6] = 61\nsorted[7] = 61\nsorted[8] = 80\nsorted[9] = 83\nmin: 15\nmax: 83\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_029",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_029",
+      "sha256": "ceeb07bbf9dec2f120d4ba3b0cf3000849013cdc61b25824d3e57188a2f53de1",
+      "stdout": "input: 82 8 15 15 69 53 71 37 67\nalgorithm: insertion\nsorted[0] = 8\nsorted[1] = 15\nsorted[2] = 15\nsorted[3] = 37\nsorted[4] = 53\nsorted[5] = 67\nsorted[6] = 69\nsorted[7] = 71\nsorted[8] = 82\nmin: 8\nmax: 82\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_030",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_030",
+      "sha256": "e1d5d8a88d0367d2a7718cac63be5d492d531ec18a2e08b4e65779bef1a15064",
+      "stdout": "input: 12 62 90 54 43 4 35 90\nalgorithm: insertion\nsorted[0] = 4\nsorted[1] = 12\nsorted[2] = 35\nsorted[3] = 43\nsorted[4] = 54\nsorted[5] = 62\nsorted[6] = 90\nsorted[7] = 90\nmin: 4\nmax: 90\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "sorting",
+          "comparison"
+        ],
+        "notes": "comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/307_sorting_031",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/307_sorting_031",
+      "sha256": "34fee59bbf94dd9880a58efeb4a3f3967890d7db8a00ea5da5ef07b953b874e1",
+      "stdout": "input: 80 47 57 84 65 60 95 13 19\nalgorithm: selection\nsorted[0] = 13\nsorted[1] = 19\nsorted[2] = 47\nsorted[3] = 57\nsorted[4] = 60\nsorted[5] = 65\nsorted[6] = 80\nsorted[7] = 84\nsorted[8] = 95\nmin: 13\nmax: 95\n",
       "metadata": {
         "canonical": true,
         "fixture_required": false,
@@ -5362,6 +6098,466 @@
       }
     },
     {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_009",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_009",
+      "sha256": "7a76dab13235c5876ae3f519c9b0ad9d1c99f9a5bf4657651ff079e2fc09f1d6",
+      "stdout": "array: 32 63 20 53 76 58 47 78\nsorted: 5 31 43 77 86 91 93 98\nindex_of(78) = 7\nmin_index = 2\nmin_value = 20\nbinary_search(80) = -1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_010",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_010",
+      "sha256": "2d38a1ec813252170147c790fecf54cd9fbf2f157f52442184e1e3aed1f9906b",
+      "stdout": "array: 32 28 55 3 22 60\nsorted: 14 21 26 33 81 84\nindex_of(82) = -1\nmin_index = 3\nmin_value = 3\nbinary_search(81) = 4\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_011",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_011",
+      "sha256": "ca645a737670759a2f00aed3ce3e3c76a7f8c2f3203c12722d96fb1280dffd8d",
+      "stdout": "array: 48 45 40 58 16 11 67 39 49 49\nsorted: 1 11 31 34 35 40 44 59 70 87\nindex_of(39) = 7\nmin_index = 5\nmin_value = 11\nbinary_search(34) = 3\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_012",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_012",
+      "sha256": "6051cd376c49a7dc0996bafb1af1d6fc210bebf4310fd2c98c7ed8abe3606534",
+      "stdout": "array: 74 76 80 48 58 43 22 59\nsorted: 13 15 40 41 46 47 72 97\nindex_of(22) = 6\nmin_index = 6\nmin_value = 22\nbinary_search(15) = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_013",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_013",
+      "sha256": "1e13794da8a8eef5ceaf7fba8659b88c1dbebd60241703e46579bf170e85a31c",
+      "stdout": "array: 38 79 60 16 52 8 39 31\nsorted: 3 6 15 17 48 61 76 97\nindex_of(31) = 7\nmin_index = 5\nmin_value = 8\nbinary_search(57) = -1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_014",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_014",
+      "sha256": "28b55146d165e95c85c0c3665a5a91e43ded4fd144e56759a99df323a1c9a2ff",
+      "stdout": "array: 63 35 24 17 79 52 34 36\nsorted: 1 19 27 51 58 71 89 92\nindex_of(96) = -1\nmin_index = 3\nmin_value = 17\nbinary_search(51) = 3\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_015",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_015",
+      "sha256": "6663014146469bc0d4cb103697fb2967c27ac919775c49efb71ebda4f727ca02",
+      "stdout": "array: 7 39 10 37 72 10 35 74 9 38 4\nsorted: 2 3 20 66 81 82 83 86 89 91 94\nindex_of(38) = 9\nmin_index = 10\nmin_value = 4\nbinary_search(66) = 3\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_016",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_016",
+      "sha256": "0f2228b44dd7fb76257dfe0daf0f679f95615184ded4347279c187aa4f5eb690",
+      "stdout": "array: 29 67 34 74 20 80 13 10 6\nsorted: 32 33 41 54 70 81 83 87 91\nindex_of(85) = -1\nmin_index = 8\nmin_value = 6\nbinary_search(44) = -1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_017",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_017",
+      "sha256": "b6273af87c09323d6cf7679ec74dcde2db3f81df34acd0ecdc9ec1c50d1c46f7",
+      "stdout": "array: 79 27 39 31 23 61 72 57 4 45\nsorted: 3 7 27 35 36 38 56 70 77 83\nindex_of(85) = -1\nmin_index = 8\nmin_value = 4\nbinary_search(35) = 3\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_018",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_018",
+      "sha256": "c5ce978aaaf8e23200f9a75c90d002135680f75c2b72550ddefa77ceb4ab76ca",
+      "stdout": "array: 58 65 51 2 34 28 71 11\nsorted: 3 16 32 45 46 59 85 98\nindex_of(58) = 0\nmin_index = 3\nmin_value = 2\nbinary_search(3) = 0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_019",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_019",
+      "sha256": "1cc77e84f72b5ce43294e24a9cf467fc7cd21a6e96080371adce25f3cd542c49",
+      "stdout": "array: 3 19 62 78 28 37 53 8 14\nsorted: 7 11 24 25 43 65 86 88 95\nindex_of(28) = 4\nmin_index = 0\nmin_value = 3\nbinary_search(77) = -1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_020",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_020",
+      "sha256": "f0c0bd58320775dbb87713f55ca236944f60b17f91a7bb35c328fb938887e46c",
+      "stdout": "array: 48 11 49 23 35 79 67 75 80 80\nsorted: 17 42 44 60 73 77 79 96 98 99\nindex_of(87) = -1\nmin_index = 1\nmin_value = 11\nbinary_search(64) = -1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_021",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_021",
+      "sha256": "ab6bcd2d4302fc87d781d2206db796456a913818f5df3687835df10ab8bd1dc7",
+      "stdout": "array: 26 61 39 41 14 5\nsorted: 47 82 85 86 88 89\nindex_of(14) = 4\nmin_index = 5\nmin_value = 5\nbinary_search(89) = 5\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_022",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_022",
+      "sha256": "c3da3d00b21bb14dc1ffd6e19adabb3e3164a510ecc709c819e5382f5c99e526",
+      "stdout": "array: 41 43 27 2 58 64 24\nsorted: 10 23 47 48 54 82 90\nindex_of(58) = 4\nmin_index = 3\nmin_value = 2\nbinary_search(23) = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_023",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_023",
+      "sha256": "d06f9c08a54e4d33ed3424b5d295cc0e1cadfeed316b055df6246c8ca70b3abc",
+      "stdout": "array: 11 69 66 77 75 51 7 49 9 11\nsorted: 12 21 25 27 29 30 46 53 68 70\nindex_of(77) = 3\nmin_index = 6\nmin_value = 7\nbinary_search(40) = -1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_024",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_024",
+      "sha256": "e905884c37c82affac77dcdf8825ccda998359d226310e4113d42b28edb81d29",
+      "stdout": "array: 68 17 4 68 48 50\nsorted: 1 18 69 82 88 92\nindex_of(84) = -1\nmin_index = 2\nmin_value = 4\nbinary_search(88) = 4\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_025",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_025",
+      "sha256": "b71cc17e5d8b5a0c4f86b18dab8949345f986c644ff742e8827ba888b6182f44",
+      "stdout": "array: 3 29 29 43 62 61 59\nsorted: 11 17 44 48 55 69 95\nindex_of(93) = -1\nmin_index = 0\nmin_value = 3\nbinary_search(38) = -1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_026",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_026",
+      "sha256": "bfa217c6e50a7fa3923a2db8db2b10578413a863484e5d9c551e015c10205ceb",
+      "stdout": "array: 44 47 60 19 59 66 11 45\nsorted: 5 17 35 50 61 69 72 85\nindex_of(45) = 7\nmin_index = 6\nmin_value = 11\nbinary_search(5) = 0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_027",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_027",
+      "sha256": "2b30db84fce474e92920f4122a4bfaff885e22f3468279435333f178d4bfb3e7",
+      "stdout": "array: 71 60 15 4 35 5 7 5\nsorted: 10 17 29 31 55 83 85 93\nindex_of(95) = -1\nmin_index = 3\nmin_value = 4\nbinary_search(27) = -1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_028",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_028",
+      "sha256": "f2b149460059a89f8f71280512e0da1a3414d5c60c0930e041bd9627d8403eac",
+      "stdout": "array: 79 48 6 66 65 79 65 15 79\nsorted: 7 33 38 66 70 73 74 91 93\nindex_of(79) = 0\nmin_index = 2\nmin_value = 6\nbinary_search(76) = -1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_029",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_029",
+      "sha256": "ad2e0213a0b77a7441300625c99d2e4cc2cca57b12efec02dd7dc2b9625ffe7c",
+      "stdout": "array: 64 33 42 79 78 47 55 42 22\nsorted: 5 8 14 23 36 48 50 72 78\nindex_of(79) = 3\nmin_index = 8\nmin_value = 22\nbinary_search(8) = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_030",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_030",
+      "sha256": "a46e23b2c43f2cffb7d9667d29497593e4f5e7acd329820f25ceffa1bbd78af5",
+      "stdout": "array: 50 46 63 7 6 27 53 4\nsorted: 2 29 49 51 65 70 73 79\nindex_of(63) = 2\nmin_index = 7\nmin_value = 4\nbinary_search(65) = 4\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/308_searching_031",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/308_searching_031",
+      "sha256": "3720df1f95d828567d370c778fac701e69fd7d5b348d6f559852a94868ffe732",
+      "stdout": "array: 42 66 63 29 7 49 74 25 70 78 44\nsorted: 1 13 21 33 48 53 54 64 74 91 93\nindex_of(42) = 0\nmin_index = 4\nmin_value = 7\nbinary_search(13) = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "searching",
+          "linear",
+          "search",
+          "returning",
+          "first",
+          "matching"
+        ],
+        "notes": "linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets"
+      }
+    },
+    {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_000",
       "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_000",
       "sha256": "042cd2e64dd4256410813601ad30943638e827a8c5fb5c79339bb52820998d99",
@@ -5526,6 +6722,466 @@
       "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_008",
       "sha256": "e21ca106399140244d271911c787f4bf13b6df7d4cb5f685b9d0a5f50b6b5eb0",
       "stdout": "array: 5 6 0 1 0 7 -7\nmax_subarray = 19\nstairs(13) ways = 377\nhouses: 6 10 22 21 13 2 20 4 16\nrob_max = 77\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_009",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_009",
+      "sha256": "faa5a877a3f6ebf63a012f5b0ae24b21ce4e6b7ff255112c6ca4f643cb028af4",
+      "stdout": "array: -3 2 -6 -6 6 4 -1 6\nmax_subarray = 15\nstairs(4) ways = 5\nhouses: 19 8 9 18 3 13 30\nrob_max = 67\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_010",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_010",
+      "sha256": "c0a6e71ea83f1b3aa25e22509f2ea4ab014d87961ddff16d0b7e8c9f2c1d529a",
+      "stdout": "array: -1 -9 1 0 2 -3 5 -2 -8 -9\nmax_subarray = 5\nstairs(17) ways = 2584\nhouses: 3 28 20 13 28 20 9 24\nrob_max = 85\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_011",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_011",
+      "sha256": "191471af42e193015651bff484256fbd48a89a2ac4de16103bf74134f19a3d6b",
+      "stdout": "array: 8 7 0 1 2 -4 8\nmax_subarray = 22\nstairs(16) ways = 1597\nhouses: 11 2 10 15 14 12 18 13\nrob_max = 53\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_012",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_012",
+      "sha256": "5b1d0ab9fb923cb15838fc75c9e0c84fc50bb99cf2cd8a9d23aa5397fb2b88fe",
+      "stdout": "array: 3 -9 -7 8 -7 -7 1 -3 -3\nmax_subarray = 8\nstairs(9) ways = 55\nhouses: 11 13 3 5 6 5 7\nrob_max = 27\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_013",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_013",
+      "sha256": "6a81a5a4def2a7d20902dfec8cd38234f75c6598da47ea0dd805841aaaf97220",
+      "stdout": "array: 6 -6 3 -3 9 -1 3 5\nmax_subarray = 16\nstairs(9) ways = 55\nhouses: 4 20 20 7 30 9 14\nrob_max = 68\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_014",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_014",
+      "sha256": "6326c3eb9a01d9adc34500f00f72472f271fe2e4ac466da9bdab1c819c0fcd89",
+      "stdout": "array: -3 8 -1 -2 4 8 -7 4 7\nmax_subarray = 21\nstairs(15) ways = 987\nhouses: 25 7 24 29 5 11\nrob_max = 65\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_015",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_015",
+      "sha256": "60ba958bbfb544fb00746487db1be0c822926ebe4efa5cc5b5f9c007f57c5931",
+      "stdout": "array: -2 7 8 8 3 0 -5\nmax_subarray = 26\nstairs(13) ways = 377\nhouses: 10 25 24 4 4 5\nrob_max = 39\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_016",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_016",
+      "sha256": "d6f8fd21adc203ebe762ed76a64c5147f96882ecbd21f98acec1ae0d81decbcf",
+      "stdout": "array: 1 -8 -8 -4 1 9 -1 -5 9\nmax_subarray = 13\nstairs(6) ways = 13\nhouses: 18 21 25 4 8\nrob_max = 51\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_017",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_017",
+      "sha256": "08f10654ea423f4805b017a2f5242a5257ae7f75ae2ded0dcabff1e9e9f3f7f6",
+      "stdout": "array: 9 3 4 8 0 -4 7 6 -8 -4\nmax_subarray = 33\nstairs(13) ways = 377\nhouses: 21 16 15 23 6 26\nrob_max = 70\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_018",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_018",
+      "sha256": "c654a721a6123aac09364a69d1e43712230db7e66e38e986a4d48a592f17a8d7",
+      "stdout": "array: -3 -5 2 8 -3 -9 -6 -4 -4 1\nmax_subarray = 10\nstairs(8) ways = 34\nhouses: 14 13 20 27 3 26 1 3\nrob_max = 70\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_019",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_019",
+      "sha256": "672ee5e14cbc54177c77f9bb64a6c00e0c40be62cb559a26d5608da86d646219",
+      "stdout": "array: 5 -7 8 -2 8 -4 -6 7 1\nmax_subarray = 14\nstairs(4) ways = 5\nhouses: 12 20 8 18 11 13 14 30 29\nrob_max = 81\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_020",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_020",
+      "sha256": "9ed15832362017b3ff8af22ff8d31e26b03b6de49dbd11c62c2a686996aac7b7",
+      "stdout": "array: -7 3 -4 9 7 -3\nmax_subarray = 16\nstairs(14) ways = 610\nhouses: 7 1 14 1 21 21 3\nrob_max = 45\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_021",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_021",
+      "sha256": "d9a506768669901ae7aa1f86590e7dfc11a4ba220c08e64a3f3453f05e235315",
+      "stdout": "array: 6 -5 -9 9 3 -8 -8 2 -2 5\nmax_subarray = 12\nstairs(4) ways = 5\nhouses: 21 16 14 4 17 22 7 7\nrob_max = 64\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_022",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_022",
+      "sha256": "197c0e8fbbb521cf3458e9c21cdd57661c708d56970597f2551f09b2778ac51f",
+      "stdout": "array: 1 8 2 -1 -8 -1 -3 -2 2\nmax_subarray = 11\nstairs(15) ways = 987\nhouses: 30 26 6 12 2 15 6 27 26\nrob_max = 84\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_023",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_023",
+      "sha256": "d4728256f8c43429bd71c653a0526f7b222d5d4a9c265dec8f6550f36bb29fb9",
+      "stdout": "array: 8 0 5 6 -3 -6 8\nmax_subarray = 19\nstairs(14) ways = 610\nhouses: 1 8 8 22 22 24 2\nrob_max = 54\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_024",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_024",
+      "sha256": "195bb1bf8b674b97381b7d4098355326a2e4d6c02a6f348fea3b8c2394fa7561",
+      "stdout": "array: -9 7 -8 5 2 0 -7\nmax_subarray = 7\nstairs(13) ways = 377\nhouses: 10 7 20 13 13 21 30\nrob_max = 73\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_025",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_025",
+      "sha256": "c1d549419802dd192f474aaa9370f6f9287a7c9d394ff6a55087f496029a6566",
+      "stdout": "array: -7 -4 3 1 9 0 -5 2 -9\nmax_subarray = 13\nstairs(4) ways = 5\nhouses: 18 22 22 28 24 11 25 25\nrob_max = 89\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_026",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_026",
+      "sha256": "860203c0b5470891c8b5dfed3f5e058fc38932d82fbdac68edfb3b0cf19c3cd3",
+      "stdout": "array: -3 2 6 3 -1 2 -9 -8 2 3\nmax_subarray = 12\nstairs(5) ways = 8\nhouses: 16 15 5 17 24 8\nrob_max = 45\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_027",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_027",
+      "sha256": "dfc5a013697e75ae79bd127037f5151e7e8f4d9adbcfd20a40cfcccbd046719d",
+      "stdout": "array: 9 3 -7 -3 -8 -4 -7\nmax_subarray = 12\nstairs(11) ways = 144\nhouses: 21 6 17 26 1 2 15 24\nrob_max = 73\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_028",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_028",
+      "sha256": "a347b6bc204bd6ab954ca0d693d1d5a80a314391aa7034257cb37e11018b6d9f",
+      "stdout": "array: -5 -3 -1 -5 -5 5 -5 -4\nmax_subarray = 5\nstairs(11) ways = 144\nhouses: 26 11 30 18 3 5 16\nrob_max = 75\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_029",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_029",
+      "sha256": "b8be4b2196d526f7ea87ed5e3522fd7f78d5a73def438f028c8480bc71c67317",
+      "stdout": "array: 4 -6 -2 7 6 7 5\nmax_subarray = 25\nstairs(7) ways = 21\nhouses: 9 15 22 23 1 5 15\nrob_max = 53\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_030",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_030",
+      "sha256": "c23a782df55ebb07e707fce73995f587c67a94dae22c1f82c56e74a791d495dc",
+      "stdout": "array: 0 7 -3 7 1 -3 -9 -9 6 3\nmax_subarray = 12\nstairs(16) ways = 1597\nhouses: 13 22 21 24 2 3 6 16 22\nrob_max = 74\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp1d",
+          "dynamic",
+          "programming",
+          "kadane's",
+          "max-subarray",
+          "climbing-stairs"
+        ],
+        "notes": "1-D dynamic programming \u2014 Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/309_dp1d_031",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/309_dp1d_031",
+      "sha256": "66b28fd5de8075d88d55efbb7fb02fdb78e5782680e63889c876f1876cdbbef1",
+      "stdout": "array: -7 7 -8 -5 5 -3 -1 -5\nmax_subarray = 7\nstairs(17) ways = 2584\nhouses: 27 20 22 27 27 5\nrob_max = 76\n",
       "metadata": {
         "canonical": true,
         "fixture_required": false,
@@ -5738,6 +7394,466 @@
       }
     },
     {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_009",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_009",
+      "sha256": "f76181b093baa8e9ee49a7ff9844ca03fdf638879c382528d30acd0bd7cb7d8a",
+      "stdout": "grid: 2x2\ncost: 6 5 3 4\nunique_paths = 2\nmin_path_sum = 13\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_010",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_010",
+      "sha256": "a5fce0b37403c057b9bdbae45dc8a78694b8728e9e4d0f2819a15245a2e605a0",
+      "stdout": "grid: 3x3\ncost: 3 7 5 3 8 3 2 3 7\nunique_paths = 6\nmin_path_sum = 18\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_011",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_011",
+      "sha256": "a398355bbf2a4cfece99dc3e22a410870929525504217cd731896ede98755967",
+      "stdout": "grid: 3x4\ncost: 3 2 3 6 9 6 7 7 9 8 4 8\nunique_paths = 10\nmin_path_sum = 27\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_012",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_012",
+      "sha256": "9914bcbeeb22cc8c33352163737985315bf8f223593ed551a2e03896070a3b34",
+      "stdout": "grid: 2x4\ncost: 2 1 9 1 4 9 8 7\nunique_paths = 4\nmin_path_sum = 20\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_013",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_013",
+      "sha256": "d6a6d503f1e3fca370696744cb882bf7ada00485cc1916ef5ee252d83809fff9",
+      "stdout": "grid: 2x4\ncost: 8 2 8 1 5 8 6 8\nunique_paths = 4\nmin_path_sum = 27\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_014",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_014",
+      "sha256": "e30f8361acf9cceabc47e31c82a48140b13a74fef4207157e11e91e385cba167",
+      "stdout": "grid: 2x3\ncost: 9 3 9 7 4 8\nunique_paths = 3\nmin_path_sum = 24\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_015",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_015",
+      "sha256": "08d431a9c8926a661aad89a6280749101f4d7781db4a18b18fea97d27f0f3e30",
+      "stdout": "grid: 3x4\ncost: 8 9 8 9 8 1 9 4 2 1 3 4\nunique_paths = 10\nmin_path_sum = 25\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_016",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_016",
+      "sha256": "ef58fb9ea608eb54e151a16440e5ebb2ab3ff2021bb923073efb8ea394e3295b",
+      "stdout": "grid: 2x3\ncost: 4 9 5 3 5 7\nunique_paths = 3\nmin_path_sum = 19\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_017",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_017",
+      "sha256": "8e6a39be32bad9753392f92313228d3b88de58284cd43dd8380c29b7d37d50dc",
+      "stdout": "grid: 4x4\ncost: 7 5 7 8 8 8 2 4 1 7 8 7 5 7 6 9\nunique_paths = 20\nmin_path_sum = 41\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_018",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_018",
+      "sha256": "c90b9f57c0e027186050fce761c2778f58f318169c017f12c87068f8a326581c",
+      "stdout": "grid: 3x2\ncost: 2 5 3 6 7 8\nunique_paths = 3\nmin_path_sum = 19\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_019",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_019",
+      "sha256": "485722e3de30341714289f614dd1e6089db3f29755d1e3f4a92e2ed6248160c9",
+      "stdout": "grid: 2x2\ncost: 7 4 2 3\nunique_paths = 2\nmin_path_sum = 12\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_020",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_020",
+      "sha256": "b1d340498bb0390164320ab0159488a5b111d95be781083a9bbee75fcd5fc8bb",
+      "stdout": "grid: 4x3\ncost: 2 7 8 2 7 8 8 8 1 8 6 2\nunique_paths = 10\nmin_path_sum = 22\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_021",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_021",
+      "sha256": "86f1426f1739067af268c3b67d55738098ded17e5d77e83865da4c624dbf7829",
+      "stdout": "grid: 3x4\ncost: 3 6 7 5 6 7 4 9 4 1 6 6\nunique_paths = 10\nmin_path_sum = 26\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_022",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_022",
+      "sha256": "f8e072cecd0ebba53c4e96f3c28b868cc7173b0a3bb63c63131cdd33f9471bcb",
+      "stdout": "grid: 2x4\ncost: 2 2 7 9 5 7 3 4\nunique_paths = 4\nmin_path_sum = 18\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_023",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_023",
+      "sha256": "14d876a511401ddb140e9ce4b44d1151289e88ac186132568160db0656bf3756",
+      "stdout": "grid: 2x3\ncost: 7 1 5 3 7 4\nunique_paths = 3\nmin_path_sum = 17\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_024",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_024",
+      "sha256": "6560b88e0a8f4f0c6f1d74c5ac87728d1e67c7a72622a5aadfd0af0f94c8e271",
+      "stdout": "grid: 2x4\ncost: 3 4 9 7 1 5 9 1\nunique_paths = 4\nmin_path_sum = 19\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_025",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_025",
+      "sha256": "e762a0c44dd91b9baf47cce31da41bc7e433c0a0e3551b81586b43efec37ebe2",
+      "stdout": "grid: 4x3\ncost: 7 9 5 8 1 1 2 9 1 4 3 3\nunique_paths = 10\nmin_path_sum = 21\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_026",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_026",
+      "sha256": "59e8044a91458c293537355ba2b27a8afce06f05ae1afa2d677d61fbb6570c15",
+      "stdout": "grid: 2x3\ncost: 9 2 7 8 3 6\nunique_paths = 3\nmin_path_sum = 20\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_027",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_027",
+      "sha256": "066cae8dc240e80027066b9c93ab92433b0976021858bd72b9ff06cc8baec66f",
+      "stdout": "grid: 3x2\ncost: 2 9 5 8 4 3\nunique_paths = 3\nmin_path_sum = 14\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_028",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_028",
+      "sha256": "71a07064ac5601fb4511701c0709affc8d521031d99565e8994812e307ee0a15",
+      "stdout": "grid: 2x2\ncost: 5 6 3 2\nunique_paths = 2\nmin_path_sum = 10\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_029",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_029",
+      "sha256": "9d4868b361466afaf19c8b60993c4a73112fc474c965428dc27f9dfc7b155287",
+      "stdout": "grid: 2x3\ncost: 1 1 1 3 9 3\nunique_paths = 3\nmin_path_sum = 6\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_030",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_030",
+      "sha256": "aa4c91465f33482c87a8d197e3b737e0e6321f8fd1b6db3f2a8a65156b11ccd1",
+      "stdout": "grid: 4x4\ncost: 3 9 2 5 1 7 3 5 6 8 3 7 6 2 5 1\nunique_paths = 20\nmin_path_sum = 23\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/310_dp2d_031",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/310_dp2d_031",
+      "sha256": "9afdd859b1ab94b01f023a59f3d33798919fca94c076d439f4d999c4ec307ec3",
+      "stdout": "grid: 3x3\ncost: 5 3 2 1 6 5 5 8 8\nunique_paths = 6\nmin_path_sum = 23\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "dp2d",
+          "grid",
+          "dynamic",
+          "programming",
+          "flattened",
+          "addressed"
+        ],
+        "notes": "2-D grid dynamic programming flattened into an Int[] addressed r*cols+c \u2014 count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if"
+      }
+    },
+    {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_000",
       "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_000",
       "sha256": "eebb480de025676c1f2d541c1dbbfd5e34970cfbd141530e9ac4cc5815bfe289",
@@ -5902,6 +8018,466 @@
       "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_008",
       "sha256": "bedb767f0e0d09ba116fbf343459bf8bac110638336b4df275ca27c76da155ba",
       "stdout": "is_prime(32) = false\nprimes_up_to(15) = 6\nsum_of_divisors(39) = 56\nis_perfect(10) = false\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_009",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_009",
+      "sha256": "a2ae8dd71316915139a6a5bf6bdbdaab777d58c9040273d47491af47d901f3ea",
+      "stdout": "is_prime(200) = false\nprimes_up_to(31) = 11\nsum_of_divisors(16) = 31\nis_perfect(28) = true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_010",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_010",
+      "sha256": "6fa79fe8cf1a660449b30be0a0c17ee49e0aa61c9756e1a5df172640e2ed57f2",
+      "stdout": "is_prime(92) = false\nprimes_up_to(57) = 16\nsum_of_divisors(45) = 78\nis_perfect(28) = true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_011",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_011",
+      "sha256": "01de13f44fabf5e00586e0ccb529ae06423d73c5afd6581b1f1bd8d12d02b39a",
+      "stdout": "is_prime(81) = false\nprimes_up_to(24) = 9\nsum_of_divisors(86) = 132\nis_perfect(24) = false\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_012",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_012",
+      "sha256": "4bc25dee93e6067fa8927f57813dd2dc9126b7880137e2b44c66ce6f181b2293",
+      "stdout": "is_prime(49) = false\nprimes_up_to(24) = 9\nsum_of_divisors(13) = 14\nis_perfect(496) = true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_013",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_013",
+      "sha256": "c01552b181e6822ff45652f61848e1d7a2803e94c4f79549bdd01962cbfcdb0a",
+      "stdout": "is_prime(100) = false\nprimes_up_to(26) = 9\nsum_of_divisors(48) = 124\nis_perfect(8) = false\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_014",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_014",
+      "sha256": "aa6b241709c77017f826d679b142ab7fddbecd452f2f031adf4e385e006a0610",
+      "stdout": "is_prime(173) = true\nprimes_up_to(34) = 11\nsum_of_divisors(82) = 126\nis_perfect(496) = true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_015",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_015",
+      "sha256": "fd648fa34123997ed5637048b22b8b1fd0ba6e072be23b675513d81fc4b8e3a6",
+      "stdout": "is_prime(97) = true\nprimes_up_to(21) = 8\nsum_of_divisors(84) = 224\nis_perfect(6) = true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_016",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_016",
+      "sha256": "6dca467ad97c249ef0615f386cc28be0711ea639102638c78d498a9516a6deb7",
+      "stdout": "is_prime(197) = true\nprimes_up_to(20) = 8\nsum_of_divisors(64) = 127\nis_perfect(8) = false\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_017",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_017",
+      "sha256": "52a932ab284ab71e0f0025128df44f760d789aea908ece10c694b9fe4d7eec4d",
+      "stdout": "is_prime(78) = false\nprimes_up_to(56) = 16\nsum_of_divisors(77) = 96\nis_perfect(496) = true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_018",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_018",
+      "sha256": "efdb11f2f541db02fbad253aedcdd3278626a6b6fd79a0031c586757ee783fe8",
+      "stdout": "is_prime(159) = false\nprimes_up_to(31) = 11\nsum_of_divisors(75) = 124\nis_perfect(8) = false\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_019",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_019",
+      "sha256": "94ce8566bca6a8affbfe8ec1deb3a034c4d6f991d0a1100b045eefdd9a9424a3",
+      "stdout": "is_prime(106) = false\nprimes_up_to(19) = 8\nsum_of_divisors(63) = 104\nis_perfect(8) = false\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_020",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_020",
+      "sha256": "126e2acc580aef43b0fa8a7ae2bf1169785bef5d45a6ff547f630df8f06e61b1",
+      "stdout": "is_prime(58) = false\nprimes_up_to(53) = 16\nsum_of_divisors(87) = 120\nis_perfect(12) = false\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_021",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_021",
+      "sha256": "5cb936ba903ddb1b9dd993e50ca10b2b95b43a82edb163087f56bb70a2d2886c",
+      "stdout": "is_prime(59) = true\nprimes_up_to(26) = 9\nsum_of_divisors(67) = 68\nis_perfect(6) = true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_022",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_022",
+      "sha256": "15bd236c277081e25fc0ff196058304c0582149c78403304254915d4f461cd9d",
+      "stdout": "is_prime(84) = false\nprimes_up_to(13) = 6\nsum_of_divisors(82) = 126\nis_perfect(6) = true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_023",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_023",
+      "sha256": "0326b8e203e04f1e1d00db6f7a3b0156bc7b0ea28415f75c299ab2b4b367b323",
+      "stdout": "is_prime(167) = true\nprimes_up_to(23) = 9\nsum_of_divisors(59) = 60\nis_perfect(6) = true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_024",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_024",
+      "sha256": "8873bb4e2eebc57f67a3fb30c7c108d379afccbcb1b29f0a31b61cf9a0626306",
+      "stdout": "is_prime(95) = false\nprimes_up_to(54) = 16\nsum_of_divisors(19) = 20\nis_perfect(496) = true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_025",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_025",
+      "sha256": "7f8506b01abf4fdd9db23c180081b4d7d99e6b45b1292de71704c7e3171039fb",
+      "stdout": "is_prime(178) = false\nprimes_up_to(22) = 8\nsum_of_divisors(61) = 62\nis_perfect(496) = true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_026",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_026",
+      "sha256": "28bfa67eab1f8e6873f2a4e1c4d1b6dee6b4a07fcc19bcdd2719097c9e04050a",
+      "stdout": "is_prime(161) = false\nprimes_up_to(25) = 9\nsum_of_divisors(36) = 91\nis_perfect(10) = false\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_027",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_027",
+      "sha256": "14805712e630e8f9959c595c633a44923be97d0c7e6e901461e6246dca503f9b",
+      "stdout": "is_prime(77) = false\nprimes_up_to(30) = 10\nsum_of_divisors(57) = 80\nis_perfect(24) = false\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_028",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_028",
+      "sha256": "0f417730744576d8165f325c0593d91a7e766984ed7a34e36427a02a62ac2ab7",
+      "stdout": "is_prime(175) = false\nprimes_up_to(59) = 17\nsum_of_divisors(61) = 62\nis_perfect(28) = true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_029",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_029",
+      "sha256": "491f8f3799ff92f1a80e840828632eb12b577d6083105148aee2608d4abb88b1",
+      "stdout": "is_prime(8) = false\nprimes_up_to(57) = 16\nsum_of_divisors(71) = 72\nis_perfect(10) = false\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_030",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_030",
+      "sha256": "c39a6e8c44677a9a3a1f0feb64bf4c6cdbbd3f9a989ff2bf61d01b722904ac05",
+      "stdout": "is_prime(15) = false\nprimes_up_to(43) = 14\nsum_of_divisors(23) = 24\nis_perfect(28) = true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "number_theory",
+          "number",
+          "theory",
+          "trial",
+          "division",
+          "primality"
+        ],
+        "notes": "number theory by trial division \u2014 primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/311_number_theory_031",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/311_number_theory_031",
+      "sha256": "6063e659873b84175a0f2b4361bb3ff58ccd2a6690ca85366dd0ee129263c2ea",
+      "stdout": "is_prime(123) = false\nprimes_up_to(45) = 14\nsum_of_divisors(87) = 120\nis_perfect(12) = false\n",
       "metadata": {
         "canonical": true,
         "fixture_required": false,
@@ -6098,6 +8674,466 @@
       }
     },
     {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_009",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_009",
+      "sha256": "0351d890d7c761df71166e984ec3fa97862ee24d15f377aee2f96b09a986a673",
+      "stdout": "word: banana\nreversed: ananab\nis_palindrome = false\nvowel_count = 3\nfreq('n') = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_010",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_010",
+      "sha256": "d39431a454cc6b4566874af04800f5e0e755fad915250aacfacd3ed6e1bdb2ef",
+      "stdout": "word: radar\nreversed: radar\nis_palindrome = true\nvowel_count = 2\nfreq('r') = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_011",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_011",
+      "sha256": "a51ca537487822056c38866057b4c1deab27799250a4dac81f0492a08e5d3892",
+      "stdout": "word: mississippi\nreversed: ippississim\nis_palindrome = false\nvowel_count = 4\nfreq('w') = 0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_012",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_012",
+      "sha256": "5985cd13ee18779d8fd386435c8b57c64d7c8f0c4d9b69891241abaa87432b37",
+      "stdout": "word: rhythm\nreversed: mhtyhr\nis_palindrome = false\nvowel_count = 0\nfreq('h') = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_013",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_013",
+      "sha256": "fd33062ed8580efaa9cfd16df64a7ea50c4e22315991be0e21913a37b06ddf5b",
+      "stdout": "word: balloon\nreversed: noollab\nis_palindrome = false\nvowel_count = 3\nfreq('a') = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_014",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_014",
+      "sha256": "4550c489e7338f24d833dbf0f5eff907f5b067f88195461397f13baaee261a4e",
+      "stdout": "word: civic\nreversed: civic\nis_palindrome = true\nvowel_count = 2\nfreq('y') = 0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_015",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_015",
+      "sha256": "921a9013315878edcdc789f2524fb66f877858e5d31542f036da0ba78329f7ea",
+      "stdout": "word: rotator\nreversed: rotator\nis_palindrome = true\nvowel_count = 3\nfreq('t') = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_016",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_016",
+      "sha256": "42ad8952c742c34e166f01aed9c13f0504fe1b1b95f32dd9cc77558ecf72dcff",
+      "stdout": "word: rhythm\nreversed: mhtyhr\nis_palindrome = false\nvowel_count = 0\nfreq('h') = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_017",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_017",
+      "sha256": "2108d133616d788fc25f06ed075944184dcdb0a3931fbbabfac84b9869cfddcb",
+      "stdout": "word: pepper\nreversed: reppep\nis_palindrome = false\nvowel_count = 2\nfreq('e') = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_018",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_018",
+      "sha256": "96dc8a85334f9ee5088dd9fe6aa8bb4b0685e62318bb9b8ed63d465c92570a2d",
+      "stdout": "word: civic\nreversed: civic\nis_palindrome = true\nvowel_count = 2\nfreq('c') = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_019",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_019",
+      "sha256": "a7476b5196aedf3eec00a86d8fbbe15a5e83a55daf31d5f3f39c013ba590aee8",
+      "stdout": "word: programming\nreversed: gnimmargorp\nis_palindrome = false\nvowel_count = 3\nfreq('m') = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_020",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_020",
+      "sha256": "2aecf74b466262fc759a76ca866de73783d32de17f7f7018ba020d1acdb3a596",
+      "stdout": "word: civic\nreversed: civic\nis_palindrome = true\nvowel_count = 2\nfreq('v') = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_021",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_021",
+      "sha256": "edd37f0befc4af914da4784104475ecfc662105c5b894aaa375a1f6c17483adf",
+      "stdout": "word: sequoia\nreversed: aiouqes\nis_palindrome = false\nvowel_count = 5\nfreq('x') = 0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_022",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_022",
+      "sha256": "5f62c27eab5cc1a584064c2c91161f63880bac45f4dbff437e21d3d9f5e92b8c",
+      "stdout": "word: civic\nreversed: civic\nis_palindrome = true\nvowel_count = 2\nfreq('w') = 0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_023",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_023",
+      "sha256": "18654664eaaeb1ec0a751a24ed498b8502dc02b2eb4aac86eb4d85f5aeba1ba3",
+      "stdout": "word: mississippi\nreversed: ippississim\nis_palindrome = false\nvowel_count = 4\nfreq('s') = 4\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_024",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_024",
+      "sha256": "9f362e3742dd4a37d30773b1d7103ba662591069e89b08f770114ae1ce471e36",
+      "stdout": "word: alphabet\nreversed: tebahpla\nis_palindrome = false\nvowel_count = 3\nfreq('l') = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_025",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_025",
+      "sha256": "eed12856d138a91499ffde76538612a18e37dfd3f76a23ab7bd9d8710cf2c39e",
+      "stdout": "word: kayak\nreversed: kayak\nis_palindrome = true\nvowel_count = 2\nfreq('k') = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_026",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_026",
+      "sha256": "ca48d5d801645a377891c8accb9faa5f4cee89bbb464386639dbe084f143794d",
+      "stdout": "word: level\nreversed: level\nis_palindrome = true\nvowel_count = 2\nfreq('e') = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_027",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_027",
+      "sha256": "a20a5340e4a9f6c4ad9c72a1238ef880c16c51cff7178f1a2ddecf9730600532",
+      "stdout": "word: alphabet\nreversed: tebahpla\nis_palindrome = false\nvowel_count = 3\nfreq('b') = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_028",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_028",
+      "sha256": "f3ed714dd42a62410bfbedf14a6029f7feee2d6a05379de556194910027d7732",
+      "stdout": "word: alphabet\nreversed: tebahpla\nis_palindrome = false\nvowel_count = 3\nfreq('a') = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_029",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_029",
+      "sha256": "a5a8b68440ff34fc912a69d21a41fc66faf6c6eb87c803b28c08843f516b3a8e",
+      "stdout": "word: alphabet\nreversed: tebahpla\nis_palindrome = false\nvowel_count = 3\nfreq('b') = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_030",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_030",
+      "sha256": "ef4ae54e9c29383f749ba0b97d83ef91fb0a402dcc55e18622732c57767abb89",
+      "stdout": "word: rhythm\nreversed: mhtyhr\nis_palindrome = false\nvowel_count = 0\nfreq('q') = 0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_031",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_031",
+      "sha256": "36bfdf55884a91e848c2597c8c09caec26f0d6fe872fa5118f2163d507927ae5",
+      "stdout": "word: tattarrattat\nreversed: tattarrattat\nis_palindrome = true\nvowel_count = 4\nfreq('t') = 6\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "strings",
+          "text",
+          "processing",
+          "based",
+          "character",
+          "indexing"
+        ],
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+      }
+    },
+    {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_000",
       "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_000",
       "sha256": "8101d1203e7efd111399a6d6017d2082dc5ee54cb0e62a500bd5fce0d3ce12e7",
@@ -6262,6 +9298,466 @@
       "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_008",
       "sha256": "265e51db39435915083ee62794cf3a688c13a4e0158bd1eb68c5039a5cee4a7e",
       "stdout": "nodes: 5\nedges: 7\nreachable_from(1) = 5\ncomponents = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_009",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_009",
+      "sha256": "82d5edda3a48fde3501b0fe644b26aea9179fb58fd2b817176900baadaa918e7",
+      "stdout": "nodes: 6\nedges: 9\nreachable_from(5) = 6\ncomponents = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_010",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_010",
+      "sha256": "7fa7c79450e16621bd82db535e9628a1c2b5354e5cba87270a42dbbc8ffdee3a",
+      "stdout": "nodes: 7\nedges: 9\nreachable_from(6) = 7\ncomponents = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_011",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_011",
+      "sha256": "a7d1d39590a6310bc2a266532e38c266d14df99554529361ac9f90921be03075",
+      "stdout": "nodes: 7\nedges: 5\nreachable_from(4) = 5\ncomponents = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_012",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_012",
+      "sha256": "143c73a2ca9251c02766947f01c4fc48909441817d126d6960ea0bdc8bae6d78",
+      "stdout": "nodes: 4\nedges: 2\nreachable_from(3) = 3\ncomponents = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_013",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_013",
+      "sha256": "42679dd6212036f7d7767918724368e9cf026ff866283bcf54c3c370d2b5ebe1",
+      "stdout": "nodes: 6\nedges: 8\nreachable_from(4) = 6\ncomponents = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_014",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_014",
+      "sha256": "92d13723cba12b26bcaf371af8f5e6c8fcbb1a39e91fa85ec3082e405ac1e66b",
+      "stdout": "nodes: 5\nedges: 3\nreachable_from(1) = 2\ncomponents = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_015",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_015",
+      "sha256": "41701606c0e715a8bf6d3b92bb8a23db27485f6d83434e83a9792e5fbac933dc",
+      "stdout": "nodes: 6\nedges: 6\nreachable_from(1) = 6\ncomponents = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_016",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_016",
+      "sha256": "d95f97db8b8968894071fe6929b392ea9a6085a70ef05a11110f2d2d175cb563",
+      "stdout": "nodes: 6\nedges: 5\nreachable_from(2) = 6\ncomponents = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_017",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_017",
+      "sha256": "37943b36283553b950550439f986fc1673e5c2ba1d82c99198ef9481c6046013",
+      "stdout": "nodes: 4\nedges: 1\nreachable_from(1) = 1\ncomponents = 3\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_018",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_018",
+      "sha256": "ecbc05a38f0c8c1c3a14faf7e6bb2c54c1e869e1c36b53379e73f7b0d4ddf2b7",
+      "stdout": "nodes: 4\nedges: 2\nreachable_from(2) = 3\ncomponents = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_019",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_019",
+      "sha256": "0fbf713d087ad7f3e7475f8dcf3fcd6a49a87e1d993359f7bacb279de656113f",
+      "stdout": "nodes: 6\nedges: 8\nreachable_from(4) = 1\ncomponents = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_020",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_020",
+      "sha256": "d485cd1609cebc615e99685ebbb46c934dec8fdc76fb1b7e8bf6cebce85b9b7b",
+      "stdout": "nodes: 5\nedges: 3\nreachable_from(1) = 2\ncomponents = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_021",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_021",
+      "sha256": "7c36b56186d254d72ac1a0b19a897da8357b91a425c2a839437644ce0cb896b9",
+      "stdout": "nodes: 4\nedges: 2\nreachable_from(2) = 3\ncomponents = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_022",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_022",
+      "sha256": "c69db69477cd1614b3a171696a12bd8c7faea973814bbba76805bd74922b3ef4",
+      "stdout": "nodes: 5\nedges: 4\nreachable_from(1) = 4\ncomponents = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_023",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_023",
+      "sha256": "09d0f0ac7be69217c0973a1b31dbdc3950a7a03d1972c14ccf35cc821c66372f",
+      "stdout": "nodes: 6\nedges: 6\nreachable_from(1) = 6\ncomponents = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_024",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_024",
+      "sha256": "a77bf3cbc1ff7bd16c4b825963e3b4bcc2bd1cb29f59dba1c36d5dd37a6d1cf5",
+      "stdout": "nodes: 4\nedges: 5\nreachable_from(3) = 4\ncomponents = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_025",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_025",
+      "sha256": "ef0b6fa3a616524e4e83773e678dd9580ac3422494f7f01d26947b209bbabb67",
+      "stdout": "nodes: 6\nedges: 4\nreachable_from(0) = 5\ncomponents = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_026",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_026",
+      "sha256": "37c7502fd5c16fdd6c7c92cb22c372688fa6998055a96e2f2de0ff0b1f160d18",
+      "stdout": "nodes: 4\nedges: 1\nreachable_from(0) = 2\ncomponents = 3\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_027",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_027",
+      "sha256": "47c850f3c03743dd4cac6d44004b3ac29376ade009e85598c46bea833d9bd7b9",
+      "stdout": "nodes: 4\nedges: 3\nreachable_from(1) = 4\ncomponents = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_028",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_028",
+      "sha256": "b9613c486f7a1e8b7d646d4c761183235800fd715a8ea5b55ddae33f7306a556",
+      "stdout": "nodes: 7\nedges: 5\nreachable_from(2) = 5\ncomponents = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_029",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_029",
+      "sha256": "0174b35dee657722115a28287b5a579ce025c33123d8063a1f339ee461b05f7d",
+      "stdout": "nodes: 4\nedges: 2\nreachable_from(1) = 3\ncomponents = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_030",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_030",
+      "sha256": "79f44b276fbba46e1ee37806a5026bc525aaf41eb8f6b3ea3b609d92424c92b6",
+      "stdout": "nodes: 4\nedges: 3\nreachable_from(3) = 3\ncomponents = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "graphs",
+          "undirected",
+          "graph",
+          "flat",
+          "adjacency",
+          "matrix"
+        ],
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_031",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_031",
+      "sha256": "44a7b582f4bc3618caf8df08cac0a8246afde8f1cc9aee08a957b248198d0b36",
+      "stdout": "nodes: 4\nedges: 3\nreachable_from(3) = 1\ncomponents = 2\n",
       "metadata": {
         "canonical": true,
         "fixture_required": false,

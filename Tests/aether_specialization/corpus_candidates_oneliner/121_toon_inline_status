@@ -1,0 +1,31 @@
+// 121_toon_inline_status
+// Concepts: inline toon_parse of a string literal (no external file), object-root
+// array extraction, threshold classify, running counter, summary
+// expect: sensor 0: S1 / 12 / low
+// expect: sensor 1: S2 / 80 / high
+// expect: sensor 2: S3 / 55 / high
+// expect: high count = 2
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse("{\"sensors\":[{\"name\":\"S1\",\"value\":12},{\"name\":\"S2\",\"value\":80},{\"name\":\"S3\",\"value\":55}]}");
+    let root: ToonNode = toon_root(doc);
+    let sensors: ToonNode = toon_key(root, "sensors");
+    let high: Int = 0;
+
+    loop i in 0..toon_len(sensors) {
+        let sensor: ToonNode = toon_at(sensors, i);
+        let name: Text = toon_get_text_or(sensor, "name", "UNKNOWN");
+        let value: Int = toon_get_int_or(sensor, "value", 0);
+        let status: Text = "low";
+        if value >= 50 { status = "high"; high = high + 1; }
+
+        fx { println("sensor ", i, ": ", name, " / ", value, " / ", status); }
+    }
+
+    fx { println("high count = ", high); }
+
+    toon_close(doc);
+    ret;
+}

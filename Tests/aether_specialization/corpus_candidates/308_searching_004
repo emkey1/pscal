@@ -1,0 +1,66 @@
+// 308_searching_004
+// Concepts: linear search returning first matching index or -1, find-min-index scan, binary search over a sorted Int[] (lo/hi/mid bisection), present and absent targets
+// expect: array: 61 59 2 39 63 11 3 8 4
+// expect: sorted: 1 5 15 20 24 41 47 49 63
+// expect: index_of(11) = 5
+// expect: min_index = 2
+// expect: min_value = 2
+// expect: binary_search(15) = 2
+
+fn indexOf(xs: Int[], target: Int) -> Int {
+    let n: Int = length(xs);
+    loop i in 0..n {
+        if xs[i] == target { ret i; }
+    }
+    ret -1;
+}
+
+fn minIndex(xs: Int[]) -> Int {
+    let m: Int = 0;
+    let n: Int = length(xs);
+    loop i in 1..n {
+        if xs[i] < xs[m] { m = i; }
+    }
+    ret m;
+}
+
+fn binarySearch(xs: Int[], target: Int) -> Int {
+    let lo: Int = 0;
+    let hi: Int = length(xs) - 1;
+    loop lo <= hi {
+        let mid: Int = (lo + hi) / 2;
+        if xs[mid] == target { ret mid; }
+        if xs[mid] < target { lo = mid + 1; }
+        if xs[mid] > target { hi = mid - 1; }
+    }
+    ret -1;
+}
+
+fn joinInts(xs: Int[]) -> Text {
+    let out: Text = "";
+    let n: Int = length(xs);
+    loop i in 0..n {
+        if i > 0 { out = out + " "; }
+        out = out + int_to_text(xs[i]);
+    }
+    ret out;
+}
+
+fn main() -> Void {
+    let xs: Int[] = [61, 59, 2, 39, 63, 11, 3, 8, 4];
+    let sorted: Int[] = [1, 5, 15, 20, 24, 41, 47, 49, 63];
+    let ltgt: Int = 11;
+    let btgt: Int = 15;
+    let lin: Int = indexOf(xs, ltgt);
+    let mi: Int = minIndex(xs);
+    let bin: Int = binarySearch(sorted, btgt);
+    fx {
+        println("array: ", joinInts(xs));
+        println("sorted: ", joinInts(sorted));
+        println("index_of(", ltgt, ") = ", lin);
+        println("min_index = ", mi);
+        println("min_value = ", xs[mi]);
+        println("binary_search(", btgt, ") = ", bin);
+    }
+    ret;
+}

@@ -1,0 +1,13 @@
+// r2_average  (wishlist 7)
+// expect: sum = 337
+// expect: average = 84.25
+
+fn main() -> Void {
+    let xs: Int[] = [82, 91, 76, 88];
+    let n: Int = length(xs);
+    let sum: Int = 0;
+    loop i in 0..n { sum = sum + xs[i]; }
+    let avg: Real = sum * 1.0 / n;
+    fx { println("sum = ", sum); println("average = ", avg:0:2); }
+    ret;
+}

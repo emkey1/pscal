@@ -1,0 +1,4 @@
+mod TaxRates {
+    export const BaseRate: Int = 8;
+    export const Surcharge: Int = 3;
+}

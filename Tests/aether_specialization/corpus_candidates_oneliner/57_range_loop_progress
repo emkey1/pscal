@@ -1,0 +1,24 @@
+// 57_range_loop_progress
+// Concepts: range loop with side effects, running total, modulo check
+// expect: Calculating sum from 0 to 9
+// expect: Step 0: Current total = 0
+// expect: Step 3: Current total = 6
+// expect: Step 6: Current total = 21
+// expect: Step 9: Current total = 45
+// expect: Final Sum: 45
+
+fn main() -> Void {
+    let target: Int = 10;
+    let runningTotal: Int = 0;
+
+    fx { println("Calculating sum from 0 to ", target - 1); }
+
+    loop i in 0..target {
+        runningTotal = runningTotal + i;
+
+        if i % 3 == 0 { fx { println("Step ", i, ": Current total = ", runningTotal); } }
+    }
+
+    fx { println("Final Sum: ", runningTotal); }
+    ret;
+}

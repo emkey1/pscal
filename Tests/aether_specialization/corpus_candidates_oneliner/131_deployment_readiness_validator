@@ -1,0 +1,124 @@
+// 131_deployment_readiness_validator
+// Concepts: deeply nested TOON object extraction (service/resources/rollout),
+// many pure field validators, per-issue ISSUE output lines, issue counter type,
+// cross-field check, final readiness verdict
+// expect: ISSUE: service name is empty or too long
+// expect: ISSUE: port out of range (70000)
+// expect: ISSUE: replicas must be at least 1
+// expect: ISSUE: cpu must be at least 1
+// expect: ISSUE: memory below minimum (64)
+// expect: ISSUE: unknown rollout strategy (yolo)
+// expect: ISSUE: maxUnavailable exceeds replicas
+// expect: issue count: 7
+// expect: DEPLOY BLOCKED: 7 issue(s)
+
+@pure
+fn validName(name: Text) -> Bool {
+    let n: Int = string_len(name);
+    if n < 1 { ret false; }
+    if n > 32 { ret false; }
+    ret true;
+}
+
+@pure
+fn validPort(port: Int) -> Bool {
+    if port < 1 { ret false; }
+    if port > 65535 { ret false; }
+    ret true;
+}
+
+@pure
+fn atLeast(value: Int, floor: Int) -> Bool {
+    if value < floor { ret false; }
+    ret true;
+}
+
+@pure
+fn validStrategy(strategy: Text) -> Bool {
+    if strategy == "rolling" { ret true; }
+    if strategy == "recreate" { ret true; }
+    ret false;
+}
+
+type Report {
+    issues: Int;
+
+    fn flag() -> Void {
+        self.issues = self.issues + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("deploy131.json");
+    let root: ToonNode = toon_root(doc);
+    let service: ToonNode = toon_key(root, "service");
+    let resources: ToonNode = toon_key(root, "resources");
+    let rollout: ToonNode = toon_key(root, "rollout");
+
+    let name: Text = toon_get_text_or(service, "name", "");
+    let port: Int = toon_get_int_or(service, "port", 0);
+    let replicas: Int = toon_get_int_or(service, "replicas", 0);
+    let cpu: Int = toon_get_int_or(resources, "cpu", 0);
+    let memoryMb: Int = toon_get_int_or(resources, "memoryMb", 0);
+    let strategy: Text = toon_get_text_or(rollout, "strategy", "");
+    let maxUnavailable: Int = toon_get_int_or(rollout, "maxUnavailable", 0);
+
+    let report: Report = new Report();
+
+    if !validName(name) {
+        report.flag();
+        fx { println("ISSUE: service name is empty or too long"); }
+    }
+    if !validPort(port) {
+        report.flag();
+        fx {
+            print("ISSUE: port out of range (");
+            print(port);
+            println(")");
+        }
+    }
+    if !atLeast(replicas, 1) {
+        report.flag();
+        fx { println("ISSUE: replicas must be at least 1"); }
+    }
+    if !atLeast(cpu, 1) {
+        report.flag();
+        fx { println("ISSUE: cpu must be at least 1"); }
+    }
+    if !atLeast(memoryMb, 128) {
+        report.flag();
+        fx {
+            print("ISSUE: memory below minimum (");
+            print(memoryMb);
+            println(")");
+        }
+    }
+    if !validStrategy(strategy) {
+        report.flag();
+        fx {
+            print("ISSUE: unknown rollout strategy (");
+            print(strategy);
+            println(")");
+        }
+    }
+    if maxUnavailable > replicas {
+        report.flag();
+        fx { println("ISSUE: maxUnavailable exceeds replicas"); }
+    }
+
+    fx { println("issue count: ", report.issues); }
+
+    if report.issues > 0 {
+        fx { println("DEPLOY BLOCKED: ", report.issues, " issue(s)"); }
+        toon_close(doc);
+        ret;
+    }
+
+    fx { println("DEPLOY READY"); }
+
+    toon_close(doc);
+    ret;
+}

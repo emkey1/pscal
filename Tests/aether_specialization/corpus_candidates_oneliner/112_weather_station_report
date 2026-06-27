@@ -1,0 +1,71 @@
+// 112_weather_station_report
+// Concepts: object-root TOON extraction, pure threshold classify, custom mutable
+// totals type with method, missing-field fallbacks, real average formatting,
+// per-row and summary output
+// expect: station 0: NORTH / 18 / normal
+// expect: station 1: EAST / 30 / warn
+// expect: station 2: SOUTH / 37 / alert
+// expect: station 3: WEST / -5 / alert
+// expect: station 4: RIDGE / 0 / normal
+// expect: normal = 2
+// expect: warn = 1
+// expect: alert = 2
+// expect: average = 16.00
+
+@pure
+fn classifyReading(tempC: Int) -> Text {
+    if tempC >= 35 { ret "alert"; }
+    if tempC < 0 { ret "alert"; }
+    if tempC >= 28 { ret "warn"; }
+    ret "normal";
+}
+
+type Telemetry {
+    count: Int;
+    sumTemp: Int;
+    normal: Int;
+    warn: Int;
+    alert: Int;
+
+    fn record(status: Text, tempC: Int) -> Void {
+        self.count = self.count + 1;
+        self.sumTemp = self.sumTemp + tempC;
+        if status == "normal" { self.normal = self.normal + 1; ret; }
+        if status == "warn" { self.warn = self.warn + 1; ret; }
+        self.alert = self.alert + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("telemetry112.json");
+    let root: ToonNode = toon_root(doc);
+    let stations: ToonNode = toon_key(root, "stations");
+    let totals: Telemetry = new Telemetry();
+
+    loop i in 0..toon_len(stations) {
+        let station: ToonNode = toon_at(stations, i);
+        let name: Text = toon_get_text_or(station, "name", "UNKNOWN");
+        let tempC: Int = toon_get_int_or(station, "tempC", 0);
+        let status: Text = classifyReading(tempC);
+
+        totals.record(status, tempC);
+
+        fx { println("station ", i, ": ", name, " / ", tempC, " / ", status); }
+    }
+
+    let average: Real = 0.0;
+    if totals.count > 0 { average = totals.sumTemp * 1.0 / totals.count; }
+
+    fx {
+        println("normal = ", totals.normal);
+        println("warn = ", totals.warn);
+        println("alert = ", totals.alert);
+        println("average = ", average:0:2);
+    }
+
+    toon_close(doc);
+    ret;
+}

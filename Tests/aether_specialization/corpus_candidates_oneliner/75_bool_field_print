@@ -1,0 +1,15 @@
+// b2_bool_field  (wishlist 3)
+// expect: cache active = true
+
+type Flag {
+    name: Text;
+    active: Bool;
+}
+
+fn main() -> Void {
+    let f: Flag = new Flag();
+    f.name = "cache";
+    f.active = true;
+    fx { println(f.name, " active = ", f.active); }
+    ret;
+}

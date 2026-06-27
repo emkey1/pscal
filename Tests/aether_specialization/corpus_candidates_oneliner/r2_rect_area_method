@@ -1,0 +1,15 @@
+type Rect {
+    w: Int;
+    h: Int;
+
+    fn area() -> Int {
+        ret self.w * self.h;
+    }
+}
+
+fn main() -> Void {
+    let r: Rect = Rect { w: 5, h: 3 };
+    let s: Rect = Rect { w: 2, h: 2 };
+    fx { println("area1=", r.area()); println("area2=", s.area()); }
+    ret;
+}

@@ -1,0 +1,19 @@
+// 50_status_sequential_if
+// Concepts: sequential if + ret control flow, pure classifier helper
+// expect: User level 75 is classified as: Advanced
+
+@pure
+fn determineStatus(level: Int) -> Text {
+    if level >= 90 { ret "Elite"; }
+    if level >= 70 { ret "Advanced"; }
+    if level >= 50 { ret "Intermediate"; }
+    ret "Novice";
+}
+
+fn main() -> Void {
+    let userLevel: Int = 75;
+    let status: Text = determineStatus(userLevel);
+
+    fx { println("User level ", userLevel, " is classified as: ", status); }
+    ret;
+}

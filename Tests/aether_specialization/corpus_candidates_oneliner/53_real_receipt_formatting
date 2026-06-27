@@ -1,0 +1,26 @@
+// 53_real_receipt_formatting
+// Concepts: mixed-type variadic printing, Real arithmetic, width/precision formatting
+// expect: Item: Widget | Qty: 12
+// expect: Unit Price:      19.99
+// expect: Subtotal:     239.88
+// expect: Tax (8%):      19.19
+// expect: Grand Total:     259.07
+
+fn main() -> Void {
+    let itemName: Text = "Widget";
+    let quantity: Int = 12;
+    let unitPrice: Real = 19.99;
+    let total: Real = quantity * unitPrice;
+    let taxRate: Real = 0.08;
+    let tax: Real = total * taxRate;
+    let grandTotal: Real = total + tax;
+
+    fx {
+        println("Item: ", itemName, " | Qty: ", quantity);
+        println("Unit Price: ", unitPrice:10:2);
+        println("Subtotal: ", total:10:2);
+        println("Tax (8%): ", tax:10:2);
+        println("Grand Total: ", grandTotal:10:2);
+    }
+    ret;
+}

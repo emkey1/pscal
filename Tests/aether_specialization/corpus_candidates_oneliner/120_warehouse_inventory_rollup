@@ -1,0 +1,65 @@
+// 120_warehouse_inventory_rollup
+// Concepts: object-root TOON extraction, reorder-threshold classify, running
+// quantity total, custom totals type, missing-field fallbacks, summary
+// expect: item 0: A1 / 50 / ok
+// expect: item 1: B2 / 5 / low
+// expect: item 2: C3 / 0 / out
+// expect: item 3: D4 / 15 / ok
+// expect: item 4: UNKNOWN / 0 / out
+// expect: ok = 2
+// expect: low = 1
+// expect: out = 2
+// expect: total qty = 70
+
+@pure
+fn classifyStock(qty: Int, reorderAt: Int) -> Text {
+    if qty < 1 { ret "out"; }
+    if qty < reorderAt { ret "low"; }
+    ret "ok";
+}
+
+type Inventory {
+    ok: Int;
+    low: Int;
+    out: Int;
+    totalQty: Int;
+
+    fn record(status: Text, qty: Int) -> Void {
+        self.totalQty = self.totalQty + qty;
+        if status == "ok" { self.ok = self.ok + 1; ret; }
+        if status == "low" { self.low = self.low + 1; ret; }
+        self.out = self.out + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("inventory120.json");
+    let root: ToonNode = toon_root(doc);
+    let items: ToonNode = toon_key(root, "items");
+    let inv: Inventory = new Inventory();
+
+    loop i in 0..toon_len(items) {
+        let item: ToonNode = toon_at(items, i);
+        let sku: Text = toon_get_text_or(item, "sku", "UNKNOWN");
+        let qty: Int = toon_get_int_or(item, "qty", 0);
+        let reorderAt: Int = toon_get_int_or(item, "reorderAt", 1);
+        let status: Text = classifyStock(qty, reorderAt);
+
+        inv.record(status, qty);
+
+        fx { println("item ", i, ": ", sku, " / ", qty, " / ", status); }
+    }
+
+    fx {
+        println("ok = ", inv.ok);
+        println("low = ", inv.low);
+        println("out = ", inv.out);
+        println("total qty = ", inv.totalQty);
+    }
+
+    toon_close(doc);
+    ret;
+}

@@ -1,0 +1,20 @@
+// 101_method_explicit_context
+// Concepts: methods do not capture outer loop locals, caller passes row index
+// explicitly
+// expect: row 0 -> Alpha
+// expect: row 1 -> Beta
+
+type Reporter {
+    fn emit(rowIndex: Int, name: Text) -> Void {
+        fx { println("row ", rowIndex, " -> ", name); }
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let names: Text[] = ["Alpha", "Beta"];
+    let reporter: Reporter = new Reporter();
+
+    loop i in 0..length(names) { reporter.emit(i, names[i]); }
+    ret;
+}

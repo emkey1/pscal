@@ -1,0 +1,48 @@
+// 306_recursion_003
+// Concepts: classic single-recursion drills (exponentiation, digit reduction, digit count, triangular sum, integer reversal with accumulator), Int %/ division, base cases
+// expect: power(7, 3) = 343
+// expect: digit_sum(727631) = 26
+// expect: count_digits(8381891) = 7
+// expect: sum_to(10) = 55
+// expect: reverse_int(4692414) = 4142964
+
+fn power(base: Int, exp: Int) -> Int {
+    if exp == 0 { ret 1; }
+    ret base * power(base, exp - 1);
+}
+
+fn digitSum(n: Int) -> Int {
+    if n == 0 { ret 0; }
+    ret (n % 10) + digitSum(n / 10);
+}
+
+fn countDigits(n: Int) -> Int {
+    if n < 10 { ret 1; }
+    ret 1 + countDigits(n / 10);
+}
+
+fn sumTo(n: Int) -> Int {
+    if n == 0 { ret 0; }
+    ret n + sumTo(n - 1);
+}
+
+fn reverseInt(n: Int, acc: Int) -> Int {
+    if n == 0 { ret acc; }
+    ret reverseInt(n / 10, acc * 10 + n % 10);
+}
+
+fn main() -> Void {
+    let pw: Int = power(7, 3);
+    let ds: Int = digitSum(727631);
+    let cd: Int = countDigits(8381891);
+    let st: Int = sumTo(10);
+    let ri: Int = reverseInt(4692414, 0);
+    fx {
+        println("power(7, 3) = ", pw);
+        println("digit_sum(727631) = ", ds);
+        println("count_digits(8381891) = ", cd);
+        println("sum_to(10) = ", st);
+        println("reverse_int(4692414) = ", ri);
+    }
+    ret;
+}

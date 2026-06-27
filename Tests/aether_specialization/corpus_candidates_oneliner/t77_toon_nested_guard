@@ -1,0 +1,16 @@
+fn main() -> Void {
+    if !has_toon() { fx { println("toon unavailable"); } ret; }
+    let doc: ToonDoc = toon_parse("{\"user\":{\"profile\":{\"name\":\"Ada\"}}}");
+    let root: ToonNode = toon_root(doc);
+    let name: Text = "unknown";
+    if toon_has_key(root, "user") {
+        let user: ToonNode = toon_key(root, "user");
+        if toon_has_key(user, "profile") {
+            let profile: ToonNode = toon_key(user, "profile");
+            name = toon_get_text_or(profile, "name", "unknown");
+        }
+    }
+    fx { println("name=", name); }
+    toon_close(doc);
+    ret;
+}

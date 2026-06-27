@@ -1,0 +1,82 @@
+// 67_config_validator_nested
+// Concepts: nested TOON object extraction, pure validators, issue counting,
+// exact issue lines, final validation summary
+// expect: ISSUE: port is invalid (0)
+// expect: ISSUE: app name is empty or too long
+// expect: log severity level: 2
+// expect: VALIDATION FAILED: 2 issue(s) found
+
+@pure
+fn validPort(port: Int) -> Bool {
+    if port < 1 { ret false; }
+    if port > 65535 { ret false; }
+    ret true;
+}
+
+@pure
+fn validName(name: Text) -> Bool {
+    let size: Int = string_len(name);
+    if size < 1 { ret false; }
+    if size > 64 { ret false; }
+    ret true;
+}
+
+@pure
+fn severityForLevel(level: Text) -> Int {
+    if level == "critical" { ret 4; }
+    if level == "error" { ret 3; }
+    if level == "warning" { ret 2; }
+    if level == "info" { ret 1; }
+    ret 0;
+}
+
+type ValidationSummary {
+    issues: Int;
+
+    fn addIssue() -> Void {
+        self.issues = self.issues + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("config67.json");
+    let root: ToonNode = toon_root(doc);
+    let server: ToonNode = toon_key(root, "server");
+    let app: ToonNode = toon_key(root, "app");
+    let log: ToonNode = toon_key(root, "log");
+
+    let port: Int = toon_get_int_or(server, "port", 0);
+    let appName: Text = toon_get_text_or(app, "name", "");
+    let logLevel: Text = toon_get_text_or(log, "level", "info");
+    let summary: ValidationSummary = new ValidationSummary();
+
+    if !validPort(port) {
+        summary.addIssue();
+        fx {
+            print("ISSUE: port is invalid (");
+            print(port);
+            println(")");
+        }
+    }
+
+    if !validName(appName) {
+        summary.addIssue();
+        fx { println("ISSUE: app name is empty or too long"); }
+    }
+
+    fx { println("log severity level: ", severityForLevel(logLevel)); }
+
+    if summary.issues > 0 {
+        fx { println("VALIDATION FAILED: ", summary.issues, " issue(s) found"); }
+        toon_close(doc);
+        ret;
+    }
+
+    fx { println("CONFIG VALID"); }
+
+    toon_close(doc);
+    ret;
+}

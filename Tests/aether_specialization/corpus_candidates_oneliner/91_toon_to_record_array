@@ -1,0 +1,55 @@
+// h2_toon_records  (wishlist 5)
+// jobs.json = {"jobs":[{"name":"A","score":95},{"name":"B","score":120},
+//                      {"name":"C","score":50}]}
+// expect: A / ready / 95
+// expect: B / ready / 100
+// expect: C / blocked / 50
+// expect: ready = 2
+
+type Job {
+    name: Text;
+    score: Int;
+    status: Text;
+}
+
+@pure
+fn classify(score: Int) -> Text {
+    if score >= 90 { ret "ready"; }
+    if score >= 70 { ret "review"; }
+    ret "blocked";
+}
+
+@pre score >= 0
+@post result <= 100
+fn normalize(score: Int) -> Int {
+    if score > 100 { ret 100; }
+    ret score;
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("jobs.json");
+    let root: ToonNode = toon_root(doc);
+    let jobs: ToonNode = toon_key(root, "jobs");
+
+    let report: Job[] = [];
+    loop i in 0..toon_len(jobs) {
+        let node: ToonNode = toon_at(jobs, i);
+        let j: Job = new Job();
+        j.name = toon_get_text(node, "name");
+        j.score = normalize(toon_get_int_or(node, "score", 0));
+        j.status = classify(j.score);
+        report = report + [j];
+    }
+    toon_close(doc);
+
+    let ready: Int = 0;
+    loop i in 0..length(report) {
+        let j: Job = report[i];
+        if j.status == "ready" { ready = ready + 1; }
+        fx { println(j.name, " / ", j.status, " / ", j.score); }
+    }
+    fx { println("ready = ", ready); }
+    ret;
+}

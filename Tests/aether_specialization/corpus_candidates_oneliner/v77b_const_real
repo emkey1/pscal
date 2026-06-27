@@ -1,0 +1,12 @@
+const TAX: Real = 0.20;
+
+@pure
+fn after_tax(amount: Real) -> Real {
+    ret amount - amount * TAX;
+}
+
+fn main() -> Void {
+    let net: Real = after_tax(50.0);
+    fx { println("net=", net:0:2); }
+    ret;
+}

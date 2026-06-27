@@ -1,0 +1,58 @@
+// 311_number_theory_008
+// Concepts: number theory by trial division — primality test (i*i <= n loop), counting primes up to N, sum of all divisors, perfect-number check via proper-divisor sum; Bool output
+// expect: is_prime(32) = false
+// expect: primes_up_to(15) = 6
+// expect: sum_of_divisors(39) = 56
+// expect: is_perfect(10) = false
+
+fn isPrime(n: Int) -> Bool {
+    if n < 2 { ret false; }
+    let i: Int = 2;
+    loop i * i <= n {
+        if n % i == 0 { ret false; }
+        i = i + 1;
+    }
+    ret true;
+}
+
+fn countPrimes(limit: Int) -> Int {
+    let count: Int = 0;
+    loop k in 2..limit + 1 {
+        if isPrime(k) { count = count + 1; }
+    }
+    ret count;
+}
+
+fn sumOfDivisors(n: Int) -> Int {
+    let total: Int = 0;
+    let i: Int = 1;
+    loop i <= n {
+        if n % i == 0 { total = total + i; }
+        i = i + 1;
+    }
+    ret total;
+}
+
+fn isPerfect(n: Int) -> Bool {
+    let proper: Int = sumOfDivisors(n) - n;
+    if proper == n { ret true; }
+    ret false;
+}
+
+fn main() -> Void {
+    let p: Int = 32;
+    let limit: Int = 15;
+    let d: Int = 39;
+    let pc: Int = 10;
+    let isp: Bool = isPrime(p);
+    let cnt: Int = countPrimes(limit);
+    let sd: Int = sumOfDivisors(d);
+    let perfect: Bool = isPerfect(pc);
+    fx {
+        println("is_prime(", p, ") = ", isp);
+        println("primes_up_to(", limit, ") = ", cnt);
+        println("sum_of_divisors(", d, ") = ", sd);
+        println("is_perfect(", pc, ") = ", perfect);
+    }
+    ret;
+}

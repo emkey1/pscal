@@ -1,0 +1,5 @@
+// inclusive 1..2 across two nested loops via half-open 1..3
+fn main() -> Void {
+    loop r in 1..3 { loop c in 1..3 { fx { println("cell(", r, ",", c, ")"); } } }
+    ret;
+}

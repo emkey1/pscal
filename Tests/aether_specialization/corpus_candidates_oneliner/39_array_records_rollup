@@ -1,0 +1,52 @@
+// 39_array_records_rollup
+// Concepts: dynamic arrays of records, indexed access, string classification,
+// per-row reporting plus aggregate counters
+// expect: alpha: ready
+// expect: beta: review
+// expect: gamma: blocked
+// expect: ready = 1
+// expect: review = 1
+// expect: blocked = 1
+
+type ScoreLine {
+    name: Text;
+    score: Int;
+}
+
+@pure
+fn classifyBand(score: Int) -> Text {
+    if score >= 90 { ret "ready"; }
+    if score >= 70 { ret "review"; }
+    ret "blocked";
+}
+
+fn main() -> Void {
+    let alpha: ScoreLine = ScoreLine { name: "alpha", score: 95 };
+    let beta: ScoreLine = ScoreLine { name: "beta", score: 74 };
+    let gamma: ScoreLine = ScoreLine { name: "gamma", score: 40 };
+    let rows: ScoreLine[] = [];
+    rows = rows + [alpha];
+    rows = rows + [beta];
+    rows = rows + [gamma];
+
+    let ready: Int = 0;
+    let review: Int = 0;
+    let blocked: Int = 0;
+    let count: Int = length(rows);
+
+    loop i in 0..count {
+        let row: ScoreLine = rows[i];
+        let label: Text = classifyBand(row.score);
+        if label == "ready" { ready = ready + 1; }
+        if label == "review" { review = review + 1; }
+        if label == "blocked" { blocked = blocked + 1; }
+        fx { println(row.name, ": ", label); }
+    }
+
+    fx {
+        println("ready = ", ready);
+        println("review = ", review);
+        println("blocked = ", blocked);
+    }
+    ret;
+}

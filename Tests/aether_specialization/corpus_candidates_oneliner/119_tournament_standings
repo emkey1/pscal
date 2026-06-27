@@ -1,0 +1,80 @@
+// 119_tournament_standings
+// Concepts: object-root TOON extraction, pure normalize-with-clamp + tiered
+// classify, custom totals type, clamped real average with fixed precision
+// expect: team 0: Lions / 80 / top
+// expect: team 1: Bears / 40 / mid
+// expect: team 2: Hawks / 20 / low
+// expect: team 3: Wolves / 100 / top
+// expect: top = 2
+// expect: mid = 1
+// expect: low = 1
+// expect: average = 60.00
+
+@pure
+fn normalizeRate(points: Int, played: Int) -> Int {
+    if played < 1 { ret 0; }
+    let maxPoints: Int = played * 3;
+    let rate: Int = points * 100 / maxPoints;
+    if rate < 0 { ret 0; }
+    if rate > 100 { ret 100; }
+    ret rate;
+}
+
+@pure
+fn classifyTier(rate: Int) -> Text {
+    if rate >= 70 { ret "top"; }
+    if rate >= 40 { ret "mid"; }
+    ret "low";
+}
+
+type Standings {
+    count: Int;
+    total: Int;
+    top: Int;
+    mid: Int;
+    low: Int;
+
+    fn record(tier: Text, rate: Int) -> Void {
+        self.count = self.count + 1;
+        self.total = self.total + rate;
+        if tier == "top" { self.top = self.top + 1; ret; }
+        if tier == "mid" { self.mid = self.mid + 1; ret; }
+        self.low = self.low + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("teams119.json");
+    let root: ToonNode = toon_root(doc);
+    let teams: ToonNode = toon_key(root, "teams");
+    let board: Standings = new Standings();
+
+    loop i in 0..toon_len(teams) {
+        let team: ToonNode = toon_at(teams, i);
+        let name: Text = toon_get_text_or(team, "name", "UNKNOWN");
+        let points: Int = toon_get_int_or(team, "points", 0);
+        let played: Int = toon_get_int_or(team, "played", 0);
+        let rate: Int = normalizeRate(points, played);
+        let tier: Text = classifyTier(rate);
+
+        board.record(tier, rate);
+
+        fx { println("team ", i, ": ", name, " / ", rate, " / ", tier); }
+    }
+
+    let average: Real = 0.0;
+    if board.count > 0 { average = board.total * 1.0 / board.count; }
+
+    fx {
+        println("top = ", board.top);
+        println("mid = ", board.mid);
+        println("low = ", board.low);
+        println("average = ", average:0:2);
+    }
+
+    toon_close(doc);
+    ret;
+}

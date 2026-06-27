@@ -1,0 +1,78 @@
+// 310_dp2d_021
+// Concepts: 2-D grid dynamic programming flattened into an Int[] addressed r*cols+c — count down/right unique paths, and min-cost down/right path sum; boundary rows/cols, min() via if
+// expect: grid: 3x4
+// expect: cost: 3 6 7 5 6 7 4 9 4 1 6 6
+// expect: unique_paths = 10
+// expect: min_path_sum = 26
+
+fn uniquePaths(rows: Int, cols: Int) -> Int {
+    let total: Int = rows * cols;
+    let dp: Int[] = [];
+    loop i in 0..total {
+        dp = dp + [0];
+    }
+    loop r in 0..rows {
+        loop c in 0..cols {
+            let idx: Int = r * cols + c;
+            if r == 0 { dp[idx] = 1; }
+            if c == 0 { dp[idx] = 1; }
+            if r > 0 {
+                if c > 0 { dp[idx] = dp[(r - 1) * cols + c] + dp[r * cols + (c - 1)]; }
+            }
+        }
+    }
+    ret dp[total - 1];
+}
+
+fn minPathSum(cost: Int[], rows: Int, cols: Int) -> Int {
+    let total: Int = rows * cols;
+    let dp: Int[] = [];
+    loop i in 0..total {
+        dp = dp + [0];
+    }
+    loop r in 0..rows {
+        loop c in 0..cols {
+            let idx: Int = r * cols + c;
+            if r == 0 {
+                if c == 0 { dp[idx] = cost[idx]; }
+                if c > 0 { dp[idx] = dp[idx - 1] + cost[idx]; }
+            }
+            if r > 0 {
+                if c == 0 { dp[idx] = dp[(r - 1) * cols + c] + cost[idx]; }
+                if c > 0 {
+                    let top: Int = dp[(r - 1) * cols + c];
+                    let left: Int = dp[r * cols + (c - 1)];
+                    let best: Int = top;
+                    if left < best { best = left; }
+                    dp[idx] = best + cost[idx];
+                }
+            }
+        }
+    }
+    ret dp[total - 1];
+}
+
+fn joinInts(xs: Int[]) -> Text {
+    let out: Text = "";
+    let n: Int = length(xs);
+    loop i in 0..n {
+        if i > 0 { out = out + " "; }
+        out = out + int_to_text(xs[i]);
+    }
+    ret out;
+}
+
+fn main() -> Void {
+    let cost: Int[] = [3, 6, 7, 5, 6, 7, 4, 9, 4, 1, 6, 6];
+    let rows: Int = 3;
+    let cols: Int = 4;
+    let paths: Int = uniquePaths(rows, cols);
+    let minsum: Int = minPathSum(cost, rows, cols);
+    fx {
+        println("grid: ", rows, "x", cols);
+        println("cost: ", joinInts(cost));
+        println("unique_paths = ", paths);
+        println("min_path_sum = ", minsum);
+    }
+    ret;
+}

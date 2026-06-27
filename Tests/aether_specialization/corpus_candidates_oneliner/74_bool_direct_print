@@ -1,0 +1,10 @@
+// b1_direct_bool  (wishlist 3)
+// expect: ready = true
+// expect: blocked = false
+
+fn main() -> Void {
+    let ready: Bool = true;
+    let blocked: Bool = false;
+    fx { println("ready = ", ready); println("blocked = ", blocked); }
+    ret;
+}

@@ -1,0 +1,11 @@
+const RATE: Int = 3;
+
+@pure
+fn scaled(n: Int) -> Int {
+    ret n * RATE;
+}
+
+fn main() -> Void {
+    fx { println("scaled=", scaled(7)); }
+    ret;
+}

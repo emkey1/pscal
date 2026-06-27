@@ -1,0 +1,19 @@
+// 47_array_average_real
+// Concepts: dynamic Int[] arrays, length(), indexed accumulation, real-valued average
+// expect: Average score: 85.00
+
+fn main() -> Void {
+    let scores: Int[] = [];
+    scores = scores + [85];
+    scores = scores + [92];
+    scores = scores + [78];
+
+    let n: Int = length(scores);
+    let sum: Int = 0;
+    loop i in 0..n { sum = sum + scores[i]; }
+
+    let average: Real = sum * 1.0 / n;
+
+    fx { println("Average score: ", average:0:2); }
+    ret;
+}

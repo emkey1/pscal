@@ -1,0 +1,36 @@
+// 43_module_threshold_report
+// Concepts: multi-file module use, imported exported constants/functions,
+// direct imported-name calls, array-driven reporting in main
+// expect: [hot] alpha
+// expect: [warm] beta
+// expect: [cold] gamma
+// expect: threshold = 80
+
+use "98_severity_rules";
+use "99_severity_labels";
+
+type Finding {
+    name: Text;
+    score: Int;
+}
+
+fn main() -> Void {
+    let alpha: Finding = Finding { name: "alpha", score: 95 };
+    let beta: Finding = Finding { name: "beta", score: 80 };
+    let gamma: Finding = Finding { name: "gamma", score: 40 };
+    let items: Finding[] = [];
+    items = items + [alpha];
+    items = items + [beta];
+    items = items + [gamma];
+
+    let count: Int = length(items);
+    loop i in 0..count {
+        let item: Finding = items[i];
+        let level: Text = classifySeverity(item.score);
+        let prefix: Text = severityPrefix(level);
+        fx { println(prefix, " ", item.name); }
+    }
+
+    fx { println("threshold = ", WarmThreshold); }
+    ret;
+}

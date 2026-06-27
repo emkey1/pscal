@@ -1,0 +1,19 @@
+// 105_exact_output_normalize
+// Concepts: exact-output labels, explicit final return path in non-Void helper
+// expect: normalize(150)=100
+// expect: normalize(42)=42
+
+@pre score >= 0
+@post result >= 0 && result <= 100
+fn normalize(score: Int) -> Int {
+    if score > 100 { ret 100; }
+    ret score;
+}
+
+fn main() -> Void {
+    fx {
+        println("normalize(150)=", normalize(150));
+        println("normalize(42)=", normalize(42));
+    }
+    ret;
+}

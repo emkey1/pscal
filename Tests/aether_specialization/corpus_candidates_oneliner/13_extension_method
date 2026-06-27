@@ -1,0 +1,22 @@
+// 13_extension_method
+// Concepts: top-level fn with self: Type is an extension method,
+// called with method syntax
+// expect: first = 1
+// expect: second = 2
+
+type Counter {
+    value: Int;
+}
+
+fn bump(self: Counter) -> Int {
+    self.value = self.value + 1;
+    ret self.value;
+}
+
+fn main() -> Void {
+    let counter: Counter = new Counter();
+    let first: Int = counter.bump();
+    let second: Int = counter.bump();
+    fx { println("first = ", first); println("second = ", second); }
+    ret;
+}

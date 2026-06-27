@@ -1,0 +1,11 @@
+// 137_nested_pairings
+// Concepts: nested loops over an array with an i<j guard
+fn main() -> Void {
+    let teams: Text[] = ["A", "B", "C"];
+    loop i in 0..length(teams) {
+        loop j in 0..length(teams) {
+            if i < j { fx { println(teams[i], " vs ", teams[j]); } }
+        }
+    }
+    ret;
+}

@@ -1,0 +1,15 @@
+// 151_pure_sign
+@pure
+fn sign(n: Int) -> Int {
+    if n > 0 { ret 1; }
+    if n < 0 { ret 0 - 1; }
+    ret 0;
+}
+fn main() -> Void {
+    fx {
+        println("sign 8 = ", sign(8));
+        println("sign -3 = ", sign(0 - 3));
+        println("sign 0 = ", sign(0));
+    }
+    ret;
+}

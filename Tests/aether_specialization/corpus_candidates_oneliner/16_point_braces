@@ -1,0 +1,29 @@
+// 16_point_braces
+// Concepts: canonical brace initialization, Void method with bare ret
+// expect: sum after doubling = 14
+
+type Point {
+    x: Int;
+    y: Int;
+
+    fn sum() -> Int {
+        ret self.x + self.y;
+    }
+
+    fn doubleBoth() -> Void {
+        self.x = self.x * 2;
+        self.y = self.y * 2;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let point: Point = Point {
+        x: 3,
+        y: 4
+    };
+    point.doubleBoth();
+    let total: Int = point.sum();
+    fx { println("sum after doubling = ", total); }
+    ret;
+}

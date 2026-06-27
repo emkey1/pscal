@@ -1,0 +1,21 @@
+// a5_two_pass  (wishlist 1)
+// First pass builds squares; second pass computes the mean and reports
+// elements above it.
+// expect: above avg: 9
+// expect: above avg: 16
+// expect: sum = 30
+// expect: avg = 6
+
+fn main() -> Void {
+    let xs: Int[] = [];
+    loop i in 0..5 { xs = xs + [i * i]; }
+
+    let n: Int = length(xs);
+    let sum: Int = 0;
+    loop i in 0..n { sum = sum + xs[i]; }
+    let avg: Int = sum / n;
+
+    loop i in 0..n { if xs[i] > avg { fx { println("above avg: ", xs[i]); } } }
+    fx { println("sum = ", sum); println("avg = ", avg); }
+    ret;
+}

@@ -1,0 +1,15 @@
+// 27_real_formatting
+// Concepts: default Real format (6 decimals) vs value:width:precision
+// expect: 2.718280
+// expect: 2.72
+// expect:    2.718
+
+fn main() -> Void {
+    let e: Real = 2.71828;
+    fx {
+        println(e);
+        println(e:0:2);
+        println(e:8:3);
+    }
+    ret;
+}

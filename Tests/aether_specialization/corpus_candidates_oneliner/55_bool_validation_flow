@@ -1,0 +1,27 @@
+// 55_bool_validation_flow
+// Concepts: Bool logic with negation, sequential early-return validator
+// expect: Access granted.
+
+@pure
+fn validateUser(isActive: Bool, age: Int, role: Text) -> Bool {
+    if !isActive { ret false; }
+    if age < 18 { ret false; }
+    if role != "admin" { ret false; }
+    ret true;
+}
+
+fn main() -> Void {
+    let active: Bool = true;
+    let age: Int = 25;
+    let role: Text = "admin";
+    let isValid: Bool = validateUser(active, age, role);
+
+    fx {
+        if isValid {
+            println("Access granted.");
+        } else {
+            println("Access denied.");
+        }
+    }
+    ret;
+}

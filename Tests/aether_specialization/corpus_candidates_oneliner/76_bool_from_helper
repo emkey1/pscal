@@ -1,0 +1,13 @@
+// b3_bool_from_helper  (wishlist 3)
+// expect: 95 -> true
+// expect: 80 -> false
+
+@pure
+fn isReady(score: Int) -> Bool {
+    ret score >= 90;
+}
+
+fn main() -> Void {
+    fx { println("95 -> ", isReady(95)); println("80 -> ", isReady(80)); }
+    ret;
+}

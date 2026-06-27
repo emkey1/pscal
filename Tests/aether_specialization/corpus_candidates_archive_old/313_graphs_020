@@ -1,0 +1,62 @@
+// 313_graphs_020
+// Concepts: undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) — recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference
+// expect: nodes: 5
+// expect: edges: 3
+// expect: reachable_from(1) = 2
+// expect: components = 2
+
+fn dfs(adj: Int[], visited: Int[], n: Int, u: Int) -> Int {
+    visited[u] = 1;
+    let count: Int = 1;
+    loop v in 0..n {
+        if adj[u * n + v] == 1 {
+            if visited[v] == 0 { count = count + dfs(adj, visited, n, v); }
+        }
+    }
+    ret count;
+}
+
+fn reachableFrom(adj: Int[], n: Int, src: Int) -> Int {
+    let visited: Int[] = [];
+    loop i in 0..n { visited = visited + [0]; }
+    ret dfs(adj, visited, n, src);
+}
+
+fn componentCount(adj: Int[], n: Int) -> Int {
+    let visited: Int[] = [];
+    loop i in 0..n { visited = visited + [0]; }
+    let comps: Int = 0;
+    loop s in 0..n {
+        if visited[s] == 0 {
+            comps = comps + 1;
+            let ignore: Int = dfs(adj, visited, n, s);
+        }
+    }
+    ret comps;
+}
+
+fn countEdges(adj: Int[], n: Int) -> Int {
+    let total: Int = 0;
+    loop u in 0..n {
+        loop v in 0..n {
+            if adj[u * n + v] == 1 { total = total + 1; }
+        }
+    }
+    ret total / 2;
+}
+
+fn main() -> Void {
+    let adj: Int[] = [0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
+    let n: Int = 5;
+    let src: Int = 1;
+    let edges: Int = countEdges(adj, n);
+    let reach: Int = reachableFrom(adj, n, src);
+    let comps: Int = componentCount(adj, n);
+    fx {
+        println("nodes: ", n);
+        println("edges: ", edges);
+        println("reachable_from(", src, ") = ", reach);
+        println("components = ", comps);
+    }
+    ret;
+}

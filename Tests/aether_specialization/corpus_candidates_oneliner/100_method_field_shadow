@@ -1,0 +1,29 @@
+// 100_method_field_shadow
+// Concepts: method-local shadowing of a field name, explicit self.field update,
+// statement-level else
+// expect: valid = 1
+// expect: invalid = 1
+
+type Totals {
+    valid: Int;
+    invalid: Int;
+
+    fn record(score: Int) -> Void {
+        let valid: Bool = score >= 70;
+        if valid {
+            self.valid = self.valid + 1;
+        } else {
+            self.invalid = self.invalid + 1;
+        }
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let totals: Totals = new Totals();
+    totals.record(90);
+    totals.record(10);
+
+    fx { println("valid = ", totals.valid); println("invalid = ", totals.invalid); }
+    ret;
+}

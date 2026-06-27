@@ -1,0 +1,18 @@
+// t3_bool_int_tuple  (wishlist 2)
+// expect: positives = 1
+// expect: all positive = false
+
+@post result.0 >= 0
+fn analyze(a: Int, b: Int) -> (Int, Bool) {
+    let count: Int = 0;
+    if a > 0 { count = count + 1; }
+    if b > 0 { count = count + 1; }
+    let allPos: Bool = a > 0 && b > 0;
+    ret (count, allPos);
+}
+
+fn main() -> Void {
+    let (count, allPos) = analyze(3, -2);
+    fx { println("positives = ", count); println("all positive = ", allPos); }
+    ret;
+}

@@ -1,0 +1,24 @@
+// 62_toon_parse_file_simple
+// Concepts: TOON parse_file, typed scalar extraction, explicit close
+// expect: Aether
+// expect: true
+// expect: 2
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("payload.json");
+    let root: ToonNode = toon_root(doc);
+    let name: Text = toon_get_text(root, "name");
+    let enabled: Bool = toon_get_bool(root, "enabled");
+    let count: Int = toon_get_int(root, "count");
+
+    fx {
+        println(name);
+        println(enabled);
+        println(count);
+    }
+
+    toon_close(doc);
+    ret;
+}

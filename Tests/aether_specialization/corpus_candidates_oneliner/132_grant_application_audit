@@ -1,0 +1,83 @@
+// 132_grant_application_audit
+// Concepts: object-root TOON, const cap, cross-field decision (cap + score),
+// derived award amount, custom audit type with multiple counters + running total
+// expect: app 0: G1 / approved / 20000
+// expect: app 1: G2 / rejected / 0
+// expect: app 2: G3 / review / 7500
+// expect: app 3: G4 / rejected / 0
+// expect: app 4: UNKNOWN / rejected / 0
+// expect: approved = 1
+// expect: review = 1
+// expect: rejected = 3
+// expect: total awarded = 27500
+
+const MaxGrant: Int = 50000;
+
+@pure
+fn withinCap(requested: Int) -> Bool {
+    if requested > MaxGrant { ret false; }
+    ret true;
+}
+
+@pure
+fn decide(score: Int, ok: Bool) -> Text {
+    if !ok { ret "rejected"; }
+    if score >= 80 { ret "approved"; }
+    if score >= 50 { ret "review"; }
+    ret "rejected";
+}
+
+@pure
+fn award(status: Text, requested: Int) -> Int {
+    if status == "approved" { ret requested; }
+    if status == "review" { ret requested / 2; }
+    ret 0;
+}
+
+type AuditBook {
+    approved: Int;
+    review: Int;
+    rejected: Int;
+    totalAwarded: Int;
+
+    fn record(status: Text, amount: Int) -> Void {
+        self.totalAwarded = self.totalAwarded + amount;
+        if status == "approved" { self.approved = self.approved + 1; ret; }
+        if status == "review" { self.review = self.review + 1; ret; }
+        self.rejected = self.rejected + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("grants132.json");
+    let root: ToonNode = toon_root(doc);
+    let apps: ToonNode = toon_key(root, "applications");
+    let book: AuditBook = new AuditBook();
+
+    loop i in 0..toon_len(apps) {
+        let app: ToonNode = toon_at(apps, i);
+        let id: Text = toon_get_text_or(app, "id", "UNKNOWN");
+        let requested: Int = toon_get_int_or(app, "requested", 0);
+        let score: Int = toon_get_int_or(app, "score", 0);
+        let ok: Bool = withinCap(requested);
+        let status: Text = decide(score, ok);
+        let amount: Int = award(status, requested);
+
+        book.record(status, amount);
+
+        fx { println("app ", i, ": ", id, " / ", status, " / ", amount); }
+    }
+
+    fx {
+        println("approved = ", book.approved);
+        println("review = ", book.review);
+        println("rejected = ", book.rejected);
+        println("total awarded = ", book.totalAwarded);
+    }
+
+    toon_close(doc);
+    ret;
+}

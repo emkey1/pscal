@@ -1,0 +1,31 @@
+// 49_toon_nested_meta_guard
+// Concepts: object root extraction, guarded intermediate TOON lookup, defaulted final lookup
+// expect: Item 1 has code: A
+// expect: Item 2 has code: UNKNOWN
+
+fn main() -> Void {
+    if !has_toon() { fx { println("TOON unavailable"); } ret; }
+
+    let json: Text = "{\"items\":[{\"id\":1,\"meta\":{\"code\":\"A\"}},{\"id\":2}]}";
+    let doc: ToonDoc = toon_parse(json);
+    let root: ToonNode = toon_root(doc);
+    let items: ToonNode = toon_key(root, "items");
+
+    loop i in 0..toon_len(items) {
+        let item: ToonNode = toon_at(items, i);
+        let id: Int = toon_get_int(item, "id");
+        let code: Text = "UNKNOWN";
+
+        if toon_has_key(item, "meta") {
+            let meta: ToonNode = toon_key(item, "meta");
+            code = toon_get_text_or(meta, "code", "MISSING");
+        }
+
+        fx { println("Item ", id, " has code: ", code); }
+
+        toon_free(item);
+    }
+
+    toon_close(doc);
+    ret;
+}

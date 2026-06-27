@@ -1,0 +1,76 @@
+// 68_ledger_audit_file
+// Concepts: object-root array extraction, pure validity helper, custom mutable
+// type, fallback extraction, per-row audit output, summary lines
+// expect: row 0: T1 / valid / 500
+// expect: row 1: T2 / invalid / 99999
+// expect: row 2: T3 / invalid / -100
+// expect: row 3: UNKNOWN / invalid / -1
+// expect: batch = batch_99
+// expect: balance = 500
+// expect: valid = 1
+// expect: invalid = 3
+
+const MaxTxAmount: Int = 10000;
+
+@pure
+fn isTxValid(amount: Int) -> Bool {
+    if amount < 0 { ret false; }
+    if amount > MaxTxAmount { ret false; }
+    ret true;
+}
+
+@pure
+fn statusLabel(valid: Bool) -> Text {
+    if valid { ret "valid"; }
+    ret "invalid";
+}
+
+type Ledger {
+    batch: Text;
+    balance: Int;
+    valid: Int;
+    invalid: Int;
+
+    fn record(ok: Bool, amount: Int) -> Void {
+        if ok {
+            self.valid = self.valid + 1;
+            self.balance = self.balance + amount;
+            ret;
+        }
+        self.invalid = self.invalid + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("transactions68.json");
+    let root: ToonNode = toon_root(doc);
+    let batchName: Text = toon_get_text_or(root, "metadata", "unknown");
+    let rows: ToonNode = toon_key(root, "transactions");
+    let ledger: Ledger = new Ledger();
+    ledger.batch = batchName;
+
+    loop i in 0..toon_len(rows) {
+        let row: ToonNode = toon_at(rows, i);
+        let id: Text = toon_get_text_or(row, "id", "UNKNOWN");
+        let amount: Int = toon_get_int_or(row, "amount", -1);
+        let ok: Bool = isTxValid(amount);
+        let label: Text = statusLabel(ok);
+
+        ledger.record(ok, amount);
+
+        fx { println("row ", i, ": ", id, " / ", label, " / ", amount); }
+    }
+
+    fx {
+        println("batch = ", ledger.batch);
+        println("balance = ", ledger.balance);
+        println("valid = ", ledger.valid);
+        println("invalid = ", ledger.invalid);
+    }
+
+    toon_close(doc);
+    ret;
+}

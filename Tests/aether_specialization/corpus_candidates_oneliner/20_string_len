@@ -1,0 +1,12 @@
+// 20_string_len
+// Concepts: string_len, '+' only for Text-with-Text concatenation
+// expect: Hello, Aether!
+// expect: name length = 6
+
+fn main() -> Void {
+    let name: Text = "Aether";
+    let greeting: Text = "Hello, " + name + "!";
+    let nameLen: Int = string_len(name);
+    fx { println(greeting); println("name length = ", nameLen); }
+    ret;
+}

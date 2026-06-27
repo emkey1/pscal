@@ -1,0 +1,8 @@
+mod SeverityLabels {
+    @pure
+    export fn severityPrefix(level: Text) -> Text {
+        if level == "hot" { ret "[hot]"; }
+        if level == "warm" { ret "[warm]"; }
+        ret "[cold]";
+    }
+}

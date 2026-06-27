@@ -1,0 +1,16 @@
+fn main() -> Void {
+    if !has_toon() { fx { println("toon unavailable"); } ret; }
+    let doc: ToonDoc = toon_parse("{\"host\":\"db1\",\"port\":5432}");
+    let root: ToonNode = toon_root(doc);
+    let host: Text = toon_get_text_or(root, "host", "localhost");
+    let port: Int = toon_get_int_or(root, "port", 80);
+    let tls: Bool = toon_get_bool_or(root, "tls", false);
+    let tlsLabel: Text = if tls { "on" } else { "off" };
+    fx {
+        println("host=", host);
+        println("port=", port);
+        println("tls=", tlsLabel);
+    }
+    toon_close(doc);
+    ret;
+}

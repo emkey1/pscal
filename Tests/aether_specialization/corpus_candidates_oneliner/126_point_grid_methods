@@ -1,0 +1,33 @@
+// 126_point_grid_methods
+// Concepts: custom type, literal init Point { x, y }, new Point() with field
+// assignment, top-level extension method called as value.method(), field reads
+// expect: a => 3,4 m=7
+// expect: b => 1,6 m=7
+// expect: c => 5,2 m=7
+// expect: total m = 21
+
+type Point {
+    x: Int;
+    y: Int;
+}
+
+fn manhattan(self: Point) -> Int {
+    ret self.x + self.y;
+}
+
+fn main() -> Void {
+    let a: Point = Point { x: 3, y: 4 };
+    let b: Point = Point { x: 1, y: 6 };
+    let c: Point = new Point();
+    c.x = 5;
+    c.y = 2;
+
+    fx {
+        println("a => ", a.x, ",", a.y, " m=", a.manhattan());
+        println("b => ", b.x, ",", b.y, " m=", b.manhattan());
+        println("c => ", c.x, ",", c.y, " m=", c.manhattan());
+        println("total m = ", a.manhattan() + b.manhattan() + c.manhattan());
+    }
+
+    ret;
+}
