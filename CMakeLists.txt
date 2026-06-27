@@ -2417,6 +2417,7 @@ set(AETHER_SOURCES
     ${AETHER_SRC}/diagnostics.c
     ${AETHER_SRC}/translate.c
     ${AETHER_SRC}/parser.c
+    ${AETHER_SRC}/ast_parser.c
     ${AETHER_SRC}/semantic.c
     ${AETHER_SRC}/state.c
 )
