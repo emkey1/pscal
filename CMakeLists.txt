@@ -101,7 +101,7 @@ if(PSCAL_PLATFORM_IOS)
     if(VPROC_ENABLE_STUBS_FOR_TESTS)
         add_compile_definitions(VPROC_ENABLE_STUBS_FOR_TESTS)
     endif()
-    add_compile_options(-include ${CMAKE_SOURCE_DIR}/src/runtime/vproc/vproc_shim.h)
+    add_compile_options(-include ${CMAKE_SOURCE_DIR}/components/pscal-core/src/runtime/vproc/vproc_shim.h)
     # vproc implementation compiles without the global shim overrides to avoid macro pollution.
     set_property(SOURCE components/pscal-core/src/runtime/vproc/vproc.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
     # path virtualization helpers must call the real syscalls to avoid recursion with vproc shim macros.
@@ -2853,6 +2853,7 @@ if(PSCAL_PLATFORM_IOS)
     set(_tool_runner_libs
         pscal_clike_static
         pscal_rea_static
+        pscal_aether_static
         pscal_pascal_static
         pscal_vm_static
         pscal_json2bc_static

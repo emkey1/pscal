@@ -86,6 +86,7 @@ required_libs=(
     libpscal_pascal_static.a
     libpscal_clike_static.a
     libpscal_rea_static.a
+    libpscal_aether_static.a
     libpscal_vm_static.a
     libpscal_json2bc_static.a
     libpscal_pscald_static.a
@@ -214,6 +215,7 @@ if [[ -n "${preset}" ]]; then
         pscal_pascal_static \
         pscal_clike_static \
         pscal_rea_static \
+        pscal_aether_static \
         pscal_vm_static \
         pscal_json2bc_static \
         pscal_pscald_static \
