@@ -40,26 +40,62 @@
 | include_raw_corpus / include_reference | `false` / `false` |
 | Export | `export_merged_16bit = true` → `/storage/q36-sdpa/merged_16bit` |
 
-## NOT recovered (reconstructed from project memory — VERIFY before use)
+## Reconstructed runtime — now CONFIRMED (2026-06-28)
 
-The surviving `run_metadata.json` does NOT capture these, and they are the fragile,
-Blackwell-specific parts that made this run hard. From the `gb10-moe-training-recipe`
-memory, the working stack for `qwen3_5_moe` on the GB10 Blackwell was:
+These were not in `run_metadata.json` but have been pinned down by cross-referencing the
+image inventory + the run's own README framework-versions block. **High confidence:**
 
-- **Image:** NOT `aether-unsloth-qwen3-coder-30b:q3`. The Qwen3.6 hybrid needed a
-  newer base. Memory: built on `nvcr.io/nvidia/pytorch:26.05-py3`. On claw2 the
-  candidate images are `aether-unsloth-qwen3-coder-30b:base26-fla` and
-  `:tf520-fla` (the `-fla` = flash-linear-attention variants). **Confirm which one.**
-- **`attn_implementation="sdpa"`** passed to `FastLanguageModel.from_pretrained`
-  (the run tag `q36-sdpa` reflects this). The hybrid's full-attention layers call
-  `flash_attn` whose `varlen_fwd` does an illegal memory access on sm_121 → must route
-  through cuDNN SDPA. Fallback: `pip uninstall flash-attn`.
-- **flash-linear-attention from GIT** (`git+https://github.com/fla-org/flash-linear-attention`),
-  not PyPI (PyPI 0.5.1 is a stub missing `fla.ops`/`fla.modules`).
-- **Version squeeze** (`--no-deps`): `transformers==5.2.0 trl==0.22.2 unsloth
-  unsloth_zoo bitsandbytes==0.49.2`, `tokenizers>=0.22,<=0.23`, `BNB_CUDA_VERSION=130`.
-- **Driver** `nvidia-driver-595-open`.
-- Pace ~133s/step; a 150-step / 3-epoch run ≈ 5–6h.
+- **Image: `aether-unsloth-qwen3-coder-30b:base26-fla`** (id `41d24de8b448`). CONFIRMED:
+  the q36-sdpa README records `Transformers 5.2.0 / PyTorch 2.12.0a0+nv26.5 / TRL 0.22.2 /
+  Datasets 4.8.5 / Tokenizers 0.22.2`, and `base26-fla` contains EXACTLY that stack
+  (torch 2.12.0+nv26.05, transformers 5.2.0, **fla 0.5.2 with `fla.ops` present**, trl
+  0.22.2); it was built 2026-06-24 08:43, the same day q36-sdpa trained (~10:25–13:02).
+  The other candidate `:tf520-fla` (torch 2.10/nv25.11, fla 0.5.1) does NOT match and is
+  the older stack the memory says hit step-0 illegal-memory. The base `:q3` image is
+  torch 2.10/nv25.11 and cannot run `qwen3_5_moe`.
+- **`attn_implementation="sdpa"` is HARDCODED in the trainer** — `unsloth_qwen_coder_30b_sft.py`
+  passes `attn_implementation="sdpa"` to `FastLanguageModel.from_pretrained` (lines ~279 and
+  ~444). So q36 used the SAME script as every other run; NO special variant or flag is
+  needed for SDPA. (Why it matters: the hybrid's full-attention layers call `flash_attn`
+  whose `varlen_fwd` illegal-accesses on sm_121; SDPA routes through cuDNN. Fallback if
+  unsloth ever overrides it: `pip uninstall flash-attn` in the image.)
+- **flash-linear-attention** is already baked into `base26-fla` as 0.5.2 with `fla.ops`
+  (the git build, not the PyPI stub) — no pip step needed at launch.
+- **Driver** `nvidia-driver-595-open` (already on claw2). Pace ~133s/step; 3 epochs ≈ 5–6h.
+
+### Full reconstructed launch (READY FOR REVIEW — do NOT run until owner go-ahead)
+
+To reproduce the ORIGINAL run (older `data_qwen_ml2x` corpus, r=32/α=64/ep3):
+
+```bash
+docker run -d --name aether-train-q36-cs-aug2-builtins \
+  --gpus all --ipc=host --shm-size=16g \
+  --ulimit memlock=-1 --ulimit stack=67108864 \
+  -v /home/claw/training/aether-qwen-coder-30b-unsloth:/workspace \
+  -v /storage:/storage -e HF_HOME=/storage/hf \
+  aether-unsloth-qwen3-coder-30b:base26-fla \
+  python /workspace/scripts/unsloth_qwen_coder_30b_sft.py \
+    --model-id /storage/models/Qwen3.6-35B-A3B-Instruct \
+    --instruction-jsonl /workspace/data_cs_aug2_builtins/aether_instruction_sft.jsonl \
+    --repair-jsonl /workspace/data_cs_aug2_builtins/aether_repair_sft.jsonl \
+    --output-dir /workspace/runs/sft-q36-cs-aug2-builtins \
+    --no-load-in-4bit --epochs 3 --lora-r 32 --lora-alpha 64 \
+    --learning-rate 1e-4 --batch-size 1 --grad-accum 8 \
+    --export-merged-16bit --merged-output-dir /storage/q36-cs-aug2-builtins/merged_16bit
+```
+
+(Above swaps the data dir to the new `data_cs_aug2_builtins` — that part IS a new config,
+see Caveats. Markers: Qwen ChatML defaults, no override; probe the base's chat template to
+confirm before launch.) NOTE: `train_any.sh` would NOT use `base26-fla` unless you pass
+`IMG=aether-unsloth-qwen3-coder-30b:base26-fla` — so prefer the explicit `docker run` above,
+or `IMG=… ./train_any.sh q36-cs-aug2-builtins /storage/models/Qwen3.6-35B-A3B-Instruct 32 64 data_cs_aug2_builtins 3`.
+
+### Residual risk (why this is report-not-auto-launch)
+Even with the image pinned, the GB10 Blackwell walls (gb10-moe-training-recipe.md) can
+resurface on a fresh launch. If it step-0 illegal-accesses, `CUDA_LAUNCH_BLOCKING=1` pins
+the kernel; the `bincount`/Triton errors are red herrings. Watch the first step actually
+advance before trusting the run. **The very first successful q36 launch MUST write its exact
+`docker run` here + to `/storage/q36-*/LAUNCH_COMMAND.md`** so it is never lost again.
 
 ## Caveats for the deferred retrain
 
