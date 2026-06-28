@@ -829,13 +829,37 @@ def resolve_api_key(destination: Destination) -> str | None:
 
 
 def strip_reasoning_block(text: str) -> str:
-    """Drop a leading reasoning block from reasoning models (e.g. Qwen3.5).
+    """Drop a reasoning/analysis block from reasoning models.
 
-    The model emits ``<think>...</think>`` before its answer. With the chat
-    template's generation prompt the opening ``<think>`` may already be consumed,
-    so the reply can start with the closing tag alone. Remove everything up to and
-    including the first ``</think>``. No-op for models that emit no think block.
+    Two formats are handled:
+
+    * ``<think>...</think>`` (e.g. Qwen3.5). With the chat template's generation
+      prompt the opening ``<think>`` may already be consumed, so the reply can
+      start with the closing tag alone. Remove everything up to and including the
+      first ``</think>``.
+    * OpenAI *harmony* channels (e.g. gpt-oss served via Ollama), which Ollama
+      flattens into ``content``: ``<analysis text><|end|><|start|>assistant
+      <|channel|>final<|message|><final answer>``. Keep only the text after the
+      last ``final`` channel marker -- that is the answer -- dropping the analysis
+      (reasoning) channel and any trailing harmony control tokens. The channel
+      name may be followed by an explicit ``<|message|>`` token (short replies)
+      or just a newline before the answer (longer replies); both are handled.
+      (Pair this with ``"extra_body": {"stop": null}`` on the destination so the
+      bench end-marker cannot truncate the reply inside the analysis channel
+      before ``final``.)
+
+    No-op for models that emit neither.
     """
+    final_tag = "<|channel|>final"
+    if final_tag in text:
+        text = text.rsplit(final_tag, 1)[1].lstrip()
+        if text.startswith("<|message|>"):
+            text = text[len("<|message|>"):].lstrip()
+        for control in ("<|return|>", "<|end|>", "<|start|>", "<|call|>", "<|channel|>"):
+            cut = text.find(control)
+            if cut != -1:
+                text = text[:cut]
+        return text.strip()
     idx = text.find("</think>")
     if idx != -1:
         return text[idx + len("</think>"):].lstrip()
