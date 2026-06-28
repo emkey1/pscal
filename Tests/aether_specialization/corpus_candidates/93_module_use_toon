@@ -11,7 +11,10 @@ fn main() -> Void {
         ret;
     }
 
-    let doc: ToonDoc = toon_parse_file("users.json");
+    let doc: ToonDoc;
+    fx {
+        doc = toon_parse_file("users.json");
+    }
     let root: ToonNode = toon_root(doc);
     let users: ToonNode = toon_key(root, "users");
 

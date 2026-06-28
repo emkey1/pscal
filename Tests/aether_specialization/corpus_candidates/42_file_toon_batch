@@ -26,14 +26,21 @@ fn main() -> Void {
         ret;
     }
 
-    if !fileexists("jobs42.json") {
+    let hasFile: Bool = false;
+    fx {
+        hasFile = fileexists("jobs42.json");
+    }
+    if !hasFile {
         fx {
             println("missing jobs42.json");
         }
         ret;
     }
 
-    let doc: ToonDoc = toon_parse_file("jobs42.json");
+    let doc: ToonDoc;
+    fx {
+        doc = toon_parse_file("jobs42.json");
+    }
     let root: ToonNode = toon_root(doc);
     let jobs: ToonNode = toon_key(root, "jobs");
     let batchName: Text = toon_get_text(root, "batch");

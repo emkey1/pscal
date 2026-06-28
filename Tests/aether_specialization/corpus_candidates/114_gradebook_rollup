@@ -76,7 +76,10 @@ fn main() -> Void {
         ret;
     }
 
-    let doc: ToonDoc = toon_parse_file("grades114.json");
+    let doc: ToonDoc;
+    fx {
+        doc = toon_parse_file("grades114.json");
+    }
     let root: ToonNode = toon_root(doc);
     let students: ToonNode = toon_key(root, "students");
     let book: Gradebook = new Gradebook();

@@ -46,7 +46,10 @@ fn main() -> Void {
         ret;
     }
 
-    let doc: ToonDoc = toon_parse_file("tickets128.json");
+    let doc: ToonDoc;
+    fx {
+        doc = toon_parse_file("tickets128.json");
+    }
     let root: ToonNode = toon_root(doc);
     let tickets: ToonNode = toon_key(root, "tickets");
     let queue: Queue = new Queue();

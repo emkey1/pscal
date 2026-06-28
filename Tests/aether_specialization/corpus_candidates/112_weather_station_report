@@ -57,7 +57,10 @@ fn main() -> Void {
         ret;
     }
 
-    let doc: ToonDoc = toon_parse_file("telemetry112.json");
+    let doc: ToonDoc;
+    fx {
+        doc = toon_parse_file("telemetry112.json");
+    }
     let root: ToonNode = toon_root(doc);
     let stations: ToonNode = toon_key(root, "stations");
     let totals: Telemetry = new Telemetry();

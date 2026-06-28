@@ -77,7 +77,10 @@ fn main() -> Void {
         ret;
     }
 
-    let doc: ToonDoc = toon_parse_file("stories133.json");
+    let doc: ToonDoc;
+    fx {
+        doc = toon_parse_file("stories133.json");
+    }
     let root: ToonNode = toon_root(doc);
     let stories: ToonNode = toon_key(root, "stories");
     let board: Board = new Board();

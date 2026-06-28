@@ -56,7 +56,10 @@ fn main() -> Void {
         ret;
     }
 
-    let doc: ToonDoc = toon_parse_file("tickets.json");
+    let doc: ToonDoc;
+    fx {
+        doc = toon_parse_file("tickets.json");
+    }
     let root: ToonNode = toon_root(doc);
     let tickets: ToonNode = toon_key(root, "tickets");
 

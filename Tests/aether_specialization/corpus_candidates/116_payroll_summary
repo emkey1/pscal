@@ -20,7 +20,10 @@ fn main() -> Void {
         ret;
     }
 
-    let doc: ToonDoc = toon_parse_file("shifts116.json");
+    let doc: ToonDoc;
+    fx {
+        doc = toon_parse_file("shifts116.json");
+    }
     let root: ToonNode = toon_root(doc);
     let workers: ToonNode = toon_key(root, "workers");
     let totalHours: Int = 0;

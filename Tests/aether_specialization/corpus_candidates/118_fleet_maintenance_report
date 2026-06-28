@@ -48,7 +48,10 @@ fn main() -> Void {
         ret;
     }
 
-    let doc: ToonDoc = toon_parse_file("fleet118.json");
+    let doc: ToonDoc;
+    fx {
+        doc = toon_parse_file("fleet118.json");
+    }
     let root: ToonNode = toon_root(doc);
     let vehicles: ToonNode = toon_key(root, "vehicles");
     let totals: FleetTotals = new FleetTotals();

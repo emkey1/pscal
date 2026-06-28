@@ -1,0 +1,9 @@
+{
+  "raw_corpus": "Tests/aether_specialization/out_cs_aug2_builtins/aether_raw_corpus.json",
+  "reference_corpus": "Tests/aether_specialization/out_cs_aug2_builtins/aether_reference_corpus.json",
+  "instruction_jsonl": "Tests/aether_specialization/out_cs_aug2_builtins/aether_instruction_sft.jsonl",
+  "repair_jsonl": "Tests/aether_specialization/out_cs_aug2_builtins/aether_repair_sft.jsonl",
+  "instruction_records": 406,
+  "repair_records": 25,
+  "policy": "instruction-only SFT: corpus cases promoted to verified instruction pairs + seed instruction/repair pairs. Raw corpus and small guide are still exported for provenance but are NOT language-modeled as bare completions (trainer --include-raw-corpus / --include-reference default off)."
+}

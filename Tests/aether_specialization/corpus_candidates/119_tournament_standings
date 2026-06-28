@@ -68,7 +68,10 @@ fn main() -> Void {
         ret;
     }
 
-    let doc: ToonDoc = toon_parse_file("teams119.json");
+    let doc: ToonDoc;
+    fx {
+        doc = toon_parse_file("teams119.json");
+    }
     let root: ToonNode = toon_root(doc);
     let teams: ToonNode = toon_key(root, "teams");
     let board: Standings = new Standings();
