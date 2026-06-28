@@ -1,4 +1,6 @@
 {
+  "version": "2026-06-28-1",
+  "aether_version": "2026-06-27-3",
   "raw_corpus": "Tests/aether_specialization/out_cs_aug2_builtins/aether_raw_corpus.json",
   "reference_corpus": "Tests/aether_specialization/out_cs_aug2_builtins/aether_reference_corpus.json",
   "instruction_jsonl": "Tests/aether_specialization/out_cs_aug2_builtins/aether_instruction_sft.jsonl",

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import pathlib
 import subprocess
@@ -37,6 +38,10 @@ def main() -> int:
     parser.add_argument("--validate-manifest", type=pathlib.Path, default=None,
                         help="manifest used for the strict corpus-layout validation step "
                         "(default: the --corpus-manifest value).")
+    parser.add_argument("--version", default=None,
+                        help="dataset version stamp (YYYY-MM-DD-N); default: today-1. "
+                        "Recorded in aether_training_mix.json alongside the aether "
+                        "language version for traceability.")
     args = parser.parse_args()
     validate_manifest = args.validate_manifest if args.validate_manifest is not None else args.corpus_manifest
 
@@ -111,10 +116,16 @@ def main() -> int:
             "no-supervision asset set (this was the v6 failure mode)."
         )
 
+    version_file = REPO_ROOT / "components" / "aether" / "VERSION"
+    aether_version = version_file.read_text(encoding="utf-8").strip() if version_file.exists() else "unknown"
+    dataset_version = args.version or f"{datetime.date.today().isoformat()}-1"
+
     summary_path = output_dir / "aether_training_mix.json"
     summary_path.write_text(
         json.dumps(
             {
+                "version": dataset_version,
+                "aether_version": aether_version,
                 "raw_corpus": str(corpus_json),
                 "reference_corpus": str(reference_json),
                 "instruction_jsonl": str(instruction_jsonl),
