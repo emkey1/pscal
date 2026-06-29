@@ -117,7 +117,7 @@ def compile_example(binary: Path, script_path: Path, timeout_seconds: float) -> 
         cwd=script_path.parent,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True,
+        text=True, errors="replace",
         timeout=timeout_seconds,
         check=False,
     )

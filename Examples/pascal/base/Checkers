@@ -58,13 +58,11 @@ end;
 
 function GetPieceChar(piece: ShortInt): Char;
 begin
-  case piece of
-    1:     GetPieceChar := 'o'; { Player1 regular }
-   -1:     GetPieceChar := 'x'; { Player2 regular }
-    2:     GetPieceChar := 'O'; { Player1 king }
-   -2:     GetPieceChar := 'X'; { Player2 king }
-    else  GetPieceChar := '.';
-  end;
+  if piece = 1 then GetPieceChar := 'o'
+  else if piece = -1 then GetPieceChar := 'x'
+  else if piece = 2 then GetPieceChar := 'O'
+  else if piece = -2 then GetPieceChar := 'X'
+  else GetPieceChar := '.';
 end;
 
 function BoardStateHash(var b: BoardType; playerToMove: ShortInt): Integer;
@@ -341,12 +339,12 @@ begin
   
   for r := 1 to 8 do
     for c := 1 to 8 do
-      case b[r, c] of
-         1: EvaluateBoard := EvaluateBoard - 5;
-        -1: EvaluateBoard := EvaluateBoard + 5;
-         2: EvaluateBoard := EvaluateBoard - 8;
-        -2: EvaluateBoard := EvaluateBoard + 8;
-      end;
+    begin
+      if b[r, c] = 1 then EvaluateBoard := EvaluateBoard - 5
+      else if b[r, c] = -1 then EvaluateBoard := EvaluateBoard + 5
+      else if b[r, c] = 2 then EvaluateBoard := EvaluateBoard - 8
+      else if b[r, c] = -2 then EvaluateBoard := EvaluateBoard + 8;
+    end;
 
   if player = 1 then
     EvaluateBoard := -EvaluateBoard;
