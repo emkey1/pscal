@@ -89,6 +89,8 @@ class Destination:
     retry_backoff_seconds: float = 2.0
     extra_body: dict | None = None
     extra_headers: dict | None = None
+    preferred_targets: list[str] | None = None
+    priority: int = 5
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -417,6 +419,8 @@ def load_destinations(path: pathlib.Path) -> list[Destination]:
                 retry_backoff_seconds=float(item.get("retry_backoff_seconds", 2.0)),
                 extra_body=item.get("extra_body"),
                 extra_headers=item.get("extra_headers"),
+                preferred_targets=item.get("preferred_targets"),
+                priority=int(item.get("priority", 5)),
             )
         )
     return destinations
@@ -1185,6 +1189,74 @@ def invoke_openai_chat_completions(prompt: str, destination: Destination) -> dic
     }
 
 
+def invoke_tra_queue(prompt: str, destination: Destination) -> dict[str, Any]:
+    """Submit a generation to the T'Ra AI queue (e.g. http://m4t:8793), poll, return it.
+
+    The queue serializes work per target (no GPU contention) and routes model->target.
+    A completed job's ``result`` is a JSON string like ``{"content": ...}`` (reasoning
+    models may add a ``reasoning`` key). Pass ``preferred_targets`` + ``priority`` on the
+    destination; ``extra_body`` (e.g. ``disable_thinking``) is merged into the payload.
+    """
+    if not destination.model:
+        raise RuntimeError("destination model is required for tra_queue")
+    if not destination.base_url:
+        raise RuntimeError("destination base_url (the T'Ra queue) is required for tra_queue")
+    base = destination.base_url.rstrip("/")
+    inner: dict[str, Any] = {
+        "model": destination.model,
+        "preferred_targets": destination.preferred_targets or [],
+        "prompt": prompt,
+        "max_tokens": destination.max_output_tokens,
+    }
+    if destination.temperature >= 0:
+        inner["temperature"] = destination.temperature
+    if destination.extra_body:
+        inner.update(destination.extra_body)
+    job = {
+        "resource_group": "llm",
+        "type": "llm_generate",
+        "priority": destination.priority,
+        "submitter": "aether_doc_bench",
+        "payload": inner,
+    }
+    submit = http_json_request(f"{base}/jobs", job, None, timeout_seconds=30)
+    job_id = submit.get("id")
+    if not job_id:
+        raise RuntimeError(f"tra_queue submit returned no id: {submit}")
+
+    deadline = max(30, int(destination.request_timeout_seconds))
+    waited = 0
+    rec: dict[str, Any] = {}
+    while waited < deadline:
+        chunk = min(30, deadline - waited)
+        try:
+            req = urllib.request.Request(f"{base}/jobs/{job_id}?wait={chunk}", method="GET")
+            with urllib.request.urlopen(req, timeout=chunk + 15) as resp:
+                rec = json.loads(resp.read().decode("utf-8", errors="replace"))
+        except urllib.error.URLError:
+            waited += chunk
+            continue
+        status = (rec.get("status") or rec.get("display_status") or "").lower()
+        if status in ("done", "complete", "completed", "succeeded", "success"):
+            result = rec.get("result")
+            if isinstance(result, str):
+                try:
+                    result = json.loads(result)
+                except json.JSONDecodeError:
+                    result = {"content": result}
+            content = (result or {}).get("content") or ""
+            if not content:
+                raise RuntimeError("tra_queue job returned empty content")
+            return {"raw_text": content, "response_id": job_id, "usage": rec.get("usage")}
+        if status in ("failed", "error", "cancelled", "canceled", "rejected"):
+            why = rec.get("display_error") or rec.get("error") or rec.get("scheduler_note") or "unknown"
+            raise RuntimeError(f"tra_queue job {job_id} {status}: {why}")
+        waited += chunk
+    raise ProviderTimeoutError(
+        f"tra_queue job {job_id} exceeded {deadline}s (last note: {rec.get('scheduler_note')})"
+    )
+
+
 def invoke_openai_completions(prompt: str, destination: Destination) -> dict[str, Any]:
     if not destination.model:
         raise RuntimeError("destination model is required for openai_completions")
@@ -1310,6 +1382,8 @@ def run_model(prompt: str, destination: Destination) -> dict[str, Any]:
         return invoke_openai_responses(prompt=prompt, destination=destination)
     if destination.kind == "openai_chat_completions":
         return invoke_openai_chat_completions(prompt=prompt, destination=destination)
+    if destination.kind == "tra_queue":
+        return invoke_tra_queue(prompt=prompt, destination=destination)
     if destination.kind == "openai_completions":
         return invoke_openai_completions(prompt=prompt, destination=destination)
     if destination.kind == "command":
