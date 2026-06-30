@@ -14,9 +14,12 @@ final class TerminalAccessoryView: UIView {
 
 // MARK: - Custom Native View with Expandable Settings Drawer
 
-final class NativeTerminalView: UITextView {
+final class NativeTerminalView: UITextView, UIInputViewAudioFeedback {
     var onSettingsChanged: ((CGFloat, UIColor) -> Void)?
     var onInput: ((String) -> Void)?
+
+    var enableInputClicksWhenVisible: Bool { return true }
+
     private var softKeyboardVisible: Bool = false
     private let amberColor = UIColor(red: 1.0, green: 0.74, blue: 0.23, alpha: 1.0)
 
@@ -189,6 +192,7 @@ final class NativeTerminalView: UITextView {
     // MARK: Actions
 
     @objc private func keyTapped(_ sender: UIButton) {
+        UIDevice.current.playInputClick()
         guard let title = sender.title(for: .normal) else { return }
         if title == "⚙️" {
             toggleSettings()
