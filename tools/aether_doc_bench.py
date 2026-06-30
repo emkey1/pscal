@@ -1251,12 +1251,14 @@ def invoke_tra_queue(prompt: str, destination: Destination) -> dict[str, Any]:
             ex = http_json_request(f"{base}/jobs/explain", body, None, timeout_seconds=30)
             if not ex.get("routable", True):
                 note = str(ex.get("scheduler_note") or "")
-                head = note.split(":", 1)[0]
-                # Hard failure = the model is not servable anywhere. A *busy* target is
-                # transient (`no_eligible_target:X [busy=...]`) -- the job queues and runs
-                # when it frees -- so submit anyway rather than failing the generation.
-                transient = "busy=" in note or "external_busy=" in note
-                if head == "no_route_for_model" or (head == "no_eligible_target" and not transient):
+                # Bail ONLY on a true hard failure: the model is not servable on ANY
+                # target (`no_route_for_model`). Every `no_eligible_target:X [<state>=...]`
+                # -- busy / loading / external_busy / locked / ... -- is TRANSIENT:
+                # submitting queues the job and it runs once a target becomes eligible.
+                # Enumerating the transient states is fragile (we missed `loading=` the
+                # first pass and false-failed a whole run while LM Studio loaded the
+                # model), so treat anything that is not no_route_for_model as queue-able.
+                if note.split(":", 1)[0] == "no_route_for_model":
                     raise RuntimeError(f"scheduler will not route this job: {note}")
         except RuntimeError:
             raise
