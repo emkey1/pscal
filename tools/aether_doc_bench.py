@@ -35,6 +35,7 @@ import tempfile
 import textwrap
 import time
 import email.utils
+import hashlib
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -1212,29 +1213,48 @@ def invoke_tra_queue(prompt: str, destination: Destination) -> dict[str, Any]:
         inner["temperature"] = destination.temperature
     if destination.extra_body:
         inner.update(destination.extra_body)
+    idem = "aether_doc_bench:" + hashlib.sha256(
+        (destination.destination_id + "\x00" + (destination.model or "") + "\x00" + prompt).encode("utf-8")
+    ).hexdigest()[:40]
     job = {
         "resource_group": "llm",
         "type": "llm_generate",
         "priority": destination.priority,
         "submitter": "aether_doc_bench",
+        "idempotency_key": idem,
         "payload": inner,
     }
-    submit = http_json_request(f"{base}/jobs", job, None, timeout_seconds=30)
-    job_id = submit.get("id")
-    if not job_id:
-        raise RuntimeError(f"tra_queue submit returned no id: {submit}")
 
-    deadline = max(30, int(destination.request_timeout_seconds))
-    waited = 0
+    deadline = max(60, int(destination.request_timeout_seconds))
+    start = time.time()
+    job_id: str | None = None
     rec: dict[str, Any] = {}
-    while waited < deadline:
-        chunk = min(30, deadline - waited)
+    last_err = "no response"
+    while time.time() - start < deadline:
+        # (Re)submit if we have no id. The idempotency_key dedups re-submits
+        # server-side, so a transient submit failure under queue load is safe to retry.
+        if not job_id:
+            try:
+                submit = http_json_request(f"{base}/jobs", job, None, timeout_seconds=30)
+                job_id = submit.get("id")
+            except Exception as exc:
+                last_err = f"submit: {exc}"
+                time.sleep(4)
+                continue
+            if not job_id:
+                last_err = f"submit returned no id: {submit}"
+                time.sleep(4)
+                continue
+        # Long-poll the job. Transient HTTP errors (connection refused / dropped /
+        # timeout when the shared queue is busy) just retry the SAME job_id rather
+        # than failing the generation -- the queue keeps running it regardless.
         try:
-            req = urllib.request.Request(f"{base}/jobs/{job_id}?wait={chunk}", method="GET")
-            with urllib.request.urlopen(req, timeout=chunk + 15) as resp:
+            req = urllib.request.Request(f"{base}/jobs/{job_id}?wait=30", method="GET")
+            with urllib.request.urlopen(req, timeout=45) as resp:
                 rec = json.loads(resp.read().decode("utf-8", errors="replace"))
-        except urllib.error.URLError:
-            waited += chunk
+        except Exception as exc:
+            last_err = f"poll: {exc}"
+            time.sleep(4)
             continue
         status = (rec.get("status") or rec.get("display_status") or "").lower()
         if status in ("done", "complete", "completed", "succeeded", "success"):
@@ -1251,9 +1271,9 @@ def invoke_tra_queue(prompt: str, destination: Destination) -> dict[str, Any]:
         if status in ("failed", "error", "cancelled", "canceled", "rejected"):
             why = rec.get("display_error") or rec.get("error") or rec.get("scheduler_note") or "unknown"
             raise RuntimeError(f"tra_queue job {job_id} {status}: {why}")
-        waited += chunk
+        # pending / running: keep polling until the deadline
     raise ProviderTimeoutError(
-        f"tra_queue job {job_id} exceeded {deadline}s (last note: {rec.get('scheduler_note')})"
+        f"tra_queue exceeded {deadline}s (job={job_id}, last={last_err}, note={rec.get('scheduler_note')})"
     )
 
 
