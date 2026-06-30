@@ -1191,90 +1191,145 @@ def invoke_openai_chat_completions(prompt: str, destination: Destination) -> dic
 
 
 def invoke_tra_queue(prompt: str, destination: Destination) -> dict[str, Any]:
-    """Submit a generation to the T'Ra AI queue (e.g. http://m4t:8793), poll, return it.
+    """Canonical T'Ra AI queue adapter -- shared by the doc-bench AND the idea-miner.
 
-    The queue serializes work per target (no GPU contention) and routes model->target.
-    A completed job's ``result`` is a JSON string like ``{"content": ...}`` (reasoning
-    models may add a ``reasoning`` key). Pass ``preferred_targets`` + ``priority`` on the
-    destination; ``extra_body`` (e.g. ``disable_thinking``) is merged into the payload.
+    Submit a generation to the queue (e.g. http://m4t:8793), explain-validate, submit
+    idempotently (a re-submit of the same prompt reuses the job rather than orphaning a
+    duplicate), long-poll, and cancel on give-up so a job never strands a GPU. Resilient
+    to a busy shared queue: a hard routing failure bails early, but transient submit/poll
+    errors retry. Config comes from the destination fields (model, preferred_targets,
+    priority, temperature, timeouts) with ``extra_body`` overrides: ``disable_thinking``
+    (default True -- the miner wants programs not reasoning traces; the bench config flips
+    it False so reasoning tail models match the other reasoning entries), ``validate``,
+    ``priority``, ``preferred_targets``, ``submitter``, ``max_runtime_seconds``,
+    ``progress_idle_timeout_seconds``, ``wait_seconds``, ``poll_timeout_seconds``. A done
+    job's ``result`` is a JSON string ``{"content": ..., optional "reasoning": ...}``.
     """
-    if not destination.model:
-        raise RuntimeError("destination model is required for tra_queue")
     if not destination.base_url:
         raise RuntimeError("destination base_url (the T'Ra queue) is required for tra_queue")
     base = destination.base_url.rstrip("/")
-    inner: dict[str, Any] = {
-        "model": destination.model,
-        "preferred_targets": destination.preferred_targets or [],
+    eb = destination.extra_body or {}
+    payload: dict[str, Any] = {
         "prompt": prompt,
         "max_tokens": destination.max_output_tokens,
+        "request_timeout_seconds": destination.request_timeout_seconds,
+        # The scheduler kills a job at max_runtime / on idle -- bounds reasoning runaway.
+        "max_runtime_seconds": int(eb.get("max_runtime_seconds", destination.request_timeout_seconds)),
+        "progress_idle_timeout_seconds": int(eb.get("progress_idle_timeout_seconds", 180)),
+        # No-op on models that don't think; default off for the miner (programs, not
+        # traces), the bench config flips it on so reasoning tail models think.
+        "disable_thinking": bool(eb.get("disable_thinking", True)),
     }
-    if destination.temperature >= 0:
-        inner["temperature"] = destination.temperature
-    if destination.extra_body:
-        inner.update(destination.extra_body)
-    idem = "aether_doc_bench:" + hashlib.sha256(
-        (destination.destination_id + "\x00" + (destination.model or "") + "\x00" + prompt).encode("utf-8")
-    ).hexdigest()[:40]
-    job = {
+    if destination.model:
+        payload["model"] = destination.model
+    if destination.temperature is not None and destination.temperature >= 0:
+        payload["temperature"] = destination.temperature
+    pref = eb.get("preferred_targets", destination.preferred_targets)
+    if pref:
+        payload["preferred_targets"] = pref
+    for key in ("target_name", "target"):
+        if key in eb:
+            payload[key] = eb[key]
+
+    body = {
         "resource_group": "llm",
         "type": "llm_generate",
-        "priority": destination.priority,
-        "submitter": "aether_doc_bench",
-        "idempotency_key": idem,
-        "payload": inner,
+        "payload": payload,
+        "priority": int(eb.get("priority", destination.priority)),
+        "submitter": eb.get("submitter", "aether_doc_bench"),
     }
+    # Stable idempotency key: a retry of the SAME prompt to the SAME destination reuses
+    # the existing job instead of creating a duplicate (the orphan trap under load).
+    idem = "aether-tra:" + hashlib.md5(
+        f"{destination.destination_id}|{destination.model}|{prompt}".encode("utf-8")
+    ).hexdigest()[:16]
 
-    deadline = max(60, int(destination.request_timeout_seconds))
-    start = time.time()
-    job_id: str | None = None
-    rec: dict[str, Any] = {}
-    last_err = "no response"
-    while time.time() - start < deadline:
-        # (Re)submit if we have no id. The idempotency_key dedups re-submits
-        # server-side, so a transient submit failure under queue load is safe to retry.
-        if not job_id:
-            try:
-                submit = http_json_request(f"{base}/jobs", job, None, timeout_seconds=30)
-                job_id = submit.get("id")
-            except Exception as exc:
-                last_err = f"submit: {exc}"
-                time.sleep(4)
-                continue
-            if not job_id:
-                last_err = f"submit returned no id: {submit}"
-                time.sleep(4)
-                continue
-        # Long-poll the job. Transient HTTP errors (connection refused / dropped /
-        # timeout when the shared queue is busy) just retry the SAME job_id rather
-        # than failing the generation -- the queue keeps running it regardless.
+    # 1) Dry-run (POST /jobs/explain). Bail early ONLY on a hard routing failure (model
+    # not servable anywhere); transient busy/lock just means the job will queue.
+    if eb.get("validate", True):
         try:
-            req = urllib.request.Request(f"{base}/jobs/{job_id}?wait=30", method="GET")
-            with urllib.request.urlopen(req, timeout=45) as resp:
-                rec = json.loads(resp.read().decode("utf-8", errors="replace"))
-        except Exception as exc:
-            last_err = f"poll: {exc}"
-            time.sleep(4)
-            continue
-        status = (rec.get("status") or rec.get("display_status") or "").lower()
-        if status in ("done", "complete", "completed", "succeeded", "success"):
-            result = rec.get("result")
-            if isinstance(result, str):
-                try:
-                    result = json.loads(result)
-                except json.JSONDecodeError:
-                    result = {"content": result}
-            content = (result or {}).get("content") or ""
-            if not content:
-                raise RuntimeError("tra_queue job returned empty content")
-            return {"raw_text": content, "response_id": job_id, "usage": rec.get("usage")}
-        if status in ("failed", "error", "cancelled", "canceled", "rejected"):
-            why = rec.get("display_error") or rec.get("error") or rec.get("scheduler_note") or "unknown"
-            raise RuntimeError(f"tra_queue job {job_id} {status}: {why}")
-        # pending / running: keep polling until the deadline
-    raise ProviderTimeoutError(
-        f"tra_queue exceeded {deadline}s (job={job_id}, last={last_err}, note={rec.get('scheduler_note')})"
+            ex = http_json_request(f"{base}/jobs/explain", body, None, timeout_seconds=30)
+            if not ex.get("routable", True):
+                note = str(ex.get("scheduler_note") or "")
+                head = note.split(":", 1)[0]
+                # Hard failure = the model is not servable anywhere. A *busy* target is
+                # transient (`no_eligible_target:X [busy=...]`) -- the job queues and runs
+                # when it frees -- so submit anyway rather than failing the generation.
+                transient = "busy=" in note or "external_busy=" in note
+                if head == "no_route_for_model" or (head == "no_eligible_target" and not transient):
+                    raise RuntimeError(f"scheduler will not route this job: {note}")
+        except RuntimeError:
+            raise
+        except Exception:
+            pass  # explain is best-effort
+
+    # 2) Submit (idempotent + retried on transient queue-server errors).
+    submit = http_json_request(
+        f"{base}/jobs", body, None, timeout_seconds=30,
+        max_retries=max(2, destination.request_max_retries),
+        retry_backoff_seconds=destination.retry_backoff_seconds or 2.0,
+        extra_headers={**(destination.extra_headers or {}), "Idempotency-Key": idem},
     )
+    job_id = submit.get("id")
+    if not job_id:
+        raise RuntimeError(f"tra_queue submit returned no job id: {submit}")
+
+    def _cancel() -> None:
+        try:
+            http_json_request(
+                f"{base}/jobs/{job_id}/cancel", {"note": "aether bench gave up"},
+                None, timeout_seconds=15,
+            )
+        except Exception:
+            pass
+
+    # 3) Long-poll: GET /jobs/{id}?wait=N blocks server-side up to N seconds. Transient
+    # poll errors (refused/dropped/timeout under load) retry the SAME job; on give-up the
+    # job is cancelled so it never orphans holding the GPU.
+    wait_window = int(eb.get("wait_seconds", 30))
+    poll_deadline = time.time() + max(
+        int(destination.request_timeout_seconds), int(eb.get("poll_timeout_seconds", 1800))
+    )
+    consecutive_errors = 0
+    last_status = None
+    try:
+        while time.time() < poll_deadline:
+            try:
+                req = urllib.request.Request(f"{base}/jobs/{job_id}?wait={wait_window}", method="GET")
+                with urllib.request.urlopen(req, timeout=wait_window + 30) as resp:
+                    status = json.loads(resp.read().decode("utf-8", "replace"))
+                consecutive_errors = 0
+            except Exception:  # transient scheduler hiccup -- keep waiting
+                consecutive_errors += 1
+                if consecutive_errors >= 10:
+                    raise RuntimeError(
+                        f"tra_queue unreachable for job {job_id} "
+                        f"({consecutive_errors} consecutive poll failures)"
+                    )
+                time.sleep(min(30.0, 3.0 * consecutive_errors))
+                continue
+            st = (status.get("status") or "").lower()
+            if st in ("done", "complete", "completed", "succeeded", "success"):
+                raw = status.get("result")
+                result = json.loads(raw) if isinstance(raw, str) else (raw or {})
+                return {
+                    "raw_text": (result or {}).get("content", "") or "",
+                    "usage": (result or {}).get("usage") or status.get("usage"),
+                    "response_id": job_id,
+                    "model": status.get("target_name"),
+                }
+            if st in ("failed", "error", "canceled", "cancelled", "archived_canceled", "rejected"):
+                why = status.get("error") or status.get("display_error") or status.get("scheduler_note") or "unknown"
+                raise RuntimeError(f"tra_queue job {job_id} {st}: {why}")
+            last_status = st
+        raise ProviderTimeoutError(
+            f"tra_queue job {job_id} not done within deadline (last status={last_status})"
+        )
+    except BaseException:
+        # Any non-success exit (deadline, persistent poll failure, interrupt) cancels the
+        # job so it never orphans in the queue holding the GPU.
+        _cancel()
+        raise
 
 
 def invoke_openai_completions(prompt: str, destination: Destination) -> dict[str, Any]:
@@ -1402,7 +1457,7 @@ def run_model(prompt: str, destination: Destination) -> dict[str, Any]:
         return invoke_openai_responses(prompt=prompt, destination=destination)
     if destination.kind == "openai_chat_completions":
         return invoke_openai_chat_completions(prompt=prompt, destination=destination)
-    if destination.kind == "tra_queue":
+    if destination.kind in ("tra_queue", "tra_scheduler"):
         return invoke_tra_queue(prompt=prompt, destination=destination)
     if destination.kind == "openai_completions":
         return invoke_openai_completions(prompt=prompt, destination=destination)
