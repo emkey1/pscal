@@ -399,6 +399,31 @@ def primary_diagnostic(run: dict[str, Any]) -> dict[str, Any] | None:
     return diags[0] if diags else None
 
 
+# Runtime failures Aether reports on STDOUT (nonzero exit, empty stderr, no
+# diagnostics) — e.g. a legitimately-violated contract prints ``Aether @post
+# failed in <fn>``. Without scanning stdout these are indistinguishable from a
+# genuine silent crash and pollute the "silent failure" finding category.
+RUNTIME_STDOUT_ERROR_PREFIXES = (
+    "Aether @post failed",
+    "Aether @pre failed",
+    "Runtime Error",
+    "Compiler error",
+)
+
+
+def first_stdout_error_line(stdout: Any) -> str | None:
+    """The first stdout line reporting a known Aether runtime/compile error
+    (see ``RUNTIME_STDOUT_ERROR_PREFIXES``), or None. Used to reclassify a
+    failure that was reported on stdout rather than stderr."""
+    if not isinstance(stdout, str) or not stdout:
+        return None
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(RUNTIME_STDOUT_ERROR_PREFIXES):
+            return stripped
+    return None
+
+
 def analyze_failure(source_code: str, run: dict[str, Any]) -> dict[str, Any] | None:
     """Return a structured failure record, or None if the program ran cleanly."""
     if run.get("returncode", -1) == 0:
@@ -416,6 +441,18 @@ def analyze_failure(source_code: str, run: dict[str, Any]) -> dict[str, Any] | N
     stderr = (run.get("stderr") or "").strip()
     if not message and stderr:
         message = stderr.splitlines()[0]
+
+    # No coded diagnostic and nothing on stderr, but the program still failed:
+    # some Aether runtime errors (violated @pre/@post contracts, raised runtime
+    # errors) print to STDOUT instead. Treat a known error line there as the
+    # reported failure so it fingerprints as runtime, not "silent".
+    stdout_error_line = None
+    if not message and not stderr:
+        stdout_error_line = first_stdout_error_line(run.get("stdout"))
+        if stdout_error_line:
+            message = stdout_error_line
+            if phase is None:
+                phase = "runtime"
 
     identifier = None
     if message:
@@ -444,8 +481,8 @@ def analyze_failure(source_code: str, run: dict[str, Any]) -> dict[str, Any] | N
         "offending_identifier": identifier,
         "offending_line": offending_line,
         "is_missing_identifier": is_missing,
-        "stderr_head": stderr.splitlines()[0] if stderr else "",
-        "silent": bool(diag is None and not stderr),
+        "stderr_head": stderr.splitlines()[0] if stderr else (stdout_error_line or ""),
+        "silent": bool(diag is None and not stderr and not stdout_error_line),
     }
 
 
