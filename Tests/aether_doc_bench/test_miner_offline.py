@@ -124,6 +124,41 @@ def test_plain_stderr_failure_unchanged():
     assert m.finding_key(f) == "stderr:boom: something failed"
 
 
+def test_mine_findings_categorizes_stdout_runtime_failure_as_runtime():
+    # The end-to-end check on the code path that assigns the finding *category*
+    # the bug was polluting: a program whose only failure is a STDOUT-reported
+    # @post violation must aggregate into the "runtime" category, never "silent".
+    failure = m.analyze_failure(
+        "src", _run(returncode=1, stdout="Aether @post failed in inc\n", stderr=""))
+    model_records = [{
+        "destination_id": "dest-a",
+        "model": "test-model",
+        "programs": [{
+            "initial_failure": failure,
+            "initial_source": "fn inc() -> Int { ret 0; }",
+            "intent": "increment",
+            "fixed_by_repair": False,
+        }],
+    }]
+    findings = m.mine_findings(model_records)
+    assert len(findings) == 1
+    assert findings[0]["kind"] == "runtime", findings[0]["kind"]
+    assert findings[0]["key"].startswith("runtime:")
+    assert not any(fd["kind"] == "silent" for fd in findings), "must not pollute the silent category"
+
+
+def test_mine_findings_keeps_genuine_silent_failure_silent():
+    failure = m.analyze_failure("src", _run(returncode=1, stdout="", stderr=""))
+    model_records = [{
+        "destination_id": "dest-a",
+        "model": "test-model",
+        "programs": [{"initial_failure": failure, "initial_source": "", "intent": "x"}],
+    }]
+    findings = m.mine_findings(model_records)
+    assert len(findings) == 1
+    assert findings[0]["kind"] == "silent"
+
+
 def test_clean_run_returns_none():
     assert m.analyze_failure("", _run(returncode=0, stdout="ok\n")) is None
 
