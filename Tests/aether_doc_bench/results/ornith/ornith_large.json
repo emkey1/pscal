@@ -1,0 +1,1640 @@
+{
+  "tasks_file": "Tests/aether_doc_bench/tasks_hard.json",
+  "tasks_version": "2026-06-21-1",
+  "destinations_config": "Tests/aether_doc_bench/destinations.tra.json",
+  "created_at_unix": 1782838932,
+  "aether_version": "2026-06-26-1",
+  "aether_version_raw": "Aether Compiler Version: 2026-06-26-1 (latest tag: untagged)",
+  "aether_bin": "/Users/mke/PBuild/components/aether/build/aether",
+  "summary": {
+    "total_cases_per_destination": 8,
+    "doc_variants": 2,
+    "destination_count": 1
+  },
+  "doc_token_reference": {
+    "full": {
+      "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+      "approx_tokens": 10231,
+      "bytes": 41067
+    },
+    "small": {
+      "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+      "approx_tokens": 5502,
+      "bytes": 22073
+    },
+    "none": {
+      "path": null,
+      "approx_tokens": 0,
+      "bytes": 0
+    }
+  },
+  "destinations": [
+    {
+      "destination_id": "claw1-ornith-1.0-35b-nvfp4",
+      "type": "tra_queue",
+      "model": "ornith-1.0-35b-nvfp4",
+      "base_url": "http://m4t:8793",
+      "variants": [
+        {
+          "doc_name": "full",
+          "doc_path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+          "doc_bytes": 41067,
+          "doc_approx_tokens": 10231,
+          "shared_guide_batch_size_requested": 1,
+          "shared_guide_batch_size": 1,
+          "batch_mode_enabled": false,
+          "batch_runs": [],
+          "results": [
+            {
+              "task_id": "hard_expense_outliers",
+              "task_title": "Two-pass expense outlier report",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 10772,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"expenses_hard_a.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let expenses: ToonNode = toon_key(root, \"expenses\");\n\n    let names: Text[] = [];\n    let amounts: Int[] = [];\n    let sum: Real = 0.0;\n\n    loop i in 0..toon_len(expenses) {\n        let exp: ToonNode = toon_at(expenses, i);\n        let name: Text = toon_get_text(exp, \"name\");\n        let amount: Int = toon_get_int(exp, \"amount\");\n        names = names + [name];\n        amounts = amounts + [amount];\n        sum = sum + amount;\n        toon_free(exp);\n    }\n\n    let count: Int = length(names);\n    let mean: Real = sum / count;\n\n    let outlierCount: Int = 0;\n    let maxDev: Real = 0.0;\n\n    loop i in 0..count {\n        let name: Text = names[i];\n        let amount: Int = amounts[i];\n        let dev: Real = abs(mean - amount);\n        let isOutlier: Bool = dev > mean / 2.0;\n\n        if isOutlier {\n            outlierCount = outlierCount + 1;\n        }\n        if dev > maxDev {\n            maxDev = dev;\n        }\n\n        fx {\n            println(\"expense \", i, \": \", name, \" / \", amount, \" / dev \", dev:0:2, \" / \", isOutlier);\n        }\n    }\n\n    fx {\n        println(\"count = \", count);\n        println(\"mean = \", mean:0:2);\n        println(\"outliers = \", outlierCount);\n        println(\"maxDev = \", maxDev:0:2);\n    }\n\n    toon_free(expenses);\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "542bab9d-bc8c-4515-bed9-1a9e1b8b1ed6",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"expenses_hard_a.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let expenses: ToonNode = toon_key(root, \"expenses\");\n\n    let names: Text[] = [];\n    let amounts: Int[] = [];\n    let sum: Real = 0.0;\n\n    loop i in 0..toon_len(expenses) {\n        let exp: ToonNode = toon_at(expenses, i);\n        let name: Text = toon_get_text(exp, \"name\");\n        let amount: Int = toon_get_int(exp, \"amount\");\n        names = names + [name];\n        amounts = amounts + [amount];\n        sum = sum + amount;\n        toon_free(exp);\n    }\n\n    let count: Int = length(names);\n    let mean: Real = sum / count;\n\n    let outlierCount: Int = 0;\n    let maxDev: Real = 0.0;\n\n    loop i in 0..count {\n        let name: Text = names[i];\n        let amount: Int = amounts[i];\n        let dev: Real = abs(mean - amount);\n        let isOutlier: Bool = dev > mean / 2.0;\n\n        if isOutlier {\n            outlierCount = outlierCount + 1;\n        }\n        if dev > maxDev {\n            maxDev = dev;\n        }\n\n        fx {\n            println(\"expense \", i, \": \", name, \" / \", amount, \" / dev \", dev:0:2, \" / \", isOutlier);\n        }\n    }\n\n    fx {\n        println(\"count = \", count);\n        println(\"mean = \", mean:0:2);\n        println(\"outliers = \", outlierCount);\n        println(\"maxDev = \", maxDev:0:2);\n    }\n\n    toon_free(expenses);\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 389,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-9_ihqg75/hard_expense_outliers.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "expense 0: a / 100 / dev 29.29 / false\nexpense 1: b / 110 / dev 19.29 / false\nexpense 2: c / 90 / dev 39.29 / false\nexpense 3: d / 105 / dev 24.29 / false\nexpense 4: e / 95 / dev 34.29 / false\nexpense 5: big / 400 / dev 270.71 / true\nexpense 6: tiny / 5 / dev 124.29 / true\ncount = 7\nmean = 129.29\noutliers = 2\nmaxDev = 270.71\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.091,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 10231,
+                  "bytes": 41067
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 5502,
+                  "bytes": 22073
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 10772,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"expenses_hard_a.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let expenses: ToonNode = toon_key(root, \"expenses\");\n\n    let names: Text[] = [];\n    let amounts: Int[] = [];\n    let sum: Real = 0.0;\n\n    loop i in 0..toon_len(expenses) {\n        let exp: ToonNode = toon_at(expenses, i);\n        let name: Text = toon_get_text(exp, \"name\");\n        let amount: Int = toon_get_int(exp, \"amount\");\n        names = names + [name];\n        amounts = amounts + [amount];\n        sum = sum + amount;\n        toon_free(exp);\n    }\n\n    let count: Int = length(names);\n    let mean: Real = sum / count;\n\n    let outlierCount: Int = 0;\n    let maxDev: Real = 0.0;\n\n    loop i in 0..count {\n        let name: Text = names[i];\n        let amount: Int = amounts[i];\n        let dev: Real = abs(mean - amount);\n        let isOutlier: Bool = dev > mean / 2.0;\n\n        if isOutlier {\n            outlierCount = outlierCount + 1;\n        }\n        if dev > maxDev {\n            maxDev = dev;\n        }\n\n        fx {\n            println(\"expense \", i, \": \", name, \" / \", amount, \" / dev \", dev:0:2, \" / \", isOutlier);\n        }\n    }\n\n    fx {\n        println(\"count = \", count);\n        println(\"mean = \", mean:0:2);\n        println(\"outliers = \", outlierCount);\n        println(\"maxDev = \", maxDev:0:2);\n    }\n\n    toon_free(expenses);\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "542bab9d-bc8c-4515-bed9-1a9e1b8b1ed6",
+                "model": "claw1_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"expenses_hard_a.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let expenses: ToonNode = toon_key(root, \"expenses\");\n\n    let names: Text[] = [];\n    let amounts: Int[] = [];\n    let sum: Real = 0.0;\n\n    loop i in 0..toon_len(expenses) {\n        let exp: ToonNode = toon_at(expenses, i);\n        let name: Text = toon_get_text(exp, \"name\");\n        let amount: Int = toon_get_int(exp, \"amount\");\n        names = names + [name];\n        amounts = amounts + [amount];\n        sum = sum + amount;\n        toon_free(exp);\n    }\n\n    let count: Int = length(names);\n    let mean: Real = sum / count;\n\n    let outlierCount: Int = 0;\n    let maxDev: Real = 0.0;\n\n    loop i in 0..count {\n        let name: Text = names[i];\n        let amount: Int = amounts[i];\n        let dev: Real = abs(mean - amount);\n        let isOutlier: Bool = dev > mean / 2.0;\n\n        if isOutlier {\n            outlierCount = outlierCount + 1;\n        }\n        if dev > maxDev {\n            maxDev = dev;\n        }\n\n        fx {\n            println(\"expense \", i, \": \", name, \" / \", amount, \" / dev \", dev:0:2, \" / \", isOutlier);\n        }\n    }\n\n    fx {\n        println(\"count = \", count);\n        println(\"mean = \", mean:0:2);\n        println(\"outliers = \", outlierCount);\n        println(\"maxDev = \", maxDev:0:2);\n    }\n\n    toon_free(expenses);\n    toon_close(doc);\n    ret;\n}",
+              "source_approx_tokens": 389,
+              "run": {
+                "command": [
+                  "/Users/mke/PBuild/components/aether/build/aether",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-9_ihqg75/hard_expense_outliers.aether"
+                ],
+                "returncode": 0,
+                "stdout": "expense 0: a / 100 / dev 29.29 / false\nexpense 1: b / 110 / dev 19.29 / false\nexpense 2: c / 90 / dev 39.29 / false\nexpense 3: d / 105 / dev 24.29 / false\nexpense 4: e / 95 / dev 34.29 / false\nexpense 5: big / 400 / dev 270.71 / true\nexpense 6: tiny / 5 / dev 124.29 / true\ncount = 7\nmean = 129.29\noutliers = 2\nmaxDev = 270.71\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.091,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "hard_log_levels",
+              "task_title": "Log-level grouping with dominant level",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 10723,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"events_hard_b.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let events: ToonNode = toon_key(root, \"events\");\n\n    let infoCount: Int = 0;\n    let warnCount: Int = 0;\n    let errorCount: Int = 0;\n    let firstErrorIndex: Int = -1;\n\n    loop i in 0..toon_len(events) {\n        let event: ToonNode = toon_at(events, i);\n        let level: Text = toon_get_text(event, \"level\");\n        let msg: Text = toon_get_text(event, \"msg\");\n\n        fx {\n            println(\"event \", i, \": \", level, \" / \", msg);\n        }\n\n        if level == \"info\" {\n            infoCount = infoCount + 1;\n        } else if level == \"warn\" {\n            warnCount = warnCount + 1;\n        } else if level == \"error\" {\n            errorCount = errorCount + 1;\n            if firstErrorIndex == -1 {\n                firstErrorIndex = i;\n            }\n        }\n\n        toon_free(event);\n    }\n\n    fx {\n        println(\"info = \", infoCount);\n        println(\"warn = \", warnCount);\n        println(\"error = \", errorCount);\n    }\n\n    let dominant: Text = \"info\";\n    if errorCount > infoCount && errorCount > warnCount {\n        dominant = \"error\";\n    } else if warnCount > infoCount {\n        dominant = \"warn\";\n    }\n\n    fx {\n        println(\"dominant = \", dominant);\n    }\n\n    if firstErrorIndex == -1 {\n        fx {\n            println(\"first error: none\");\n        }\n    } else {\n        fx {\n            println(\"first error at index \", firstErrorIndex);\n        }\n    }\n\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "66c33785-b1ac-4ef8-b255-c6bf02235302",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"events_hard_b.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let events: ToonNode = toon_key(root, \"events\");\n\n    let infoCount: Int = 0;\n    let warnCount: Int = 0;\n    let errorCount: Int = 0;\n    let firstErrorIndex: Int = -1;\n\n    loop i in 0..toon_len(events) {\n        let event: ToonNode = toon_at(events, i);\n        let level: Text = toon_get_text(event, \"level\");\n        let msg: Text = toon_get_text(event, \"msg\");\n\n        fx {\n            println(\"event \", i, \": \", level, \" / \", msg);\n        }\n\n        if level == \"info\" {\n            infoCount = infoCount + 1;\n        } else if level == \"warn\" {\n            warnCount = warnCount + 1;\n        } else if level == \"error\" {\n            errorCount = errorCount + 1;\n            if firstErrorIndex == -1 {\n                firstErrorIndex = i;\n            }\n        }\n\n        toon_free(event);\n    }\n\n    fx {\n        println(\"info = \", infoCount);\n        println(\"warn = \", warnCount);\n        println(\"error = \", errorCount);\n    }\n\n    let dominant: Text = \"info\";\n    if errorCount > infoCount && errorCount > warnCount {\n        dominant = \"error\";\n    } else if warnCount > infoCount {\n        dominant = \"warn\";\n    }\n\n    fx {\n        println(\"dominant = \", dominant);\n    }\n\n    if firstErrorIndex == -1 {\n        fx {\n            println(\"first error: none\");\n        }\n    } else {\n        fx {\n            println(\"first error at index \", firstErrorIndex);\n        }\n    }\n\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 422,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-nv1nh09r/hard_log_levels.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "event 0: info / start\nevent 1: warn / slow\nevent 2: error / oops\nevent 3: info / retry\nevent 4: error / fail\nevent 5: warn / degraded\nevent 6: error / crash\ninfo = 2\nwarn = 2\nerror = 3\ndominant = error\nfirst error at index 2\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.079,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 10231,
+                  "bytes": 41067
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 5502,
+                  "bytes": 22073
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 10723,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"events_hard_b.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let events: ToonNode = toon_key(root, \"events\");\n\n    let infoCount: Int = 0;\n    let warnCount: Int = 0;\n    let errorCount: Int = 0;\n    let firstErrorIndex: Int = -1;\n\n    loop i in 0..toon_len(events) {\n        let event: ToonNode = toon_at(events, i);\n        let level: Text = toon_get_text(event, \"level\");\n        let msg: Text = toon_get_text(event, \"msg\");\n\n        fx {\n            println(\"event \", i, \": \", level, \" / \", msg);\n        }\n\n        if level == \"info\" {\n            infoCount = infoCount + 1;\n        } else if level == \"warn\" {\n            warnCount = warnCount + 1;\n        } else if level == \"error\" {\n            errorCount = errorCount + 1;\n            if firstErrorIndex == -1 {\n                firstErrorIndex = i;\n            }\n        }\n\n        toon_free(event);\n    }\n\n    fx {\n        println(\"info = \", infoCount);\n        println(\"warn = \", warnCount);\n        println(\"error = \", errorCount);\n    }\n\n    let dominant: Text = \"info\";\n    if errorCount > infoCount && errorCount > warnCount {\n        dominant = \"error\";\n    } else if warnCount > infoCount {\n        dominant = \"warn\";\n    }\n\n    fx {\n        println(\"dominant = \", dominant);\n    }\n\n    if firstErrorIndex == -1 {\n        fx {\n            println(\"first error: none\");\n        }\n    } else {\n        fx {\n            println(\"first error at index \", firstErrorIndex);\n        }\n    }\n\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "66c33785-b1ac-4ef8-b255-c6bf02235302",
+                "model": "claw1_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"events_hard_b.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let events: ToonNode = toon_key(root, \"events\");\n\n    let infoCount: Int = 0;\n    let warnCount: Int = 0;\n    let errorCount: Int = 0;\n    let firstErrorIndex: Int = -1;\n\n    loop i in 0..toon_len(events) {\n        let event: ToonNode = toon_at(events, i);\n        let level: Text = toon_get_text(event, \"level\");\n        let msg: Text = toon_get_text(event, \"msg\");\n\n        fx {\n            println(\"event \", i, \": \", level, \" / \", msg);\n        }\n\n        if level == \"info\" {\n            infoCount = infoCount + 1;\n        } else if level == \"warn\" {\n            warnCount = warnCount + 1;\n        } else if level == \"error\" {\n            errorCount = errorCount + 1;\n            if firstErrorIndex == -1 {\n                firstErrorIndex = i;\n            }\n        }\n\n        toon_free(event);\n    }\n\n    fx {\n        println(\"info = \", infoCount);\n        println(\"warn = \", warnCount);\n        println(\"error = \", errorCount);\n    }\n\n    let dominant: Text = \"info\";\n    if errorCount > infoCount && errorCount > warnCount {\n        dominant = \"error\";\n    } else if warnCount > infoCount {\n        dominant = \"warn\";\n    }\n\n    fx {\n        println(\"dominant = \", dominant);\n    }\n\n    if firstErrorIndex == -1 {\n        fx {\n            println(\"first error: none\");\n        }\n    } else {\n        fx {\n            println(\"first error at index \", firstErrorIndex);\n        }\n    }\n\n    toon_close(doc);\n    ret;\n}",
+              "source_approx_tokens": 422,
+              "run": {
+                "command": [
+                  "/Users/mke/PBuild/components/aether/build/aether",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-nv1nh09r/hard_log_levels.aether"
+                ],
+                "returncode": 0,
+                "stdout": "event 0: info / start\nevent 1: warn / slow\nevent 2: error / oops\nevent 3: info / retry\nevent 4: error / fail\nevent 5: warn / degraded\nevent 6: error / crash\ninfo = 2\nwarn = 2\nerror = 3\ndominant = error\nfirst error at index 2\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.079,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "hard_account_ledger",
+              "task_title": "Stateful account ledger simulation",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 10838,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"ops_hard_c.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let cap: Int = toon_get_int(root, \"cap\");\n    let ops: ToonNode = toon_key(root, \"operations\");\n\n    let balance: Int = 0;\n    let applied: Int = 0;\n    let rejected: Int = 0;\n\n    loop i in 0..toon_len(ops) {\n        let op: ToonNode = toon_at(ops, i);\n        let kind: Text = toon_get_text(op, \"kind\");\n        let amount: Int = toon_get_int(op, \"amount\");\n        let changed: Bool = false;\n\n        if kind == \"deposit\" {\n            let newBal: Int = balance + amount;\n            if newBal > cap {\n                balance = cap;\n            } else {\n                balance = newBal;\n            }\n            fx {\n                println(\"op \", i, \": deposit \", amount, \" -> \", balance);\n            }\n        } else if kind == \"withdraw\" {\n            if balance >= amount {\n                balance = balance - amount;\n                fx {\n                    println(\"op \", i, \": withdraw \", amount, \" -> \", balance);\n                }\n            } else {\n                fx {\n                    println(\"op \", i, \": withdraw \", amount, \" REJECTED (balance \", balance, \")\");\n                }\n            }\n        } else if kind == \"interest\" {\n            let interest: Int = balance * amount / 100;\n            balance = balance + interest;\n            fx {\n                println(\"op \", i, \": interest \", amount, \"% -> \", balance);\n            }\n        }\n\n        if changed {\n            applied = applied + 1;\n        } else {\n            rejected = rejected + 1;\n        }\n    }\n\n    fx {\n        println(\"final balance = \", balance);\n        println(\"applied = \", applied);\n        println(\"rejected = \", rejected);\n    }\n\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "23d164ef-ad70-4d58-9887-b7d5047be111",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"ops_hard_c.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let cap: Int = toon_get_int(root, \"cap\");\n    let ops: ToonNode = toon_key(root, \"operations\");\n\n    let balance: Int = 0;\n    let applied: Int = 0;\n    let rejected: Int = 0;\n\n    loop i in 0..toon_len(ops) {\n        let op: ToonNode = toon_at(ops, i);\n        let kind: Text = toon_get_text(op, \"kind\");\n        let amount: Int = toon_get_int(op, \"amount\");\n        let changed: Bool = false;\n\n        if kind == \"deposit\" {\n            let newBal: Int = balance + amount;\n            if newBal > cap {\n                balance = cap;\n            } else {\n                balance = newBal;\n            }\n            fx {\n                println(\"op \", i, \": deposit \", amount, \" -> \", balance);\n            }\n        } else if kind == \"withdraw\" {\n            if balance >= amount {\n                balance = balance - amount;\n                fx {\n                    println(\"op \", i, \": withdraw \", amount, \" -> \", balance);\n                }\n            } else {\n                fx {\n                    println(\"op \", i, \": withdraw \", amount, \" REJECTED (balance \", balance, \")\");\n                }\n            }\n        } else if kind == \"interest\" {\n            let interest: Int = balance * amount / 100;\n            balance = balance + interest;\n            fx {\n                println(\"op \", i, \": interest \", amount, \"% -> \", balance);\n            }\n        }\n\n        if changed {\n            applied = applied + 1;\n        } else {\n            rejected = rejected + 1;\n        }\n    }\n\n    fx {\n        println(\"final balance = \", balance);\n        println(\"applied = \", applied);\n        println(\"rejected = \", rejected);\n    }\n\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 484,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-_disjxd8/hard_account_ledger.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "op 0: deposit 200 -> 200\nop 1: withdraw 50 -> 150\nop 2: withdraw 1000 REJECTED (balance 150)\nop 3: deposit 400 -> 500\nop 4: interest 10% -> 550\nop 5: withdraw 100 -> 450\nfinal balance = 450\napplied = 0\nrejected = 6\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.087,
+                    "exact_stdout_match": false
+                  }
+                },
+                {
+                  "prompt_kind": "repair",
+                  "prompt_approx_tokens": 11256,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"ops_hard_c.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let cap: Int = toon_get_int(root, \"cap\");\n    let ops: ToonNode = toon_key(root, \"operations\");\n\n    let balance: Int = 0;\n    let applied: Int = 0;\n    let rejected: Int = 0;\n\n    loop i in 0..toon_len(ops) {\n        let op: ToonNode = toon_at(ops, i);\n        let kind: Text = toon_get_text(op, \"kind\");\n        let amount: Int = toon_get_int(op, \"amount\");\n        let prevBalance: Int = balance;\n\n        if kind == \"deposit\" {\n            let newBal: Int = balance + amount;\n            if newBal > cap {\n                balance = cap;\n            } else {\n                balance = newBal;\n            }\n            if balance != prevBalance {\n                applied = applied + 1;\n            } else {\n                rejected = rejected + 1;\n            }\n            fx {\n                println(\"op \", i, \": deposit \", amount, \" -> \", balance);\n            }\n        } else if kind == \"withdraw\" {\n            if balance >= amount {\n                balance = balance - amount;\n                applied = applied + 1;\n                fx {\n                    println(\"op \", i, \": withdraw \", amount, \" -> \", balance);\n                }\n            } else {\n                rejected = rejected + 1;\n                fx {\n                    println(\"op \", i, \": withdraw \", amount, \" REJECTED (balance \", balance, \")\");\n                }\n            }\n        } else if kind == \"interest\" {\n            let interestAmount: Int = balance * amount / 100;\n            if interestAmount > 0 {\n                balance = balance + interestAmount;\n                applied = applied + 1;\n            } else {\n                rejected = rejected + 1;\n            }\n            fx {\n                println(\"op \", i, \": interest \", amount, \"% -> \", balance);\n            }\n        }\n    }\n\n    fx {\n        println(\"final balance = \", balance);\n        println(\"applied = \", applied);\n        println(\"rejected = \", rejected);\n    }\n\n    toon_close(doc);\n    ret;\n}\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "4a63a3a8-4b3b-446d-b48e-77b88e97dded",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"ops_hard_c.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let cap: Int = toon_get_int(root, \"cap\");\n    let ops: ToonNode = toon_key(root, \"operations\");\n\n    let balance: Int = 0;\n    let applied: Int = 0;\n    let rejected: Int = 0;\n\n    loop i in 0..toon_len(ops) {\n        let op: ToonNode = toon_at(ops, i);\n        let kind: Text = toon_get_text(op, \"kind\");\n        let amount: Int = toon_get_int(op, \"amount\");\n        let prevBalance: Int = balance;\n\n        if kind == \"deposit\" {\n            let newBal: Int = balance + amount;\n            if newBal > cap {\n                balance = cap;\n            } else {\n                balance = newBal;\n            }\n            if balance != prevBalance {\n                applied = applied + 1;\n            } else {\n                rejected = rejected + 1;\n            }\n            fx {\n                println(\"op \", i, \": deposit \", amount, \" -> \", balance);\n            }\n        } else if kind == \"withdraw\" {\n            if balance >= amount {\n                balance = balance - amount;\n                applied = applied + 1;\n                fx {\n                    println(\"op \", i, \": withdraw \", amount, \" -> \", balance);\n                }\n            } else {\n                rejected = rejected + 1;\n                fx {\n                    println(\"op \", i, \": withdraw \", amount, \" REJECTED (balance \", balance, \")\");\n                }\n            }\n        } else if kind == \"interest\" {\n            let interestAmount: Int = balance * amount / 100;\n            if interestAmount > 0 {\n                balance = balance + interestAmount;\n                applied = applied + 1;\n            } else {\n                rejected = rejected + 1;\n            }\n            fx {\n                println(\"op \", i, \": interest \", amount, \"% -> \", balance);\n            }\n        }\n    }\n\n    fx {\n        println(\"final balance = \", balance);\n        println(\"applied = \", applied);\n        println(\"rejected = \", rejected);\n    }\n\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 556,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-vu3occ5_/hard_account_ledger.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "op 0: deposit 200 -> 200\nop 1: withdraw 50 -> 150\nop 2: withdraw 1000 REJECTED (balance 150)\nop 3: deposit 400 -> 500\nop 4: interest 10% -> 550\nop 5: withdraw 100 -> 450\nfinal balance = 450\napplied = 5\nrejected = 1\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.09,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 10231,
+                  "bytes": 41067
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 5502,
+                  "bytes": 22073
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "repair",
+              "prompt_approx_tokens": 11256,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"ops_hard_c.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let cap: Int = toon_get_int(root, \"cap\");\n    let ops: ToonNode = toon_key(root, \"operations\");\n\n    let balance: Int = 0;\n    let applied: Int = 0;\n    let rejected: Int = 0;\n\n    loop i in 0..toon_len(ops) {\n        let op: ToonNode = toon_at(ops, i);\n        let kind: Text = toon_get_text(op, \"kind\");\n        let amount: Int = toon_get_int(op, \"amount\");\n        let prevBalance: Int = balance;\n\n        if kind == \"deposit\" {\n            let newBal: Int = balance + amount;\n            if newBal > cap {\n                balance = cap;\n            } else {\n                balance = newBal;\n            }\n            if balance != prevBalance {\n                applied = applied + 1;\n            } else {\n                rejected = rejected + 1;\n            }\n            fx {\n                println(\"op \", i, \": deposit \", amount, \" -> \", balance);\n            }\n        } else if kind == \"withdraw\" {\n            if balance >= amount {\n                balance = balance - amount;\n                applied = applied + 1;\n                fx {\n                    println(\"op \", i, \": withdraw \", amount, \" -> \", balance);\n                }\n            } else {\n                rejected = rejected + 1;\n                fx {\n                    println(\"op \", i, \": withdraw \", amount, \" REJECTED (balance \", balance, \")\");\n                }\n            }\n        } else if kind == \"interest\" {\n            let interestAmount: Int = balance * amount / 100;\n            if interestAmount > 0 {\n                balance = balance + interestAmount;\n                applied = applied + 1;\n            } else {\n                rejected = rejected + 1;\n            }\n            fx {\n                println(\"op \", i, \": interest \", amount, \"% -> \", balance);\n            }\n        }\n    }\n\n    fx {\n        println(\"final balance = \", balance);\n        println(\"applied = \", applied);\n        println(\"rejected = \", rejected);\n    }\n\n    toon_close(doc);\n    ret;\n}\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "4a63a3a8-4b3b-446d-b48e-77b88e97dded",
+                "model": "claw1_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"ops_hard_c.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let cap: Int = toon_get_int(root, \"cap\");\n    let ops: ToonNode = toon_key(root, \"operations\");\n\n    let balance: Int = 0;\n    let applied: Int = 0;\n    let rejected: Int = 0;\n\n    loop i in 0..toon_len(ops) {\n        let op: ToonNode = toon_at(ops, i);\n        let kind: Text = toon_get_text(op, \"kind\");\n        let amount: Int = toon_get_int(op, \"amount\");\n        let prevBalance: Int = balance;\n\n        if kind == \"deposit\" {\n            let newBal: Int = balance + amount;\n            if newBal > cap {\n                balance = cap;\n            } else {\n                balance = newBal;\n            }\n            if balance != prevBalance {\n                applied = applied + 1;\n            } else {\n                rejected = rejected + 1;\n            }\n            fx {\n                println(\"op \", i, \": deposit \", amount, \" -> \", balance);\n            }\n        } else if kind == \"withdraw\" {\n            if balance >= amount {\n                balance = balance - amount;\n                applied = applied + 1;\n                fx {\n                    println(\"op \", i, \": withdraw \", amount, \" -> \", balance);\n                }\n            } else {\n                rejected = rejected + 1;\n                fx {\n                    println(\"op \", i, \": withdraw \", amount, \" REJECTED (balance \", balance, \")\");\n                }\n            }\n        } else if kind == \"interest\" {\n            let interestAmount: Int = balance * amount / 100;\n            if interestAmount > 0 {\n                balance = balance + interestAmount;\n                applied = applied + 1;\n            } else {\n                rejected = rejected + 1;\n            }\n            fx {\n                println(\"op \", i, \": interest \", amount, \"% -> \", balance);\n            }\n        }\n    }\n\n    fx {\n        println(\"final balance = \", balance);\n        println(\"applied = \", applied);\n        println(\"rejected = \", rejected);\n    }\n\n    toon_close(doc);\n    ret;\n}",
+              "source_approx_tokens": 556,
+              "run": {
+                "command": [
+                  "/Users/mke/PBuild/components/aether/build/aether",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-vu3occ5_/hard_account_ledger.aether"
+                ],
+                "returncode": 0,
+                "stdout": "op 0: deposit 200 -> 200\nop 1: withdraw 50 -> 150\nop 2: withdraw 1000 REJECTED (balance 150)\nop 3: deposit 400 -> 500\nop 4: interest 10% -> 550\nop 5: withdraw 100 -> 450\nfinal balance = 450\napplied = 5\nrejected = 1\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.09,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 2,
+              "resolved_after_repair": true,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "hard_collatz_recursion",
+              "task_title": "Recursive Collatz stopping times",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 10695,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "```aether\n@pure\nfn collatz(n: Int) -> Int {\n    if n <= 1 {\n        ret 0;\n    }\n    if n % 2 == 0 {\n        ret 1 + collatz(n / 2);\n    }\n    ret 1 + collatz(3 * n + 1);\n}\n\nfn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"numbers_hard_d.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let numbers: ToonNode = toon_key(root, \"numbers\");\n\n    let maxSteps: Int = 0;\n    let maxNumber: Int = 0;\n\n    loop i in 0..toon_len(numbers) {\n        let item: ToonNode = toon_at(numbers, i);\n        let n: Int = toon_get_int(item, \"n\");\n        let steps: Int = collatz(n);\n\n        fx {\n            println(\"number \", i, \": \", n, \" -> \", steps, \" steps\");\n        }\n\n        if steps > maxSteps {\n            maxSteps = steps;\n            maxNumber = n;\n        }\n    }\n\n    fx {\n        println(\"max steps = \", maxSteps, \" (number \", maxNumber, \")\");\n    }\n\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "68a09327-964f-43c1-93d4-80da6f153865",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "@pure\nfn collatz(n: Int) -> Int {\n    if n <= 1 {\n        ret 0;\n    }\n    if n % 2 == 0 {\n        ret 1 + collatz(n / 2);\n    }\n    ret 1 + collatz(3 * n + 1);\n}\n\nfn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"numbers_hard_d.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let numbers: ToonNode = toon_key(root, \"numbers\");\n\n    let maxSteps: Int = 0;\n    let maxNumber: Int = 0;\n\n    loop i in 0..toon_len(numbers) {\n        let item: ToonNode = toon_at(numbers, i);\n        let n: Int = toon_get_int(item, \"n\");\n        let steps: Int = collatz(n);\n\n        fx {\n            println(\"number \", i, \": \", n, \" -> \", steps, \" steps\");\n        }\n\n        if steps > maxSteps {\n            maxSteps = steps;\n            maxNumber = n;\n        }\n    }\n\n    fx {\n        println(\"max steps = \", maxSteps, \" (number \", maxNumber, \")\");\n    }\n\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 256,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-w5stnsap/hard_collatz_recursion.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "number 0: 6 -> 8 steps\nnumber 1: 7 -> 16 steps\nnumber 2: 11 -> 14 steps\nnumber 3: 27 -> 111 steps\nnumber 4: 9 -> 19 steps\nmax steps = 111 (number 27)\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.042,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 10231,
+                  "bytes": 41067
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 5502,
+                  "bytes": 22073
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 10695,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "```aether\n@pure\nfn collatz(n: Int) -> Int {\n    if n <= 1 {\n        ret 0;\n    }\n    if n % 2 == 0 {\n        ret 1 + collatz(n / 2);\n    }\n    ret 1 + collatz(3 * n + 1);\n}\n\nfn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"numbers_hard_d.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let numbers: ToonNode = toon_key(root, \"numbers\");\n\n    let maxSteps: Int = 0;\n    let maxNumber: Int = 0;\n\n    loop i in 0..toon_len(numbers) {\n        let item: ToonNode = toon_at(numbers, i);\n        let n: Int = toon_get_int(item, \"n\");\n        let steps: Int = collatz(n);\n\n        fx {\n            println(\"number \", i, \": \", n, \" -> \", steps, \" steps\");\n        }\n\n        if steps > maxSteps {\n            maxSteps = steps;\n            maxNumber = n;\n        }\n    }\n\n    fx {\n        println(\"max steps = \", maxSteps, \" (number \", maxNumber, \")\");\n    }\n\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "68a09327-964f-43c1-93d4-80da6f153865",
+                "model": "claw1_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "@pure\nfn collatz(n: Int) -> Int {\n    if n <= 1 {\n        ret 0;\n    }\n    if n % 2 == 0 {\n        ret 1 + collatz(n / 2);\n    }\n    ret 1 + collatz(3 * n + 1);\n}\n\nfn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"numbers_hard_d.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let numbers: ToonNode = toon_key(root, \"numbers\");\n\n    let maxSteps: Int = 0;\n    let maxNumber: Int = 0;\n\n    loop i in 0..toon_len(numbers) {\n        let item: ToonNode = toon_at(numbers, i);\n        let n: Int = toon_get_int(item, \"n\");\n        let steps: Int = collatz(n);\n\n        fx {\n            println(\"number \", i, \": \", n, \" -> \", steps, \" steps\");\n        }\n\n        if steps > maxSteps {\n            maxSteps = steps;\n            maxNumber = n;\n        }\n    }\n\n    fx {\n        println(\"max steps = \", maxSteps, \" (number \", maxNumber, \")\");\n    }\n\n    toon_close(doc);\n    ret;\n}",
+              "source_approx_tokens": 256,
+              "run": {
+                "command": [
+                  "/Users/mke/PBuild/components/aether/build/aether",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-w5stnsap/hard_collatz_recursion.aether"
+                ],
+                "returncode": 0,
+                "stdout": "number 0: 6 -> 8 steps\nnumber 1: 7 -> 16 steps\nnumber 2: 11 -> 14 steps\nnumber 3: 27 -> 111 steps\nnumber 4: 9 -> 19 steps\nmax steps = 111 (number 27)\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.042,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "hard_payroll_nested",
+              "task_title": "Nested department payroll rollup",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 10692,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"org_hard_e.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let depts: ToonNode = toon_key(root, \"departments\");\n\n    let totalMembers: Int = 0;\n    let totalPayroll: Int = 0;\n    let topName: Text = \"\";\n    let topPayroll: Int = 0;\n\n    loop i in 0..toon_len(depts) {\n        let dept: ToonNode = toon_at(depts, i);\n        let name: Text = toon_get_text(dept, \"name\");\n        let members: ToonNode = toon_key(dept, \"members\");\n        let count: Int = toon_len(members);\n        let sum: Int = 0;\n\n        loop j in 0..count {\n            let member: ToonNode = toon_at(members, j);\n            let salary: Int = toon_get_int(member, \"salary\");\n            sum = sum + salary;\n            toon_free(member);\n        }\n\n        fx {\n            println(\"dept \", i, \": \", name, \" / \", count, \" members / payroll \", sum);\n        }\n\n        totalMembers = totalMembers + count;\n        totalPayroll = totalPayroll + sum;\n\n        if sum > topPayroll {\n            topPayroll = sum;\n            topName = name;\n        }\n\n        toon_free(members);\n        toon_free(dept);\n    }\n\n    fx {\n        println(\"total members = \", totalMembers);\n        println(\"total payroll = \", totalPayroll);\n        println(\"top department = \", topName, \" (\", topPayroll, \")\");\n    }\n\n    toon_close(doc);\n    ret;\n}\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "85305e8f-a5f5-4505-a3a1-f170bc6c566d",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"org_hard_e.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let depts: ToonNode = toon_key(root, \"departments\");\n\n    let totalMembers: Int = 0;\n    let totalPayroll: Int = 0;\n    let topName: Text = \"\";\n    let topPayroll: Int = 0;\n\n    loop i in 0..toon_len(depts) {\n        let dept: ToonNode = toon_at(depts, i);\n        let name: Text = toon_get_text(dept, \"name\");\n        let members: ToonNode = toon_key(dept, \"members\");\n        let count: Int = toon_len(members);\n        let sum: Int = 0;\n\n        loop j in 0..count {\n            let member: ToonNode = toon_at(members, j);\n            let salary: Int = toon_get_int(member, \"salary\");\n            sum = sum + salary;\n            toon_free(member);\n        }\n\n        fx {\n            println(\"dept \", i, \": \", name, \" / \", count, \" members / payroll \", sum);\n        }\n\n        totalMembers = totalMembers + count;\n        totalPayroll = totalPayroll + sum;\n\n        if sum > topPayroll {\n            topPayroll = sum;\n            topName = name;\n        }\n\n        toon_free(members);\n        toon_free(dept);\n    }\n\n    fx {\n        println(\"total members = \", totalMembers);\n        println(\"total payroll = \", totalPayroll);\n        println(\"top department = \", topName, \" (\", topPayroll, \")\");\n    }\n\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 370,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-ky_hw1dw/hard_payroll_nested.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "dept 0: eng / 2 members / payroll 220\ndept 1: sales / 1 members / payroll 90\ndept 2: ops / 3 members / payroll 285\ntotal members = 6\ntotal payroll = 595\ntop department = ops (285)\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.095,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 10231,
+                  "bytes": 41067
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 5502,
+                  "bytes": 22073
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 10692,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"org_hard_e.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let depts: ToonNode = toon_key(root, \"departments\");\n\n    let totalMembers: Int = 0;\n    let totalPayroll: Int = 0;\n    let topName: Text = \"\";\n    let topPayroll: Int = 0;\n\n    loop i in 0..toon_len(depts) {\n        let dept: ToonNode = toon_at(depts, i);\n        let name: Text = toon_get_text(dept, \"name\");\n        let members: ToonNode = toon_key(dept, \"members\");\n        let count: Int = toon_len(members);\n        let sum: Int = 0;\n\n        loop j in 0..count {\n            let member: ToonNode = toon_at(members, j);\n            let salary: Int = toon_get_int(member, \"salary\");\n            sum = sum + salary;\n            toon_free(member);\n        }\n\n        fx {\n            println(\"dept \", i, \": \", name, \" / \", count, \" members / payroll \", sum);\n        }\n\n        totalMembers = totalMembers + count;\n        totalPayroll = totalPayroll + sum;\n\n        if sum > topPayroll {\n            topPayroll = sum;\n            topName = name;\n        }\n\n        toon_free(members);\n        toon_free(dept);\n    }\n\n    fx {\n        println(\"total members = \", totalMembers);\n        println(\"total payroll = \", totalPayroll);\n        println(\"top department = \", topName, \" (\", topPayroll, \")\");\n    }\n\n    toon_close(doc);\n    ret;\n}\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "85305e8f-a5f5-4505-a3a1-f170bc6c566d",
+                "model": "claw1_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"org_hard_e.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let depts: ToonNode = toon_key(root, \"departments\");\n\n    let totalMembers: Int = 0;\n    let totalPayroll: Int = 0;\n    let topName: Text = \"\";\n    let topPayroll: Int = 0;\n\n    loop i in 0..toon_len(depts) {\n        let dept: ToonNode = toon_at(depts, i);\n        let name: Text = toon_get_text(dept, \"name\");\n        let members: ToonNode = toon_key(dept, \"members\");\n        let count: Int = toon_len(members);\n        let sum: Int = 0;\n\n        loop j in 0..count {\n            let member: ToonNode = toon_at(members, j);\n            let salary: Int = toon_get_int(member, \"salary\");\n            sum = sum + salary;\n            toon_free(member);\n        }\n\n        fx {\n            println(\"dept \", i, \": \", name, \" / \", count, \" members / payroll \", sum);\n        }\n\n        totalMembers = totalMembers + count;\n        totalPayroll = totalPayroll + sum;\n\n        if sum > topPayroll {\n            topPayroll = sum;\n            topName = name;\n        }\n\n        toon_free(members);\n        toon_free(dept);\n    }\n\n    fx {\n        println(\"total members = \", totalMembers);\n        println(\"total payroll = \", totalPayroll);\n        println(\"top department = \", topName, \" (\", topPayroll, \")\");\n    }\n\n    toon_close(doc);\n    ret;\n}",
+              "source_approx_tokens": 370,
+              "run": {
+                "command": [
+                  "/Users/mke/PBuild/components/aether/build/aether",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-ky_hw1dw/hard_payroll_nested.aether"
+                ],
+                "returncode": 0,
+                "stdout": "dept 0: eng / 2 members / payroll 220\ndept 1: sales / 1 members / payroll 90\ndept 2: ops / 3 members / payroll 285\ntotal members = 6\ntotal payroll = 595\ntop department = ops (285)\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.095,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "hard_sensor_streak",
+              "task_title": "Adjacent reading deltas and longest run",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 10707,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"readings_hard_f.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let readings: ToonNode = toon_key(root, \"readings\");\n    let n: Int = toon_len(readings);\n\n    let maxJump: Int = 0;\n    let longestRun: Int = 1;\n    let currentRun: Int = 1;\n\n    let first: ToonNode = toon_at(readings, 0);\n    let prev: Int = toon_get_int(first, \"value\");\n    toon_free(first);\n\n    loop i in 1..n {\n        let currNode: ToonNode = toon_at(readings, i);\n        let curr: Int = toon_get_int(currNode, \"value\");\n\n        let delta: Int = curr - prev;\n\n        fx {\n            println(\"step \", i, \": \", prev, \" -> \", curr, \" (\", delta, \")\");\n        }\n\n        if delta > maxJump {\n            maxJump = delta;\n        }\n\n        if curr >= prev {\n            currentRun = currentRun + 1;\n        } else {\n            currentRun = 1;\n        }\n\n        if currentRun > longestRun {\n            longestRun = currentRun;\n        }\n\n        prev = curr;\n        toon_free(currNode);\n    }\n\n    fx {\n        println(\"maxJump = \", maxJump);\n        println(\"longest non-decreasing run = \", longestRun);\n    }\n\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "ba51936b-27a6-4d46-bc20-37a709d27af1",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"readings_hard_f.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let readings: ToonNode = toon_key(root, \"readings\");\n    let n: Int = toon_len(readings);\n\n    let maxJump: Int = 0;\n    let longestRun: Int = 1;\n    let currentRun: Int = 1;\n\n    let first: ToonNode = toon_at(readings, 0);\n    let prev: Int = toon_get_int(first, \"value\");\n    toon_free(first);\n\n    loop i in 1..n {\n        let currNode: ToonNode = toon_at(readings, i);\n        let curr: Int = toon_get_int(currNode, \"value\");\n\n        let delta: Int = curr - prev;\n\n        fx {\n            println(\"step \", i, \": \", prev, \" -> \", curr, \" (\", delta, \")\");\n        }\n\n        if delta > maxJump {\n            maxJump = delta;\n        }\n\n        if curr >= prev {\n            currentRun = currentRun + 1;\n        } else {\n            currentRun = 1;\n        }\n\n        if currentRun > longestRun {\n            longestRun = currentRun;\n        }\n\n        prev = curr;\n        toon_free(currNode);\n    }\n\n    fx {\n        println(\"maxJump = \", maxJump);\n        println(\"longest non-decreasing run = \", longestRun);\n    }\n\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 325,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-xn73_bta/hard_sensor_streak.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "step 1: 10 -> 12 (2)\nstep 2: 12 -> 12 (0)\nstep 3: 12 -> 9 (-3)\nstep 4: 9 -> 11 (2)\nstep 5: 11 -> 15 (4)\nmaxJump = 4\nlongest non-decreasing run = 3\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.034,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 10231,
+                  "bytes": 41067
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 5502,
+                  "bytes": 22073
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 10707,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"readings_hard_f.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let readings: ToonNode = toon_key(root, \"readings\");\n    let n: Int = toon_len(readings);\n\n    let maxJump: Int = 0;\n    let longestRun: Int = 1;\n    let currentRun: Int = 1;\n\n    let first: ToonNode = toon_at(readings, 0);\n    let prev: Int = toon_get_int(first, \"value\");\n    toon_free(first);\n\n    loop i in 1..n {\n        let currNode: ToonNode = toon_at(readings, i);\n        let curr: Int = toon_get_int(currNode, \"value\");\n\n        let delta: Int = curr - prev;\n\n        fx {\n            println(\"step \", i, \": \", prev, \" -> \", curr, \" (\", delta, \")\");\n        }\n\n        if delta > maxJump {\n            maxJump = delta;\n        }\n\n        if curr >= prev {\n            currentRun = currentRun + 1;\n        } else {\n            currentRun = 1;\n        }\n\n        if currentRun > longestRun {\n            longestRun = currentRun;\n        }\n\n        prev = curr;\n        toon_free(currNode);\n    }\n\n    fx {\n        println(\"maxJump = \", maxJump);\n        println(\"longest non-decreasing run = \", longestRun);\n    }\n\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "ba51936b-27a6-4d46-bc20-37a709d27af1",
+                "model": "claw1_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"readings_hard_f.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let readings: ToonNode = toon_key(root, \"readings\");\n    let n: Int = toon_len(readings);\n\n    let maxJump: Int = 0;\n    let longestRun: Int = 1;\n    let currentRun: Int = 1;\n\n    let first: ToonNode = toon_at(readings, 0);\n    let prev: Int = toon_get_int(first, \"value\");\n    toon_free(first);\n\n    loop i in 1..n {\n        let currNode: ToonNode = toon_at(readings, i);\n        let curr: Int = toon_get_int(currNode, \"value\");\n\n        let delta: Int = curr - prev;\n\n        fx {\n            println(\"step \", i, \": \", prev, \" -> \", curr, \" (\", delta, \")\");\n        }\n\n        if delta > maxJump {\n            maxJump = delta;\n        }\n\n        if curr >= prev {\n            currentRun = currentRun + 1;\n        } else {\n            currentRun = 1;\n        }\n\n        if currentRun > longestRun {\n            longestRun = currentRun;\n        }\n\n        prev = curr;\n        toon_free(currNode);\n    }\n\n    fx {\n        println(\"maxJump = \", maxJump);\n        println(\"longest non-decreasing run = \", longestRun);\n    }\n\n    toon_close(doc);\n    ret;\n}",
+              "source_approx_tokens": 325,
+              "run": {
+                "command": [
+                  "/Users/mke/PBuild/components/aether/build/aether",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-xn73_bta/hard_sensor_streak.aether"
+                ],
+                "returncode": 0,
+                "stdout": "step 1: 10 -> 12 (2)\nstep 2: 12 -> 12 (0)\nstep 3: 12 -> 9 (-3)\nstep 4: 9 -> 11 (2)\nstep 5: 11 -> 15 (4)\nmaxJump = 4\nlongest non-decreasing run = 3\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.034,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "hard_turnstile_fsm",
+              "task_title": "Turnstile state machine",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 10730,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"events_hard_g.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let events: ToonNode = toon_key(root, \"events\");\n\n    let state: Text = \"locked\";\n    let passes: Int = 0;\n    let denied: Int = 0;\n\n    loop i in 0..toon_len(events) {\n        let ev: ToonNode = toon_at(events, i);\n        let e: Text = toon_get_text(ev, \"e\");\n\n        if state == \"locked\" {\n            if e == \"coin\" {\n                state = \"unlocked\";\n                fx { println(\"event \", i, \": coin -> unlocked\"); }\n            } else {\n                denied = denied + 1;\n                fx { println(\"event \", i, \": push -> DENIED\"); }\n            }\n        } else {\n            if e == \"push\" {\n                passes = passes + 1;\n                state = \"locked\";\n                fx { println(\"event \", i, \": push -> PASS\"); }\n            } else {\n                fx { println(\"event \", i, \": coin -> thanks\"); }\n            }\n        }\n    }\n\n    fx {\n        println(\"passes = \", passes);\n        println(\"denied = \", denied);\n        println(\"final state = \", state);\n    }\n\n    toon_close(doc);\n    ret;\n}\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "c19ca03a-1c27-4044-a472-be3963bb5f43",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"events_hard_g.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let events: ToonNode = toon_key(root, \"events\");\n\n    let state: Text = \"locked\";\n    let passes: Int = 0;\n    let denied: Int = 0;\n\n    loop i in 0..toon_len(events) {\n        let ev: ToonNode = toon_at(events, i);\n        let e: Text = toon_get_text(ev, \"e\");\n\n        if state == \"locked\" {\n            if e == \"coin\" {\n                state = \"unlocked\";\n                fx { println(\"event \", i, \": coin -> unlocked\"); }\n            } else {\n                denied = denied + 1;\n                fx { println(\"event \", i, \": push -> DENIED\"); }\n            }\n        } else {\n            if e == \"push\" {\n                passes = passes + 1;\n                state = \"locked\";\n                fx { println(\"event \", i, \": push -> PASS\"); }\n            } else {\n                fx { println(\"event \", i, \": coin -> thanks\"); }\n            }\n        }\n    }\n\n    fx {\n        println(\"passes = \", passes);\n        println(\"denied = \", denied);\n        println(\"final state = \", state);\n    }\n\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 317,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-ukg9wvcy/hard_turnstile_fsm.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "event 0: push -> DENIED\nevent 1: coin -> unlocked\nevent 2: push -> PASS\nevent 3: push -> DENIED\nevent 4: coin -> unlocked\nevent 5: coin -> thanks\nevent 6: push -> PASS\npasses = 2\ndenied = 2\nfinal state = locked\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.035,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 10231,
+                  "bytes": 41067
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 5502,
+                  "bytes": 22073
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 10730,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"events_hard_g.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let events: ToonNode = toon_key(root, \"events\");\n\n    let state: Text = \"locked\";\n    let passes: Int = 0;\n    let denied: Int = 0;\n\n    loop i in 0..toon_len(events) {\n        let ev: ToonNode = toon_at(events, i);\n        let e: Text = toon_get_text(ev, \"e\");\n\n        if state == \"locked\" {\n            if e == \"coin\" {\n                state = \"unlocked\";\n                fx { println(\"event \", i, \": coin -> unlocked\"); }\n            } else {\n                denied = denied + 1;\n                fx { println(\"event \", i, \": push -> DENIED\"); }\n            }\n        } else {\n            if e == \"push\" {\n                passes = passes + 1;\n                state = \"locked\";\n                fx { println(\"event \", i, \": push -> PASS\"); }\n            } else {\n                fx { println(\"event \", i, \": coin -> thanks\"); }\n            }\n        }\n    }\n\n    fx {\n        println(\"passes = \", passes);\n        println(\"denied = \", denied);\n        println(\"final state = \", state);\n    }\n\n    toon_close(doc);\n    ret;\n}\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "c19ca03a-1c27-4044-a472-be3963bb5f43",
+                "model": "claw1_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"events_hard_g.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let events: ToonNode = toon_key(root, \"events\");\n\n    let state: Text = \"locked\";\n    let passes: Int = 0;\n    let denied: Int = 0;\n\n    loop i in 0..toon_len(events) {\n        let ev: ToonNode = toon_at(events, i);\n        let e: Text = toon_get_text(ev, \"e\");\n\n        if state == \"locked\" {\n            if e == \"coin\" {\n                state = \"unlocked\";\n                fx { println(\"event \", i, \": coin -> unlocked\"); }\n            } else {\n                denied = denied + 1;\n                fx { println(\"event \", i, \": push -> DENIED\"); }\n            }\n        } else {\n            if e == \"push\" {\n                passes = passes + 1;\n                state = \"locked\";\n                fx { println(\"event \", i, \": push -> PASS\"); }\n            } else {\n                fx { println(\"event \", i, \": coin -> thanks\"); }\n            }\n        }\n    }\n\n    fx {\n        println(\"passes = \", passes);\n        println(\"denied = \", denied);\n        println(\"final state = \", state);\n    }\n\n    toon_close(doc);\n    ret;\n}",
+              "source_approx_tokens": 317,
+              "run": {
+                "command": [
+                  "/Users/mke/PBuild/components/aether/build/aether",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-ukg9wvcy/hard_turnstile_fsm.aether"
+                ],
+                "returncode": 0,
+                "stdout": "event 0: push -> DENIED\nevent 1: coin -> unlocked\nevent 2: push -> PASS\nevent 3: push -> DENIED\nevent 4: coin -> unlocked\nevent 5: coin -> thanks\nevent 6: push -> PASS\npasses = 2\ndenied = 2\nfinal state = locked\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.035,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "hard_word_lengths",
+              "task_title": "Word length buckets and longest word",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 10714,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"words_hard_h.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let words: ToonNode = toon_key(root, \"words\");\n\n    let shortCount: Int = 0;\n    let mediumCount: Int = 0;\n    let longCount: Int = 0;\n    let totalChars: Int = 0;\n    let longestWord: Text = \"\";\n    let longestLen: Int = 0;\n\n    loop i in 0..toon_len(words) {\n        let entry: ToonNode = toon_at(words, i);\n        let w: ToonNode = toon_key(entry, \"w\");\n        let word: Text = toon_text_value(w);\n        let len: Int = string_len(word);\n\n        let kind: Text;\n        if len < 4 {\n            kind = \"short\";\n            shortCount = shortCount + 1;\n        } else if len > 7 {\n            kind = \"long\";\n            longCount = longCount + 1;\n        } else {\n            kind = \"medium\";\n            mediumCount = mediumCount + 1;\n        }\n\n        totalChars = totalChars + len;\n\n        if len > longestLen {\n            longestLen = len;\n            longestWord = word;\n        }\n\n        fx {\n            println(\"word \", i, \": \", word, \" (\", len, \") \", kind);\n        }\n\n        toon_free(w);\n        toon_free(entry);\n    }\n\n    fx {\n        println(\"short = \", shortCount);\n        println(\"medium = \", mediumCount);\n        println(\"long = \", longCount);\n        println(\"total chars = \", totalChars);\n        println(\"longest = \", longestWord, \" (\", longestLen, \")\");\n    }\n\n    toon_free(words);\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "7fcb58ef-b5e1-44ff-b442-13264b81d9a2",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"words_hard_h.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let words: ToonNode = toon_key(root, \"words\");\n\n    let shortCount: Int = 0;\n    let mediumCount: Int = 0;\n    let longCount: Int = 0;\n    let totalChars: Int = 0;\n    let longestWord: Text = \"\";\n    let longestLen: Int = 0;\n\n    loop i in 0..toon_len(words) {\n        let entry: ToonNode = toon_at(words, i);\n        let w: ToonNode = toon_key(entry, \"w\");\n        let word: Text = toon_text_value(w);\n        let len: Int = string_len(word);\n\n        let kind: Text;\n        if len < 4 {\n            kind = \"short\";\n            shortCount = shortCount + 1;\n        } else if len > 7 {\n            kind = \"long\";\n            longCount = longCount + 1;\n        } else {\n            kind = \"medium\";\n            mediumCount = mediumCount + 1;\n        }\n\n        totalChars = totalChars + len;\n\n        if len > longestLen {\n            longestLen = len;\n            longestWord = word;\n        }\n\n        fx {\n            println(\"word \", i, \": \", word, \" (\", len, \") \", kind);\n        }\n\n        toon_free(w);\n        toon_free(entry);\n    }\n\n    fx {\n        println(\"short = \", shortCount);\n        println(\"medium = \", mediumCount);\n        println(\"long = \", longCount);\n        println(\"total chars = \", totalChars);\n        println(\"longest = \", longestWord, \" (\", longestLen, \")\");\n    }\n\n    toon_free(words);\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 403,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-rjszkjih/hard_word_lengths.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "word 0: hi (2) short\nword 1: hello (5) medium\nword 2: a (1) short\nword 3: wonderful (9) long\nword 4: cat (3) short\nword 5: elephantine (11) long\nword 6: dog (3) short\nshort = 4\nmedium = 1\nlong = 2\ntotal chars = 34\nlongest = elephantine (11)\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.072,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 10231,
+                  "bytes": 41067
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 5502,
+                  "bytes": 22073
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 10714,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"words_hard_h.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let words: ToonNode = toon_key(root, \"words\");\n\n    let shortCount: Int = 0;\n    let mediumCount: Int = 0;\n    let longCount: Int = 0;\n    let totalChars: Int = 0;\n    let longestWord: Text = \"\";\n    let longestLen: Int = 0;\n\n    loop i in 0..toon_len(words) {\n        let entry: ToonNode = toon_at(words, i);\n        let w: ToonNode = toon_key(entry, \"w\");\n        let word: Text = toon_text_value(w);\n        let len: Int = string_len(word);\n\n        let kind: Text;\n        if len < 4 {\n            kind = \"short\";\n            shortCount = shortCount + 1;\n        } else if len > 7 {\n            kind = \"long\";\n            longCount = longCount + 1;\n        } else {\n            kind = \"medium\";\n            mediumCount = mediumCount + 1;\n        }\n\n        totalChars = totalChars + len;\n\n        if len > longestLen {\n            longestLen = len;\n            longestWord = word;\n        }\n\n        fx {\n            println(\"word \", i, \": \", word, \" (\", len, \") \", kind);\n        }\n\n        toon_free(w);\n        toon_free(entry);\n    }\n\n    fx {\n        println(\"short = \", shortCount);\n        println(\"medium = \", mediumCount);\n        println(\"long = \", longCount);\n        println(\"total chars = \", totalChars);\n        println(\"longest = \", longestWord, \" (\", longestLen, \")\");\n    }\n\n    toon_free(words);\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "7fcb58ef-b5e1-44ff-b442-13264b81d9a2",
+                "model": "claw1_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx {\n        doc = toon_parse_file(\"words_hard_h.json\");\n    }\n    let root: ToonNode = toon_root(doc);\n    let words: ToonNode = toon_key(root, \"words\");\n\n    let shortCount: Int = 0;\n    let mediumCount: Int = 0;\n    let longCount: Int = 0;\n    let totalChars: Int = 0;\n    let longestWord: Text = \"\";\n    let longestLen: Int = 0;\n\n    loop i in 0..toon_len(words) {\n        let entry: ToonNode = toon_at(words, i);\n        let w: ToonNode = toon_key(entry, \"w\");\n        let word: Text = toon_text_value(w);\n        let len: Int = string_len(word);\n\n        let kind: Text;\n        if len < 4 {\n            kind = \"short\";\n            shortCount = shortCount + 1;\n        } else if len > 7 {\n            kind = \"long\";\n            longCount = longCount + 1;\n        } else {\n            kind = \"medium\";\n            mediumCount = mediumCount + 1;\n        }\n\n        totalChars = totalChars + len;\n\n        if len > longestLen {\n            longestLen = len;\n            longestWord = word;\n        }\n\n        fx {\n            println(\"word \", i, \": \", word, \" (\", len, \") \", kind);\n        }\n\n        toon_free(w);\n        toon_free(entry);\n    }\n\n    fx {\n        println(\"short = \", shortCount);\n        println(\"medium = \", mediumCount);\n        println(\"long = \", longCount);\n        println(\"total chars = \", totalChars);\n        println(\"longest = \", longestWord, \" (\", longestLen, \")\");\n    }\n\n    toon_free(words);\n    toon_close(doc);\n    ret;\n}",
+              "source_approx_tokens": 403,
+              "run": {
+                "command": [
+                  "/Users/mke/PBuild/components/aether/build/aether",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-rjszkjih/hard_word_lengths.aether"
+                ],
+                "returncode": 0,
+                "stdout": "word 0: hi (2) short\nword 1: hello (5) medium\nword 2: a (1) short\nword 3: wonderful (9) long\nword 4: cat (3) short\nword 5: elephantine (11) long\nword 6: dog (3) short\nshort = 4\nmedium = 1\nlong = 2\ntotal chars = 34\nlongest = elephantine (11)\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.072,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            }
+          ],
+          "summary": {
+            "total_cases": 8,
+            "generated_ok": 8,
+            "run_ok": 8,
+            "exact_stdout_match": 8,
+            "resolved_after_repair": 1,
+            "generated_rate": 1.0,
+            "run_rate": 1.0,
+            "exact_match_rate": 1.0,
+            "repair_recovery_rate": 0.125
+          },
+          "usage_summary": {
+            "attempts_total": 9,
+            "attempts_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null
+          },
+          "source_token_summary": {
+            "attempts_total": 9,
+            "source_approx_tokens_total": 3522,
+            "source_approx_tokens_avg": 391.33
+          },
+          "final_usage_summary": {
+            "cases_total": 8,
+            "cases_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null,
+            "success_filter": "all"
+          },
+          "run_ok_final_usage_summary": {
+            "cases_total": 8,
+            "cases_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null,
+            "success_filter": "run_ok"
+          },
+          "exact_final_usage_summary": {
+            "cases_total": 8,
+            "cases_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null,
+            "success_filter": "exact"
+          },
+          "final_source_token_summary": {
+            "cases_counted": 8,
+            "source_approx_tokens_total": 3038,
+            "source_approx_tokens_avg": 379.75,
+            "success_filter": "all"
+          },
+          "run_ok_final_source_token_summary": {
+            "cases_counted": 8,
+            "source_approx_tokens_total": 3038,
+            "source_approx_tokens_avg": 379.75,
+            "success_filter": "run_ok"
+          },
+          "exact_final_source_token_summary": {
+            "cases_counted": 8,
+            "source_approx_tokens_total": 3038,
+            "source_approx_tokens_avg": 379.75,
+            "success_filter": "exact"
+          },
+          "failure_patterns": []
+        },
+        {
+          "doc_name": "small",
+          "doc_path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+          "doc_bytes": 22073,
+          "doc_approx_tokens": 5502,
+          "shared_guide_batch_size_requested": 1,
+          "shared_guide_batch_size": 1,
+          "batch_mode_enabled": false,
+          "batch_runs": [],
+          "results": [
+            {
+              "task_id": "hard_expense_outliers",
+              "task_title": "Two-pass expense outlier report",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 6042,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse_file(\"expenses_hard_a.json\");\n    let root: ToonNode = toon_root(doc);\n    let expenses: ToonNode = toon_key(root, \"expenses\");\n    let count: Int = toon_len(expenses);\n\n    // First pass: compute sum of amounts\n    let sum: Real = 0.0;\n    loop i in 0..count {\n        let row: ToonNode = toon_at(expenses, i);\n        let amount: Int = toon_get_int(row, \"amount\");\n        sum = sum + amount;\n        toon_free(row);\n    }\n\n    let mean: Real = sum / count;\n    let halfMean: Real = mean / 2.0;\n\n    // Second pass: compute deviations, mark outliers, print\n    let outlierCount: Int = 0;\n    let maxDev: Real = 0.0;\n\n    loop i in 0..count {\n        let row: ToonNode = toon_at(expenses, i);\n        let name: Text = toon_get_text(row, \"name\");\n        let amount: Int = toon_get_int(row, \"amount\");\n\n        let dev: Real = abs(mean - amount);\n        let isOutlier: Bool = dev > halfMean;\n\n        if isOutlier {\n            outlierCount = outlierCount + 1;\n        }\n        if dev > maxDev {\n            maxDev = dev;\n        }\n\n        fx {\n            println(\"expense \", i, \": \", name, \" / \", amount, \" / dev \", dev:0:2, \" / \", isOutlier);\n        }\n\n        toon_free(row);\n    }\n\n    fx {\n        println(\"count = \", count);\n        println(\"mean = \", mean:0:2);\n        println(\"outliers = \", outlierCount);\n        println(\"maxDev = \", maxDev:0:2);\n    }\n\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "40f37599-dfc3-414c-9d5a-c5342131ecfa",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse_file(\"expenses_hard_a.json\");\n    let root: ToonNode = toon_root(doc);\n    let expenses: ToonNode = toon_key(root, \"expenses\");\n    let count: Int = toon_len(expenses);\n\n    // First pass: compute sum of amounts\n    let sum: Real = 0.0;\n    loop i in 0..count {\n        let row: ToonNode = toon_at(expenses, i);\n        let amount: Int = toon_get_int(row, \"amount\");\n        sum = sum + amount;\n        toon_free(row);\n    }\n\n    let mean: Real = sum / count;\n    let halfMean: Real = mean / 2.0;\n\n    // Second pass: compute deviations, mark outliers, print\n    let outlierCount: Int = 0;\n    let maxDev: Real = 0.0;\n\n    loop i in 0..count {\n        let row: ToonNode = toon_at(expenses, i);\n        let name: Text = toon_get_text(row, \"name\");\n        let amount: Int = toon_get_int(row, \"amount\");\n\n        let dev: Real = abs(mean - amount);\n        let isOutlier: Bool = dev > halfMean;\n\n        if isOutlier {\n            outlierCount = outlierCount + 1;\n        }\n        if dev > maxDev {\n            maxDev = dev;\n        }\n\n        fx {\n            println(\"expense \", i, \": \", name, \" / \", amount, \" / dev \", dev:0:2, \" / \", isOutlier);\n        }\n\n        toon_free(row);\n    }\n\n    fx {\n        println(\"count = \", count);\n        println(\"mean = \", mean:0:2);\n        println(\"outliers = \", outlierCount);\n        println(\"maxDev = \", maxDev:0:2);\n    }\n\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 386,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-wjp9s_jp/hard_expense_outliers.aether"
+                    ],
+                    "returncode": 1,
+                    "stdout": "",
+                    "stderr": "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-wjp9s_jp/hard_expense_outliers.aether:7: [FX-001] Aether effect error: call to 'toon_parse_file' requires an fx block.\nhelp: see FX-001 in the Aether guide (aether_for_llms_with_small_contexts.md)\n",
+                    "diagnostics": [
+                      {
+                        "severity": "error",
+                        "phase": "semantic",
+                        "kind": "effect",
+                        "code": "FX-001",
+                        "file": "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-wjp9s_jp/hard_expense_outliers.aether",
+                        "line": 7,
+                        "column": null,
+                        "message": "Aether effect error: call to 'toon_parse_file' requires an fx block.",
+                        "hint": null,
+                        "raw": "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-wjp9s_jp/hard_expense_outliers.aether:7: [FX-001] Aether effect error: call to 'toon_parse_file' requires an fx block."
+                      },
+                      {
+                        "severity": "error",
+                        "phase": "compile",
+                        "kind": "generic",
+                        "code": null,
+                        "file": null,
+                        "line": 0,
+                        "column": null,
+                        "message": "help: see FX-001 in the Aether guide (aether_for_llms_with_small_contexts.md)",
+                        "hint": null,
+                        "raw": "help: see FX-001 in the Aether guide (aether_for_llms_with_small_contexts.md)"
+                      }
+                    ],
+                    "elapsed_seconds": 0.013,
+                    "exact_stdout_match": false
+                  }
+                },
+                {
+                  "prompt_kind": "repair",
+                  "prompt_approx_tokens": 6488,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"expenses_hard_a.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let expenses: ToonNode = toon_key(root, \"expenses\");\n    let count: Int = toon_len(expenses);\n\n    let sum: Real = 0.0;\n    loop i in 0..count {\n        let row: ToonNode = toon_at(expenses, i);\n        let amount: Int = toon_get_int(row, \"amount\");\n        sum = sum + amount;\n        toon_free(row);\n    }\n\n    let mean: Real = sum / count;\n    let halfMean: Real = mean / 2.0;\n\n    let outlierCount: Int = 0;\n    let maxDev: Real = 0.0;\n\n    loop i in 0..count {\n        let row: ToonNode = toon_at(expenses, i);\n        let name: Text = toon_get_text(row, \"name\");\n        let amount: Int = toon_get_int(row, \"amount\");\n\n        let dev: Real = abs(mean - amount);\n        let isOutlier: Bool = dev > halfMean;\n\n        if isOutlier {\n            outlierCount = outlierCount + 1;\n        }\n        if dev > maxDev {\n            maxDev = dev;\n        }\n\n        fx {\n            println(\"expense \", i, \": \", name, \" / \", amount, \" / dev \", dev:0:2, \" / \", isOutlier);\n        }\n\n        toon_free(row);\n    }\n\n    fx {\n        println(\"count = \", count);\n        println(\"mean = \", mean:0:2);\n        println(\"outliers = \", outlierCount);\n        println(\"maxDev = \", maxDev:0:2);\n    }\n\n    toon_free(expenses);\n    toon_close(doc);\n    ret;\n}\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "2df3508a-091b-409d-b0d3-6f8374c6e5cf",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"expenses_hard_a.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let expenses: ToonNode = toon_key(root, \"expenses\");\n    let count: Int = toon_len(expenses);\n\n    let sum: Real = 0.0;\n    loop i in 0..count {\n        let row: ToonNode = toon_at(expenses, i);\n        let amount: Int = toon_get_int(row, \"amount\");\n        sum = sum + amount;\n        toon_free(row);\n    }\n\n    let mean: Real = sum / count;\n    let halfMean: Real = mean / 2.0;\n\n    let outlierCount: Int = 0;\n    let maxDev: Real = 0.0;\n\n    loop i in 0..count {\n        let row: ToonNode = toon_at(expenses, i);\n        let name: Text = toon_get_text(row, \"name\");\n        let amount: Int = toon_get_int(row, \"amount\");\n\n        let dev: Real = abs(mean - amount);\n        let isOutlier: Bool = dev > halfMean;\n\n        if isOutlier {\n            outlierCount = outlierCount + 1;\n        }\n        if dev > maxDev {\n            maxDev = dev;\n        }\n\n        fx {\n            println(\"expense \", i, \": \", name, \" / \", amount, \" / dev \", dev:0:2, \" / \", isOutlier);\n        }\n\n        toon_free(row);\n    }\n\n    fx {\n        println(\"count = \", count);\n        println(\"mean = \", mean:0:2);\n        println(\"outliers = \", outlierCount);\n        println(\"maxDev = \", maxDev:0:2);\n    }\n\n    toon_free(expenses);\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 370,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-mxn0el6r/hard_expense_outliers.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "expense 0: a / 100 / dev 29.29 / false\nexpense 1: b / 110 / dev 19.29 / false\nexpense 2: c / 90 / dev 39.29 / false\nexpense 3: d / 105 / dev 24.29 / false\nexpense 4: e / 95 / dev 34.29 / false\nexpense 5: big / 400 / dev 270.71 / true\nexpense 6: tiny / 5 / dev 124.29 / true\ncount = 7\nmean = 129.29\noutliers = 2\nmaxDev = 270.71\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.086,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 10231,
+                  "bytes": 41067
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 5502,
+                  "bytes": 22073
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "repair",
+              "prompt_approx_tokens": 6488,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"expenses_hard_a.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let expenses: ToonNode = toon_key(root, \"expenses\");\n    let count: Int = toon_len(expenses);\n\n    let sum: Real = 0.0;\n    loop i in 0..count {\n        let row: ToonNode = toon_at(expenses, i);\n        let amount: Int = toon_get_int(row, \"amount\");\n        sum = sum + amount;\n        toon_free(row);\n    }\n\n    let mean: Real = sum / count;\n    let halfMean: Real = mean / 2.0;\n\n    let outlierCount: Int = 0;\n    let maxDev: Real = 0.0;\n\n    loop i in 0..count {\n        let row: ToonNode = toon_at(expenses, i);\n        let name: Text = toon_get_text(row, \"name\");\n        let amount: Int = toon_get_int(row, \"amount\");\n\n        let dev: Real = abs(mean - amount);\n        let isOutlier: Bool = dev > halfMean;\n\n        if isOutlier {\n            outlierCount = outlierCount + 1;\n        }\n        if dev > maxDev {\n            maxDev = dev;\n        }\n\n        fx {\n            println(\"expense \", i, \": \", name, \" / \", amount, \" / dev \", dev:0:2, \" / \", isOutlier);\n        }\n\n        toon_free(row);\n    }\n\n    fx {\n        println(\"count = \", count);\n        println(\"mean = \", mean:0:2);\n        println(\"outliers = \", outlierCount);\n        println(\"maxDev = \", maxDev:0:2);\n    }\n\n    toon_free(expenses);\n    toon_close(doc);\n    ret;\n}\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "2df3508a-091b-409d-b0d3-6f8374c6e5cf",
+                "model": "claw1_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"expenses_hard_a.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let expenses: ToonNode = toon_key(root, \"expenses\");\n    let count: Int = toon_len(expenses);\n\n    let sum: Real = 0.0;\n    loop i in 0..count {\n        let row: ToonNode = toon_at(expenses, i);\n        let amount: Int = toon_get_int(row, \"amount\");\n        sum = sum + amount;\n        toon_free(row);\n    }\n\n    let mean: Real = sum / count;\n    let halfMean: Real = mean / 2.0;\n\n    let outlierCount: Int = 0;\n    let maxDev: Real = 0.0;\n\n    loop i in 0..count {\n        let row: ToonNode = toon_at(expenses, i);\n        let name: Text = toon_get_text(row, \"name\");\n        let amount: Int = toon_get_int(row, \"amount\");\n\n        let dev: Real = abs(mean - amount);\n        let isOutlier: Bool = dev > halfMean;\n\n        if isOutlier {\n            outlierCount = outlierCount + 1;\n        }\n        if dev > maxDev {\n            maxDev = dev;\n        }\n\n        fx {\n            println(\"expense \", i, \": \", name, \" / \", amount, \" / dev \", dev:0:2, \" / \", isOutlier);\n        }\n\n        toon_free(row);\n    }\n\n    fx {\n        println(\"count = \", count);\n        println(\"mean = \", mean:0:2);\n        println(\"outliers = \", outlierCount);\n        println(\"maxDev = \", maxDev:0:2);\n    }\n\n    toon_free(expenses);\n    toon_close(doc);\n    ret;\n}",
+              "source_approx_tokens": 370,
+              "run": {
+                "command": [
+                  "/Users/mke/PBuild/components/aether/build/aether",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-mxn0el6r/hard_expense_outliers.aether"
+                ],
+                "returncode": 0,
+                "stdout": "expense 0: a / 100 / dev 29.29 / false\nexpense 1: b / 110 / dev 19.29 / false\nexpense 2: c / 90 / dev 39.29 / false\nexpense 3: d / 105 / dev 24.29 / false\nexpense 4: e / 95 / dev 34.29 / false\nexpense 5: big / 400 / dev 270.71 / true\nexpense 6: tiny / 5 / dev 124.29 / true\ncount = 7\nmean = 129.29\noutliers = 2\nmaxDev = 270.71\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.086,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 2,
+              "resolved_after_repair": true,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "hard_log_levels",
+              "task_title": "Log-level grouping with dominant level",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 5993,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"events_hard_b.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let events: ToonNode = toon_key(root, \"events\");\n\n    let infoCount: Int = 0;\n    let warnCount: Int = 0;\n    let errorCount: Int = 0;\n    let firstError: Int = -1;\n\n    loop i in 0..toon_len(events) {\n        let event: ToonNode = toon_at(events, i);\n        let levelText: Text = toon_get_text(event, \"level\");\n        let msgText: Text = toon_get_text(event, \"msg\");\n\n        fx {\n            println(\"event \", i, \":\", \" \", levelText, \" / \", msgText);\n        }\n\n        if levelText == \"info\" {\n            infoCount = infoCount + 1;\n        } else if levelText == \"warn\" {\n            warnCount = warnCount + 1;\n        } else if levelText == \"error\" {\n            errorCount = errorCount + 1;\n            if firstError == -1 {\n                firstError = i;\n            }\n        }\n\n        toon_free(event);\n    }\n\n    fx {\n        println(\"info = \", infoCount);\n        println(\"warn = \", warnCount);\n        println(\"error = \", errorCount);\n    }\n\n    let dominant: Text = \"info\";\n    if warnCount > infoCount {\n        dominant = \"warn\";\n    }\n    if errorCount > infoCount && errorCount > warnCount {\n        dominant = \"error\";\n    }\n\n    fx {\n        println(\"dominant = \", dominant);\n    }\n\n    if firstError == -1 {\n        fx {\n            println(\"first error: none\");\n        }\n    } else {\n        fx {\n            println(\"first error at index \", firstError);\n        }\n    }\n\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "c643f65c-5fde-4f60-8129-984bbbb46515",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"events_hard_b.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let events: ToonNode = toon_key(root, \"events\");\n\n    let infoCount: Int = 0;\n    let warnCount: Int = 0;\n    let errorCount: Int = 0;\n    let firstError: Int = -1;\n\n    loop i in 0..toon_len(events) {\n        let event: ToonNode = toon_at(events, i);\n        let levelText: Text = toon_get_text(event, \"level\");\n        let msgText: Text = toon_get_text(event, \"msg\");\n\n        fx {\n            println(\"event \", i, \":\", \" \", levelText, \" / \", msgText);\n        }\n\n        if levelText == \"info\" {\n            infoCount = infoCount + 1;\n        } else if levelText == \"warn\" {\n            warnCount = warnCount + 1;\n        } else if levelText == \"error\" {\n            errorCount = errorCount + 1;\n            if firstError == -1 {\n                firstError = i;\n            }\n        }\n\n        toon_free(event);\n    }\n\n    fx {\n        println(\"info = \", infoCount);\n        println(\"warn = \", warnCount);\n        println(\"error = \", errorCount);\n    }\n\n    let dominant: Text = \"info\";\n    if warnCount > infoCount {\n        dominant = \"warn\";\n    }\n    if errorCount > infoCount && errorCount > warnCount {\n        dominant = \"error\";\n    }\n\n    fx {\n        println(\"dominant = \", dominant);\n    }\n\n    if firstError == -1 {\n        fx {\n            println(\"first error: none\");\n        }\n    } else {\n        fx {\n            println(\"first error at index \", firstError);\n        }\n    }\n\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 415,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-nq97hi8v/hard_log_levels.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "event 0: info / start\nevent 1: warn / slow\nevent 2: error / oops\nevent 3: info / retry\nevent 4: error / fail\nevent 5: warn / degraded\nevent 6: error / crash\ninfo = 2\nwarn = 2\nerror = 3\ndominant = error\nfirst error at index 2\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.036,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 10231,
+                  "bytes": 41067
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 5502,
+                  "bytes": 22073
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 5993,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"events_hard_b.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let events: ToonNode = toon_key(root, \"events\");\n\n    let infoCount: Int = 0;\n    let warnCount: Int = 0;\n    let errorCount: Int = 0;\n    let firstError: Int = -1;\n\n    loop i in 0..toon_len(events) {\n        let event: ToonNode = toon_at(events, i);\n        let levelText: Text = toon_get_text(event, \"level\");\n        let msgText: Text = toon_get_text(event, \"msg\");\n\n        fx {\n            println(\"event \", i, \":\", \" \", levelText, \" / \", msgText);\n        }\n\n        if levelText == \"info\" {\n            infoCount = infoCount + 1;\n        } else if levelText == \"warn\" {\n            warnCount = warnCount + 1;\n        } else if levelText == \"error\" {\n            errorCount = errorCount + 1;\n            if firstError == -1 {\n                firstError = i;\n            }\n        }\n\n        toon_free(event);\n    }\n\n    fx {\n        println(\"info = \", infoCount);\n        println(\"warn = \", warnCount);\n        println(\"error = \", errorCount);\n    }\n\n    let dominant: Text = \"info\";\n    if warnCount > infoCount {\n        dominant = \"warn\";\n    }\n    if errorCount > infoCount && errorCount > warnCount {\n        dominant = \"error\";\n    }\n\n    fx {\n        println(\"dominant = \", dominant);\n    }\n\n    if firstError == -1 {\n        fx {\n            println(\"first error: none\");\n        }\n    } else {\n        fx {\n            println(\"first error at index \", firstError);\n        }\n    }\n\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "c643f65c-5fde-4f60-8129-984bbbb46515",
+                "model": "claw1_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"events_hard_b.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let events: ToonNode = toon_key(root, \"events\");\n\n    let infoCount: Int = 0;\n    let warnCount: Int = 0;\n    let errorCount: Int = 0;\n    let firstError: Int = -1;\n\n    loop i in 0..toon_len(events) {\n        let event: ToonNode = toon_at(events, i);\n        let levelText: Text = toon_get_text(event, \"level\");\n        let msgText: Text = toon_get_text(event, \"msg\");\n\n        fx {\n            println(\"event \", i, \":\", \" \", levelText, \" / \", msgText);\n        }\n\n        if levelText == \"info\" {\n            infoCount = infoCount + 1;\n        } else if levelText == \"warn\" {\n            warnCount = warnCount + 1;\n        } else if levelText == \"error\" {\n            errorCount = errorCount + 1;\n            if firstError == -1 {\n                firstError = i;\n            }\n        }\n\n        toon_free(event);\n    }\n\n    fx {\n        println(\"info = \", infoCount);\n        println(\"warn = \", warnCount);\n        println(\"error = \", errorCount);\n    }\n\n    let dominant: Text = \"info\";\n    if warnCount > infoCount {\n        dominant = \"warn\";\n    }\n    if errorCount > infoCount && errorCount > warnCount {\n        dominant = \"error\";\n    }\n\n    fx {\n        println(\"dominant = \", dominant);\n    }\n\n    if firstError == -1 {\n        fx {\n            println(\"first error: none\");\n        }\n    } else {\n        fx {\n            println(\"first error at index \", firstError);\n        }\n    }\n\n    toon_close(doc);\n    ret;\n}",
+              "source_approx_tokens": 415,
+              "run": {
+                "command": [
+                  "/Users/mke/PBuild/components/aether/build/aether",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-nq97hi8v/hard_log_levels.aether"
+                ],
+                "returncode": 0,
+                "stdout": "event 0: info / start\nevent 1: warn / slow\nevent 2: error / oops\nevent 3: info / retry\nevent 4: error / fail\nevent 5: warn / degraded\nevent 6: error / crash\ninfo = 2\nwarn = 2\nerror = 3\ndominant = error\nfirst error at index 2\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.036,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "hard_account_ledger",
+              "task_title": "Stateful account ledger simulation",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 6108,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"ops_hard_c.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let cap: Int = toon_get_int(root, \"cap\");\n    let ops: ToonNode = toon_key(root, \"operations\");\n    let balance: Int = 0;\n    let applied: Int = 0;\n    let rejected: Int = 0;\n\n    loop i in 0..toon_len(ops) {\n        let op: ToonNode = toon_at(ops, i);\n        let kind: Text = toon_get_text(op, \"kind\");\n        let amount: Int = toon_get_int(op, \"amount\");\n        let changed: Bool = false;\n\n        if kind == \"deposit\" {\n            let newBal: Int = balance + amount;\n            if newBal > cap {\n                balance = cap;\n            } else {\n                balance = newBal;\n            }\n            changed = true;\n            fx { println(\"op \", i, \": deposit \", amount, \" -> \", balance); }\n        } else if kind == \"withdraw\" {\n            if balance >= amount {\n                balance = balance - amount;\n                changed = true;\n                fx { println(\"op \", i, \": withdraw \", amount, \" -> \", balance); }\n            } else {\n                changed = false;\n                fx { println(\"op \", i, \": withdraw \", amount, \" REJECTED (balance \", balance, \")\"); }\n            }\n        } else if kind == \"interest\" {\n            let add: Int = balance * amount / 100;\n            balance = balance + add;\n            changed = true;\n            fx { println(\"op \", i, \": interest \", amount, \"% -> \", balance); }\n        }\n\n        if changed {\n            applied = applied + 1;\n        } else {\n            rejected = rejected + 1;\n        }\n\n        toon_free(op);\n    }\n\n    fx {\n        println(\"final balance = \", balance);\n        println(\"applied = \", applied);\n        println(\"rejected = \", rejected);\n    }\n\n    toon_close(doc);\n    ret;\n}\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "e1de018b-eaac-4c76-9953-52e47269a31e",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"ops_hard_c.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let cap: Int = toon_get_int(root, \"cap\");\n    let ops: ToonNode = toon_key(root, \"operations\");\n    let balance: Int = 0;\n    let applied: Int = 0;\n    let rejected: Int = 0;\n\n    loop i in 0..toon_len(ops) {\n        let op: ToonNode = toon_at(ops, i);\n        let kind: Text = toon_get_text(op, \"kind\");\n        let amount: Int = toon_get_int(op, \"amount\");\n        let changed: Bool = false;\n\n        if kind == \"deposit\" {\n            let newBal: Int = balance + amount;\n            if newBal > cap {\n                balance = cap;\n            } else {\n                balance = newBal;\n            }\n            changed = true;\n            fx { println(\"op \", i, \": deposit \", amount, \" -> \", balance); }\n        } else if kind == \"withdraw\" {\n            if balance >= amount {\n                balance = balance - amount;\n                changed = true;\n                fx { println(\"op \", i, \": withdraw \", amount, \" -> \", balance); }\n            } else {\n                changed = false;\n                fx { println(\"op \", i, \": withdraw \", amount, \" REJECTED (balance \", balance, \")\"); }\n            }\n        } else if kind == \"interest\" {\n            let add: Int = balance * amount / 100;\n            balance = balance + add;\n            changed = true;\n            fx { println(\"op \", i, \": interest \", amount, \"% -> \", balance); }\n        }\n\n        if changed {\n            applied = applied + 1;\n        } else {\n            rejected = rejected + 1;\n        }\n\n        toon_free(op);\n    }\n\n    fx {\n        println(\"final balance = \", balance);\n        println(\"applied = \", applied);\n        println(\"rejected = \", rejected);\n    }\n\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 478,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-hmnuszb3/hard_account_ledger.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "op 0: deposit 200 -> 200\nop 1: withdraw 50 -> 150\nop 2: withdraw 1000 REJECTED (balance 150)\nop 3: deposit 400 -> 500\nop 4: interest 10% -> 550\nop 5: withdraw 100 -> 450\nfinal balance = 450\napplied = 5\nrejected = 1\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.034,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 10231,
+                  "bytes": 41067
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 5502,
+                  "bytes": 22073
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 6108,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"ops_hard_c.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let cap: Int = toon_get_int(root, \"cap\");\n    let ops: ToonNode = toon_key(root, \"operations\");\n    let balance: Int = 0;\n    let applied: Int = 0;\n    let rejected: Int = 0;\n\n    loop i in 0..toon_len(ops) {\n        let op: ToonNode = toon_at(ops, i);\n        let kind: Text = toon_get_text(op, \"kind\");\n        let amount: Int = toon_get_int(op, \"amount\");\n        let changed: Bool = false;\n\n        if kind == \"deposit\" {\n            let newBal: Int = balance + amount;\n            if newBal > cap {\n                balance = cap;\n            } else {\n                balance = newBal;\n            }\n            changed = true;\n            fx { println(\"op \", i, \": deposit \", amount, \" -> \", balance); }\n        } else if kind == \"withdraw\" {\n            if balance >= amount {\n                balance = balance - amount;\n                changed = true;\n                fx { println(\"op \", i, \": withdraw \", amount, \" -> \", balance); }\n            } else {\n                changed = false;\n                fx { println(\"op \", i, \": withdraw \", amount, \" REJECTED (balance \", balance, \")\"); }\n            }\n        } else if kind == \"interest\" {\n            let add: Int = balance * amount / 100;\n            balance = balance + add;\n            changed = true;\n            fx { println(\"op \", i, \": interest \", amount, \"% -> \", balance); }\n        }\n\n        if changed {\n            applied = applied + 1;\n        } else {\n            rejected = rejected + 1;\n        }\n\n        toon_free(op);\n    }\n\n    fx {\n        println(\"final balance = \", balance);\n        println(\"applied = \", applied);\n        println(\"rejected = \", rejected);\n    }\n\n    toon_close(doc);\n    ret;\n}\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "e1de018b-eaac-4c76-9953-52e47269a31e",
+                "model": "claw1_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"ops_hard_c.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let cap: Int = toon_get_int(root, \"cap\");\n    let ops: ToonNode = toon_key(root, \"operations\");\n    let balance: Int = 0;\n    let applied: Int = 0;\n    let rejected: Int = 0;\n\n    loop i in 0..toon_len(ops) {\n        let op: ToonNode = toon_at(ops, i);\n        let kind: Text = toon_get_text(op, \"kind\");\n        let amount: Int = toon_get_int(op, \"amount\");\n        let changed: Bool = false;\n\n        if kind == \"deposit\" {\n            let newBal: Int = balance + amount;\n            if newBal > cap {\n                balance = cap;\n            } else {\n                balance = newBal;\n            }\n            changed = true;\n            fx { println(\"op \", i, \": deposit \", amount, \" -> \", balance); }\n        } else if kind == \"withdraw\" {\n            if balance >= amount {\n                balance = balance - amount;\n                changed = true;\n                fx { println(\"op \", i, \": withdraw \", amount, \" -> \", balance); }\n            } else {\n                changed = false;\n                fx { println(\"op \", i, \": withdraw \", amount, \" REJECTED (balance \", balance, \")\"); }\n            }\n        } else if kind == \"interest\" {\n            let add: Int = balance * amount / 100;\n            balance = balance + add;\n            changed = true;\n            fx { println(\"op \", i, \": interest \", amount, \"% -> \", balance); }\n        }\n\n        if changed {\n            applied = applied + 1;\n        } else {\n            rejected = rejected + 1;\n        }\n\n        toon_free(op);\n    }\n\n    fx {\n        println(\"final balance = \", balance);\n        println(\"applied = \", applied);\n        println(\"rejected = \", rejected);\n    }\n\n    toon_close(doc);\n    ret;\n}",
+              "source_approx_tokens": 478,
+              "run": {
+                "command": [
+                  "/Users/mke/PBuild/components/aether/build/aether",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-hmnuszb3/hard_account_ledger.aether"
+                ],
+                "returncode": 0,
+                "stdout": "op 0: deposit 200 -> 200\nop 1: withdraw 50 -> 150\nop 2: withdraw 1000 REJECTED (balance 150)\nop 3: deposit 400 -> 500\nop 4: interest 10% -> 550\nop 5: withdraw 100 -> 450\nfinal balance = 450\napplied = 5\nrejected = 1\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.034,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "hard_collatz_recursion",
+              "task_title": "Recursive Collatz stopping times",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 5965,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "@pure\nfn collatz(n: Int) -> Int {\n    if n <= 1 {\n        ret 0;\n    }\n    if n % 2 == 0 {\n        ret 1 + collatz(n / 2);\n    }\n    ret 1 + collatz(3 * n + 1);\n}\n\nfn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"numbers_hard_d.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let nums: ToonNode = toon_key(root, \"numbers\");\n    let maxSteps: Int = 0;\n    let maxN: Int = 0;\n\n    loop i in 0..toon_len(nums) {\n        let row: ToonNode = toon_at(nums, i);\n        let n: Int = toon_get_int(row, \"n\");\n        let steps: Int = collatz(n);\n        \n        fx {\n            println(\"number \", i, \": \", n, \" -> \", steps, \" steps\");\n        }\n        \n        if steps > maxSteps {\n            maxSteps = steps;\n            maxN = n;\n        }\n        \n        toon_free(row);\n    }\n\n    fx {\n        println(\"max steps = \", maxSteps, \" (number \", maxN, \")\");\n    }\n\n    toon_close(doc);\n    ret;\n}\n\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "98b8fa2f-a1a3-4878-a124-2f0d62ac6f33",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "@pure\nfn collatz(n: Int) -> Int {\n    if n <= 1 {\n        ret 0;\n    }\n    if n % 2 == 0 {\n        ret 1 + collatz(n / 2);\n    }\n    ret 1 + collatz(3 * n + 1);\n}\n\nfn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"numbers_hard_d.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let nums: ToonNode = toon_key(root, \"numbers\");\n    let maxSteps: Int = 0;\n    let maxN: Int = 0;\n\n    loop i in 0..toon_len(nums) {\n        let row: ToonNode = toon_at(nums, i);\n        let n: Int = toon_get_int(row, \"n\");\n        let steps: Int = collatz(n);\n        \n        fx {\n            println(\"number \", i, \": \", n, \" -> \", steps, \" steps\");\n        }\n        \n        if steps > maxSteps {\n            maxSteps = steps;\n            maxN = n;\n        }\n        \n        toon_free(row);\n    }\n\n    fx {\n        println(\"max steps = \", maxSteps, \" (number \", maxN, \")\");\n    }\n\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 253,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-llo7f262/hard_collatz_recursion.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "number 0: 6 -> 8 steps\nnumber 1: 7 -> 16 steps\nnumber 2: 11 -> 14 steps\nnumber 3: 27 -> 111 steps\nnumber 4: 9 -> 19 steps\nmax steps = 111 (number 27)\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.035,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 10231,
+                  "bytes": 41067
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 5502,
+                  "bytes": 22073
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 5965,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "@pure\nfn collatz(n: Int) -> Int {\n    if n <= 1 {\n        ret 0;\n    }\n    if n % 2 == 0 {\n        ret 1 + collatz(n / 2);\n    }\n    ret 1 + collatz(3 * n + 1);\n}\n\nfn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"numbers_hard_d.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let nums: ToonNode = toon_key(root, \"numbers\");\n    let maxSteps: Int = 0;\n    let maxN: Int = 0;\n\n    loop i in 0..toon_len(nums) {\n        let row: ToonNode = toon_at(nums, i);\n        let n: Int = toon_get_int(row, \"n\");\n        let steps: Int = collatz(n);\n        \n        fx {\n            println(\"number \", i, \": \", n, \" -> \", steps, \" steps\");\n        }\n        \n        if steps > maxSteps {\n            maxSteps = steps;\n            maxN = n;\n        }\n        \n        toon_free(row);\n    }\n\n    fx {\n        println(\"max steps = \", maxSteps, \" (number \", maxN, \")\");\n    }\n\n    toon_close(doc);\n    ret;\n}\n\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "98b8fa2f-a1a3-4878-a124-2f0d62ac6f33",
+                "model": "claw1_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "@pure\nfn collatz(n: Int) -> Int {\n    if n <= 1 {\n        ret 0;\n    }\n    if n % 2 == 0 {\n        ret 1 + collatz(n / 2);\n    }\n    ret 1 + collatz(3 * n + 1);\n}\n\nfn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"numbers_hard_d.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let nums: ToonNode = toon_key(root, \"numbers\");\n    let maxSteps: Int = 0;\n    let maxN: Int = 0;\n\n    loop i in 0..toon_len(nums) {\n        let row: ToonNode = toon_at(nums, i);\n        let n: Int = toon_get_int(row, \"n\");\n        let steps: Int = collatz(n);\n        \n        fx {\n            println(\"number \", i, \": \", n, \" -> \", steps, \" steps\");\n        }\n        \n        if steps > maxSteps {\n            maxSteps = steps;\n            maxN = n;\n        }\n        \n        toon_free(row);\n    }\n\n    fx {\n        println(\"max steps = \", maxSteps, \" (number \", maxN, \")\");\n    }\n\n    toon_close(doc);\n    ret;\n}",
+              "source_approx_tokens": 253,
+              "run": {
+                "command": [
+                  "/Users/mke/PBuild/components/aether/build/aether",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-llo7f262/hard_collatz_recursion.aether"
+                ],
+                "returncode": 0,
+                "stdout": "number 0: 6 -> 8 steps\nnumber 1: 7 -> 16 steps\nnumber 2: 11 -> 14 steps\nnumber 3: 27 -> 111 steps\nnumber 4: 9 -> 19 steps\nmax steps = 111 (number 27)\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.035,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "hard_payroll_nested",
+              "task_title": "Nested department payroll rollup",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 5963,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"org_hard_e.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let departments: ToonNode = toon_key(root, \"departments\");\n\n    let totalMembers: Int = 0;\n    let totalPayroll: Int = 0;\n    let topName: Text = \"\";\n    let topPayroll: Int = 0;\n\n    loop i in 0..toon_len(departments) {\n        let dept: ToonNode = toon_at(departments, i);\n        let name: ToonNode = toon_key(dept, \"name\");\n        let members: ToonNode = toon_key(dept, \"members\");\n\n        let count: Int = toon_len(members);\n        let sum: Int = 0;\n\n        loop j in 0..count {\n            let member: ToonNode = toon_at(members, j);\n            let salary: Int = toon_get_int(member, \"salary\");\n            sum = sum + salary;\n            toon_free(member);\n        }\n\n        fx {\n            println(\"dept \", i, \": \", toon_text_value(name), \" / \", count, \" members / payroll \", sum);\n        }\n\n        totalMembers = totalMembers + count;\n        totalPayroll = totalPayroll + sum;\n\n        if sum > topPayroll {\n            topPayroll = sum;\n            topName = toon_text_value(name);\n        }\n\n        toon_free(name);\n        toon_free(members);\n        toon_free(dept);\n    }\n\n    fx {\n        println(\"total members = \", totalMembers);\n        println(\"total payroll = \", totalPayroll);\n        println(\"top department = \", topName, \" (\", topPayroll, \")\");\n    }\n\n    toon_free(departments);\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "fcf2997c-54d7-4df7-ad4c-addab026e306",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"org_hard_e.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let departments: ToonNode = toon_key(root, \"departments\");\n\n    let totalMembers: Int = 0;\n    let totalPayroll: Int = 0;\n    let topName: Text = \"\";\n    let topPayroll: Int = 0;\n\n    loop i in 0..toon_len(departments) {\n        let dept: ToonNode = toon_at(departments, i);\n        let name: ToonNode = toon_key(dept, \"name\");\n        let members: ToonNode = toon_key(dept, \"members\");\n\n        let count: Int = toon_len(members);\n        let sum: Int = 0;\n\n        loop j in 0..count {\n            let member: ToonNode = toon_at(members, j);\n            let salary: Int = toon_get_int(member, \"salary\");\n            sum = sum + salary;\n            toon_free(member);\n        }\n\n        fx {\n            println(\"dept \", i, \": \", toon_text_value(name), \" / \", count, \" members / payroll \", sum);\n        }\n\n        totalMembers = totalMembers + count;\n        totalPayroll = totalPayroll + sum;\n\n        if sum > topPayroll {\n            topPayroll = sum;\n            topName = toon_text_value(name);\n        }\n\n        toon_free(name);\n        toon_free(members);\n        toon_free(dept);\n    }\n\n    fx {\n        println(\"total members = \", totalMembers);\n        println(\"total payroll = \", totalPayroll);\n        println(\"top department = \", topName, \" (\", topPayroll, \")\");\n    }\n\n    toon_free(departments);\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 393,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-5uez_l_w/hard_payroll_nested.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "dept 0: eng / 2 members / payroll 220\ndept 1: sales / 1 members / payroll 90\ndept 2: ops / 3 members / payroll 285\ntotal members = 6\ntotal payroll = 595\ntop department = ops (285)\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.035,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 10231,
+                  "bytes": 41067
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 5502,
+                  "bytes": 22073
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 5963,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"org_hard_e.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let departments: ToonNode = toon_key(root, \"departments\");\n\n    let totalMembers: Int = 0;\n    let totalPayroll: Int = 0;\n    let topName: Text = \"\";\n    let topPayroll: Int = 0;\n\n    loop i in 0..toon_len(departments) {\n        let dept: ToonNode = toon_at(departments, i);\n        let name: ToonNode = toon_key(dept, \"name\");\n        let members: ToonNode = toon_key(dept, \"members\");\n\n        let count: Int = toon_len(members);\n        let sum: Int = 0;\n\n        loop j in 0..count {\n            let member: ToonNode = toon_at(members, j);\n            let salary: Int = toon_get_int(member, \"salary\");\n            sum = sum + salary;\n            toon_free(member);\n        }\n\n        fx {\n            println(\"dept \", i, \": \", toon_text_value(name), \" / \", count, \" members / payroll \", sum);\n        }\n\n        totalMembers = totalMembers + count;\n        totalPayroll = totalPayroll + sum;\n\n        if sum > topPayroll {\n            topPayroll = sum;\n            topName = toon_text_value(name);\n        }\n\n        toon_free(name);\n        toon_free(members);\n        toon_free(dept);\n    }\n\n    fx {\n        println(\"total members = \", totalMembers);\n        println(\"total payroll = \", totalPayroll);\n        println(\"top department = \", topName, \" (\", topPayroll, \")\");\n    }\n\n    toon_free(departments);\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "fcf2997c-54d7-4df7-ad4c-addab026e306",
+                "model": "claw1_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"org_hard_e.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let departments: ToonNode = toon_key(root, \"departments\");\n\n    let totalMembers: Int = 0;\n    let totalPayroll: Int = 0;\n    let topName: Text = \"\";\n    let topPayroll: Int = 0;\n\n    loop i in 0..toon_len(departments) {\n        let dept: ToonNode = toon_at(departments, i);\n        let name: ToonNode = toon_key(dept, \"name\");\n        let members: ToonNode = toon_key(dept, \"members\");\n\n        let count: Int = toon_len(members);\n        let sum: Int = 0;\n\n        loop j in 0..count {\n            let member: ToonNode = toon_at(members, j);\n            let salary: Int = toon_get_int(member, \"salary\");\n            sum = sum + salary;\n            toon_free(member);\n        }\n\n        fx {\n            println(\"dept \", i, \": \", toon_text_value(name), \" / \", count, \" members / payroll \", sum);\n        }\n\n        totalMembers = totalMembers + count;\n        totalPayroll = totalPayroll + sum;\n\n        if sum > topPayroll {\n            topPayroll = sum;\n            topName = toon_text_value(name);\n        }\n\n        toon_free(name);\n        toon_free(members);\n        toon_free(dept);\n    }\n\n    fx {\n        println(\"total members = \", totalMembers);\n        println(\"total payroll = \", totalPayroll);\n        println(\"top department = \", topName, \" (\", topPayroll, \")\");\n    }\n\n    toon_free(departments);\n    toon_close(doc);\n    ret;\n}",
+              "source_approx_tokens": 393,
+              "run": {
+                "command": [
+                  "/Users/mke/PBuild/components/aether/build/aether",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-5uez_l_w/hard_payroll_nested.aether"
+                ],
+                "returncode": 0,
+                "stdout": "dept 0: eng / 2 members / payroll 220\ndept 1: sales / 1 members / payroll 90\ndept 2: ops / 3 members / payroll 285\ntotal members = 6\ntotal payroll = 595\ntop department = ops (285)\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.035,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "hard_sensor_streak",
+              "task_title": "Adjacent reading deltas and longest run",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 5977,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"readings_hard_f.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let readings: ToonNode = toon_key(root, \"readings\");\n    let n: Int = toon_len(readings);\n\n    let prev: Int = toon_get_int(toon_at(readings, 0), \"value\");\n    let maxJump: Int = 0;\n    let longestRun: Int = 1;\n    let currentRun: Int = 1;\n\n    loop i in 1..n {\n        let curr: Int = toon_get_int(toon_at(readings, i), \"value\");\n        let delta: Int = curr - prev;\n        fx { println(\"step \", i, \": \", prev, \" -> \", curr, \" (\", delta, \")\"); }\n        if delta > maxJump {\n            maxJump = delta;\n        }\n        if curr >= prev {\n            currentRun = currentRun + 1;\n        } else {\n            currentRun = 1;\n        }\n        if currentRun > longestRun {\n            longestRun = currentRun;\n        }\n        prev = curr;\n    }\n\n    fx {\n        println(\"maxJump = \", maxJump);\n        println(\"longest non-decreasing run = \", longestRun);\n    }\n\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "1016b2bc-b849-4db7-b24c-a36838cd17ae",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"readings_hard_f.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let readings: ToonNode = toon_key(root, \"readings\");\n    let n: Int = toon_len(readings);\n\n    let prev: Int = toon_get_int(toon_at(readings, 0), \"value\");\n    let maxJump: Int = 0;\n    let longestRun: Int = 1;\n    let currentRun: Int = 1;\n\n    loop i in 1..n {\n        let curr: Int = toon_get_int(toon_at(readings, i), \"value\");\n        let delta: Int = curr - prev;\n        fx { println(\"step \", i, \": \", prev, \" -> \", curr, \" (\", delta, \")\"); }\n        if delta > maxJump {\n            maxJump = delta;\n        }\n        if curr >= prev {\n            currentRun = currentRun + 1;\n        } else {\n            currentRun = 1;\n        }\n        if currentRun > longestRun {\n            longestRun = currentRun;\n        }\n        prev = curr;\n    }\n\n    fx {\n        println(\"maxJump = \", maxJump);\n        println(\"longest non-decreasing run = \", longestRun);\n    }\n\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 283,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-fnxh38eu/hard_sensor_streak.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "step 1: 10 -> 12 (2)\nstep 2: 12 -> 12 (0)\nstep 3: 12 -> 9 (-3)\nstep 4: 9 -> 11 (2)\nstep 5: 11 -> 15 (4)\nmaxJump = 4\nlongest non-decreasing run = 3\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.036,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 10231,
+                  "bytes": 41067
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 5502,
+                  "bytes": 22073
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 5977,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"readings_hard_f.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let readings: ToonNode = toon_key(root, \"readings\");\n    let n: Int = toon_len(readings);\n\n    let prev: Int = toon_get_int(toon_at(readings, 0), \"value\");\n    let maxJump: Int = 0;\n    let longestRun: Int = 1;\n    let currentRun: Int = 1;\n\n    loop i in 1..n {\n        let curr: Int = toon_get_int(toon_at(readings, i), \"value\");\n        let delta: Int = curr - prev;\n        fx { println(\"step \", i, \": \", prev, \" -> \", curr, \" (\", delta, \")\"); }\n        if delta > maxJump {\n            maxJump = delta;\n        }\n        if curr >= prev {\n            currentRun = currentRun + 1;\n        } else {\n            currentRun = 1;\n        }\n        if currentRun > longestRun {\n            longestRun = currentRun;\n        }\n        prev = curr;\n    }\n\n    fx {\n        println(\"maxJump = \", maxJump);\n        println(\"longest non-decreasing run = \", longestRun);\n    }\n\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "1016b2bc-b849-4db7-b24c-a36838cd17ae",
+                "model": "claw1_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"readings_hard_f.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let readings: ToonNode = toon_key(root, \"readings\");\n    let n: Int = toon_len(readings);\n\n    let prev: Int = toon_get_int(toon_at(readings, 0), \"value\");\n    let maxJump: Int = 0;\n    let longestRun: Int = 1;\n    let currentRun: Int = 1;\n\n    loop i in 1..n {\n        let curr: Int = toon_get_int(toon_at(readings, i), \"value\");\n        let delta: Int = curr - prev;\n        fx { println(\"step \", i, \": \", prev, \" -> \", curr, \" (\", delta, \")\"); }\n        if delta > maxJump {\n            maxJump = delta;\n        }\n        if curr >= prev {\n            currentRun = currentRun + 1;\n        } else {\n            currentRun = 1;\n        }\n        if currentRun > longestRun {\n            longestRun = currentRun;\n        }\n        prev = curr;\n    }\n\n    fx {\n        println(\"maxJump = \", maxJump);\n        println(\"longest non-decreasing run = \", longestRun);\n    }\n\n    toon_close(doc);\n    ret;\n}",
+              "source_approx_tokens": 283,
+              "run": {
+                "command": [
+                  "/Users/mke/PBuild/components/aether/build/aether",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-fnxh38eu/hard_sensor_streak.aether"
+                ],
+                "returncode": 0,
+                "stdout": "step 1: 10 -> 12 (2)\nstep 2: 12 -> 12 (0)\nstep 3: 12 -> 9 (-3)\nstep 4: 9 -> 11 (2)\nstep 5: 11 -> 15 (4)\nmaxJump = 4\nlongest non-decreasing run = 3\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.036,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "hard_turnstile_fsm",
+              "task_title": "Turnstile state machine",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 6000,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"events_hard_g.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let events: ToonNode = toon_key(root, \"events\");\n\n    let state: Text = \"locked\";\n    let passes: Int = 0;\n    let denied: Int = 0;\n\n    loop i in 0..toon_len(events) {\n        let event: ToonNode = toon_at(events, i);\n        let e: Text = toon_get_text(event, \"e\");\n\n        if state == \"locked\" {\n            if e == \"coin\" {\n                state = \"unlocked\";\n                fx { println(\"event \", i, \": coin -> unlocked\"); }\n            } else {\n                denied = denied + 1;\n                fx { println(\"event \", i, \": push -> DENIED\"); }\n            }\n        } else {\n            if e == \"push\" {\n                state = \"locked\";\n                passes = passes + 1;\n                fx { println(\"event \", i, \": push -> PASS\"); }\n            } else {\n                fx { println(\"event \", i, \": coin -> thanks\"); }\n            }\n        }\n\n        toon_free(event);\n    }\n\n    fx {\n        println(\"passes = \", passes);\n        println(\"denied = \", denied);\n        println(\"final state = \", state);\n    }\n\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "d652d2d5-dcd3-420f-8a2e-8f686aa44036",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"events_hard_g.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let events: ToonNode = toon_key(root, \"events\");\n\n    let state: Text = \"locked\";\n    let passes: Int = 0;\n    let denied: Int = 0;\n\n    loop i in 0..toon_len(events) {\n        let event: ToonNode = toon_at(events, i);\n        let e: Text = toon_get_text(event, \"e\");\n\n        if state == \"locked\" {\n            if e == \"coin\" {\n                state = \"unlocked\";\n                fx { println(\"event \", i, \": coin -> unlocked\"); }\n            } else {\n                denied = denied + 1;\n                fx { println(\"event \", i, \": push -> DENIED\"); }\n            }\n        } else {\n            if e == \"push\" {\n                state = \"locked\";\n                passes = passes + 1;\n                fx { println(\"event \", i, \": push -> PASS\"); }\n            } else {\n                fx { println(\"event \", i, \": coin -> thanks\"); }\n            }\n        }\n\n        toon_free(event);\n    }\n\n    fx {\n        println(\"passes = \", passes);\n        println(\"denied = \", denied);\n        println(\"final state = \", state);\n    }\n\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 322,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-64ztr3pu/hard_turnstile_fsm.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "event 0: push -> DENIED\nevent 1: coin -> unlocked\nevent 2: push -> PASS\nevent 3: push -> DENIED\nevent 4: coin -> unlocked\nevent 5: coin -> thanks\nevent 6: push -> PASS\npasses = 2\ndenied = 2\nfinal state = locked\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.04,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 10231,
+                  "bytes": 41067
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 5502,
+                  "bytes": 22073
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 6000,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"events_hard_g.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let events: ToonNode = toon_key(root, \"events\");\n\n    let state: Text = \"locked\";\n    let passes: Int = 0;\n    let denied: Int = 0;\n\n    loop i in 0..toon_len(events) {\n        let event: ToonNode = toon_at(events, i);\n        let e: Text = toon_get_text(event, \"e\");\n\n        if state == \"locked\" {\n            if e == \"coin\" {\n                state = \"unlocked\";\n                fx { println(\"event \", i, \": coin -> unlocked\"); }\n            } else {\n                denied = denied + 1;\n                fx { println(\"event \", i, \": push -> DENIED\"); }\n            }\n        } else {\n            if e == \"push\" {\n                state = \"locked\";\n                passes = passes + 1;\n                fx { println(\"event \", i, \": push -> PASS\"); }\n            } else {\n                fx { println(\"event \", i, \": coin -> thanks\"); }\n            }\n        }\n\n        toon_free(event);\n    }\n\n    fx {\n        println(\"passes = \", passes);\n        println(\"denied = \", denied);\n        println(\"final state = \", state);\n    }\n\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "d652d2d5-dcd3-420f-8a2e-8f686aa44036",
+                "model": "claw1_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"events_hard_g.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let events: ToonNode = toon_key(root, \"events\");\n\n    let state: Text = \"locked\";\n    let passes: Int = 0;\n    let denied: Int = 0;\n\n    loop i in 0..toon_len(events) {\n        let event: ToonNode = toon_at(events, i);\n        let e: Text = toon_get_text(event, \"e\");\n\n        if state == \"locked\" {\n            if e == \"coin\" {\n                state = \"unlocked\";\n                fx { println(\"event \", i, \": coin -> unlocked\"); }\n            } else {\n                denied = denied + 1;\n                fx { println(\"event \", i, \": push -> DENIED\"); }\n            }\n        } else {\n            if e == \"push\" {\n                state = \"locked\";\n                passes = passes + 1;\n                fx { println(\"event \", i, \": push -> PASS\"); }\n            } else {\n                fx { println(\"event \", i, \": coin -> thanks\"); }\n            }\n        }\n\n        toon_free(event);\n    }\n\n    fx {\n        println(\"passes = \", passes);\n        println(\"denied = \", denied);\n        println(\"final state = \", state);\n    }\n\n    toon_close(doc);\n    ret;\n}",
+              "source_approx_tokens": 322,
+              "run": {
+                "command": [
+                  "/Users/mke/PBuild/components/aether/build/aether",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-64ztr3pu/hard_turnstile_fsm.aether"
+                ],
+                "returncode": 0,
+                "stdout": "event 0: push -> DENIED\nevent 1: coin -> unlocked\nevent 2: push -> PASS\nevent 3: push -> DENIED\nevent 4: coin -> unlocked\nevent 5: coin -> thanks\nevent 6: push -> PASS\npasses = 2\ndenied = 2\nfinal state = locked\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.04,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "hard_word_lengths",
+              "task_title": "Word length buckets and longest word",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 5985,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "```aether\nfn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"words_hard_h.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let words: ToonNode = toon_key(root, \"words\");\n\n    let shortCount: Int = 0;\n    let mediumCount: Int = 0;\n    let longCount: Int = 0;\n    let totalChars: Int = 0;\n    let longestWord: Text = \"\";\n    let longestLen: Int = 0;\n\n    loop i in 0..toon_len(words) {\n        let wordNode: ToonNode = toon_at(words, i);\n        let wNode: ToonNode = toon_key(wordNode, \"w\");\n        let w: Text = toon_text_value(wNode);\n        let len: Int = string_len(w);\n\n        let kind: Text = if len < 4 { \"short\" } else if len > 7 { \"long\" } else { \"medium\" };\n\n        fx {\n            println(\"word \", i, \": \", w, \" (\", len, \") \", kind);\n        }\n\n        if kind == \"short\" {\n            shortCount = shortCount + 1;\n        } else if kind == \"medium\" {\n            mediumCount = mediumCount + 1;\n        } else {\n            longCount = longCount + 1;\n        }\n\n        totalChars = totalChars + len;\n\n        if len > longestLen {\n            longestLen = len;\n            longestWord = w;\n        }\n\n        toon_free(wNode);\n        toon_free(wordNode);\n    }\n\n    fx {\n        println(\"short = \", shortCount);\n        println(\"medium = \", mediumCount);\n        println(\"long = \", longCount);\n        println(\"total chars = \", totalChars);\n        println(\"longest = \", longestWord, \" (\", longestLen, \")\");\n    }\n\n    toon_free(words);\n    toon_close(doc);\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "7f8ac860-f604-4c69-88c1-b6e9f90ac5ec",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"words_hard_h.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let words: ToonNode = toon_key(root, \"words\");\n\n    let shortCount: Int = 0;\n    let mediumCount: Int = 0;\n    let longCount: Int = 0;\n    let totalChars: Int = 0;\n    let longestWord: Text = \"\";\n    let longestLen: Int = 0;\n\n    loop i in 0..toon_len(words) {\n        let wordNode: ToonNode = toon_at(words, i);\n        let wNode: ToonNode = toon_key(wordNode, \"w\");\n        let w: Text = toon_text_value(wNode);\n        let len: Int = string_len(w);\n\n        let kind: Text = if len < 4 { \"short\" } else if len > 7 { \"long\" } else { \"medium\" };\n\n        fx {\n            println(\"word \", i, \": \", w, \" (\", len, \") \", kind);\n        }\n\n        if kind == \"short\" {\n            shortCount = shortCount + 1;\n        } else if kind == \"medium\" {\n            mediumCount = mediumCount + 1;\n        } else {\n            longCount = longCount + 1;\n        }\n\n        totalChars = totalChars + len;\n\n        if len > longestLen {\n            longestLen = len;\n            longestWord = w;\n        }\n\n        toon_free(wNode);\n        toon_free(wordNode);\n    }\n\n    fx {\n        println(\"short = \", shortCount);\n        println(\"medium = \", mediumCount);\n        println(\"long = \", longCount);\n        println(\"total chars = \", totalChars);\n        println(\"longest = \", longestWord, \" (\", longestLen, \")\");\n    }\n\n    toon_free(words);\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 398,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-72ao8edt/hard_word_lengths.aether"
+                    ],
+                    "returncode": 1,
+                    "stdout": "",
+                    "stderr": "L25: expected '{' after 'else' in if-expression.\n",
+                    "diagnostics": [
+                      {
+                        "severity": "error",
+                        "phase": "compile",
+                        "kind": "generic",
+                        "code": null,
+                        "file": null,
+                        "line": 25,
+                        "column": null,
+                        "message": "expected '{' after 'else' in if-expression.",
+                        "hint": null,
+                        "raw": "L25: expected '{' after 'else' in if-expression."
+                      }
+                    ],
+                    "elapsed_seconds": 0.004,
+                    "exact_stdout_match": false
+                  }
+                },
+                {
+                  "prompt_kind": "repair",
+                  "prompt_approx_tokens": 6371,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"words_hard_h.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let words: ToonNode = toon_key(root, \"words\");\n\n    let shortCount: Int = 0;\n    let mediumCount: Int = 0;\n    let longCount: Int = 0;\n    let totalChars: Int = 0;\n    let longestWord: Text = \"\";\n    let longestLen: Int = 0;\n\n    loop i in 0..toon_len(words) {\n        let wordNode: ToonNode = toon_at(words, i);\n        let wNode: ToonNode = toon_key(wordNode, \"w\");\n        let w: Text = toon_text_value(wNode);\n        let len: Int = string_len(w);\n\n        let kind: Text = \"\";\n        if len < 4 {\n            kind = \"short\";\n        } else if len > 7 {\n            kind = \"long\";\n        } else {\n            kind = \"medium\";\n        }\n\n        fx {\n            println(\"word \", i, \": \", w, \" (\", len, \") \", kind);\n        }\n\n        if kind == \"short\" {\n            shortCount = shortCount + 1;\n        } else if kind == \"medium\" {\n            mediumCount = mediumCount + 1;\n        } else {\n            longCount = longCount + 1;\n        }\n\n        totalChars = totalChars + len;\n\n        if len > longestLen {\n            longestLen = len;\n            longestWord = w;\n        }\n\n        toon_free(wNode);\n        toon_free(wordNode);\n    }\n\n    fx {\n        println(\"short = \", shortCount);\n        println(\"medium = \", mediumCount);\n        println(\"long = \", longCount);\n        println(\"total chars = \", totalChars);\n        println(\"longest = \", longestWord, \" (\", longestLen, \")\");\n    }\n\n    toon_free(words);\n    toon_close(doc);\n    ret;\n}\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "b7a86d76-3297-44ed-86e7-2c5fa10bcf88",
+                    "model": "claw1_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"words_hard_h.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let words: ToonNode = toon_key(root, \"words\");\n\n    let shortCount: Int = 0;\n    let mediumCount: Int = 0;\n    let longCount: Int = 0;\n    let totalChars: Int = 0;\n    let longestWord: Text = \"\";\n    let longestLen: Int = 0;\n\n    loop i in 0..toon_len(words) {\n        let wordNode: ToonNode = toon_at(words, i);\n        let wNode: ToonNode = toon_key(wordNode, \"w\");\n        let w: Text = toon_text_value(wNode);\n        let len: Int = string_len(w);\n\n        let kind: Text = \"\";\n        if len < 4 {\n            kind = \"short\";\n        } else if len > 7 {\n            kind = \"long\";\n        } else {\n            kind = \"medium\";\n        }\n\n        fx {\n            println(\"word \", i, \": \", w, \" (\", len, \") \", kind);\n        }\n\n        if kind == \"short\" {\n            shortCount = shortCount + 1;\n        } else if kind == \"medium\" {\n            mediumCount = mediumCount + 1;\n        } else {\n            longCount = longCount + 1;\n        }\n\n        totalChars = totalChars + len;\n\n        if len > longestLen {\n            longestLen = len;\n            longestWord = w;\n        }\n\n        toon_free(wNode);\n        toon_free(wordNode);\n    }\n\n    fx {\n        println(\"short = \", shortCount);\n        println(\"medium = \", mediumCount);\n        println(\"long = \", longCount);\n        println(\"total chars = \", totalChars);\n        println(\"longest = \", longestWord, \" (\", longestLen, \")\");\n    }\n\n    toon_free(words);\n    toon_close(doc);\n    ret;\n}",
+                  "source_approx_tokens": 422,
+                  "run": {
+                    "command": [
+                      "/Users/mke/PBuild/components/aether/build/aether",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-hj3jqynt/hard_word_lengths.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "word 0: hi (2) short\nword 1: hello (5) medium\nword 2: a (1) short\nword 3: wonderful (9) long\nword 4: cat (3) short\nword 5: elephantine (11) long\nword 6: dog (3) short\nshort = 4\nmedium = 1\nlong = 2\ntotal chars = 34\nlongest = elephantine (11)\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.038,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 10231,
+                  "bytes": 41067
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 5502,
+                  "bytes": 22073
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "repair",
+              "prompt_approx_tokens": 6371,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"words_hard_h.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let words: ToonNode = toon_key(root, \"words\");\n\n    let shortCount: Int = 0;\n    let mediumCount: Int = 0;\n    let longCount: Int = 0;\n    let totalChars: Int = 0;\n    let longestWord: Text = \"\";\n    let longestLen: Int = 0;\n\n    loop i in 0..toon_len(words) {\n        let wordNode: ToonNode = toon_at(words, i);\n        let wNode: ToonNode = toon_key(wordNode, \"w\");\n        let w: Text = toon_text_value(wNode);\n        let len: Int = string_len(w);\n\n        let kind: Text = \"\";\n        if len < 4 {\n            kind = \"short\";\n        } else if len > 7 {\n            kind = \"long\";\n        } else {\n            kind = \"medium\";\n        }\n\n        fx {\n            println(\"word \", i, \": \", w, \" (\", len, \") \", kind);\n        }\n\n        if kind == \"short\" {\n            shortCount = shortCount + 1;\n        } else if kind == \"medium\" {\n            mediumCount = mediumCount + 1;\n        } else {\n            longCount = longCount + 1;\n        }\n\n        totalChars = totalChars + len;\n\n        if len > longestLen {\n            longestLen = len;\n            longestWord = w;\n        }\n\n        toon_free(wNode);\n        toon_free(wordNode);\n    }\n\n    fx {\n        println(\"short = \", shortCount);\n        println(\"medium = \", mediumCount);\n        println(\"long = \", longCount);\n        println(\"total chars = \", totalChars);\n        println(\"longest = \", longestWord, \" (\", longestLen, \")\");\n    }\n\n    toon_free(words);\n    toon_close(doc);\n    ret;\n}\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "b7a86d76-3297-44ed-86e7-2c5fa10bcf88",
+                "model": "claw1_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"words_hard_h.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let words: ToonNode = toon_key(root, \"words\");\n\n    let shortCount: Int = 0;\n    let mediumCount: Int = 0;\n    let longCount: Int = 0;\n    let totalChars: Int = 0;\n    let longestWord: Text = \"\";\n    let longestLen: Int = 0;\n\n    loop i in 0..toon_len(words) {\n        let wordNode: ToonNode = toon_at(words, i);\n        let wNode: ToonNode = toon_key(wordNode, \"w\");\n        let w: Text = toon_text_value(wNode);\n        let len: Int = string_len(w);\n\n        let kind: Text = \"\";\n        if len < 4 {\n            kind = \"short\";\n        } else if len > 7 {\n            kind = \"long\";\n        } else {\n            kind = \"medium\";\n        }\n\n        fx {\n            println(\"word \", i, \": \", w, \" (\", len, \") \", kind);\n        }\n\n        if kind == \"short\" {\n            shortCount = shortCount + 1;\n        } else if kind == \"medium\" {\n            mediumCount = mediumCount + 1;\n        } else {\n            longCount = longCount + 1;\n        }\n\n        totalChars = totalChars + len;\n\n        if len > longestLen {\n            longestLen = len;\n            longestWord = w;\n        }\n\n        toon_free(wNode);\n        toon_free(wordNode);\n    }\n\n    fx {\n        println(\"short = \", shortCount);\n        println(\"medium = \", mediumCount);\n        println(\"long = \", longCount);\n        println(\"total chars = \", totalChars);\n        println(\"longest = \", longestWord, \" (\", longestLen, \")\");\n    }\n\n    toon_free(words);\n    toon_close(doc);\n    ret;\n}",
+              "source_approx_tokens": 422,
+              "run": {
+                "command": [
+                  "/Users/mke/PBuild/components/aether/build/aether",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-hj3jqynt/hard_word_lengths.aether"
+                ],
+                "returncode": 0,
+                "stdout": "word 0: hi (2) short\nword 1: hello (5) medium\nword 2: a (1) short\nword 3: wonderful (9) long\nword 4: cat (3) short\nword 5: elephantine (11) long\nword 6: dog (3) short\nshort = 4\nmedium = 1\nlong = 2\ntotal chars = 34\nlongest = elephantine (11)\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.038,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 2,
+              "resolved_after_repair": true,
+              "failure_fingerprint": ""
+            }
+          ],
+          "summary": {
+            "total_cases": 8,
+            "generated_ok": 8,
+            "run_ok": 8,
+            "exact_stdout_match": 8,
+            "resolved_after_repair": 2,
+            "generated_rate": 1.0,
+            "run_rate": 1.0,
+            "exact_match_rate": 1.0,
+            "repair_recovery_rate": 0.25
+          },
+          "usage_summary": {
+            "attempts_total": 10,
+            "attempts_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null
+          },
+          "source_token_summary": {
+            "attempts_total": 10,
+            "source_approx_tokens_total": 3720,
+            "source_approx_tokens_avg": 372.0
+          },
+          "final_usage_summary": {
+            "cases_total": 8,
+            "cases_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null,
+            "success_filter": "all"
+          },
+          "run_ok_final_usage_summary": {
+            "cases_total": 8,
+            "cases_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null,
+            "success_filter": "run_ok"
+          },
+          "exact_final_usage_summary": {
+            "cases_total": 8,
+            "cases_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null,
+            "success_filter": "exact"
+          },
+          "final_source_token_summary": {
+            "cases_counted": 8,
+            "source_approx_tokens_total": 2936,
+            "source_approx_tokens_avg": 367.0,
+            "success_filter": "all"
+          },
+          "run_ok_final_source_token_summary": {
+            "cases_counted": 8,
+            "source_approx_tokens_total": 2936,
+            "source_approx_tokens_avg": 367.0,
+            "success_filter": "run_ok"
+          },
+          "exact_final_source_token_summary": {
+            "cases_counted": 8,
+            "source_approx_tokens_total": 2936,
+            "source_approx_tokens_avg": 367.0,
+            "success_filter": "exact"
+          },
+          "failure_patterns": []
+        }
+      ]
+    }
+  ],
+  "updated_at_unix": 1782841555
+}
