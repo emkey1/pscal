@@ -63,3 +63,8 @@ readln_test.txt
 textfile_alias_basic.tmp
 minivmac4ios/
 scratchpad/
+
+# Claude Code local/session state (settings.json and skills/ ARE committed)
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/

@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmake --build build *)",
+      "Bash(python3 Tests/run_all_suites.py *)",
+      "Bash(python3 tools/recapture_expected.py --check *)",
+      "Bash(python3 tools/aether_specialization_validate_corpus.py *)",
+      "Bash(build/bin/aether --version)",
+      "Bash(./build/bin/aether --version)",
+      "Bash(git submodule status *)"
+    ]
+  }
+}
