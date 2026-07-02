@@ -2415,7 +2415,6 @@ set(AETHER_SRC components/aether/src/aether)
 set(AETHER_SOURCES
     ${REA_SOURCES}
     ${AETHER_SRC}/diagnostics.c
-    ${AETHER_SRC}/translate.c
     ${AETHER_SRC}/parser.c
     ${AETHER_SRC}/ast_prepasses.c
     ${AETHER_SRC}/ast_parser.c
@@ -2432,7 +2431,6 @@ if(NOT PSCAL_PLATFORM_IOS)
         PSCAL_FRONTEND_DISPLAY_NAME=\"Aether\"
         PSCAL_FRONTEND_USAGE_NAME=\"aether\"
         PSCAL_FRONTEND_COMPILER_ID=\"aether\"
-        PSCAL_FRONTEND_HAS_REWRITE_DUMP=1
         PSCAL_FRONTEND_INSTALL_HOOKS=aetherInstallFrontendHooks)
     # Aether installs its parse/semantic/module + diagnostic hooks at startup via
     # reaSetFrontendHooks() (src/aether/state.c); main() calls the installer named
@@ -2497,7 +2495,6 @@ if(PSCAL_BUILD_STATIC_LIBS)
         PSCAL_FRONTEND_DISPLAY_NAME=\"Aether\"
         PSCAL_FRONTEND_USAGE_NAME=\"aether\"
         PSCAL_FRONTEND_COMPILER_ID=\"aether\"
-        PSCAL_FRONTEND_HAS_REWRITE_DUMP=1
         PSCAL_FRONTEND_INSTALL_HOOKS=aetherInstallFrontendHooks)
     # Aether installs its parse/semantic/module + diagnostic hooks at startup via
     # reaSetFrontendHooks() (src/aether/state.c); main() calls the installer named
