@@ -2,52 +2,31 @@
   "pairs": [
     {
       "id": "repair_fx_required",
-      "diagnostic": "Aether effect error: call to 'println' requires an fx block.",
+      "diagnostic": "[FX-001] Aether effect error: call to 'println' requires an fx block.",
       "broken_source": "fn main() -> Void {\n    println(\"hello\");\n    ret;\n}\n",
       "fixed_source": "fn main() -> Void {\n    fx {\n        println(\"hello\");\n    }\n    ret;\n}\n",
       "expected_stdout": "hello\n"
     },
     {
       "id": "repair_return_to_ret",
-      "diagnostic": "identifier or keyword mismatch: use 'ret' instead of 'return'.",
+      "diagnostic": "[SYN-001] Aether parser rewrite error: unexpected token in block; expected a statement.",
       "broken_source": "fn answer() -> Int {\n    return 42;\n}\n\nfn main() -> Void {\n    fx {\n        println(answer());\n    }\n    ret;\n}\n",
       "fixed_source": "fn answer() -> Int {\n    ret 42;\n}\n\nfn main() -> Void {\n    fx {\n        println(answer());\n    }\n    ret;\n}\n",
       "expected_stdout": "42\n"
     },
     {
       "id": "repair_contract_placement",
-      "diagnostic": "Aether contract rewrite error: @pre must annotate the next function declaration.",
+      "diagnostic": "[SYN-001] Aether parser rewrite error: unexpected token in block; expected a statement.",
       "broken_source": "fn clamp(score: Int) -> Int {\n    @pre score >= 0\n    if score > 100 {\n        ret 100;\n    }\n    ret score;\n}\n\nfn main() -> Void {\n    fx {\n        println(clamp(150));\n    }\n    ret;\n}\n",
       "fixed_source": "@pre score >= 0\nfn clamp(score: Int) -> Int {\n    if score > 100 {\n        ret 100;\n    }\n    ret score;\n}\n\nfn main() -> Void {\n    fx {\n        println(clamp(150));\n    }\n    ret;\n}\n",
       "expected_stdout": "100\n"
     },
     {
       "id": "repair_invented_import",
-      "diagnostic": "Error: unable to open module 'helpers'.",
-      "broken_source": "use \"helpers\";\n\nfn main() -> Void {\n    fx {\n        println(42);\n    }\n    ret;\n}\n",
-      "fixed_source": "fn main() -> Void {\n    fx {\n        println(42);\n    }\n    ret;\n}\n",
+      "diagnostic": "[SCOPE-001] identifier 'Helpers' not in scope.",
+      "broken_source": "use \"helpers\";\n\nfn main() -> Void {\n    let total: Int = Helpers.add(40, 2);\n    fx { println(total); }\n    ret;\n}\n",
+      "fixed_source": "@pure\nfn add(left: Int, right: Int) -> Int {\n    ret left + right;\n}\n\nfn main() -> Void {\n    let total: Int = add(40, 2);\n    fx { println(total); }\n    ret;\n}\n",
       "expected_stdout": "42\n"
-    },
-    {
-      "id": "repair_method_self_parameter",
-      "diagnostic": "Aether method error: do not declare an explicit self parameter inside a type method; methods receive `self` implicitly.",
-      "broken_source": "type Counter {\n    value: Int;\n\n    fn bump(self: Counter) -> Int {\n        self.value = self.value + 1;\n        ret self.value;\n    }\n}\n\nfn main() -> Void {\n    let counter: Counter = new Counter();\n    counter.value = 0;\n    fx {\n        println(counter.bump());\n    }\n    ret;\n}\n",
-      "fixed_source": "type Counter {\n    value: Int;\n\n    fn bump() -> Int {\n        self.value = self.value + 1;\n        ret self.value;\n    }\n}\n\nfn main() -> Void {\n    let counter: Counter = new Counter();\n    counter.value = 0;\n    fx {\n        println(counter.bump());\n    }\n    ret;\n}\n",
-      "expected_stdout": "1\n"
-    },
-    {
-      "id": "repair_println_string_concat",
-      "diagnostic": "Type mismatch: do not build print text with `Text + Int`; pass mixed values directly to `println`.",
-      "broken_source": "fn main() -> Void {\n    let score: Int = 42;\n    fx {\n        println(\"score = \" + score);\n    }\n    ret;\n}\n",
-      "fixed_source": "fn main() -> Void {\n    let score: Int = 42;\n    fx {\n        println(\"score = \", score);\n    }\n    ret;\n}\n",
-      "expected_stdout": "score = 42\n"
-    },
-    {
-      "id": "repair_toon_guarded_intermediate",
-      "diagnostic": "TOON access error: `_or` helpers only protect the final lookup; guard intermediate object lookups before descending.",
-      "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"TOON unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse(\"{\\\"items\\\":[{\\\"id\\\":1,\\\"meta\\\":{\\\"code\\\":\\\"A\\\"}},{\\\"id\\\":2}]}\");\n    let root: ToonNode = toon_root(doc);\n    let items: ToonNode = toon_key(root, \"items\");\n\n    loop i in 0..toon_len(items) {\n        let item: ToonNode = toon_at(items, i);\n        let id: Int = toon_get_int(item, \"id\");\n        let code: Text = toon_get_text_or(toon_key(item, \"meta\"), \"code\", \"UNKNOWN\");\n        fx {\n            println(\"Item \", id, \" has code: \", code);\n        }\n    }\n\n    toon_close(doc);\n    ret;\n}\n",
-      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"TOON unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse(\"{\\\"items\\\":[{\\\"id\\\":1,\\\"meta\\\":{\\\"code\\\":\\\"A\\\"}},{\\\"id\\\":2}]}\");\n    let root: ToonNode = toon_root(doc);\n    let items: ToonNode = toon_key(root, \"items\");\n\n    loop i in 0..toon_len(items) {\n        let item: ToonNode = toon_at(items, i);\n        let id: Int = toon_get_int(item, \"id\");\n        let code: Text = \"UNKNOWN\";\n\n        if toon_has_key(item, \"meta\") {\n            let meta: ToonNode = toon_key(item, \"meta\");\n            code = toon_get_text_or(meta, \"code\", \"MISSING\");\n        }\n\n        fx {\n            println(\"Item \", id, \" has code: \", code);\n        }\n    }\n\n    toon_close(doc);\n    ret;\n}\n",
-      "expected_stdout": "Item 1 has code: A\nItem 2 has code: UNKNOWN\n"
     },
     {
       "id": "repair_float_formatting",
@@ -57,15 +36,8 @@
       "expected_stdout": "Amount: 19.99\n"
     },
     {
-      "id": "repair_type_for_toon_handle",
-      "diagnostic": "Aether declaration rewrite error: TOON handles should be bound with explicit `ToonDoc` or `ToonNode` types.",
-      "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n\n    let doc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42}\");\n    let root = toon_root(doc);\n    let name: Text = toon_get_text(root, \"name\");\n    let score: Int = toon_get_int(root, \"score\");\n    fx {\n        println(name, \" \", score);\n    }\n    toon_close(doc);\n    ret;\n}\n",
-      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42}\");\n    let root: ToonNode = toon_root(doc);\n    let name: Text = toon_get_text(root, \"name\");\n    let score: Int = toon_get_int(root, \"score\");\n    fx {\n        println(name, \" \", score);\n    }\n    toon_close(doc);\n    ret;\n}\n",
-      "expected_stdout": "Aether 42\n"
-    },
-    {
       "id": "repair_global_const_scope",
-      "diagnostic": "Runtime Error: Undefined global variable 'PI'.",
+      "diagnostic": "[SYN-001] Aether parser rewrite error: expected ')' to close argument list (opened at line 3).",
       "broken_source": "fn main() -> Void {\n    const PI: Real = 3.14159265;\n    fn area(radius: Real) -> Real {\n        ret PI * radius * radius;\n    }\n    fx {\n        println(\"area=\", area(2.5):0:2);\n    }\n    ret;\n}\n",
       "fixed_source": "const PI: Real = 3.14159265;\n\n@pure\nfn area(radius: Real) -> Real {\n    ret PI * radius * radius;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"area=\", area(2.5):0:2);\n    }\n    ret;\n}\n",
       "expected_stdout": "area=19.63\n"
@@ -82,7 +54,7 @@
     },
     {
       "id": "repair_contract_nested_in_main",
-      "diagnostic": "[ANN-001] Aether contract rewrite error: @pre must annotate the next function declaration.",
+      "diagnostic": "[SYN-001] Aether parser rewrite error: unexpected token in block; expected a statement.",
       "broken_source": "fn main() -> Void {\n    @pre score >= 0\n    @post result >= 0\n    fn normalize(score: Int) -> Int {\n        ret score;\n    }\n\n    let answer1: Int = normalize(150);\n    let answer2: Int = normalize(42);\n\n    fx {\n        println(\"150 => \", answer1);\n        println(\"42 => \", answer2);\n    }\n\n    ret;\n}\n",
       "fixed_source": "@pre score >= 0\n@post result >= 0\nfn normalize(score: Int) -> Int {\n    ret score;\n}\n\nfn main() -> Void {\n    let answer1: Int = normalize(150);\n    let answer2: Int = normalize(42);\n\n    fx {\n        println(\"150 => \", answer1);\n        println(\"42 => \", answer2);\n    }\n\n    ret;\n}\n",
       "expected_stdout": "150 => 150\n42 => 42\n"
@@ -123,21 +95,21 @@
     },
     {
       "id": "repair_pre_above_fn",
-      "diagnostic": "Aether contract rewrite error: @pre must annotate the next function declaration.",
+      "diagnostic": "[SYN-001] Aether parser rewrite error: unexpected token in block; expected a statement.",
       "broken_source": "fn cap(x: Int) -> Int {\n    @pre x >= 0\n    if x > 50 {\n        ret 50;\n    }\n    ret x;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"cap=\", cap(70));\n    }\n    ret;\n}\n",
       "fixed_source": "@pre x >= 0\n@post result <= 50\nfn cap(x: Int) -> Int {\n    if x > 50 {\n        ret 50;\n    }\n    ret x;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"cap=\", cap(70));\n    }\n    ret;\n}\n",
       "expected_stdout": "cap=50\n"
     },
     {
       "id": "repair_toon_root_before_get",
-      "diagnostic": "Aether type error: call to 'toon_get_text_or' expects a ToonNode handle, but 'doc' is ToonDoc.",
+      "diagnostic": "[TOON-001] Aether type error: call to 'toon_get_text_or' expects a ToonNode handle, but 'doc' is ToonDoc.",
       "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"city\\\":\\\"Metro\\\"}\");\n    let city: Text = toon_get_text_or(doc, \"city\", \"NONE\");\n    fx {\n        println(\"city=\", city);\n    }\n    toon_close(doc);\n    ret;\n}\n",
       "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"city\\\":\\\"Metro\\\"}\");\n    let root: ToonNode = toon_root(doc);\n    let city: Text = toon_get_text_or(root, \"city\", \"NONE\");\n    fx {\n        println(\"city=\", city);\n    }\n    toon_close(doc);\n    ret;\n}\n",
       "expected_stdout": "city=Metro\n"
     },
     {
       "id": "repair_use_module_direct_call",
-      "diagnostic": "identifier 'color_rules' not in scope.",
+      "diagnostic": "[SCOPE-001] identifier 'color_rules' not in scope.",
       "broken_source": "use \"color_rules\";\n\nfn main() -> Void {\n    let shade: Text = color_rules.shadeFor(120);\n    fx {\n        println(\"shade=\", shade);\n    }\n    ret;\n}\n",
       "fixed_source": "use \"color_rules\";\n\nfn main() -> Void {\n    let shade: Text = shadeFor(120);\n    fx {\n        println(\"shade=\", shade);\n    }\n    ret;\n}\n",
       "expected_stdout": "shade=bright\n",
@@ -147,59 +119,94 @@
     },
     {
       "id": "repair_pure_sigil",
-      "diagnostic": "Aether annotation error: purity must be written as `@pure` on its own line above the function. Bare `pure fn` is not valid.",
+      "diagnostic": "[SCOPE-001] identifier 'pure' not in scope.",
       "broken_source": "pure fn isReady(score: Int) -> Bool {\n    ret score >= 70;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"ready: \", isReady(85));\n    }\n    ret;\n}\n",
       "fixed_source": "@pure\nfn isReady(score: Int) -> Bool {\n    ret score >= 70;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"ready: \", isReady(85));\n    }\n    ret;\n}\n",
       "expected_stdout": "ready: true\n"
     },
     {
       "id": "repair_contract_in_body",
-      "diagnostic": "Aether contract rewrite error: @pre/@post must annotate the next function declaration. Place them on their own lines ABOVE `fn`, with no trailing semicolon -- not inside the function body.",
+      "diagnostic": "[SYN-001] Aether parser rewrite error: unexpected token in block; expected a statement.",
       "broken_source": "fn cap(value: Int) -> Int {\n    @pre value >= 0;\n    @post result <= 60;\n    if value > 60 {\n        ret 60;\n    }\n    ret value;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"cap 90 = \", cap(90));\n    }\n    ret;\n}\n",
       "fixed_source": "@pre value >= 0\n@post result <= 60\nfn cap(value: Int) -> Int {\n    if value > 60 {\n        ret 60;\n    }\n    ret value;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"cap 90 = \", cap(90));\n    }\n    ret;\n}\n",
       "expected_stdout": "cap 90 = 60\n"
     },
     {
       "id": "repair_post_on_signature",
-      "diagnostic": "Aether feature rewrite error: a @post contract must be on its own line above `fn`, not appended to the function signature after the return type.",
+      "diagnostic": "[ANN-001] Aether contract error: @post must annotate the next function declaration.",
       "broken_source": "fn ordered(a: Int, b: Int) -> (Int, Int) @post result.0 >= result.1 {\n    if a >= b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (hi, lo) = ordered(2, 7);\n    fx {\n        println(\"hi=\", hi);\n        println(\"lo=\", lo);\n    }\n    ret;\n}\n",
       "fixed_source": "@post result.0 >= result.1\nfn ordered(a: Int, b: Int) -> (Int, Int) {\n    if a >= b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (hi, lo) = ordered(2, 7);\n    fx {\n        println(\"hi=\", hi);\n        println(\"lo=\", lo);\n    }\n    ret;\n}\n",
       "expected_stdout": "hi=7\nlo=2\n"
     },
     {
       "id": "repair_at_fx_to_block",
-      "diagnostic": "Aether effect error: output statements like println must live inside an `fx { ... }` block in the function body, not behind an `@fx` annotation. There is no `@fx` annotation.",
+      "diagnostic": "[FX-001] Aether effect error: call to 'println' requires an fx block.",
       "broken_source": "@fx\nfn main() -> Void {\n    println(\"hi\");\n    ret;\n}\n",
       "fixed_source": "fn main() -> Void {\n    fx {\n        println(\"hi\");\n    }\n    ret;\n}\n",
       "expected_stdout": "hi\n"
     },
     {
       "id": "repair_inclusive_range",
-      "diagnostic": "Aether range error: `loop` ranges are half-open with `..`; there is no inclusive `..=`. To iterate values 1..3 inclusive, write `1..4`.",
+      "diagnostic": "[SYN-001] Aether parser rewrite error: could not parse loop range bounds.",
       "broken_source": "fn main() -> Void {\n    loop i in 1..=3 {\n        fx { println(\"i=\", i); }\n    }\n    ret;\n}\n",
       "fixed_source": "fn main() -> Void {\n    loop i in 1..4 {\n        fx { println(\"i=\", i); }\n    }\n    ret;\n}\n",
       "expected_stdout": "i=1\ni=2\ni=3\n"
     },
     {
-      "id": "repair_new_struct_init",
-      "diagnostic": "Aether record init error: construct a type with `TypeName { field: value, ... }`. Do not prefix with `new`.",
-      "broken_source": "type Point {\n    x: Int;\n    y: Int;\n}\n\nfn main() -> Void {\n    let p: Point = new Point { x: 3, y: 4 };\n    fx { println(\"x=\", p.x); }\n    ret;\n}\n",
-      "fixed_source": "type Point {\n    x: Int;\n    y: Int;\n}\n\nfn main() -> Void {\n    let p: Point = Point { x: 3, y: 4 };\n    fx { println(\"x=\", p.x); }\n    ret;\n}\n",
+      "id": "repair_no_constructor_method",
+      "diagnostic": "[SYN-001] Aether declaration rewrite error: 'new' is a reserved keyword (the object allocator) and cannot be used as a method name.",
+      "broken_source": "type Point {\n    x: Int;\n    y: Int;\n\n    fn new(x: Int, y: Int) -> Point {\n        let p: Point = new Point();\n        p.x = x;\n        p.y = y;\n        ret p;\n    }\n}\n\nfn main() -> Void {\n    let p: Point = Point.new(3, 4);\n    fx { println(\"x=\", p.x); }\n    ret;\n}\n",
+      "fixed_source": "type Point {\n    x: Int;\n    y: Int;\n}\n\nfn main() -> Void {\n    let p: Point = new Point { x: 3, y: 4 };\n    fx { println(\"x=\", p.x); }\n    ret;\n}\n",
       "expected_stdout": "x=3\n"
     },
     {
       "id": "repair_toon_availability",
-      "diagnostic": "Aether TOON error: the availability guard is `has_toon()`. There is no `has_toon_parser`.",
+      "diagnostic": "[SCOPE-001] identifier 'has_toon_parser' not in scope.",
       "broken_source": "fn main() -> Void {\n    if !has_toon_parser() {\n        fx { println(\"no toon\"); }\n        ret;\n    }\n    fx { println(\"ok\"); }\n    ret;\n}\n",
       "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no toon\"); }\n        ret;\n    }\n    fx { println(\"ok\"); }\n    ret;\n}\n",
       "expected_stdout": "ok\n"
     },
     {
       "id": "repair_const_module_scope",
-      "diagnostic": "Aether scope error: a constant used by a top-level `@pure` function must be declared at module scope (outside `main`), not inside `main`.",
+      "diagnostic": "[SCOPE-001] identifier 'RATE' not in scope.",
       "broken_source": "@pure\nfn taxed(n: Int) -> Int {\n    ret n + RATE;\n}\n\nfn main() -> Void {\n    const RATE: Int = 5;\n    fx { println(\"t=\", taxed(10)); }\n    ret;\n}\n",
       "fixed_source": "const RATE: Int = 5;\n\n@pure\nfn taxed(n: Int) -> Int {\n    ret n + RATE;\n}\n\nfn main() -> Void {\n    fx { println(\"t=\", taxed(10)); }\n    ret;\n}\n",
       "expected_stdout": "t=15\n"
+    },
+    {
+      "id": "repair_field_default_constant",
+      "diagnostic": "[FIELD-003] Aether field-default rewrite error: only constant field defaults are supported; set computed values at construction via `new T { field: value }`.",
+      "broken_source": "@pure\nfn base() -> Int {\n    ret 10;\n}\n\ntype Config {\n    retries: Int = base();\n    label: Text = \"svc\";\n}\n\nfn main() -> Void {\n    let c: Config = new Config();\n    fx { println(c.retries); }\n    ret;\n}\n",
+      "fixed_source": "@pure\nfn base() -> Int {\n    ret 10;\n}\n\ntype Config {\n    retries: Int = 0;\n    label: Text = \"svc\";\n}\n\nfn main() -> Void {\n    let c: Config = new Config { retries: base() };\n    fx { println(c.retries); }\n    ret;\n}\n",
+      "expected_stdout": "10\n"
+    },
+    {
+      "id": "repair_bare_ret_value",
+      "diagnostic": "[FLOW-002] Aether function rewrite error: return requires a value.",
+      "broken_source": "@pure\nfn pick(flag: Bool) -> Int {\n    if flag {\n        ret 1;\n    }\n    ret;\n}\n\nfn main() -> Void {\n    fx { println(pick(true)); }\n    ret;\n}\n",
+      "fixed_source": "@pure\nfn pick(flag: Bool) -> Int {\n    if flag {\n        ret 1;\n    }\n    ret 0;\n}\n\nfn main() -> Void {\n    fx { println(pick(true)); }\n    ret;\n}\n",
+      "expected_stdout": "1\n"
+    },
+    {
+      "id": "repair_par_direct_calls",
+      "diagnostic": "[PAR-002] Aether par rewrite error: only direct call statements are allowed inside par blocks.",
+      "broken_source": "type Slot {\n    value: Int;\n}\n\nfn main() -> Void {\n    let a: Slot = new Slot();\n    par {\n        a.value = 1;\n        println(\"done\");\n    }\n    fx { println(a.value); }\n    ret;\n}\n",
+      "fixed_source": "type Slot {\n    value: Int;\n}\n\nfn fill(s: Slot) -> Void {\n    s.value = 1;\n    fx { println(\"done\"); }\n    ret;\n}\n\nfn main() -> Void {\n    let a: Slot = new Slot();\n    par {\n        fill(a);\n    }\n    fx { println(a.value); }\n    ret;\n}\n",
+      "expected_stdout": "done\n1\n"
+    },
+    {
+      "id": "repair_par_shared_record",
+      "diagnostic": "[PAR-001] Aether par error: record 's' is shared by more than one par branch; the spawned threads write it concurrently, which races (heap corruption).",
+      "broken_source": "type Slot {\n    value: Int;\n}\n\nfn bump_a(s: Slot) -> Void {\n    s.value = s.value + 1;\n    ret;\n}\n\nfn bump_b(s: Slot) -> Void {\n    s.value = s.value + 2;\n    ret;\n}\n\nfn main() -> Void {\n    let s: Slot = new Slot();\n    s.value = 0;\n    par {\n        bump_a(s);\n        bump_b(s);\n    }\n    fx { println(s.value); }\n    ret;\n}\n",
+      "fixed_source": "type Slot {\n    value: Int;\n}\n\nfn bump_a(s: Slot) -> Void {\n    s.value = s.value + 1;\n    ret;\n}\n\nfn bump_b(s: Slot) -> Void {\n    s.value = s.value + 2;\n    ret;\n}\n\nfn main() -> Void {\n    let a: Slot = new Slot();\n    let b: Slot = new Slot();\n    a.value = 0;\n    b.value = 0;\n    par {\n        bump_a(a);\n        bump_b(b);\n    }\n    fx {\n        println(\"a = \", a.value);\n        println(\"b = \", b.value);\n    }\n    ret;\n}\n",
+      "expected_stdout": "a = 1\nb = 2\n"
+    },
+    {
+      "id": "repair_tuple_recursion_record",
+      "diagnostic": "[TUP-001] Aether tuple rewrite error: tuple-return functions cannot call themselves (tuple slots are not reentrant).",
+      "broken_source": "@pure\nfn split(n: Int) -> (Int, Int) {\n    if n <= 0 {\n        ret (0, 0);\n    }\n    let (lo, hi) = split(n - 1);\n    ret (lo + 1, hi + 2);\n}\n\nfn main() -> Void {\n    let (a, b) = split(3);\n    fx { println(a, \" \", b); }\n    ret;\n}\n",
+      "fixed_source": "type SplitResult {\n    lo: Int;\n    hi: Int;\n}\n\n@pure\nfn split(n: Int) -> SplitResult {\n    if n <= 0 {\n        ret new SplitResult { lo: 0, hi: 0 };\n    }\n    let prev: SplitResult = split(n - 1);\n    ret new SplitResult { lo: prev.lo + 1, hi: prev.hi + 2 };\n}\n\nfn main() -> Void {\n    let parts: SplitResult = split(3);\n    fx { println(parts.lo, \" \", parts.hi); }\n    ret;\n}\n",
+      "expected_stdout": "3 6\n"
     }
   ]
 }

@@ -13,7 +13,13 @@ fn main() -> Void {
         ret;
     }
 
-    let doc: ToonDoc = toon_parse_file("rows.json");
+    let doc: ToonDoc;
+
+    fx {
+
+        doc = toon_parse_file("rows.json");
+
+    }
     let root: ToonNode = toon_root(doc);
     let rows: ToonNode = toon_key(root, "rows");
     let missing: Int = 0;

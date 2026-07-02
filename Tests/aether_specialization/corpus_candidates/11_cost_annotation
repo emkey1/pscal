@@ -1,5 +1,7 @@
 // 11_cost_annotation
-// Concepts: @cost with a time unit, placed directly above the function
+// Concepts: @cost with a time unit, placed directly above the function.
+// @cost is advisory metadata (a declared budget); it is recorded but never
+// checked or enforced at compile time or runtime.
 // expect: answer = 42
 
 @cost 5ms

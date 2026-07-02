@@ -1,0 +1,36 @@
+// 315_par_per_branch_records
+// Concepts: par block with direct calls, one record per branch (never share a
+// record across branches), combining branch results after the par block
+// expect: low = 1225 over 50
+// expect: high = 3725 over 50
+// expect: grand = 4950
+
+type Stats {
+    total: Int = 0;
+    count: Int = 0;
+}
+
+fn sum_range(stats: Stats, lo: Int, hi: Int) -> Void {
+    loop i in lo..hi {
+        stats.total = stats.total + i;
+        stats.count = stats.count + 1;
+    }
+    ret;
+}
+
+fn main() -> Void {
+    let low: Stats = new Stats();
+    let high: Stats = new Stats();
+
+    par {
+        sum_range(low, 0, 50);
+        sum_range(high, 50, 100);
+    }
+
+    fx {
+        println("low = ", low.total, " over ", low.count);
+        println("high = ", high.total, " over ", high.count);
+        println("grand = ", low.total + high.total);
+    }
+    ret;
+}

@@ -1,0 +1,27 @@
+// 314_field_defaults_partial_init
+// Concepts: constant field defaults in a type body, new T { field: value }
+// partial construction (unlisted fields keep their defaults), plain new T()
+// expect: standard: 3 x 250ms (default)
+// expect: aggressive: 6 x 250ms (aggressive)
+
+type RetryPolicy {
+    attempts: Int = 3;
+    delay_ms: Int = 250;
+    label: Text = "default";
+}
+
+@pure
+fn describe(policy: RetryPolicy) -> Text {
+    ret policy.label;
+}
+
+fn main() -> Void {
+    let standard: RetryPolicy = new RetryPolicy();
+    let aggressive: RetryPolicy = new RetryPolicy { attempts: 6, label: "aggressive" };
+
+    fx {
+        println("standard: ", standard.attempts, " x ", standard.delay_ms, "ms (", describe(standard), ")");
+        println("aggressive: ", aggressive.attempts, " x ", aggressive.delay_ms, "ms (", describe(aggressive), ")");
+    }
+    ret;
+}

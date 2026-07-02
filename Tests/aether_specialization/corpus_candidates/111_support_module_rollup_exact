@@ -35,7 +35,13 @@ fn main() -> Void {
         ret;
     }
 
-    let doc: ToonDoc = toon_parse_file("support_jobs111.json");
+    let doc: ToonDoc;
+
+    fx {
+
+        doc = toon_parse_file("support_jobs111.json");
+
+    }
     let root: ToonNode = toon_root(doc);
     let jobs: ToonNode = toon_key(root, "jobs");
     let totals: Totals = new Totals();

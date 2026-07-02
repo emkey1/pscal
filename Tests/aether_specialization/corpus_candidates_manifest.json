@@ -423,7 +423,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/111_support_module_rollup_exact",
       "repo_path": "Tests/aether_specialization/corpus_candidates/111_support_module_rollup_exact",
-      "sha256": "2fdf603aa3b8053ca7d10ed7f48654e825a7c11b899eb37601e8186b8d92f3ac",
+      "sha256": "faf9c7b353b7e80016322a67046261a42859564ea9ae3feb6ed8323328c0e8c3",
       "stdout": "job 0 -> Alpha / ready / 95\njob 1 -> Beta / blocked / 50\njob 2 -> Gamma / blocked / 12\nready = 1\nreview = 0\nblocked = 2\n",
       "metadata": {
         "canonical": true,
@@ -436,7 +436,7 @@
           "file",
           "output"
         ],
-        "notes": "Benchmark-mirror module plus TOON file rollup using exported names exactly and a provided default score."
+        "notes": "Benchmark-mirror module plus TOON file rollup using exported names exactly and a provided default score. 2026-07-01: toon_parse_file wrapped in fx (FX-001, effectful as of 2026-07-01-5); re-verified."
       }
     },
     {
@@ -581,7 +581,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/11_cost_annotation",
       "repo_path": "Tests/aether_specialization/corpus_candidates/11_cost_annotation",
-      "sha256": "16ea33cd19ea019505e9a0bfc8ba7fd6608ef0c63c77a7dd54e682488f65eb61",
+      "sha256": "090bfbbf8e4fc4e6ad4a667df3abc9f35b123fcd783e7548582eeab30170d00e",
       "stdout": "answer = 42\n",
       "metadata": {
         "canonical": true,
@@ -6431,7 +6431,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/41_contract_quote",
       "repo_path": "Tests/aether_specialization/corpus_candidates/41_contract_quote",
-      "sha256": "16944cfad7da5a172d2e0b8960e0bd29efd88e0bc520573a1c95c995c3b6336d",
+      "sha256": "fa30f8a2c6e91c8c1e3a44f1f057732881369bc4d490dcfbda729d030212d93e",
       "stdout": "normalized units = 100\nhours = 1.50\nquote = 180.00\n",
       "metadata": {
         "canonical": true,
@@ -6716,7 +6716,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/62_toon_parse_file_simple",
       "repo_path": "Tests/aether_specialization/corpus_candidates/62_toon_parse_file_simple",
-      "sha256": "5bc4fee88a8f77965b3fda335383bbe22fa1c6cad4634f0c93c04a278f92a602",
+      "sha256": "fb277e3901b58251460e7f8cb865c08f0accdbd5ae0ba5f751a78b3b76c4776f",
       "stdout": "Aether\ntrue\n2\n",
       "metadata": {
         "canonical": true,
@@ -6728,13 +6728,13 @@
           "object-root",
           "scalars"
         ],
-        "notes": "Minimal object-root toon_parse_file scalar extraction. Fixture reconstructed 2026-06-12 from source + golden stdout; verified with build/bin/aether."
+        "notes": "Minimal object-root toon_parse_file scalar extraction. Fixture reconstructed 2026-06-12 from source + golden stdout; verified with build/bin/aether. 2026-07-01: toon_parse_file wrapped in fx (FX-001, effectful as of 2026-07-01-5); re-verified."
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/63_toon_safe_nested_codes_file",
       "repo_path": "Tests/aether_specialization/corpus_candidates/63_toon_safe_nested_codes_file",
-      "sha256": "47d2ab19eb4732d7bf38b00cd8afc5b7b1c4650d99502bdef238b21ea71564ad",
+      "sha256": "09418101f0f94736035841480f8232a69de7e4c2907f2778629d1459c51bfba1",
       "stdout": "row 0 = A1\nrow 1 = EMPTY\nrow 2 = EMPTY\nmissing = 2\n",
       "metadata": {
         "canonical": true,
@@ -6746,7 +6746,7 @@
           "nested",
           "guards"
         ],
-        "notes": "Staged nested TOON lookup with guarded fallback. Fixture reconstructed 2026-06-12 from source + golden stdout; verified with build/bin/aether."
+        "notes": "Staged nested TOON lookup with guarded fallback. Fixture reconstructed 2026-06-12 from source + golden stdout; verified with build/bin/aether. 2026-07-01: toon_parse_file wrapped in fx (FX-001, effectful as of 2026-07-01-5); re-verified."
       }
     },
     {
@@ -6804,7 +6804,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/67_config_validator_nested",
       "repo_path": "Tests/aether_specialization/corpus_candidates/67_config_validator_nested",
-      "sha256": "19dbfccf8cb8569883138e7cd09f6dd4c33935c7dad97c6b8fbb552a95b7ecf8",
+      "sha256": "6250b9bb2c9c73da6546d561f73210e03e1f761f36759b6266244208fea53214",
       "stdout": "ISSUE: port is invalid (0)\nISSUE: app name is empty or too long\nlog severity level: 2\nVALIDATION FAILED: 2 issue(s) found\n",
       "metadata": {
         "canonical": true,
@@ -6816,7 +6816,7 @@
           "validation",
           "nested"
         ],
-        "notes": "Nested object extraction with pure validators and issue counting. Fixture reconstructed 2026-06-12 from source + golden stdout; verified with build/bin/aether."
+        "notes": "Nested object extraction with pure validators and issue counting. Fixture reconstructed 2026-06-12 from source + golden stdout; verified with build/bin/aether. 2026-07-01: toon_parse_file wrapped in fx (FX-001, effectful as of 2026-07-01-5); re-verified."
       }
     },
     {
@@ -6840,7 +6840,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/69_release_board_file",
       "repo_path": "Tests/aether_specialization/corpus_candidates/69_release_board_file",
-      "sha256": "c9f185652255cc209d7d282c9fba4fe29b21331dc1a0008d3eeaef5657010a78",
+      "sha256": "2e9918c270f0368eda8cc24a672ba38a2c8ab37c4d9cab5f537c880706878538",
       "stdout": "release 0: R1 / green / false / 92\nrelease 1: R2 / yellow / true / 76\nrelease 2: R3 / red / false / 61\nrelease 3: R4 / green / true / 100\ngreen = 2\nyellow = 1\nred = 1\nblocked = 2\naverage = 82.25\n",
       "metadata": {
         "canonical": true,
@@ -6852,7 +6852,7 @@
           "formatting",
           "classification"
         ],
-        "notes": "Release-board summary with normalized averages and blocked counts."
+        "notes": "Release-board summary with normalized averages and blocked counts. 2026-07-01: toon_parse_file wrapped in fx (FX-001, effectful as of 2026-07-01-5); re-verified."
       }
     },
     {
@@ -7534,6 +7534,40 @@
           "type_probe"
         ],
         "notes": "TOON toon_is_* type predicates over a mixed array. Verified with build/bin/aether (v7.7)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/314_field_defaults_partial_init",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/314_field_defaults_partial_init",
+      "sha256": "1cf1db2fc4e1da9bfb1bd8eeeb351a6e3ab8e99aae1fafa4bf4204c0b9a0354b",
+      "stdout": "standard: 3 x 250ms (default)\naggressive: 6 x 250ms (aggressive)\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "record",
+          "field-defaults",
+          "partial-init"
+        ],
+        "notes": "Constant field defaults (FIELD-003 canon) plus new T { field: value } partial construction; unlisted fields keep defaults. Added 2026-07-01, verified with build/bin/aether (2026-07-01-8)."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/315_par_per_branch_records",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/315_par_per_branch_records",
+      "sha256": "c69e2ec91edc5d3faf8baa08d50b6a94be01a90312e97b1f82171f532211d08a",
+      "stdout": "low = 1225 over 50\nhigh = 3725 over 50\ngrand = 4950\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "par",
+          "concurrency",
+          "record"
+        ],
+        "notes": "par block with direct calls and one record per branch (PAR-001/PAR-002 canon); results combined after the block. First par usage in the corpus. Added 2026-07-01, verified with build/bin/aether (2026-07-01-8)."
       }
     }
   ]

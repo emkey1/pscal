@@ -51,7 +51,7 @@
     {
       "id": "module_dual_helpers",
       "prompt": "Write an Aether program that imports two helper modules, uses one exported function to add 5 and 10, uses the other exported function to get a label, and prints exactly `Result: 15`.",
-      "solution": "use math_utils;\nuse text_utils;\n\nfn main() -> Void {\n    let total: Int = MathUtils.add(5, 10);\n    let label: Text = TextUtils.resultLabel();\n    fx {\n        println(label, total);\n    }\n    ret;\n}\n",
+      "solution": "use \"math_utils\";\nuse \"text_utils\";\n\nfn main() -> Void {\n    let total: Int = MathUtils.add(5, 10);\n    let label: Text = TextUtils.resultLabel();\n    fx {\n        println(label, \" \", total);\n    }\n    ret;\n}\n",
       "expected_stdout": "Result: 15\n",
       "files": {
         "math_utils": "mod MathUtils {\n    @pure\n    export fn add(left: Int, right: Int) -> Int {\n        ret left + right;\n    }\n}\n",

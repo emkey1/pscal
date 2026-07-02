@@ -1,5 +1,6 @@
 // 41_contract_quote
-// Concepts: stacked contracts, @cost on a helper, Int-to-Real arithmetic,
+// Concepts: stacked contracts, @cost on a helper (advisory only: a declared
+// budget that is never checked or enforced), Int-to-Real arithmetic,
 // explicit typed intermediates
 // expect: normalized units = 100
 // expect: hours = 1.50
