@@ -405,7 +405,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/110_jobs_summary_file_exact",
       "repo_path": "Tests/aether_specialization/corpus_candidates/110_jobs_summary_file_exact",
-      "sha256": "dbc3f4571baca1b72c7eb2cad115ddd4d15fa837dc23d2257c1f6767876c68e1",
+      "sha256": "da39583749a68bd90b2d824bf9df6919461945012ae0fd3572e439119411f028",
       "stdout": "job 0 => Alpha / ready / 95\njob 1 => Beta / review / 78\njob 2 => Gamma / blocked / 62\ntotal = 3\nready = 1\nreview = 1\nblocked = 1\n",
       "metadata": {
         "canonical": true,
@@ -417,7 +417,12 @@
           "file",
           "output"
         ],
-        "notes": "Benchmark-mirror TOON file summary with object-root named-array extraction, per-row output, and final totals."
+        "notes": "Benchmark-mirror TOON file summary with object-root named-array extraction, per-row output, and final totals.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -442,7 +447,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/112_weather_station_report",
       "repo_path": "Tests/aether_specialization/corpus_candidates/112_weather_station_report",
-      "sha256": "d1fcfb3d80b3c493add56d12ea13f392bbaaddabc3722710c88cdcad8177a8a8",
+      "sha256": "413671b64ade850901c8c280697017dc9ef0360d92f16d16a222c2191574f63b",
       "stdout": "station 0: NORTH / 18 / normal\nstation 1: EAST / 30 / warn\nstation 2: SOUTH / 37 / alert\nstation 3: WEST / -5 / alert\nstation 4: RIDGE / 0 / normal\nnormal = 2\nwarn = 1\nalert = 2\naverage = 16.00\n",
       "metadata": {
         "canonical": true,
@@ -454,13 +459,18 @@
           "type",
           "real"
         ],
-        "notes": "Weather station telemetry report: object-root TOON extraction, threshold classify, custom totals type, clamped real average. Authored 2026-06-13; verified with build/bin/aether."
+        "notes": "Weather station telemetry report: object-root TOON extraction, threshold classify, custom totals type, clamped real average. Authored 2026-06-13; verified with build/bin/aether.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/113_library_loan_audit",
       "repo_path": "Tests/aether_specialization/corpus_candidates/113_library_loan_audit",
-      "sha256": "42a2ca77d2eea347e37282c4c44e9f462c8c0ed0f3297c13552f41dc6e248c22",
+      "sha256": "2783db4a5394ad78e1edc77ff20e4da13ced39b2579b4ec93c2cd0412fd150f1",
       "stdout": "loan 0: B101 / alice / overdue / fee 12\nloan 1: B102 / bob / on-time / fee 0\nloan 2: B103 / cara / overdue / fee 32\nloan 3: UNKNOWN / UNKNOWN / on-time / fee 0\ntotal = 4\noverdue = 2\non-time = 2\nfees = 44\n",
       "metadata": {
         "canonical": true,
@@ -472,13 +482,18 @@
           "audit",
           "type"
         ],
-        "notes": "Library loan audit: pure overdue/fee helpers, const policy, custom catalog type reusing a field name as a method local. Authored 2026-06-13; verified with build/bin/aether."
+        "notes": "Library loan audit: pure overdue/fee helpers, const policy, custom catalog type reusing a field name as a method local. Authored 2026-06-13; verified with build/bin/aether.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/114_gradebook_rollup",
       "repo_path": "Tests/aether_specialization/corpus_candidates/114_gradebook_rollup",
-      "sha256": "754c2eb19b701dd730d9c56e5075a437a7a627bd471e29a57912de0a229a84be",
+      "sha256": "fa4729ba904766d7fdf915b5b27326644ad77e0750891ec09938d3713d05003e",
       "stdout": "student 0: Ana / 92 / distinction\nstudent 1: Ben / 78 / merit\nstudent 2: Cy / 55 / pass\nstudent 3: Dee / 100 / distinction\nstudent 4: Eli / 0 / fail\ndistinction = 2\nmerit = 1\npass = 1\nfail = 1\naverage = 65.00\n",
       "metadata": {
         "canonical": true,
@@ -490,13 +505,18 @@
           "type",
           "real"
         ],
-        "notes": "Gradebook rollup: clamp + tiered classify, custom gradebook type, clamped real average with fixed precision. Authored 2026-06-13; verified with build/bin/aether."
+        "notes": "Gradebook rollup: clamp + tiered classify, custom gradebook type, clamped real average with fixed precision. Authored 2026-06-13; verified with build/bin/aether.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/115_incident_severity_digest",
       "repo_path": "Tests/aether_specialization/corpus_candidates/115_incident_severity_digest",
-      "sha256": "779da61bbc88b65949bb03ee6be2ae333b05b5a71784a8ad1db5c50f7c194770",
+      "sha256": "6da0c534191e29691dac94789d5159819f31753cd87e42a52bf97b93ef57a69a",
       "stdout": "incident 0: INC1 / SEV1\nincident 1: INC2 / NONE\nincident 2: INC3 / NONE\nincident 3: UNKNOWN / NONE\ncoded = 1\nmissing = 3\n",
       "metadata": {
         "canonical": true,
@@ -508,13 +528,18 @@
           "guard",
           "type"
         ],
-        "notes": "Incident severity digest: guarded nested-object extraction (toon_has_key before toon_key), coded/missing tally. Authored 2026-06-13; verified with build/bin/aether."
+        "notes": "Incident severity digest: guarded nested-object extraction (toon_has_key before toon_key), coded/missing tally. Authored 2026-06-13; verified with build/bin/aether.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/116_payroll_summary",
       "repo_path": "Tests/aether_specialization/corpus_candidates/116_payroll_summary",
-      "sha256": "ffeb3b43d752b9d560c6b9acce09587327728c0d498a85f5c4afb320b0870ecf",
+      "sha256": "0892a6dfbb747a4a7a31d1c6ce3554cfb7157e5e6afe309722c7cad862ff1680",
       "stdout": "worker 0: Ivy / 45 / overtime\nworker 1: Jon / 40 / full\nworker 2: Kim / 30 / partial\nworker 3: Lee / 80 / overtime\nbase hours = 40\novertime workers = 2\ntotal hours = 195\n",
       "metadata": {
         "canonical": true,
@@ -526,7 +551,12 @@
           "import",
           "type"
         ],
-        "notes": "Payroll summary: imports 117_payroll_rates and calls its exact exported const and pure fns; object-root TOON, running totals. Authored 2026-06-13; verified with build/bin/aether."
+        "notes": "Payroll summary: imports 117_payroll_rates and calls its exact exported const and pure fns; object-root TOON, running totals. Authored 2026-06-13; verified with build/bin/aether.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -546,7 +576,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/118_fleet_maintenance_report",
       "repo_path": "Tests/aether_specialization/corpus_candidates/118_fleet_maintenance_report",
-      "sha256": "d0a9266cc1666a8524769799b6398262be0f24dcae9463b46e41f878bdb98535",
+      "sha256": "9537bd22a26d684d0e2731f73f952dc80f7cd630714d8445952ddceee8260389",
       "stdout": "vehicle 0: V1 / 17000 / overdue\nvehicle 1: V2 / 13000 / due\nvehicle 2: V3 / 17000 / overdue\nvehicle 3: V4 / 1000 / ok\nvehicle 4: UNKNOWN / 0 / ok\noverdue = 2\ndue = 1\nok = 2\n",
       "metadata": {
         "canonical": true,
@@ -557,13 +587,18 @@
           "report",
           "type"
         ],
-        "notes": "Fleet maintenance report: object-root TOON, derived km-since-service metric, threshold classify, custom totals type. Verified with build/bin/aether."
+        "notes": "Fleet maintenance report: object-root TOON, derived km-since-service metric, threshold classify, custom totals type. Verified with build/bin/aether.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/119_tournament_standings",
       "repo_path": "Tests/aether_specialization/corpus_candidates/119_tournament_standings",
-      "sha256": "228177087289c3b151d95a60c430754d1c9903e2501886db6715cd93db274cd5",
+      "sha256": "572f1b0db0671500f2f8298671ec8e2333b1e8ef2979b4e4dccf04d744d75fca",
       "stdout": "team 0: Lions / 80 / top\nteam 1: Bears / 40 / mid\nteam 2: Hawks / 20 / low\nteam 3: Wolves / 100 / top\ntop = 2\nmid = 1\nlow = 1\naverage = 60.00\n",
       "metadata": {
         "canonical": true,
@@ -575,7 +610,12 @@
           "type",
           "real"
         ],
-        "notes": "Tournament standings: normalize-with-clamp, tiered classify, custom totals type, clamped real average. Verified with build/bin/aether."
+        "notes": "Tournament standings: normalize-with-clamp, tiered classify, custom totals type, clamped real average. Verified with build/bin/aether.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -596,7 +636,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/120_warehouse_inventory_rollup",
       "repo_path": "Tests/aether_specialization/corpus_candidates/120_warehouse_inventory_rollup",
-      "sha256": "87847863b2091013fddb6b8efa10e0a00ada908a7f60a26c9abf74e935fe67bc",
+      "sha256": "2ea98cb0f195afda27464e5088c9ce8b14d739fc7025da4813c11a18a74633c4",
       "stdout": "item 0: A1 / 50 / ok\nitem 1: B2 / 5 / low\nitem 2: C3 / 0 / out\nitem 3: D4 / 15 / ok\nitem 4: UNKNOWN / 0 / out\nok = 2\nlow = 1\nout = 2\ntotal qty = 70\n",
       "metadata": {
         "canonical": true,
@@ -607,7 +647,12 @@
           "inventory",
           "type"
         ],
-        "notes": "Warehouse inventory rollup: reorder-threshold classify, running quantity total, custom totals type. Verified with build/bin/aether."
+        "notes": "Warehouse inventory rollup: reorder-threshold classify, running quantity total, custom totals type. Verified with build/bin/aether.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -646,7 +691,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/123_sales_quota_report",
       "repo_path": "Tests/aether_specialization/corpus_candidates/123_sales_quota_report",
-      "sha256": "9e0a6a7dd265fc1ae1db9c035885b51cbd7b684c886c151ec0c398ac2bb1da6c",
+      "sha256": "700375a077bf2e9dbd02cb32b99100e7cf4613dd8637439f8bce929fd7a91f11",
       "stdout": "rep 0: Ada / 120 / bonus no\nrep 1: Ben / 160 / bonus yes\nrep 2: Cyd / 90 / bonus no\nquota = 100\nbonus reps = 1\n",
       "metadata": {
         "canonical": true,
@@ -658,7 +703,12 @@
           "import",
           "type"
         ],
-        "notes": "Sales quota report: imports 124_sales_targets and calls its exact exported consts + pure fn; object-root TOON, bonus tally. Verified with build/bin/aether."
+        "notes": "Sales quota report: imports 124_sales_targets and calls its exact exported consts + pure fn; object-root TOON, bonus tally. Verified with build/bin/aether.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -729,7 +779,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/128_ticket_queue_summary",
       "repo_path": "Tests/aether_specialization/corpus_candidates/128_ticket_queue_summary",
-      "sha256": "9207ab4dcf5eb0652fe65dabed62cc1b9d494f120ca0c4de20fdf5809b9272a9",
+      "sha256": "faf2f8a9f2e94e812682b81129db42ec0f21663297e6882e6bda7362774028fc",
       "stdout": "ticket 0 => T1 / done / 95\nticket 1 => T2 / active / 60\nticket 2 => T3 / blocked / 20\ndone = 1\nactive = 1\nblocked = 1\n",
       "metadata": {
         "canonical": true,
@@ -740,13 +790,18 @@
           "summary",
           "type"
         ],
-        "notes": "Ticket queue summary: object-root TOON, score-derived status, custom totals type, => formatted rows. Verified with build/bin/aether."
+        "notes": "Ticket queue summary: object-root TOON, score-derived status, custom totals type, => formatted rows. Verified with build/bin/aether.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/129_depot_stock_report",
       "repo_path": "Tests/aether_specialization/corpus_candidates/129_depot_stock_report",
-      "sha256": "2fb42db7f72f708d23f8649d8c91f6d06d3b7e2264cc47c1a29c35820d2e2d03",
+      "sha256": "e3e97ffec8886d1306a1b8fbc77252bbfd362a9632ad4a578c9a45372fd56836",
       "stdout": "bin 0: Z1 / 25 / ok\nbin 1: Z2 / 5 / low\nbin 2: Z3 / 0 / out\nsafety stock = 10\nok bins = 1\n",
       "metadata": {
         "canonical": true,
@@ -758,7 +813,12 @@
           "import",
           "type"
         ],
-        "notes": "Depot stock report: imports 130_stock_rules and calls its exact exported fn + const; object-root TOON, ok-bin counter. Verified with build/bin/aether."
+        "notes": "Depot stock report: imports 130_stock_rules and calls its exact exported fn + const; object-root TOON, ok-bin counter. Verified with build/bin/aether.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -794,7 +854,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/131_deployment_readiness_validator",
       "repo_path": "Tests/aether_specialization/corpus_candidates/131_deployment_readiness_validator",
-      "sha256": "58ab50c9197c3417757036508983373f25f6a8add475fcbdbc70aa9a685074ca",
+      "sha256": "1fadc1740bb9f71272b3f31a8238ba0c4ad73ae37810bac5c8be519352bf4fb5",
       "stdout": "ISSUE: service name is empty or too long\nISSUE: port out of range (70000)\nISSUE: replicas must be at least 1\nISSUE: cpu must be at least 1\nISSUE: memory below minimum (64)\nISSUE: unknown rollout strategy (yolo)\nISSUE: maxUnavailable exceeds replicas\nissue count: 7\nDEPLOY BLOCKED: 7 issue(s)\n",
       "metadata": {
         "canonical": true,
@@ -806,13 +866,18 @@
           "nested",
           "type"
         ],
-        "notes": "Deployment readiness validator: deeply nested TOON (service/resources/rollout), many pure field validators, per-issue ISSUE lines, cross-field check, readiness verdict. Verified with build/bin/aether."
+        "notes": "Deployment readiness validator: deeply nested TOON (service/resources/rollout), many pure field validators, per-issue ISSUE lines, cross-field check, readiness verdict. Verified with build/bin/aether.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/132_grant_application_audit",
       "repo_path": "Tests/aether_specialization/corpus_candidates/132_grant_application_audit",
-      "sha256": "6ba9951df191c44ca4e9250488514247db94e5066febb482b42137a372d6db1c",
+      "sha256": "fdbff4995ea50e0710c75f98012eecb316cf9c0aa5e6e0b9ba755ed94d27fa07",
       "stdout": "app 0: G1 / approved / 20000\napp 1: G2 / rejected / 0\napp 2: G3 / review / 7500\napp 3: G4 / rejected / 0\napp 4: UNKNOWN / rejected / 0\napproved = 1\nreview = 1\nrejected = 3\ntotal awarded = 27500\n",
       "metadata": {
         "canonical": true,
@@ -823,13 +888,18 @@
           "audit",
           "type"
         ],
-        "notes": "Grant application audit: const cap, cross-field decision, derived award amount, custom audit type with multiple counters and running total. Verified with build/bin/aether."
+        "notes": "Grant application audit: const cap, cross-field decision, derived award amount, custom audit type with multiple counters and running total. Verified with build/bin/aether.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/133_sprint_board_report",
       "repo_path": "Tests/aether_specialization/corpus_candidates/133_sprint_board_report",
-      "sha256": "fb4939e067cd4e56a4a3429199d2f2e7cb0df94ea9fc586688f0145028322ebe",
+      "sha256": "27c043e591771511bf195a2ec8a6498e34c442599a2ab72dcfc64c19838812b2",
       "stdout": "story 0: S1 / done / false / 95\nstory 1: S2 / doing / true / 60\nstory 2: S3 / todo / false / 30\nstory 3: S4 / done / true / 100\ndone = 2\ndoing = 1\ntodo = 1\nblocked = 2\naverage = 71.25\n",
       "metadata": {
         "canonical": true,
@@ -841,7 +911,12 @@
           "type",
           "real"
         ],
-        "notes": "Sprint board report: clamp-normalize, lane classify, blocked flag, custom board type reusing a field name as a method local, clamped real average. Verified with build/bin/aether."
+        "notes": "Sprint board report: clamp-normalize, lane classify, blocked flag, custom board type reusing a field name as a method local, clamped real average. Verified with build/bin/aether.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -6391,7 +6466,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/38_module_toon_file_report",
       "repo_path": "Tests/aether_specialization/corpus_candidates/38_module_toon_file_report",
-      "sha256": "d458c9bfb7ba5edde58ff74d1d5ff561cf8c20b0ada94454edfd644db803c91c",
+      "sha256": "4bcdb4a90bdd045a155f56ac1d6189cc3423661e0d0d42d8710d92346e267e48",
       "stdout": "alpha -> ready\nbeta -> review\ngamma -> blocked\ndefault = 50\n",
       "metadata": {
         "canonical": true,
@@ -6399,7 +6474,12 @@
         "assumption_bearing": false,
         "tags": [
           "toon"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -6443,7 +6523,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/42_file_toon_batch",
       "repo_path": "Tests/aether_specialization/corpus_candidates/42_file_toon_batch",
-      "sha256": "1765d2c67ef7eb3110aa1040c8b8bbb077265504b9f040ad0e842812e8b57569",
+      "sha256": "71b7924377504dbaff900950be0c08f384f874e76ec9e97829793d698b23f877",
       "stdout": "batch = daily-7\nalpha -> ready\nbeta -> review\ngamma -> blocked\nmissing scores = 1\n",
       "metadata": {
         "canonical": true,
@@ -6451,7 +6531,12 @@
         "assumption_bearing": false,
         "tags": [
           "toon"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -6786,7 +6871,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/66_agent_report_file",
       "repo_path": "Tests/aether_specialization/corpus_candidates/66_agent_report_file",
-      "sha256": "ff7508758287509d6f818272e5e606e868d167f8845a0e197f6e0bea13ac12c9",
+      "sha256": "3eef9b427d6fe282bfd6bfbb74ab79a186f7d43d46d8ba49f1b52d9a63e74f0d",
       "stdout": "job 0: Alpha / ready / 95\njob 1: Beta / review / 78\njob 2: Gamma / blocked / 62\njob 3: Delta / blocked / 41\njob 4: Epsilon / ready / 100\ntotal = 5\nready = 2\nreview = 1\nblocked = 2\n",
       "metadata": {
         "canonical": true,
@@ -6798,7 +6883,12 @@
           "type",
           "classification"
         ],
-        "notes": "Structured object-root job report with totals. Fixture reconstructed 2026-06-12 from source + golden stdout; verified with build/bin/aether."
+        "notes": "Structured object-root job report with totals. Fixture reconstructed 2026-06-12 from source + golden stdout; verified with build/bin/aether.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -6822,7 +6912,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/68_ledger_audit_file",
       "repo_path": "Tests/aether_specialization/corpus_candidates/68_ledger_audit_file",
-      "sha256": "3afb1d948a2eb2784f647dbf84b7819eb28023718f0d022f53bdf28da69222c3",
+      "sha256": "1def731cd5b13196eedbe2359f359809b74bbfdb6133d0a20bf1a52bdf83e12a",
       "stdout": "row 0: T1 / valid / 500\nrow 1: T2 / invalid / 99999\nrow 2: T3 / invalid / -100\nrow 3: UNKNOWN / invalid / -1\nbatch = batch_99\nbalance = 500\nvalid = 1\ninvalid = 3\n",
       "metadata": {
         "canonical": true,
@@ -6834,7 +6924,12 @@
           "audit",
           "type"
         ],
-        "notes": "Transaction audit with fallback extraction and summary counters. Fixture reconstructed 2026-06-12 from source + golden stdout; verified with build/bin/aether."
+        "notes": "Transaction audit with fallback extraction and summary counters. Fixture reconstructed 2026-06-12 from source + golden stdout; verified with build/bin/aether.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -7195,7 +7290,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/90_toon_to_int_array",
       "repo_path": "Tests/aether_specialization/corpus_candidates/90_toon_to_int_array",
-      "sha256": "d03bdd309dd46a13fa18d80631f2ca7fbc4e1217e469ea6a6ac489187b6bb87f",
+      "sha256": "d1041575fc317b77bbeb81d40d58813cf1ba8932202cb19ac3ff590a8a6ff820",
       "stdout": "count = 5\npassing = 3\n",
       "metadata": {
         "canonical": true,
@@ -7206,13 +7301,18 @@
           "array",
           "two-pass"
         ],
-        "notes": "Copies TOON ints into native array then closes doc before second pass."
+        "notes": "Copies TOON ints into native array then closes doc before second pass.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/91_toon_to_record_array",
       "repo_path": "Tests/aether_specialization/corpus_candidates/91_toon_to_record_array",
-      "sha256": "ddb31b0deca97319cb77cf98c11fbc7a46064dacf776acc58d799278f0319a9a",
+      "sha256": "8b6e799bbbaea92673c82bb8793e237eebfb336e2544417f0000069b1e9afc4a",
       "stdout": "A / ready / 95\nB / ready / 100\nC / blocked / 50\nready = 2\n",
       "metadata": {
         "canonical": true,
@@ -7223,7 +7323,12 @@
           "records",
           "array"
         ],
-        "notes": "Normalizes TOON rows into record array and summarizes."
+        "notes": "Normalizes TOON rows into record array and summarizes.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -7246,7 +7351,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/93_module_use_toon",
       "repo_path": "Tests/aether_specialization/corpus_candidates/93_module_use_toon",
-      "sha256": "b9e45f8dd6467957d3de57a52c2981c4da965e60060d151386b1b91da998de4d",
+      "sha256": "660d834db2a250966e83d0351d670b2f8b173f8c8980345ce15d5fc1a07c2c3c",
       "stdout": "Ada / high / pass=true\nBob / low / pass=false\n",
       "metadata": {
         "canonical": true,
@@ -7257,13 +7362,18 @@
           "toon",
           "bool"
         ],
-        "notes": "Applies module helpers over TOON rows."
+        "notes": "Applies module helpers over TOON rows.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/94_ticket_triage_capstone",
       "repo_path": "Tests/aether_specialization/corpus_candidates/94_ticket_triage_capstone",
-      "sha256": "31ec7120071e281c72164e37e04c12ce05ea4c1360120c1791958a7b28067eba",
+      "sha256": "411a7b33ce405f1ac289d7e6d0c492e322dd93e4da6c1cad12b9edb07740b62c",
       "stdout": "ticket 0: TK1 / high / 3 / escalate=true\nticket 1: TK2 / low / 1 / escalate=true\nticket 2: TK3 / medium / 2 / escalate=false\nticket 3: TK4 / high / 3 / escalate=true\nescalated = 3\n",
       "metadata": {
         "canonical": true,
@@ -7275,7 +7385,12 @@
           "triage",
           "logic"
         ],
-        "notes": "Large ticket triage example with stated escalation assumptions."
+        "notes": "Large ticket triage example with stated escalation assumptions.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 20260701.1525_DEV (latest tag: V.1R29)",
+          "date": "2026-07-02",
+          "source_rebaselined": true
+        }
       }
     },
     {
