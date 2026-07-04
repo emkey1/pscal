@@ -83,6 +83,9 @@ highest-risk item, and everything before it shrinks its blast radius.
    existing Pascal/Rea/CLike/Aether test suites plus a sample of
    aether_doc_bench generations) through two VM builds and byte-compares
    stdout/stderr/exit codes.  Every subsequent phase gates on zero diffs.
+   **Done:** `Tests/vm_diff_harness.py --vm-a <bin dir> --vm-b <bin dir>`
+   (resumable, per-unit results, exits nonzero on any reproducible diff;
+   see its module docstring for corpus/statuses/usage).
 2. **Performance baseline.** A small benchmark set (arith loop, call-heavy,
    string-heavy, global-heavy, JSON parse/walk, HTTP-loopback) with numbers
    recorded per phase, so wins and regressions are attributed to the phase
