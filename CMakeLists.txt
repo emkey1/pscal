@@ -161,6 +161,12 @@ endif()
 
 set(CMAKE_C_STANDARD 11)
 add_compile_options(-Wall)
+if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+    # PSCAL_VALUE_FIELD (pscal-core core/types.h) keeps a `const Value`
+    # _Generic branch for compilers that do not drop qualifiers during
+    # lvalue conversion; clang does drop them and warns it is unreachable.
+    add_compile_options(-Wno-unreachable-code-generic-assoc)
+endif()
 
 if(UNIX AND NOT APPLE)
     add_compile_definitions(_GNU_SOURCE _POSIX_C_SOURCE=200809L)
