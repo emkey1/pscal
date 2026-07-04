@@ -2411,6 +2411,27 @@ endif()
 # Aether front-end executable (bootstrapped on the shared Rea implementation)
 # Aether overrides, consumed from the aether submodule; layered on the shared
 # Rea engine (REA_SOURCES) and installed at startup via the frontend-hook seam.
+#
+# Aether tracks its own language version (VERSION file, YYYY-MM-DD-N, bumped
+# only on language-affecting changes) independently of PBuild's generic
+# PROGRAM_VERSION wall-clock/_DEV scheme above -- that scheme only says when a
+# binary was compiled, not what language semantics it has, which makes it
+# useless for telling two Aether builds apart. Fed to the aether targets below
+# via PSCAL_PROGRAM_VERSION_OVERRIDE (pscal-core's build_info.h honors it ahead
+# of PROGRAM_VERSION) rather than redefining PROGRAM_VERSION itself: CMake's
+# directory-scope compile definitions always win over a same-named
+# target-level override added later in the same directory, so redefining
+# PROGRAM_VERSION at target scope here would silently lose to the umbrella's
+# blanket definition above. This makes `aether --version` report the real
+# language version, matching the standalone components/aether build
+# (components/aether/CMakeLists.txt) instead of PBuild's default.
+file(STRINGS "${CMAKE_SOURCE_DIR}/components/aether/VERSION" AETHER_LANG_VERSION LIMIT_COUNT 1)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/components/aether/VERSION")
+if(NOT AETHER_LANG_VERSION)
+    set(AETHER_LANG_VERSION "unknown")
+endif()
+message(STATUS "Aether language version: ${AETHER_LANG_VERSION}")
 set(AETHER_SRC components/aether/src/aether)
 set(AETHER_SOURCES
     ${REA_SOURCES}
@@ -2431,7 +2452,8 @@ if(NOT PSCAL_PLATFORM_IOS)
         PSCAL_FRONTEND_DISPLAY_NAME=\"Aether\"
         PSCAL_FRONTEND_USAGE_NAME=\"aether\"
         PSCAL_FRONTEND_COMPILER_ID=\"aether\"
-        PSCAL_FRONTEND_INSTALL_HOOKS=aetherInstallFrontendHooks)
+        PSCAL_FRONTEND_INSTALL_HOOKS=aetherInstallFrontendHooks
+        PSCAL_PROGRAM_VERSION_OVERRIDE="${AETHER_LANG_VERSION}")
     # Aether installs its parse/semantic/module + diagnostic hooks at startup via
     # reaSetFrontendHooks() (src/aether/state.c); main() calls the installer named
     # here, which also forces that TU to link inside the static library.
@@ -2495,7 +2517,8 @@ if(PSCAL_BUILD_STATIC_LIBS)
         PSCAL_FRONTEND_DISPLAY_NAME=\"Aether\"
         PSCAL_FRONTEND_USAGE_NAME=\"aether\"
         PSCAL_FRONTEND_COMPILER_ID=\"aether\"
-        PSCAL_FRONTEND_INSTALL_HOOKS=aetherInstallFrontendHooks)
+        PSCAL_FRONTEND_INSTALL_HOOKS=aetherInstallFrontendHooks
+        PSCAL_PROGRAM_VERSION_OVERRIDE="${AETHER_LANG_VERSION}")
     # Aether installs its parse/semantic/module + diagnostic hooks at startup via
     # reaSetFrontendHooks() (src/aether/state.c); main() calls the installer named
     # here, which also forces that TU to link inside the static library.
