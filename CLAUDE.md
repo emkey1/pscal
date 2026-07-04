@@ -17,12 +17,11 @@ lives in the auto-memory files (this file wins if they disagree).
   `components/aether/external/`. When pscal-core or rea change, those pins go
   stale and break the *standalone* aether build while PBuild stays green.
   Bump them as part of shipping (see Ship flow).
-- **Active development branch is `AetherLang`.** Worktree/subagent merges land
-  on AetherLang, never `main`. `main` is synced by fast-forward:
-  `git push origin AetherLang:main`. A stale `aether --version` from a fresh
-  default-branch clone usually means main's gitlink lags — compare
-  `git ls-tree origin/main components/aether` vs `origin/AetherLang` before
-  blaming the build.
+- **Active development branch is `main`.** Commit and push there directly.
+  (`AetherLang` was the active branch early on, with `main` synced from it by
+  fast-forward; that's no longer the case — as of 2026-07-03 `main` is
+  current and `AetherLang` should be treated like any other branch, not a
+  required landing spot.)
 
 ## Build and test
 
@@ -65,7 +64,7 @@ lives in the auto-memory files (this file wins if they disagree).
 2. Bump dependent gitlinks: if pscal-core or rea changed, update
    `components/aether/external/` pins (`git -C components/aether update-index
    --cacheinfo 160000,<sha>,external/<name>` or checkout+add) and push aether.
-3. Bump the `components/` gitlinks in PBuild, commit, push `AetherLang`.
+3. Bump the `components/` gitlinks in PBuild, commit, push `main`.
 4. Autodeploy (post-commit hook → `tools/deploy_aether_to_claws.sh`) builds the
    pushed SHA on all three claws. Verify it ran; confirm with
    `ssh claw@clawN '~/aether-current/build/bin/aether --version'` when in doubt.
