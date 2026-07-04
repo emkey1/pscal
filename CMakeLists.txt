@@ -2626,6 +2626,17 @@ if(NOT PSCAL_PLATFORM_IOS)
     endforeach()
     install(DIRECTORY Docs/
             DESTINATION "${_pscal_runtime_root}/docs")
+    install(CODE [[
+        set(_pscal_build_cmd "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target tiny_pbc)
+        if(CMAKE_CONFIGURATION_TYPES)
+            list(APPEND _pscal_build_cmd --config "${CMAKE_INSTALL_CONFIG_NAME}")
+        endif()
+        execute_process(COMMAND ${_pscal_build_cmd}
+            RESULT_VARIABLE _pscal_tiny_pbc_result)
+        if(NOT _pscal_tiny_pbc_result EQUAL 0)
+            message(FATAL_ERROR "Failed to build tiny.pbc (tiny_pbc target)")
+        endif()
+    ]])
     install(FILES ${CMAKE_BINARY_DIR}/bin/tiny.pbc
             DESTINATION "${_pscal_runtime_root}/bin")
     # Tiny compiler runtime assets for iOS/iPadOS: install script plus minimal headers it loads.
