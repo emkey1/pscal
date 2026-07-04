@@ -2506,10 +2506,24 @@ endif()
 if(NOT PSCAL_PLATFORM_IOS)
     add_subdirectory(Examples)
 
+    # Example programs live in each component submodule's examples/ dir
+    # (moved there during the repo split); the root Examples/ tree is
+    # legacy/stale except for Examples/tiny, which has no component home.
+    set(PSCAL_EXAMPLE_COMPONENTS pascal clike rea aether exsh)
+
     file(GLOB_RECURSE PSCAL_ALL_EXAMPLE_FILES
         LIST_DIRECTORIES false
         RELATIVE "${CMAKE_SOURCE_DIR}"
-        "Examples/*")
+        "Examples/tiny/*")
+    foreach(_pscal_ex_comp IN LISTS PSCAL_EXAMPLE_COMPONENTS)
+        if(EXISTS "${CMAKE_SOURCE_DIR}/components/${_pscal_ex_comp}/examples")
+            file(GLOB_RECURSE _pscal_comp_example_files
+                LIST_DIRECTORIES false
+                RELATIVE "${CMAKE_SOURCE_DIR}"
+                "components/${_pscal_ex_comp}/examples/*")
+            list(APPEND PSCAL_ALL_EXAMPLE_FILES ${_pscal_comp_example_files})
+        endif()
+    endforeach()
 
     set(PSCAL_CONFIGURED_EXAMPLES)
     foreach(example IN LISTS PSCAL_ALL_EXAMPLE_FILES)
@@ -2599,9 +2613,16 @@ if(NOT PSCAL_PLATFORM_IOS)
     install(DIRECTORY etc/
             DESTINATION "${_pscal_runtime_root}/etc"
             USE_SOURCE_PERMISSIONS)
-    install(DIRECTORY Examples/
-            DESTINATION "${_pscal_runtime_root}/Examples"
+    install(DIRECTORY Examples/tiny/
+            DESTINATION "${_pscal_runtime_root}/Examples/tiny"
             USE_SOURCE_PERMISSIONS)
+    foreach(_pscal_ex_comp IN LISTS PSCAL_EXAMPLE_COMPONENTS)
+        if(EXISTS "${CMAKE_SOURCE_DIR}/components/${_pscal_ex_comp}/examples")
+            install(DIRECTORY components/${_pscal_ex_comp}/examples/
+                    DESTINATION "${_pscal_runtime_root}/Examples/${_pscal_ex_comp}"
+                    USE_SOURCE_PERMISSIONS)
+        endif()
+    endforeach()
     if(PSCAL_CONFIGURED_EXAMPLES)
         install(CODE [[
             set(_pscal_build_cmd "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target configured_examples)
@@ -2616,7 +2637,11 @@ if(NOT PSCAL_PLATFORM_IOS)
         ]])
     endif()
     foreach(example IN LISTS PSCAL_CONFIGURED_EXAMPLES)
-        string(REGEX REPLACE "^Examples/" "" example_relative "${example}")
+        if(example MATCHES "^Examples/")
+            string(REGEX REPLACE "^Examples/" "" example_relative "${example}")
+        else()
+            string(REGEX REPLACE "^components/([^/]+)/examples/" "\\1/" example_relative "${example}")
+        endif()
         get_filename_component(example_dir "${example_relative}" DIRECTORY)
         install(FILES "${PSCAL_CONFIGURED_EXAMPLES_DIR}/${example}"
                 DESTINATION "${_pscal_runtime_root}/Examples/${example_dir}"
@@ -2626,6 +2651,10 @@ if(NOT PSCAL_PLATFORM_IOS)
     endforeach()
     install(DIRECTORY Docs/
             DESTINATION "${_pscal_runtime_root}/docs")
+    # tiny.pbc is a precompiled-bytecode fast path for the tiny.clike
+    # mini-compiler; bin/tiny already falls back to interpreting
+    # tiny.clike directly when tiny.pbc is absent, so treat this as
+    # best-effort rather than install-blocking.
     install(CODE [[
         set(_pscal_build_cmd "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target tiny_pbc)
         if(CMAKE_CONFIGURATION_TYPES)
@@ -2633,12 +2662,21 @@ if(NOT PSCAL_PLATFORM_IOS)
         endif()
         execute_process(COMMAND ${_pscal_build_cmd}
             RESULT_VARIABLE _pscal_tiny_pbc_result)
-        if(NOT _pscal_tiny_pbc_result EQUAL 0)
-            message(FATAL_ERROR "Failed to build tiny.pbc (tiny_pbc target)")
+        if(NOT _pscal_tiny_pbc_result EQUAL 0 OR NOT EXISTS "${CMAKE_BINARY_DIR}/bin/tiny.pbc")
+            message(WARNING "tiny.pbc was not produced (tiny_pbc target); bin/tiny will fall back to interpreting tiny.clike directly")
+        else()
+            set(_pscal_tiny_pbc_root "")
+            if("${PSCAL_INSTALL_ROOT_DESTINATION}" STREQUAL "." OR "${PSCAL_INSTALL_ROOT_DESTINATION}" STREQUAL "")
+                set(_pscal_tiny_pbc_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+            elseif(IS_ABSOLUTE "${PSCAL_INSTALL_ROOT_DESTINATION}")
+                set(_pscal_tiny_pbc_root "$ENV{DESTDIR}${PSCAL_INSTALL_ROOT_DESTINATION}")
+            else()
+                set(_pscal_tiny_pbc_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/${PSCAL_INSTALL_ROOT_DESTINATION}")
+            endif()
+            file(INSTALL "${CMAKE_BINARY_DIR}/bin/tiny.pbc"
+                 DESTINATION "${_pscal_tiny_pbc_root}/bin")
         endif()
     ]])
-    install(FILES ${CMAKE_BINARY_DIR}/bin/tiny.pbc
-            DESTINATION "${_pscal_runtime_root}/bin")
     # Tiny compiler runtime assets for iOS/iPadOS: install script plus minimal headers it loads.
     install(PROGRAMS bin/tiny
             DESTINATION "${_pscal_runtime_root}/bin"
