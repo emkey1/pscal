@@ -13,11 +13,15 @@
 
 ### 3.0 ISA Conventions
 
-- **Exactly 100 opcodes** (`0x00`–`0x63`; `OPCODE_COUNT == 100`). Opcode
-  values are the enum declaration ordinals — there is no explicit `= 0xNN`
-  assignment, so inserting an opcode mid-enum renumbers everything after it.
-  This is why `PSCAL_VM_VERSION` (Chapter 2) exists: bytecode is only valid
-  against the exact opcode numbering it was compiled for.
+- **104 opcodes** (`0x00`–`0x67`; `OPCODE_COUNT == 0x68`, VM 2.0 Phase 2b —
+  was 100/`0x63` through Phase 2a). Opcode values are pinned explicit
+  ordinals in `opcodes.def` (not implicit enum-declaration order — that
+  changed back in Phase 1a specifically so append-only opcode additions no
+  longer renumber the whole page). `PSCAL_VM_VERSION` (Chapter 2) still
+  gates *semantic* changes; pure ISA additions like this phase's four new
+  opcodes do not require a VM-version bump (though this phase's opcode
+  *retirements* did bump `PSB3_FORMAT_VERSION`, a different axis — see
+  Chapter 2 §2.1).
 - **Operand endianness:** multi-byte operands in the *instruction stream* are
   **big-endian** (`(code[o+1] << 8) | code[o+2]`). This is the opposite of
   the *file container* fields (Chapter 2), which are host-little-endian
@@ -28,26 +32,49 @@
   rightmost. `addr` is a `Value` of `TYPE_POINTER`.
 - **Wide (`*16`) variants** exist wherever a constant-pool index or count can
   exceed 255; they are semantically identical to their narrow forms and are
-  omitted from prose (but listed in the tables).
-- **Global-access cache (VM 2.0 Phase 2a, `Docs/pscal_vm2_plan.md` §5.6):**
-  `GET_GLOBAL`/`SET_GLOBAL`/`GET_GLOBAL16`/`SET_GLOBAL16` each carry a
+  omitted from prose (but listed in the tables). The Phase 2b slot-addressed
+  global opcodes are the one family that does **not** follow this
+  convention: they have a single always-wide (`u16`) form each, with no
+  narrow variant (see below for why).
+- **Global-access cache (VM 2.0 Phase 2a, `Docs/pscal_vm2_plan.md` §5.6) —
+  superseded by Phase 2b, kept here for `.bc` archaeology.**
+  `GET_GLOBAL`/`SET_GLOBAL`/`GET_GLOBAL16`/`SET_GLOBAL16` each carried a
   `cache_id:u16` operand after the name index, indexing a per-chunk runtime
   side table (`chunk->caches[cache_id]`, a `CacheSlot` holding the resolved
-  `Symbol*`) instead of embedding the pointer in the instruction stream. The
-  table is sized by `cache_count` (a compile-time constant — one slot per
-  call site, stored in the CODE section, Chapter 2 §2.2) and allocated once,
-  lazily, on first execution; it is never serialized (only the count is).
-  **CODE is never written after load** — in debug builds
-  (`PSCAL_VM_CODE_PROTECT`) it is `mprotect(PROT_READ)`'d to enforce this.
-  This replaces the pre-2.0-Phase-2a design, where `GET_GLOBAL`/`SET_GLOBAL`
+  `Symbol*`) instead of embedding the pointer in the instruction stream.
+  This replaced the pre-2.0-Phase-2a design, where `GET_GLOBAL`/`SET_GLOBAL`
   reserved 8 raw bytes of instruction stream after the name index for the VM
   to self-patch a `Symbol*` into on first execution (self-modifying
-  bytecode) and rewrote the opcode byte itself to a `_CACHED` variant so
-  later executions skipped re-validating the name. `GET/SET_GLOBAL[16]_CACHED`
-  (0x28-0x2B) are retired holes now: never emitted, never executed (an
-  adversarial chunk containing one gets a clean "unknown opcode" error), kept
-  in `opcodes.def` only so a pre-Phase-2a standalone `.bc` still disassembles
-  at its true historical width instead of "undefined opcode".
+  bytecode). **All of `GET_GLOBAL`/`SET_GLOBAL`/`GET_GLOBAL16`/
+  `SET_GLOBAL16`/`DEFINE_GLOBAL`/`DEFINE_GLOBAL16`/`GET_GLOBAL_ADDRESS`/
+  `GET_GLOBAL_ADDRESS16` (0x20-0x27) and `GET/SET_GLOBAL[16]_CACHED`
+  (0x28-0x2B) are retired holes as of VM 2.0 Phase 2b**: never emitted,
+  never executed (an adversarial chunk containing one gets a clean "unknown
+  opcode" error), kept in `opcodes.def` only so a pre-Phase-2b standalone
+  `.bc` still disassembles at its true historical mnemonic/width instead of
+  "undefined opcode". `chunk->caches`/`CacheSlot`/`cache_count` are not
+  removed either — they're reserved for a possible future Phase 8
+  quickening state machine — but nothing populates them for a
+  post-Phase-2b chunk, since no opcode carries a `cache_id` operand anymore.
+- **Slot-addressed globals (VM 2.0 Phase 2b, `Docs/pscal_vm2_plan.md` §5.7):**
+  `GET_GSLOT`/`SET_GSLOT`/`GET_GSLOT_ADDRESS`/`DEFINE_GLOBAL_SLOT` (0x64-0x67)
+  replace the entire 0x20-0x2B family above. A `slot:u16` operand indexes
+  `chunk->global_slots[]` directly — no hash lookup, no cache-miss branch,
+  ever. The compiler emits a constant-pool *name* index in this operand's
+  position (always `u16`, hence no narrow form: the width has to match
+  whatever the eventual slot value will need, and the compiler doesn't
+  choose slot numbers at all); a load-time link step
+  (`compiler/bytecode_link.c`) rewrites that same 2-byte field in place into
+  the resolved slot index before the chunk is verified or executed. See
+  Chapter 2 §2.2 for the full link-step mechanics and Chapter 1 §1.2 for the
+  runtime slot-table layout (`global_slots`/`global_slot_is_const`/
+  `global_slot_names`, and the reserved-slot handling for `myself` and the
+  two Pascal-exception globals). **CODE is never written after load** — in
+  debug builds (`PSCAL_VM_CODE_PROTECT`) it is `mprotect(PROT_READ)`'d to
+  enforce this; the link step's rewrite runs strictly before that
+  `mprotect` call, so it is a load-time linker relocation, not runtime
+  self-modification of already-executing code (see Chapter 2 §2.2 for why
+  this distinction holds).
 
 ### 3.1 Stack & Constant Operations
 
@@ -114,19 +141,22 @@ operators:
 
 #### Globals
 
-Globals are name-addressed (constant-pool string index), not slot-addressed —
-the price of separately compiled units sharing one global table, paid down by
-the per-call-site cache side table described in §3.0.
+**Globals are slot-addressed as of VM 2.0 Phase 2b** (`Docs/pscal_vm2_plan.md`
+§5.7): a `slot:u16` operand indexes `chunk->global_slots[]` directly, no
+hash lookup and no cache-miss branch. The compiler emits a constant-pool
+*name* index in this operand's position; the load-time link step
+(`compiler/bytecode_link.c`) rewrites it in place into the resolved slot
+index before the chunk is verified or executed — see Chapter 2 §2.2 for
+the mechanics and ordering rationale, and Chapter 1 §1.2 for the runtime
+slot-table layout.
 
 | Hex | Mnemonic | Encoding | Stack Effect | Mechanics |
 |----:|----------|----------|--------------|-----------|
-| 0x20 | `DEFINE_GLOBAL` | `op name:u8 type:u8 payload…` | `( init -- )` | Declare + initialize a global. Variable-length payload: for `TYPE_ARRAY`, `dims:u8` then per-dim `(lo_cidx:u16, hi_cidx:u16)` then `elem_type:u8 elem_name_cidx:u16`; for `TYPE_STRING`, `type_name_cidx:u16 len_cidx:u16` (0 = dynamic); for `TYPE_FILE`, element type info; else `type_name_cidx:u16` |
-| 0x21 | `DEFINE_GLOBAL16` | `op name:u16 …` | `( init -- )` | Wide-name variant |
-| 0x22 | `GET_GLOBAL` | `op name:u8 cache_id:u16` | `( -- v )` | Push global's value; resolves through `chunk->caches[cache_id]` (populated on first miss) |
-| 0x23 | `SET_GLOBAL` | `op name:u8 cache_id:u16` | `( v -- )` | Store into global (same cache) |
-| 0x24 | `GET_GLOBAL_ADDRESS` | `op name:u8` | `( -- addr )` | Push pointer to the global's `Value` cell; the name `myself` resolves specially to the per-VM receiver slot `vm->threadMyself` |
-| 0x25–0x27 | `GET_GLOBAL16` / `SET_GLOBAL16` / `GET_GLOBAL_ADDRESS16` | `op name:u16 [cache_id:u16]` | as above | Wide-name variants |
-| 0x28–0x2B | `GET/SET_GLOBAL[16]_CACHED` | `op name cache:8B` | as above | **Retired** (VM 2.0 Phase 2a): never emitted or executed. Existed pre-Phase-2a as "cache already validated, self-patched into this opcode" forms sharing the base opcodes' 8-byte in-stream inline-cache-slot layout; kept in `opcodes.def` only so a pre-Phase-2a `.bc` still disassembles at its true historical mnemonic/width |
+| 0x64 | `DEFINE_GLOBAL_SLOT` | `op slot:u16 type:u8 payload…` | `( init -- )` | Declare + initialize a global, by slot. Variable-length payload, otherwise identical in shape to the retired `DEFINE_GLOBAL16`: for `TYPE_ARRAY`, `dims:u8` then per-dim `(lo_cidx:u16, hi_cidx:u16)` then `elem_type:u8 elem_name_cidx:u16`; for `TYPE_STRING`, `type_name_cidx:u16 len_cidx:u16` (0 = dynamic); for `TYPE_FILE`, element type info; else `type_name_cidx:u16`. The bounds/type-name/elem-name/len fields are ordinary constant-pool indices, untouched by linking — only the leading `slot` field is ever rewritten from a name index |
+| 0x65 | `GET_GSLOT` | `op slot:u16` | `( -- v )` | Push `chunk->global_slots[slot].symbol->value`'s contents (copied). `slot == chunk->global_myself_slot` diverts to `vm->threadMyself` instead, never touching the slot table |
+| 0x66 | `SET_GSLOT` | `op slot:u16` | `( v -- )` | Store into the global at `slot`. Rejects with a runtime error if `chunk->global_slot_is_const[slot]` is set, *before* checking anything else (a const-slot write is a structural violation, not a normal control-flow skip) |
+| 0x67 | `GET_GSLOT_ADDRESS` | `op slot:u16` | `( -- addr )` | Push a pointer to the global's `Value` cell (`sym->value`, stable for the chunk's whole lifetime since `global_slots[]` is sized once at link time and never reallocated). Same `myself` diversion as `GET_GSLOT` |
+| 0x20–0x2B | *(retired)* | — | — | `DEFINE_GLOBAL`/`DEFINE_GLOBAL16`/`GET_GLOBAL`/`SET_GLOBAL`/`GET_GLOBAL16`/`SET_GLOBAL16`/`GET_GLOBAL_ADDRESS`/`GET_GLOBAL_ADDRESS16` (name-addressed, retired VM 2.0 Phase 2b) and `GET/SET_GLOBAL[16]_CACHED` (cache-side-table, retired VM 2.0 Phase 2a) — see §3.0 for the full retirement rationale. Never emitted or executed; kept in `opcodes.def` only so old standalone `.bc` files still disassemble with a readable legacy mnemonic and correct byte width |
 
 #### Locals & Upvalues
 
@@ -292,16 +322,21 @@ checking the atomics at safe points.
 Tying the tables back to Chapter 2's worked example, byte by byte:
 
 ```
-0017  PUSH_IMM_I8   2        ; 07 02            — §3.1, 2 bytes
-0019  GET_GLOBAL_ADDRESS 'a' ; 24 03            — §3.3 globals, 2 bytes
-0021  SWAP                   ; 1E               — ( v addr -- addr v )
-0022  SET_INDIRECT           ; 44               — ( addr v -- ), stores 2 into 'a'
-0030  GET_GLOBAL    'a'      ; 22 03 0000       — name:u8 + cache_id:u16 = 4 bytes → next at 0034
-0038  ADD                    ; 08
-0039  CALL_BUILTIN_PROC 181 'write' (2 args)
-                             ; 51 00B5 0009 02  = 6 bytes → next at 0045
-0045  HALT                   ; 59
+0017  PUSH_IMM_I8   2         ; 07 02            — §3.1, 2 bytes
+0019  GET_GSLOT_ADDRESS 3 'a' ; 67 0003          — §3.3 globals, slot:u16 = 3 bytes
+0022  SWAP                    ; 1E               — ( v addr -- addr v )
+0023  SET_INDIRECT            ; 44               — ( addr v -- ), stores 2 into 'a'
+0030  GET_GSLOT      3 'a'    ; 65 0003          — slot:u16 = 3 bytes → next at 0033
+0033  ADD                     ; 08
+0034  CALL_BUILTIN_PROC 181 'write' (2 args)
+                              ; 51 00B5 0009 02  = 6 bytes → next at 0040
+0040  HALT                    ; 59
 ```
+
+(`GET_GSLOT`/`GET_GSLOT_ADDRESS` print the slot's name — `'a'` — purely for
+readability; the disassembler resolves it from `chunk->global_slot_names[slot]`,
+never from the constant pool, since the operand is a slot index, not a
+constant-pool index. See Chapter 2 §2.2.)
 
 Every width in that dump is predicted exactly by the encoding column of the
 tables above — which is the test this chapter's tables were built to pass.

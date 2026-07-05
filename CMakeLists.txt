@@ -1188,7 +1188,7 @@ set(PSCAL_CORE_SOURCES
     ${PSCAL_NETWORK_IMPL_SOURCE}
     components/pscal-core/src/backend_ast/shell_runtime_stub.c
     components/pscal-core/src/backend_ast/thread_wrappers.c
-    components/pscal-core/src/compiler/bytecode.c components/pscal-core/src/compiler/bytecode_verify.c components/pscal-core/src/compiler/compiler.c
+    components/pscal-core/src/compiler/bytecode.c components/pscal-core/src/compiler/bytecode_verify.c components/pscal-core/src/compiler/bytecode_link.c components/pscal-core/src/compiler/compiler.c
     components/pscal-core/src/core/cache.c
     components/pscal-core/src/common/runtime_params.c
     components/pscal-core/src/common/runtime_tty.c

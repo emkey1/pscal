@@ -8,6 +8,7 @@
 #include "tools/ast_json_loader.h"
 #include "compiler/compiler.h"
 #include "compiler/bytecode.h"
+#include "compiler/bytecode_link.h"
 #include "backend_ast/builtin.h"
 #include "symbol/symbol.h"
 #include "core/globals.h"
@@ -160,22 +161,12 @@ int pscaljson2bc_main(int argc, char** argv) {
         JSON2BC_RETURN(EXIT_FAILURE);
     }
 
-    if (dump_bc) {
-        const char* disasm_name = in_path ? bytecodeDisplayNameForPath(in_path) : "<stdin>";
-        disassembleBytecodeChunk(&chunk, disasm_name, procedure_table);
-        if (dump_only) {
-            freeBytecodeChunk(&chunk);
-            freeAST(root);
-            freeProcedureTable();
-            freeTypeTableASTNodes();
-            freeTypeTable();
-            if (globalSymbols) freeHashTable(globalSymbols);
-            if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
-            JSON2BC_RETURN(EXIT_SUCCESS);
-        }
-    }
-
     // Write bytecode to output, preserving metadata so the VM can load it.
+    // VM 2.0 Phase 2b (plan §5.7): this must happen BEFORE linking below --
+    // the on-disk/stdout representation has to stay pre-link (name-index
+    // operands), exactly like saveBytecodeToCache()'s contract in each
+    // frontend's main.c, so that loadBytecodeFromFile() (which links once
+    // itself) doesn't get handed already-linked bytecode and link it again.
     if (out_path && strcmp(out_path, "-") != 0) {
         if (!saveBytecodeToFile(out_path, in_path ? in_path : "<stdin>", &chunk)) {
             fprintf(stderr, "Failed to write bytecode to %s\n", out_path);
@@ -195,6 +186,36 @@ int pscaljson2bc_main(int argc, char** argv) {
             if (written != (size_t)chunk.count) {
                 fprintf(stderr, "Short write: wrote %zu of %d bytes.\n", written, chunk.count);
             }
+        }
+    }
+
+    if (dump_bc) {
+        // Link now, in memory only (after the write above), so the
+        // disassembly shows resolved GET_GSLOT/SET_GSLOT/DEFINE_GLOBAL_SLOT
+        // slot names instead of raw pre-link constant-pool indices.
+        char link_err[256];
+        if (!pscalLinkGlobalSlots(&chunk, link_err, sizeof(link_err))) {
+            fprintf(stderr, "Failed to link global slots: %s\n", link_err);
+            freeBytecodeChunk(&chunk);
+            freeAST(root);
+            freeProcedureTable();
+            freeTypeTableASTNodes();
+            freeTypeTable();
+            if (globalSymbols) freeHashTable(globalSymbols);
+            if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
+            JSON2BC_RETURN(EXIT_FAILURE);
+        }
+        const char* disasm_name = in_path ? bytecodeDisplayNameForPath(in_path) : "<stdin>";
+        disassembleBytecodeChunk(&chunk, disasm_name, procedure_table);
+        if (dump_only) {
+            freeBytecodeChunk(&chunk);
+            freeAST(root);
+            freeProcedureTable();
+            freeTypeTableASTNodes();
+            freeTypeTable();
+            if (globalSymbols) freeHashTable(globalSymbols);
+            if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
+            JSON2BC_RETURN(EXIT_SUCCESS);
         }
     }
 

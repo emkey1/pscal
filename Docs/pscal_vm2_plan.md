@@ -2,7 +2,8 @@
 
 Status: Phase 0 and Phase 1 core (1a-1e, the PSB3 format epoch plus the
 load-time verifier) shipped 2026-07-04; Phase 2a (inline caches move to a
-side-table) shipped 2026-07-05. Phase 2b and beyond remain proposal.
+side-table) and Phase 2b (slot-addressed globals) both shipped 2026-07-05.
+Phase 3 and beyond remain proposal.
 Companion to the
 [VM Technical Manual](pscal_vm_manual/pscal_vm_manual.md), which documents
 the 1.x engine this plan modifies.  File/line references are to
@@ -631,19 +632,237 @@ of the pieces the sketch above left open.
 
 ### 5.7 Phase 2b: Slot-addressed globals
 
-- Link step at load time: walk PROCS/CONST, assign each distinct global a
-  slot in a per-program `Value globals[]` array; `DEFINE_GLOBAL` becomes
-  `DEFINE_GLOBAL_SLOT slot:u16 type...`, `GET_GLOBAL` becomes
-  `GET_GSLOT slot:u16` (array index, no hash, no cache needed at all).
-- The name→slot map is retained as metadata for: the disassembler, `myself`
-  resolution, and **exsh**, whose dynamically created variables keep a
-  name-addressed escape hatch (`GET_GLOBAL_DYN`, the current hash-table
-  path, emitted only by the shell frontend).
-- The `vmGlobalSymbols` / `vmConstGlobalSymbols` split disappears; const
-  slots are enforced by a bitmap checked on `SET_GSLOT`.
-- Cross-thread visibility is unchanged (same shared array), but the
-  `globals_mutex` stream-binding dance in the interpreter prologue is
-  replaced by one-time link work.
+**Done (2026-07-05):** Shipped largely as designed, with two findings this
+section's own drafting didn't anticipate (exsh needed no dual path at all;
+compile/cache ordering needed a specific, non-obvious sequencing to avoid a
+real double-link bug) and one deliberate deviation from the plan sketch's
+literal encoding, in the same spirit as Phase 2a's own "shipped as designed,
+with a documented deviation" writeup.
+
+- **Opcodes.** `GET_GSLOT`/`SET_GSLOT`/`GET_GSLOT_ADDRESS`/
+  `DEFINE_GLOBAL_SLOT` (0x64-0x67, opcodes.def) replace the entire retired
+  0x20-0x2B name-addressed family (`DEFINE_GLOBAL[16]`, `GET/SET_GLOBAL[16]`,
+  `GET_GLOBAL_ADDRESS[16]`, and Phase 2a's `GET/SET_GLOBAL[16]_CACHED`) —
+  eight opcodes wider than the plan's own sketch mentioned, because
+  `GET_GLOBAL_ADDRESS`/`GET_GLOBAL_ADDRESS16` (used for `VAR`-parameter
+  pass-by-reference and vtable/`myself` field access) needed a slot-addressed
+  successor too, for the same reason `GET_GLOBAL`/`SET_GLOBAL` did. All
+  eight retired opcodes are kept as opcodes.def holes (unreachable in
+  `vm.c`'s dispatch switch) purely so a pre-Phase-2b standalone `.bc` still
+  disassembles with a readable legacy mnemonic and correct width.
+- **Single always-wide encoding, not a narrow/wide pair.** Unlike the
+  retired family (and unlike most of the ISA's other `*16` conventions),
+  the four new opcodes have exactly one form each: `op slot:u16` (or, for
+  `DEFINE_GLOBAL_SLOT`, `op slot:u16 type:u8 payload...`). There is no
+  narrow `u8` variant. This is load-bearing, not a simplification for its
+  own sake: the compiler emits a *constant-pool name index* in this
+  operand's position (see next bullet), and the load-time link step
+  rewrites that same 2-byte field in place into the resolved slot index —
+  an in-place rewrite is only safe if the operand width never changes, so
+  the compiler has to commit to the final (`u16`) width up front, before it
+  or anyone else knows how many distinct globals the program has.
+- **The actual link step: a relocation pass, not a runtime cache.** This is
+  the plan sketch's "walk PROCS/CONST" line made precise. The compiler
+  (`compiler.c`, shared by Pascal/Rea/CLike/Aether) never assigns or even
+  sees a slot number — it emits `GET_GSLOT`/`SET_GSLOT`/`GET_GSLOT_ADDRESS`/
+  `DEFINE_GLOBAL_SLOT` with a plain constant-pool name index in the slot
+  operand's position, exactly the value it would have used for the retired
+  `GET_GLOBAL16`. A new module, `compiler/bytecode_link.c`
+  (`pscalLinkGlobalSlots()`), walks the chunk's CODE once at load time,
+  assigns each distinct name a slot in first-reference order, and rewrites
+  that same 2-byte field in place from a name index to the resolved slot
+  index — a linker relocation pass in the classic sense, run once per
+  chunk load, strictly before `pscalProtectChunkCode()`'s `mprotect`
+  (Phase 2a) ever makes CODE read-only, so this does not reopen goal G2's
+  self-modifying-code question. Const-global names (enum members, `const`
+  declarations, unit-interface constants) that never appear in a
+  `DEFINE_GLOBAL_SLOT` at all are resolved into the same slot table by
+  checking the process's `constGlobalSymbols`/`globalSymbols` tables
+  (already populated by compile-time const-folding or, for a cache-loaded
+  chunk, PROCS-section deserialization) for each name the CODE walk
+  discovers — this is what lets enum members and other compile-time
+  constants share the same `GET_GSLOT` path as ordinary mutable globals
+  with zero special-casing in the opcode itself.
+- **Ordering vs. the Phase 1e verifier: link runs first, unconditionally.**
+  The verifier's job for the new opcodes' `'s'`-spec operand is `slot <
+  chunk->global_slot_count`, which is meaningless before the link step has
+  run (that's literally what establishes `global_slot_count`). So linking
+  precedes verification for every loaded chunk (`cache.c`'s
+  `loadBytecodeFromCache()`/`loadBytecodeFromFile()`, and the embedded
+  shell-closure path in `readPointerValue()`). Since the link step itself
+  reads constant-pool name indices *before* the verifier has validated
+  them, it defensively bounds-checks every index it reads
+  (`linkResolveName()`), rejecting a malformed chunk cleanly rather than
+  trusting an unverified operand — the same posture the section-directory
+  validation (§5.4) already takes for data consumed ahead of the verifier.
+- **A real double-link bug, found and fixed during this phase's own
+  testing.** The first cut of this phase called the link step from inside
+  `compileASTToBytecode()`, reasoning that a fresh compile needed linking
+  before its first execution just like a cache load did. That is true, but
+  wrong in *when*: each frontend's `main.c` saves `compileASTToBytecode()`'s
+  direct output to the `.bc` cache via `saveBytecodeToCache()` — so linking
+  inside the compiler meant the **cached file itself held post-link,
+  slot-indexed bytecode**. The next process to hit that cache entry would
+  run `pscalLinkGlobalSlots()` a *second* time, on already-resolved slot
+  indices, misinterpreting them as fresh constant-pool name indices —
+  silently wrong (a small in-range slot number is frequently, though not
+  always, a valid-but-unrelated constant-pool index) rather than cleanly
+  rejected. Caught by `Tests/run_all_suites.py`'s Rea scope suite
+  (`class_constructor_sets_and_reads` and three sibling fixtures failed
+  with `GET_GSLOT_ADDRESS name index out of range` on a second run against
+  a warm cache). Fixed by moving the link call out of
+  `compileASTToBytecode()` entirely: each frontend's `main.c`
+  (`pascal/src/Pascal/main.c`, `rea/src/rea/main.c` — shared by the `aether`
+  build target too, `clike/src/clike/main.c`, `clike/src/clike/repl.c`, and
+  the umbrella's `pscaljson2bc` tool) now calls `pscalLinkGlobalSlots()`
+  itself, exactly once, immediately after `saveBytecodeToCache()`/
+  `saveBytecodeToFile()` and before `interpretBytecode()` — safe to call
+  unconditionally on a cache-hit chunk too, since `chunk->globals_linked`
+  makes the function idempotent. The invariant this establishes: **the
+  on-disk `.bc` representation always holds pre-link, name-indexed
+  bytecode**, whether it reached disk via a fresh compile or was already
+  there from a previous run.
+- **`exsh` needed no dual path.** The plan anticipated a `GET_GLOBAL_DYN`/
+  `SET_GLOBAL_DYN`-style escape hatch for shell variables (creatable at
+  runtime, so apparently unable to participate in static slot assignment).
+  In practice, exsh's independent codegen
+  (`components/exsh/src/shell/codegen.c`) never emitted `GET_GLOBAL`/
+  `SET_GLOBAL`/`DEFINE_GLOBAL` at all — shell variable access already went
+  through `CALL_HOST`/`CALL_BUILTIN` dispatch, entirely orthogonal to the
+  global-opcode family. exsh is therefore completely untouched by this
+  phase; no new opcodes, no dual-path design, no changes to
+  `components/exsh` at all.
+- **`myself` and the two Pascal-exception globals get reserved slots, not a
+  name check.** `myself` is per-VM-thread state (`vm->threadMyself`), never
+  actually chunk-shared storage, so it still needs its pre-2b special-case
+  short-circuit — but the check is now `slot == chunk->global_myself_slot`
+  (an O(1) integer compare the link step resolves once) instead of a
+  `strcasecmp("myself", ...)` on every single global access. The same
+  treatment applies to `__pas_exc_pending`/`__pas_exc_message`
+  (`global_pas_exc_pending_slot`/`global_pas_exc_message_slot`), which
+  `vmPasExceptionPending()` used to resolve via a hash lookup on every
+  `SET_GLOBAL` and now resolves via direct slot dereference.
+- **Symbol ownership is unchanged; the slot table is a non-owning index on
+  top of it, not a replacement allocator.** `chunk->global_slots[slot]` is a
+  `Symbol*` (via a `GlobalSlot { Symbol* symbol; }` wrapper, mirroring
+  `CacheSlot`'s shape for the same "room for later metadata" reason), not a
+  raw `Value` — a deliberate deviation from the plan sketch's literal
+  "`Value globals[]`". `DEFINE_GLOBAL_SLOT`/`SET_GSLOT` still need
+  type/type_def to construct and coerce array, record, file and pointer
+  values via the pre-existing `makeValueForType()`/`updateSymbolDirect()`
+  machinery; flattening to a bare `Value` would require re-deriving that
+  metadata in a second, parallel per-slot table for no observable benefit
+  — the "no hash, no cache-miss branch" goal is achieved by the *slot
+  index* being a direct array index, not by the payload's shape. Symbol
+  allocation/insertion continues to go through `vm->vmGlobalSymbols`
+  exactly as before (so `stdin`/`stdout`/`input`/`output` setup,
+  `nullifyPointerAliasesByAddrValue`, and debug dumps — none of which are
+  on the addressing hot path — are unaffected); `global_slots[]` just adds
+  an O(1) index on top.
+- **Const enforcement is a bitmap, checked before anything else.**
+  `chunk->global_slot_is_const[slot]`, populated by the link step from
+  whichever of `constGlobalSymbols`/`globalSymbols` already held the name
+  (`is_const` field), is checked at the very top of `SET_GSLOT` — ahead of
+  even the Pascal-exception-unwind skip, since a const-slot write is a
+  structural violation that must always surface as a runtime error, not be
+  silently absorbed the way an ordinary assignment is during unwind.
+- **`vmGlobalSymbols`/`vmConstGlobalSymbols` HashTable *lookup* goes away
+  for the new opcodes; the tables themselves do not.** No opcode in the new
+  family ever calls `hashTableLookup()` on the hot path — that's the actual
+  performance claim. The underlying HashTable-based Symbol allocation
+  machinery stays, because untangling it fully would mean rewriting
+  `handleDefineGlobalSlot`'s (formerly `handleDefineGlobal`'s) ~200 lines of
+  array/record/pointer/file construction logic for a change that's about
+  addressing, not memory ownership — out of scope for this phase, and a
+  larger, separate risk than the phase's own stated goal justified.
+- **Cross-thread visibility.** `chunk->global_slots[]` lives on the shared
+  `BytecodeChunk*`, so every `THREAD_CREATE`-spawned worker sees it by
+  pointer identity with no separate hand-off, the same way Phase 2a's
+  `chunk->caches` already did. The array is sized and allocated once by the
+  link step, before any thread can possibly start (linking always precedes
+  first execution) — no race on the array's existence/size, only on a
+  slot's *contents*: a mutable slot's `Symbol*` is written exactly once
+  (by whichever thread's `DEFINE_GLOBAL_SLOT` reaches it first) under
+  `globals_mutex`; every subsequent `GET_GSLOT`/`SET_GSLOT` reads/writes
+  that pointer unlocked (a benign race on a pointer-sized value, the same
+  tolerance the pre-2b hash lookup and Phase 2a's cache side-table both
+  already relied on). A `Symbol`'s `Value` *contents* keep the pre-existing
+  discipline exactly: `SET_GSLOT` mutates under `globals_mutex`
+  (`updateSymbolDirect()`), `GET_GSLOT`'s read of those contents is
+  unlocked on the hot path, identical to the pre-2b `GET_GLOBAL` fast path.
+  Const slots need no lock at all, ever: resolved once by the link step,
+  single-threaded, before the chunk is shared, and never subsequently
+  written (`SET_GSLOT` rejects a const write outright).
+- **A second, pre-existing bug found and fixed along the way (not part of
+  this phase's own surface, but blocking its testing).** Extending
+  `Tests/vm_verify_corpus/generate_corpus.py` with slot-addressed adversarial
+  cases surfaced that its `code_section_payload()`/`rebuild_code_section()`
+  helpers had never been updated for Phase 2a's own `cache_count` field
+  addition to the CODE section — every corruption case built through them
+  since Phase 2a landed was round-tripping a CODE blob shifted one byte
+  early (silently including cache_count's own leading varint byte) and one
+  byte short, which `readCodeSection()` rejected as a malformed section
+  header *before* the intended corruption (a bad jump target, a bad
+  constant index, ...) ever reached the verifier. Every existing corpus
+  case still reported PASS throughout, because "rejected cleanly, nonzero
+  exit" doesn't distinguish *why* — but several were silently testing the
+  wrong thing since 2026-07-05's Phase 2a ship. Fixed in
+  `generate_corpus.py` (`code_section_payload` now returns
+  `(code_bytes, cache_count)`, `rebuild_code_section` re-emits it); a
+  separate, related gap in `find_first_opcode`'s fixed-length instruction
+  walker (no entry for `DEFINE_GLOBAL_SLOT`'s variable length, which every
+  fixture now contains unconditionally via the always-emitted `myself`
+  declaration) was fixed the same way. `psb3_value.py`'s embedded-closure
+  probe has the same class of gap (unaudited as part of this phase; flagged
+  for follow-up, not blocking since exsh doesn't use the new opcodes).
+- **Verified:**
+  - `Tests/run_all_suites.py`: green after the double-link fix above and
+    after regenerating stale fixture goldens (byte-offset/mnemonic shifts
+    only, the same class of change Phase 2a's own goldens needed — 3 Pascal
+    `.disasm`, 2 Pascal `.err`, 1 Pascal compiler-suite manifest string,
+    1 CLike `.disasm`, 1 CLike `.err`; every diff independently confirmed
+    to carry zero stdout/behavioral difference before being accepted).
+  - `Tests/vm_diff_harness.py` vs. a from-scratch pre-Phase-2b worktree
+    build (committed HEAD, since this phase's changes were still
+    uncommitted working-tree state at verification time): 362 MATCH, 7
+    SKIP, 5 NONDET (the same pre-existing HTTP-timing flakiness prior
+    phases documented — `ApiSendReceiveTest`, `ExtendedBuiltinsTest`,
+    `HttpHeadersFileURL`, `HttpRequestToFileFileURL`,
+    `InterfaceAssertionFailure`), **27 DIFF, all independently confirmed
+    pure disassembly-offset/mnemonic artifacts** (zero stdout difference on
+    every one; stderr deltas are exactly the expected `DEFINE_GLOBAL` →
+    `DEFINE_GLOBAL_SLOT` / `GET_GLOBAL` → `GET_GSLOT` mnemonic and byte-width
+    shifts, or a numeric bytecode offset in an error message) across 401
+    units total (pascal/clike/rea/aether suites).
+  - `Tests/vm_bench/run_vm_bench.py`, Release builds, head-to-head against a
+    same-session pre-Phase-2b baseline (committed HEAD): **`globals.p`
+    median 0.224s → 0.142s, a ~37% improvement** — the benchmark this phase
+    exists to move, confirming a real speed win, not just the size/format
+    win Phase 2a settled for. The other five benchmarks (arith/calls/
+    strings/json/io_http, none of which this phase touches) show no
+    regression.
+  - `build-asan/` (ASan+UBSan): `Tests/vm_verify_corpus/` (17-case corpus,
+    including two new adversarial cases this phase added —
+    `bad_gslot_name_index.bc` for the link step's defensive name-index
+    bounds check, and `write_to_const_slot.bc` for `SET_GSLOT`'s
+    `global_slot_is_const` rejection, both confirmed to fail with their
+    intended, specific error message rather than an incidental one — plus
+    the 15 pre-existing cases, all reconfirmed to exercise their intended
+    verifier/loader checks after the `generate_corpus.py` fix above) and
+    `fuzz_bitflip.py` (3968 single-bit-flip mutations of a real linked
+    `.bc`: 2076 clean rejections, 1886 inert flips, 6 hangs — the same
+    self-targeted-jump-retarget class prior phases documented as expected
+    and not a memory-safety issue, unchanged in count — **0 crashes**),
+    all clean.
+  - Multithreaded stress: a dedicated fixture,
+    `Tests/vm_thread_stress/globals_concurrency.pas` (six `spawn`/`join`
+    worker threads hammering ten shared globals through `GET_GSLOT`/
+    `SET_GSLOT` with *no* mutex, plus a separate mutex-protected control
+    counter), run 150 consecutive times under `build-asan`: 0 sanitizer
+    reports, 0 hangs, the mutex-protected counter exactly right every time.
+    TSan was not set up for this repo as of this writing (no CMake toggle
+    exists); the ASan-repeated-run approach is the documented fallback and
+    is what this phase's own rigor bar asked for in that case.
 
 ### 5.8 Phase 8 (opportunistic, after Phase 2): Quickening
 

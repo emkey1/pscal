@@ -250,14 +250,72 @@ Pascal/Rea). `STRING_CHAR_PTR_SENTINEL` marks the resulting pointer as
 "points inside a managed string's buffer" rather than an arbitrary heap
 pointer, so later frees/copies know not to treat it as an owning reference.
 
-**Globals** live outside the per-call-frame stack entirely, in two separate
-`HashTable`s: `vmGlobalSymbols` (mutable) and `vmConstGlobalSymbols`
-(immutable, and explicitly *not* mutex-guarded, since it never changes after
-load — a deliberate optimization for the multithreaded case described below).
-`GET_GLOBAL_CACHED`/`SET_GLOBAL_CACHED` variants exist alongside the plain
-`GET_GLOBAL`/`SET_GLOBAL` opcodes as an inline-cache optimization for
-hot-path global access, avoiding a full hash lookup on repeat execution of
-the same instruction.
+**Globals** (VM 2.0 Phase 2b, plan §5.7) live outside the per-call-frame
+stack entirely, in a per-chunk **slot table**: `chunk->global_slots`, an
+array of `GlobalSlot { Symbol* symbol; }` indexed directly by a `slot:u16`
+operand baked into `GET_GSLOT`/`SET_GSLOT`/`GET_GSLOT_ADDRESS`/
+`DEFINE_GLOBAL_SLOT`. There is no hash lookup and no per-call-site cache on
+this path at all — the array index *is* the address. Two companion arrays
+carry per-slot metadata sized to the same `global_slot_count`:
+`global_slot_is_const` (a bitmap `SET_GSLOT` checks before writing, raising
+a runtime error on a const slot rather than mutating it) and
+`global_slot_names` (owned strings, consulted only by the disassembler and
+by runtime error messages — never on the read/write hot path). Three
+reserved-slot fields (`global_myself_slot`, `global_pas_exc_pending_slot`,
+`global_pas_exc_message_slot`) let the three synthetic globals that need
+special handling (see below, and the Pascal exception-unwind mechanism) be
+recognized by an O(1) integer compare instead of a name string comparison.
+
+This table is populated by a **load-time link step**
+(`compiler/bytecode_link.c`, `pscalLinkGlobalSlots()`): every AST frontend's
+compiler (Pascal/Rea/CLike/Aether share one `compiler.c`) emits these
+opcodes with a *constant-pool name index* in the slot operand's position —
+the compiler never assigns or even sees a slot number. The link step walks
+the chunk's CODE once, assigns each distinct name a slot in first-reference
+order, and rewrites that same 2-byte operand *in place* from a name index
+to the resolved slot index, before the chunk is verified (loaded-from-cache
+path) or executed (all paths) — see §2.2's CODE section and §3.0 for the
+full ordering rationale and why this in-place rewrite does not reopen
+Phase 2a's self-modifying-code concern. `chunk->globals_linked` guards
+against relinking an already-linked chunk (the on-disk `.bc` cache always
+holds the pre-link, name-indexed form — see §2.2 — precisely so a cache hit
+can't accidentally run the rewrite twice).
+
+Symbol *ownership* is unchanged from the pre-2b hash-table design: a global
+still gets a heap-allocated `Symbol` (name, type, type_def, is_const, and a
+separately-heap-allocated `Value*`) the first time `DEFINE_GLOBAL_SLOT`
+executes for it (mutable globals) or, for const globals (whole numbers,
+enum members, unit-interface constants), at link time from whichever of the
+process's `globalSymbols`/`constGlobalSymbols` tables already holds it
+(populated during compilation/const-folding or, for a cache-loaded chunk,
+during PROCS-section deserialization). `chunk->global_slots[slot].symbol` is
+a **non-owning** rider pointing at that same `Symbol` — the slot table adds
+an O(1) index on top of the existing allocation/ownership machinery, it does
+not replace it. This is a deliberate, documented deviation from a literal
+"flatten `Value` into the slot array" reading of the plan: the array holds
+`Symbol*`, not a raw `Value`, because `DEFINE_GLOBAL_SLOT`/`SET_GSLOT` still
+need type/type_def to construct and coerce array, record, file and pointer
+values via the pre-existing `makeValueForType()`/`updateSymbolDirect()`
+machinery.
+
+`myself` is special-cased independently of the slot table's own mechanics:
+it is a per-VM-thread field (`vm->threadMyself`), not process/chunk-shared
+state, so `chunk->global_myself_slot` only marks *which* slot number the
+opcodes should recognize and divert away from `global_slots[]` entirely —
+`myself` itself is never actually stored there. The retired
+`GET_GLOBAL_CACHED`/`SET_GLOBAL_CACHED`/`GET_GLOBAL16_CACHED`/
+`SET_GLOBAL16_CACHED` opcodes from Phase 2a, and `GET_GLOBAL`/`SET_GLOBAL`/
+`GET_GLOBAL16`/`SET_GLOBAL16`/`DEFINE_GLOBAL`/`DEFINE_GLOBAL16`/
+`GET_GLOBAL_ADDRESS`/`GET_GLOBAL_ADDRESS16` retired by this phase, are kept
+as opcode holes purely so a pre-2b standalone `.bc` still disassembles with
+a readable legacy mnemonic (§3.0).
+
+exsh is untouched by any of this: its independent codegen
+(`components/exsh/src/shell/codegen.c`) never emitted `GET_GLOBAL`/
+`SET_GLOBAL`/`DEFINE_GLOBAL` in the first place — shell variables, being
+creatable at runtime, go through `CALL_HOST`/`CALL_BUILTIN` dispatch
+instead. The dual-path design the original Phase 2b proposal anticipated
+("exsh keeps a name-addressed escape hatch") turned out to be unnecessary.
 
 ### 1.3 Builtins, Extensibility, and Side Effects
 
@@ -358,10 +416,35 @@ Each spawned thread runs `interpretBytecode()` over **its own** `VM`
 instance (`vm->threadOwner` links a worker's `VM*` back to the owning parent),
 with its own operand stack and call-frame array — `Value stack[VM_STACK_MAX]`
 and `CallFrame frames[VM_CALL_STACK_MAX]` are per-`VM`, hence per-thread. What
-*is* shared across threads is `vmGlobalSymbols`/`vmConstGlobalSymbols` (global
-variable state) and the procedure/mutex tables, which is why the const-global
-table is deliberately lock-free (read-only after program load) while the
-mutable-global table needs the runtime's own locking discipline.
+*is* shared across threads is global variable state and the procedure/mutex
+tables. `THREAD_CREATE` spawns a worker against the *same* `BytecodeChunk*`
+the parent is executing, and (VM 2.0 Phase 2b, plan §5.7) `chunk->global_slots[]`
+— the slot table backing `GET_GSLOT`/`SET_GSLOT` — lives on that shared chunk,
+so every thread executing it automatically shares the same slot array purely
+by pointer identity; no separate hand-off step was needed to preserve this
+property across the hash-table-to-array migration. The array itself is sized
+and allocated once at link time, before any `THREAD_CREATE` can possibly run
+(link always precedes first execution — see §1.2), so there is no
+allocation-time race on the array's existence or size, only on its
+*contents*: a mutable global's `Symbol*` slot entry is written exactly once,
+by whichever thread's `DEFINE_GLOBAL_SLOT` execution reaches it first, under
+`globals_mutex` (the same lock that has always protected global-table
+mutation); every `GET_GSLOT`/`SET_GSLOT` after that reads/writes the pointer
+without a lock (a benign race on a pointer-sized value, the same tolerance
+the pre-2b hash-table lookup and the Phase 2a cache side-table both already
+relied on). A slot's `Symbol->value` *contents* follow the pre-existing
+discipline unchanged: mutation happens under `globals_mutex` in `SET_GSLOT`
+(via `updateSymbolDirect()`), while `GET_GSLOT`'s read of those contents is
+unlocked on the hot path, identical to the pre-2b `GET_GLOBAL` fast path.
+Const slots need no lock at all, at any point: their `Symbol*` is resolved
+once by the link step (single-threaded, before the chunk is ever shared) and
+never subsequently written (`SET_GSLOT` rejects a const-slot write outright
+via a per-slot bitmap, `global_slot_is_const`, rather than silently
+allowing it). Verified with a dedicated stress fixture
+(`Tests/vm_thread_stress/globals_concurrency.pas`): six worker threads
+hammering ten shared globals with no mutex at all, run 150 consecutive times
+under ASan+UBSan with zero sanitizer reports and an exact mutex-protected
+control counter every time.
 
 `THREAD_CREATE` (2-byte entry-point offset operand) spawns a worker against a
 given bytecode offset and pushes the thread id; `THREAD_JOIN` pops a thread

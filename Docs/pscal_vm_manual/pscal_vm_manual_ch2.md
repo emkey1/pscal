@@ -44,11 +44,17 @@ The header is written by `psb3Write()` (`cache.c`):
 
 ```
 [magic   u32le]  0x50534233 ('PSB3'; little-endian bytes on disk read "3BSP")
-[format_ver u16] container-format version (currently 2 as of VM 2.0 Phase 2a,
+[format_ver u16] container-format version (currently 3 as of VM 2.0 Phase 2b,
                  up from 1; independent of the VM semantic version below —
                  this axis can move without a VM version bump. The 1→2 bump
-                 is CODE's cache_count field, §2.2 — the first section-shape
-                 change since PSB3's introduction)
+                 was CODE's cache_count field, §2.2 (the first section-shape
+                 change since PSB3's introduction); 2→3 changed no section
+                 shape at all -- it exists purely to invalidate stale
+                 Phase-2a-vintage .bc entries whose CODE bytes use opcodes
+                 (GET_GLOBAL/SET_GLOBAL/DEFINE_GLOBAL/...) that are
+                 *structurally* still valid-looking under the new binary
+                 (their opcodes.def entries are kept for legacy disassembly)
+                 but are no longer executable -- see §2.2's CODE entry)
 [vm_ver  u16]    chunk->version (PSCAL_VM_VERSION at compile time)
 [flags   u32]    reserved, always 0 in this phase
 [section_count u32]
@@ -105,22 +111,85 @@ section's own length prefix and the directory's recorded length are
 redundant by construction (defense in depth): a reader can trust either, and
 a mismatch between them is a corruption signal.
 
-`cache_count` (VM 2.0 Phase 2a, `Docs/pscal_vm2_plan.md` §5.6) is the number
+`cache_count` (VM 2.0 Phase 2a, `Docs/pscal_vm2_plan.md` §5.6) was the number
 of `GET_GLOBAL`/`SET_GLOBAL`/`GET_GLOBAL16`/`SET_GLOBAL16` call sites the
-compiler emitted — a compile-time constant, tallied once per emission by
-`compiler.c`'s shared `emitGlobalNameIdx` helper. It sizes the loader's
-`chunk->caches` array (`CacheSlot caches[cache_count]`, `bytecode.h`): a
-per-chunk, per-call-site runtime side table holding the `Symbol*` each call
-site resolves to, allocated once (lazily, on first execution) rather than
-serialized — cache *contents* are never written to disk, only the count
-needed to size the table, the same "written as zeros" spirit the pre-Phase-2a
-inline cache slots followed. Adding this field to CODE's shape is the reason
-`PSB3_FORMAT_VERSION` bumped 1→2 (§2.1): every phase before this one changed
-only what the opaque CODE bytes *mean*, never how the section frames itself,
-so format_ver had never needed to move since PSB3's introduction. Bounds:
-since a `cache_id` operand is `u16` (§2.3/Chapter 3), no chunk can
+compiler emitted, sizing the loader's `chunk->caches` array (`CacheSlot
+caches[cache_count]`, `bytecode.h`) — a per-chunk, per-call-site runtime
+side table holding the `Symbol*` each call site resolves to. Adding this
+field to CODE's shape is the reason `PSB3_FORMAT_VERSION` bumped 1→2
+(§2.1). **As of VM 2.0 Phase 2b, `cache_count` is always 0** for any freshly
+compiled chunk: `GET_GLOBAL`/`SET_GLOBAL`/`GET_GLOBAL16`/`SET_GLOBAL16`, the
+only opcodes that ever carried a `cache_id` operand, are themselves retired
+(§3.0) — global access moved to slot-addressed `GET_GSLOT`/`SET_GSLOT`
+instead (see below). The field, `chunk->caches`, and `CacheSlot` are *not*
+removed: they remain live infrastructure reserved for a future Phase 8
+quickening state machine (`bytecode.h`'s `CacheSlot` doc comment), just with
+no current caller. Bounds: since a `cache_id` operand is `u16`, no chunk can
 legitimately need more than 65536 slots; the reader rejects a `cache_count`
 above that as corrupt.
+
+**Slot-addressed globals (VM 2.0 Phase 2b, `Docs/pscal_vm2_plan.md` §5.7).**
+Unlike `cache_count`, the global-slot table (`chunk->global_slots`,
+`global_slot_count`, `global_slot_is_const`, `global_slot_names`, and the
+three reserved-slot fields — see Chapter 1 §1.2 for what each holds) is
+**not serialized at all**. It is entirely reconstructed at load time by a
+new pass, `pscalLinkGlobalSlots()` (`compiler/bytecode_link.c`), that runs
+on every chunk regardless of origin (fresh compile or `.bc` load) before
+that chunk is verified or executed. Concretely, for the loader path
+(`loadBytecodeFromCache()`/`loadBytecodeFromFile()`, `cache.c`):
+
+```
+psb3ReadChunk()            ; CODE/LINE/CONS/BMAP/PROC/TYPE sections, as before
+pscalLinkGlobalSlots()     ; NEW: resolves GET_GSLOT/SET_GSLOT/GET_GSLOT_ADDRESS/
+                           ; DEFINE_GLOBAL_SLOT name-index operands to slot indices,
+                           ; rewriting CODE in place; builds global_slot_*
+pscalVerifyBytecodeChunk() ; unchanged in spirit, but now validates the
+                           ; *linked* (slot-indexed) form -- see below for why
+```
+
+**Why linking runs before verification, not after.** The compiler emits
+these four opcodes with a *constant-pool name index* in the operand
+position their `'s'` spec letter documents (Chapter 3) — the same position
+and width the final slot index will occupy, so the link step's rewrite
+never changes an instruction's length or shifts any later offset. The
+verifier's job for a `'s'`-spec operand is to check `slot <
+chunk->global_slot_count`; that check is meaningless before linking has
+even established what `global_slot_count` is. So linking must complete
+first, and by construction it only ever writes slot values in
+`[0, global_slot_count)` that it assigned itself — the *only* way a
+malformed `.bc` can attack this operand position is by supplying an
+out-of-range *name* index before linking, which the link step itself
+rejects defensively (bounds-checking against `constants_count`, since it
+runs ahead of the verifier and cannot yet trust that index is in range).
+This is exactly the same posture the section-directory validation in
+§2.1 already takes for data consumed ahead of the verifier.
+
+**Why this doesn't reopen the self-modifying-code question (Phase 2a,
+goal G2).** The rewrite happens once, at load time, on a plain malloc'd
+buffer, strictly before `pscalProtectChunkCode()` (§1.2/Chapter 4) ever
+`mprotect`s it `PROT_READ` — that call happens later, in
+`interpretBytecode()`'s prologue, after linking has already completed for
+every path into it. It is a linker relocation pass over freshly loaded (or
+freshly compiled) bytecode, not runtime self-modification of code that is
+already executing.
+
+**Fresh-compile path.** `compileASTToBytecode()` (`compiler.c`) deliberately
+does **not** call `pscalLinkGlobalSlots()` before returning, even though its
+output chunk needs linking before it can execute GET_GSLOT/SET_GSLOT
+correctly. The reason is the cache: each frontend's `main.c` calls
+`saveBytecodeToCache()` on `compileASTToBytecode()`'s direct output
+immediately after compiling, and that saved `.bc` must hold the *pre-link*
+(name-indexed) form — otherwise a later cache hit would run
+`pscalLinkGlobalSlots()` a second time on already-linked bytecode,
+misinterpreting resolved slot indices as fresh name indices (a real bug
+caught during this phase's own testing: small in-range slot numbers are
+frequently, but not always, valid-but-wrong constant-pool indices, so the
+symptom was a confusing downstream failure, not an obvious load error).
+Each frontend's `main.c` therefore calls `pscalLinkGlobalSlots()` itself,
+exactly once, immediately after `saveBytecodeToCache()` and before
+`interpretBytecode()` — safe to call unconditionally regardless of whether
+the chunk came from a fresh compile or a cache hit, since the function is
+idempotent (`chunk->globals_linked` short-circuits a second call).
 
 **LINE** (`writeLinesSection`/`readLinesSection`): a **varint run-length
 table**, replacing PSB2's per-code-byte `int[]` (4 bytes of debug info per
@@ -166,12 +235,17 @@ exsh's compiled shell functions) recurses through the *same* six section
 writers (`writeChunkCoreInline`) sequentially into the surrounding buffer,
 with no directory of its own — it's never loaded standalone or randomly
 addressed, so it doesn't need the top-level container's per-section
-addressing. `readPointerValue()` runs `pscalVerifyBytecodeChunk()` (§5.5 of
-`Docs/pscal_vm2_plan.md`) on this nested chunk immediately after
-deserializing it, exactly as the top-level loaders do for the outer chunk —
-a malformed embedded closure fails the whole load rather than surfacing as
-undefined behavior the first time the closure is invoked (security fix,
-2026-07-05).
+addressing. `readPointerValue()` runs `pscalLinkGlobalSlots()` then
+`pscalVerifyBytecodeChunk()` (§5.5 of `Docs/pscal_vm2_plan.md`) on this
+nested chunk immediately after deserializing it, exactly as the top-level
+loaders do for the outer chunk — a malformed embedded closure fails the
+whole load rather than surfacing as undefined behavior the first time the
+closure is invoked (security fix, 2026-07-05). The link step here is
+effectively a no-op walk in practice: exsh's own codegen never emits
+`GET_GSLOT`/`SET_GSLOT`/`DEFINE_GLOBAL_SLOT` (shell variables go through
+`CALL_HOST`/`CALL_BUILTIN` instead, being creatable at runtime), but running
+it unconditionally keeps "every chunk is linked before it's verified" true
+without a special case for this one nested path.
 
 **BMAP** (`writeBmapSection`/`readBmapSection`): `[varint builtin_map_count]`,
 then that many `(orig_idx:uvarint, lower_idx:uvarint)` pairs restoring
@@ -260,23 +334,24 @@ $ build/bin/pscalvm add2.bc
 ```
 
 Header + section directory (`xxd add2.bc`, first 96 bytes; regenerated post
-VM 2.0 Phase 2a — `format_ver` is now 2 and CODE is smaller, both explained
-below):
+VM 2.0 Phase 2b — `format_ver` is now 3, explained below):
 
 ```
-00000000: 3342 5350 0200 0900 0000 0000 0600 0000  3BSP............
-          └magic┘ └fmt=2┘└vm=9┘└flags──┘└count=6┘
-00000010: 434f 4445 5800 0000 3000 0000 4c49 4e45  CODE offset=0x58=88 len=0x30=48  LINE
-00000020: 8800 0000 0300 0000 434f 4e53 9000 0000  offset=0x88=136 len=3            CONS offset=0x90=144
-00000030: 6100 0000 424d 4150 f800 0000 0b00 0000  len=0x61=97                      BMAP offset=0xf8=248 len=11
-00000040: 5052 4f43 0801 0000 0200 0000 5459 5045  PROC offset=0x108=264 len=2      TYPE
-00000050: 1001 0000 0100 0000 ...                  offset=0x110=272 len=1
+00000000: 3342 5350 0300 0900 0000 0000 0600 0000  3BSP............
+          └magic┘ └fmt=3┘└vm=9┘└flags──┘└count=6┘
+00000010: 434f 4445 5800 0000 3300 0000 4c49 4e45  CODE offset=0x58=88 len=0x33=51  LINE
+00000020: 9000 0000 0300 0000 434f 4e53 9800 0000  offset=0x90=144 len=3            CONS offset=0x98=152
+00000030: 6100 0000 424d 4150 0001 0000 0b00 0000  len=0x61=97                      BMAP offset=0x100=256 len=11
+00000040: 5052 4f43 1001 0000 0200 0000 5459 5045  PROC offset=0x110=272 len=2      TYPE
+00000050: 1801 0000 0100 0000 ...                  offset=0x118=280 len=1
 ```
 
 Six sections (no `META` — this is an explicit `.bc` file written by
-`saveBytecodeToFile`, not a cache entry). `format_ver` 2 (was 1) is the VM 2.0
-Phase 2a bump: CODE's body now starts with a `cache_count` varint (§2.2)
-before its raw bytes, sizing this chunk's `caches[]` side table.
+`saveBytecodeToFile`, not a cache entry). `format_ver` 3 (was 2) is the VM
+2.0 Phase 2b bump: no section shape changed, but the opcode retirements
+below make a stale Phase-2a-vintage `.bc`'s CODE bytes structurally
+valid-looking yet no longer executable — see §2.1/§2.2 for why that alone
+justifies a format bump with no shape change.
 
 Disassembly (`pscaljson2bc --dump-bytecode-only add2.json`):
 
@@ -284,23 +359,23 @@ Disassembly (`pscaljson2bc --dump-bytecode-only add2.json`):
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    0 CONSTANT            1 'nil'
-0002    | DEFINE_GLOBAL    NameIdx:0   'myself' Type:POINTER ('')
-0007    | DEFINE_GLOBAL    NameIdx:3   'a' Type:INTEGER ('integer')
-0012    | DEFINE_GLOBAL    NameIdx:5   'b' Type:INTEGER ('integer')
-0017    | PUSH_IMM_I8         2
-0019    | GET_GLOBAL_ADDRESS    3 'a'
-0021    | SWAP
-0022    | SET_INDIRECT
-0023    | PUSH_IMM_I8        40
-0025    | GET_GLOBAL_ADDRESS    5 'b'
-0027    | SWAP
-0028    | SET_INDIRECT
-0029    | CONST_1
-0030    | GET_GLOBAL          3 'a' cache_id=0
-0034    | GET_GLOBAL          5 'b' cache_id=1
-0038    | ADD
-0039    | CALL_BUILTIN_PROC   181 'write' (2 args)
-0045    | HALT
+0002    | DEFINE_GLOBAL_SLOT Slot:0   'myself' Type:POINTER ('')
+0008    | DEFINE_GLOBAL_SLOT Slot:1   'a' Type:INTEGER ('integer')
+0014    | DEFINE_GLOBAL_SLOT Slot:2   'b' Type:INTEGER ('integer')
+0020    | PUSH_IMM_I8         2
+0022    | GET_GSLOT_ADDRESS    1 'a'
+0025    | SWAP
+0026    | SET_INDIRECT
+0027    | PUSH_IMM_I8        40
+0029    | GET_GSLOT_ADDRESS    2 'b'
+0032    | SWAP
+0033    | SET_INDIRECT
+0034    | CONST_1
+0035    | GET_GSLOT           1 'a'
+0038    | GET_GSLOT           2 'b'
+0041    | ADD
+0042    | CALL_BUILTIN_PROC   181 'write' (2 args)
+0048    | HALT
 
 Constants (10):
   0000: STR   "myself"    0001: NIL          0002: STR   ""
@@ -309,13 +384,21 @@ Constants (10):
   0008: INT   1           0009: STR   "write"
 ```
 
-Each `GET_GLOBAL` is 4 bytes now (`op name:u8 cache_id:u16`) instead of the
-pre-Phase-2a 10 (`op name:u8` + an 8-byte in-stream inline-cache slot), which
-is why offset 0034 follows 0030 by 4, not 10 — see
-`Docs/pscal_vm2_plan.md` §5.6 and Chapter 3 §3.0/§3.3 for the full mechanism
-(the `Symbol*` this used to self-patch into the instruction stream now lives
-in a per-chunk `caches[cache_id]` side table instead, keeping CODE read-only
-after load).
+`DEFINE_GLOBAL_SLOT` is one byte longer per declaration than the retired
+`DEFINE_GLOBAL` was for these three names (always `slot:u16` now, where
+`DEFINE_GLOBAL` used a narrow `name:u8` for name indices under 256, as all
+three here were): `myself`/`a`/`b` cost 6/6/6 bytes instead of 5/5/5, +3
+bytes total. `GET_GSLOT` is one byte *shorter* than the retired `GET_GLOBAL`
+per occurrence (`op slot:u16` = 3 bytes vs. `op name:u8 cache_id:u16` = 4),
+−2 bytes for the two occurrences of `a`/`b`. `GET_GSLOT_ADDRESS` is one byte
+*longer* than the retired `GET_GLOBAL_ADDRESS` per occurrence (`op slot:u16`
+= 3 bytes vs. `op name:u8` = 2, since the slot form has no narrow variant —
+see Chapter 3 §3.0 for why), +2 bytes for its two occurrences. Net: CODE
+grows by exactly 3 bytes (48→51) for this program, matching the section
+directory above. See `Docs/pscal_vm2_plan.md` §5.7 and Chapter 3 §3.0/§3.3
+for the full mechanism (the load-time link step that resolves each `slot`
+operand, and why the compiler emits a name index there rather than ever
+choosing a slot number itself).
 
 This particular program has no jumps, so it doesn't show off VM 2.0 Phase
 1c's widened operand encodings — see Chapter 3 for the current opcode page,

@@ -37,6 +37,11 @@ OP_JUMP_IF_FALSE = 0x1C
 OP_JUMP = 0x1D
 OP_CALL_HOST = 0x53
 OP_HALT = 0x59
+# VM 2.0 Phase 2b (plan §5.7): slot-addressed globals.
+OP_DEFINE_GLOBAL_SLOT = 0x64  # variable-length ("?"), no fixed entry in find_first_opcode's table
+OP_GET_GSLOT = 0x65
+OP_SET_GSLOT = 0x66
+OP_GET_GSLOT_ADDRESS = 0x67
 HOST_FN_QUIT_REQUESTED = 0  # first entry of HostFunctionID (vm/vm.h); always
                             # registered by vmInit regardless of frontend, and
                             # its C implementation touches no VM stack slots
@@ -75,6 +80,26 @@ SHELL_CLOSURE_SRC = """myfunc() {
 myfunc
 """
 
+# VM 2.0 Phase 2b (plan §5.7): a fixture with both a mutable global (x, gets
+# a real DEFINE_GLOBAL_SLOT + SET_GSLOT/GET_GSLOT) and a const global that is
+# genuinely resolved through GET_GSLOT rather than compiler-inlined -- a
+# plain `const` declaration is folded into a literal CONSTANT operand at
+# compile time, so it never touches the slot mechanism at all, but an enum
+# member is a real is_const=true global (see core/utils.c's
+# exportEnumMembersFromNode/ensureEnumMemberExported), resolved via
+# GET_GSLOT/GET_GSLOT_ADDRESS just like any mutable global. Used below to
+# build a "write through SET_GSLOT to a const slot" adversarial case using
+# only real compiler output (no hand-crafted PROCS-section Value bytes).
+GSLOT_CONST_SRC = """program GSlotConstTest;
+type
+  TColor = (Red, Green, Blue);
+var
+  x: integer = 1;
+begin
+  writeln(x, Ord(Red));
+end.
+"""
+
 
 def compile_to_bc(pascal_bin, source, cache_root):
     src_dir = tempfile.mkdtemp()
@@ -111,12 +136,59 @@ def compile_shell_to_bc(exsh_bin, source, cache_root):
         return f.read()
 
 
+OP_DEFINE_GLOBAL_SLOT_VARTYPE_ARRAY = 11  # VarType ordinals from core/types.h
+OP_DEFINE_GLOBAL_SLOT_VARTYPE_STRING = 4  # (0-indexed enum; see psb3_value.py's
+OP_DEFINE_GLOBAL_SLOT_VARTYPE_FILE = 7    # own copy of this table)
+
+
+def define_global_slot_length(code, pc):
+    """Length of a DEFINE_GLOBAL_SLOT instruction at `pc` (opcode already
+    known to be 0x64). Mirrors defineGlobalSlotPayloadLength() in
+    compiler/bytecode_link.c -- keep in sync if that payload shape changes."""
+    declared = code[pc + 3]
+    cursor = pc + 4
+    if declared == OP_DEFINE_GLOBAL_SLOT_VARTYPE_ARRAY:
+        dims = code[cursor]
+        cursor += 1 + dims * 4 + 3  # dims byte, per-dim bounds, elem type + elem name idx
+    else:
+        cursor += 2  # type name index
+        if declared == OP_DEFINE_GLOBAL_SLOT_VARTYPE_STRING:
+            cursor += 2
+        elif declared == OP_DEFINE_GLOBAL_SLOT_VARTYPE_FILE:
+            cursor += 3
+    return cursor - pc
+
+
 def find_first_opcode(code, wanted):
-    """Walks `code` using each opcode's *fixed* operand length (good enough
-    for these two small fixtures, which contain none of the four
-    variable-length opcodes) and returns the offset of the first occurrence
-    of any opcode in `wanted`, plus the still-unpatched raw code bytes."""
-    # Minimal fixed-length table for the opcodes these fixtures can contain.
+    """Walks `code` using each opcode's *fixed* operand length, with a
+    special case for DEFINE_GLOBAL_SLOT (VM 2.0 Phase 2b's one
+    variable-length opcode that these fixtures actually contain --
+    compileASTToBytecode() unconditionally emits one for "myself" in every
+    program, so this isn't a rare case to skip handling for). Returns the
+    offset of the first occurrence of any opcode in `wanted`.
+
+    Getting this wrong doesn't fail loudly: stepping the wrong length past
+    a variable-length opcode desyncs every subsequent "boundary" this walk
+    reports from the code's *real* instruction boundaries, and the search
+    may still coincidentally land on a byte matching a wanted opcode
+    value elsewhere in the stream (as happened here before this fix,
+    silently corrupting the wrong instruction instead of the intended one
+    -- caught by write_to_const_slot.bc's own runtime behavior not
+    matching what its corruption was supposed to produce, not by an
+    exception or a decode error). See _walk_opcode_positions() for the
+    fixed-length table this shares with find_all_opcodes()."""
+    for pc in _walk_opcode_positions(code):
+        if code[pc] in wanted:
+            return pc
+    return None
+
+
+def _walk_opcode_positions(code):
+    """Yields the offset of every real instruction boundary in `code`,
+    using the same fixed_len table + DEFINE_GLOBAL_SLOT special case as
+    find_first_opcode(). Factored out so callers needing more than "the
+    first match" (e.g. distinguishing two GET_GSLOT sites that reference
+    different names) can filter on more than just the opcode byte."""
     fixed_len = {
         0x00: 1, 0x01: 2, 0x02: 3, 0x03: 1, 0x04: 1, 0x05: 1, 0x06: 1, 0x07: 2,
         0x08: 1, 0x09: 1, 0x0A: 1, 0x0B: 1, 0x0C: 1, 0x0D: 1, 0x0E: 1,
@@ -131,23 +203,39 @@ def find_first_opcode(code, wanted):
         0x50: 4, 0x51: 5, 0x52: 4, 0x53: 2, 0x54: 1, 0x55: 8, 0x56: 2, 0x57: 3,
         0x58: 2, 0x59: 1, 0x5A: 1, 0x5B: 3, 0x5C: 5, 0x5D: 1, 0x5E: 1, 0x5F: 1,
         0x60: 1, 0x61: 1, 0x62: 1, 0x63: 2,
+        0x65: 3, 0x66: 3, 0x67: 3,
     }
     pc = 0
     while pc < len(code):
+        yield pc
         op = code[pc]
-        if op in wanted:
-            return pc
-        pc += fixed_len.get(op, 1)
-    return None
+        if op == OP_DEFINE_GLOBAL_SLOT:
+            pc += define_global_slot_length(code, pc)
+        else:
+            pc += fixed_len.get(op, 1)
 
 
 def code_section_payload(code_section_bytes):
-    count, pos = psb3.decode_varint(code_section_bytes, 0)
-    return code_section_bytes[pos:pos + count]
+    """Returns (code_bytes, cache_count). The on-disk CODE section is
+    [varint byte_count][varint cache_count][byte_count raw bytes] (VM 2.0
+    Phase 2a added cache_count; this helper was originally written before
+    that landed and, until fixed here, silently dropped it -- every prior
+    corpus case built via this + rebuild_code_section() was round-tripping
+    a code blob that started one byte early (the true first code byte
+    replaced by cache_count's own leading varint byte) and one byte short,
+    which readCodeSection() then rejected as a malformed section header
+    before the intended corruption (a bad jump target, a bad constant
+    index, ...) ever reached the verifier. Found while adding the Phase 2b
+    GET_GSLOT/SET_GSLOT cases below, which surfaced it immediately: their
+    corpus files failed to load for the wrong reason (this bug) instead of
+    the reason they were designed to test."""
+    byte_count, pos = psb3.decode_varint(code_section_bytes, 0)
+    cache_count, pos = psb3.decode_varint(code_section_bytes, pos)
+    return code_section_bytes[pos:pos + byte_count], cache_count
 
 
-def rebuild_code_section(new_code):
-    return psb3.encode_varint(len(new_code)) + new_code
+def rebuild_code_section(new_code, cache_count=0):
+    return psb3.encode_varint(len(new_code)) + psb3.encode_varint(cache_count) + new_code
 
 
 def write_corpus(out_dir, name, data, expect_ok, note):
@@ -215,11 +303,12 @@ def main():
     # --- Bad jump target: patch a JUMP/JUMP_IF_FALSE displacement to point
     # far past the end of the code section. ---
     pf = psb3.read_psb3(os.path.join(args.out, "golden_hello.bc"))
-    code = bytearray(code_section_payload(pf.section(psb3.SEC_CODE)))
+    code_bytes, code_cache_count = code_section_payload(pf.section(psb3.SEC_CODE))
+    code = bytearray(code_bytes)
     jmp_pc = find_first_opcode(bytes(code), {OP_JUMP_IF_FALSE, OP_JUMP})
     if jmp_pc is not None:
         code[jmp_pc + 1:jmp_pc + 5] = (0x7FFFFFF0).to_bytes(4, "big")
-        mutated = pf.with_section(psb3.SEC_CODE, rebuild_code_section(bytes(code)))
+        mutated = pf.with_section(psb3.SEC_CODE, rebuild_code_section(bytes(code), code_cache_count))
         manifest.append(write_corpus(args.out, "bad_jump_target.bc", mutated.to_bytes(), False,
                                       f"JUMP*/JUMP_IF_FALSE at code pc {jmp_pc} retargeted out of range"))
     else:
@@ -227,14 +316,14 @@ def main():
               file=sys.stderr)
 
     # --- Bad constant index: patch a CONSTANT/CONSTANT16 operand out of range. ---
-    code2 = bytearray(code_section_payload(pf.section(psb3.SEC_CODE)))
+    code2 = bytearray(code_bytes)
     const_pc = find_first_opcode(bytes(code2), {OP_CONSTANT, OP_CONSTANT16})
     if const_pc is not None:
         if code2[const_pc] == OP_CONSTANT:
             code2[const_pc + 1] = 0xFF
         else:
             code2[const_pc + 1:const_pc + 3] = (0xFFFF).to_bytes(2, "big")
-        mutated = pf.with_section(psb3.SEC_CODE, rebuild_code_section(bytes(code2)))
+        mutated = pf.with_section(psb3.SEC_CODE, rebuild_code_section(bytes(code2), code_cache_count))
         manifest.append(write_corpus(args.out, "bad_const_index.bc", mutated.to_bytes(), False,
                                       f"CONSTANT*/at code pc {const_pc} index set out of range"))
     else:
@@ -360,6 +449,86 @@ def main():
                                           f"embedded shell-closure's nested CONSTANT* at inner code pc "
                                           f"{bad_pc} index set out of range; the enclosing chunk is "
                                           "well-formed, only the nested chunk is corrupt"))
+
+    # --- VM 2.0 Phase 2b (plan §5.7): slot-addressed globals adversarial
+    # cases. GSLOT_CONST_SRC compiles with a real mutable global (x) and a
+    # real const global resolved through the slot mechanism (the enum
+    # member Red -- see the fixture's own comment for why a plain `const`
+    # doesn't work for this). ---
+    with tempfile.TemporaryDirectory() as cache_d:
+        gslot_bytes = compile_to_bc(args.pascal_bin, GSLOT_CONST_SRC, cache_d)
+    gslot_path = os.path.join(args.out, "_gslot_fixture.bc")
+    with open(gslot_path, "wb") as f:
+        f.write(gslot_bytes)
+    gpf = psb3.read_psb3(gslot_path)
+    os.remove(gslot_path)
+    gslot_code, gslot_cache_count = code_section_payload(gpf.section(psb3.SEC_CODE))
+
+    # --- Bad name index feeding the load-time link step (compiler/
+    # bytecode_link.c): patches a GET_GSLOT's still-pre-link name-index
+    # operand out of range, same corruption class as bad_const_index.bc but
+    # for the opcode family this phase adds. This is deliberately NOT a test
+    # of bytecode_verify.c's checkSlotIndex directly: by construction, the
+    # link step always runs before the verifier and only ever writes
+    # in-range slot values (0..count-1) it assigned itself, so a
+    # corrupted-but-in-range slot index can never reach the verifier this
+    # way -- the link step's own defensive bounds check (linkResolveName)
+    # is the actual first (and only) line of defense against a malformed
+    # pre-link name index in this operand position, which is exactly what
+    # this case exercises. ---
+    gslot_pc = find_first_opcode(gslot_code, {OP_GET_GSLOT, OP_SET_GSLOT, OP_GET_GSLOT_ADDRESS})
+    if gslot_pc is None:
+        print("warning: no GET_GSLOT/SET_GSLOT/GET_GSLOT_ADDRESS found in gslot fixture; "
+              "skipping bad_gslot_name_index.bc", file=sys.stderr)
+    else:
+        code3 = bytearray(gslot_code)
+        code3[gslot_pc + 1:gslot_pc + 3] = (0xFFFF).to_bytes(2, "big")
+        mutated = gpf.with_section(psb3.SEC_CODE, rebuild_code_section(bytes(code3), gslot_cache_count))
+        manifest.append(write_corpus(args.out, "bad_gslot_name_index.bc", mutated.to_bytes(), False,
+                                      f"opcode at code pc {gslot_pc} (GET_GSLOT/SET_GSLOT/"
+                                      "GET_GSLOT_ADDRESS) had its pre-link name-index operand set "
+                                      "out of range -- must be rejected by the load-time link step "
+                                      "(compiler/bytecode_link.c), before the verifier ever runs"))
+
+    # --- Write through SET_GSLOT to a const slot: retargets the real
+    # SET_GSLOT emitted for `x := 1` to reference the constant-pool name
+    # "red" instead of "x" (found via the GET_GSLOT the compiler already
+    # emitted for `Ord(Red)`, so this needs no hand-crafted PROCS-section
+    # Value bytes -- both name indices already exist as real constant-pool
+    # entries in this fixture). After linking, this SET_GSLOT resolves to
+    # Red's slot, which the link step marked const because "red" is a real
+    # is_const=true entry in globalSymbols (exportEnumMembersFromNode).
+    # The file loads and verifies cleanly (structurally well-formed --
+    # const-ness is a runtime bitmap check, not a load-time property the
+    # verifier enforces), and must fail cleanly at runtime instead, via
+    # SET_GSLOT's global_slot_is_const check. ---
+    set_x_pc = find_first_opcode(gslot_code, {OP_SET_GSLOT})
+    x_name_idx = gslot_code[set_x_pc + 1:set_x_pc + 3] if set_x_pc is not None else None
+    # `writeln(x, Ord(Red))` emits a GET_GSLOT for 'x' *before* the one for
+    # 'red' (it evaluates x first), so find_first_opcode() alone would find
+    # x's, not red's -- walk all GET_GSLOT*/GET_GSLOT_ADDRESS sites and take
+    # the first whose operand differs from x's own name index instead.
+    get_red_pc = None
+    if x_name_idx is not None:
+        for pc in _walk_opcode_positions(gslot_code):
+            if gslot_code[pc] in (OP_GET_GSLOT, OP_GET_GSLOT_ADDRESS) and \
+               gslot_code[pc + 1:pc + 3] != x_name_idx:
+                get_red_pc = pc
+                break
+    if get_red_pc is None or set_x_pc is None:
+        print("warning: could not locate both a GET_GSLOT* (for Red) and a SET_GSLOT (for x) "
+              "in gslot fixture; skipping write_to_const_slot.bc", file=sys.stderr)
+    else:
+        red_name_idx = gslot_code[get_red_pc + 1:get_red_pc + 3]
+        code4 = bytearray(gslot_code)
+        code4[set_x_pc + 1:set_x_pc + 3] = red_name_idx
+        mutated = gpf.with_section(psb3.SEC_CODE, rebuild_code_section(bytes(code4), gslot_cache_count))
+        manifest.append(write_corpus(args.out, "write_to_const_slot.bc", mutated.to_bytes(), False,
+                                      f"SET_GSLOT at code pc {set_x_pc} (originally targeting mutable "
+                                      "global 'x') retargeted to the same constant-pool name index as "
+                                      "the enum member 'red' (a real const global); loads and verifies "
+                                      "cleanly, must be rejected at runtime by SET_GSLOT's "
+                                      "global_slot_is_const check"))
 
     manifest_path = os.path.join(args.out, "manifest.json")
     import json
