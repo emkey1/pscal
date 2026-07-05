@@ -105,6 +105,20 @@ highest-risk item, and everything before it shrinks its blast radius.
    (`AS_INTEGER`, `IS_NUMERIC`, `makeInt`, ...), extended to full coverage.
    Zero behavior change; verified by the differential harness.  This is what
    makes Phase 4 a representation swap instead of a codebase rewrite.
+   **Done:** ~2,600 sites swept across vm.c, builtin.c, the network API,
+   symbol/compiler, ext_builtins, gl/sdl/audio, the shell `.inc` family and
+   smallclue integration.  New exact-alias accessors in core/types.h
+   (`VALUE_TYPE`, `VAL_INT`/`VAL_UINT`, `VAL_REAL32/64/_LD`, `AS_RECORD`,
+   `AS_ARRAY`, `AS_POINTER`, ..., `SET_VALUE_TYPE`, `SET_CHAR_VALUE`) are
+   C11 `_Generic`-pinned to `Value`, so applying one to a Symbol/AST/Token
+   is a compile error.  Verified per slice by -O2 object-code
+   byte-comparison, the full suites, and zero-diff `vm_diff_harness` runs.
+   Regression guard: configure with `-DPSCAL_VALUE_ACCESS_LINT=ON` to
+   `#pragma GCC poison` the raw payload field names outside the
+   representation layer (core/utils.c, core/cache.c stay raw by design).
+   Still raw: Value array/string *metadata* fields (`lower_bound(s)`,
+   `dimensions`, `element_type`, `max_length`, `base_type_node`; ~600
+   sites) — follow-up sweep needed before Phase 4 Stage A touches arrays.
 4. **`opcodes.def` single source of truth.** Replace the hand-maintained
    enum + `VM_OPCODE_LIST` X-macro + hand-written disassembler switch with
    one table:

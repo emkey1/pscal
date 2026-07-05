@@ -168,6 +168,12 @@ if(CMAKE_C_COMPILER_ID MATCHES "Clang")
     add_compile_options(-Wno-unreachable-code-generic-assoc)
 endif()
 
+# VM 2.0 Phase 0 accessor-sweep lint: poison raw Value payload field names in
+# pscal-core sources (frontends are out of scope for the sweep). Opt-in; see
+# pscal-core src/core/utils.h.
+option(PSCAL_VALUE_ACCESS_LINT
+    "Forbid raw Value payload field access in pscal-core outside its representation layer" OFF)
+
 if(UNIX AND NOT APPLE)
     add_compile_definitions(_GNU_SOURCE _POSIX_C_SOURCE=200809L)
 endif()
@@ -1856,6 +1862,10 @@ if(PSCAL_HAS_LIBGIT2 AND PSCAL_LIBGIT2_TARGET)
     target_link_libraries(pscal_core_static PUBLIC ${PSCAL_LIBGIT2_TARGET})
 endif()
 target_compile_definitions(pscal_core_static PRIVATE PSCAL_NO_CLI_ENTRYPOINTS)
+if(PSCAL_VALUE_ACCESS_LINT)
+    target_compile_definitions(pscal_core_static PRIVATE PSCAL_VALUE_ACCESS_LINT)
+    message(STATUS "pscal-core: Value access lint ENABLED")
+endif()
 if(NOT PSCAL_PLATFORM_IOS OR PSCAL_USE_HOST_OPENSSL)
     if(OPENSSL_INCLUDE_DIR)
         target_include_directories(pscal_core_static PRIVATE ${OPENSSL_INCLUDE_DIR})
