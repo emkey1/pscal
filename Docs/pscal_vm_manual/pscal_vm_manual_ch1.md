@@ -158,8 +158,10 @@ typedef struct VM_s {
     uint8_t* ip;
     uint8_t* lastInstruction;
 
-    Value stack[VM_STACK_MAX];   // VM_STACK_MAX == 8192
-    Value* stackTop;             // one past the logical top
+    Value* stack;                 // base of a growable mmap reservation (VM 2.0 Phase 3)
+    Value* stackTop;               // one past the logical top
+    size_t stackCommittedValues;   // currently accessible (mprotect'd RW) prefix
+    size_t stackReservedValues;    // total reservation size -- the hard ceiling
 
     HashTable* vmGlobalSymbols;      // mutable globals
     HashTable* vmConstGlobalSymbols; // read-only globals (no locking needed)
@@ -168,7 +170,8 @@ typedef struct VM_s {
 
     HostFn host_functions[MAX_HOST_FUNCTIONS];  // MAX_HOST_FUNCTIONS == 4096
 
-    CallFrame frames[VM_CALL_STACK_MAX];  // VM_CALL_STACK_MAX == 4096
+    CallFrame* frames;              // heap array, grown via realloc (VM 2.0 Phase 3)
+    size_t frameCapacity;
     int frameCount;
     ...
     Thread threads[VM_MAX_THREADS];       // VM_MAX_THREADS == 16
@@ -177,17 +180,40 @@ typedef struct VM_s {
 } VM;
 ```
 
-**Operand stack.** `stack[VM_STACK_MAX]` is a fixed array of `Value` — PSCAL's
+**Operand stack (VM 2.0 Phase 3, plan §5.9).** `stack` is the base of a
+single virtual-memory reservation made once in `initVM()` via
+`mmap(PROT_NONE)` and never relocated or freed until `freeVM()` — a
+`Value*` taken from a stack slot (see `GET_LOCAL_ADDRESS` below) stays valid
+for the VM's entire lifetime. Only a small initial prefix is actually
+accessible (`mprotect(PROT_READ|PROT_WRITE)`'d) at first;
+`push()`/`vmFastPushUnchecked()` extend that committed prefix in place
+(doubling it) whenever the next push would exceed it, up to a configurable
+ceiling (`VM_STACK_MAX`, default 1,048,576 Values, overridable via the
+`PSCAL_VM_MAX_STACK_VALUES` environment variable) — exceeding the ceiling
+is a clean `"VM Error: Stack overflow."`, never a native crash or unbounded
+growth. Because the base address never moves, every pointer-difference
+computation elsewhere in the interpreter (`vm->stackTop - vm->stack`,
+loops like `for (Value* slot = vm->stack; slot < vm->stackTop; slot++)`)
+keeps working completely unmodified — the growable design is deliberately
+*not* a linked list of fixed-size segments (which would make every one of
+those computations undefined behavior across separate allocations); see
+the plan's §5.9 writeup for the full rationale. `Value` is PSCAL's
 tagged-union runtime value type (numeric variants, strings, pointers,
-records/objects, sets, files, enums). There is no separate typed-stack
-optimization; every push/pop moves a full `Value`. The interpreter's stack
+records/objects, sets, files, enums); there is no separate typed-stack
+optimization, every push/pop moves a full `Value`. The interpreter's stack
 primitives are `push`/`pop` plus a `peek` and `FAST_POP`/fast-path variants
 used on hot paths (opcodes like `DUP`/`SWAP`/`POP` are thin wrappers over
 stack-top arithmetic).
 
-**Call/frame stack.** `frames[VM_CALL_STACK_MAX]` is a *parallel* fixed array,
-not a linked structure. Each `CallFrame` is a window description into the
-*same* operand stack rather than a separate stack of its own:
+**Call/frame stack.** `frames` (VM 2.0 Phase 3: a heap array grown via
+ordinary `realloc()`, starting small and doubling up to a configurable
+ceiling, `VM_CALL_STACK_MAX` default 131,072 frames, overridable via
+`PSCAL_VM_MAX_CALL_FRAMES`) is a *parallel* array, not a linked structure.
+Relocating it on growth is safe because nothing holds a `CallFrame*` beyond
+the immediate scope of the opcode handler that read it — unlike the operand
+stack, no opcode takes the address of a `CallFrame` itself. Each `CallFrame`
+is a window description into the *same* operand stack rather than a
+separate stack of its own:
 
 ```c
 typedef struct {
@@ -414,8 +440,11 @@ typedef struct {
 
 Each spawned thread runs `interpretBytecode()` over **its own** `VM`
 instance (`vm->threadOwner` links a worker's `VM*` back to the owning parent),
-with its own operand stack and call-frame array — `Value stack[VM_STACK_MAX]`
-and `CallFrame frames[VM_CALL_STACK_MAX]` are per-`VM`, hence per-thread. What
+with its own operand stack and call-frame array — `stack` (its own growable
+mmap reservation, VM 2.0 Phase 3) and `frames` (its own growable heap array)
+are per-`VM`, hence per-thread; each worker's storage is allocated by the
+same `initVM()` every VM instance goes through, so no special-casing was
+needed to preserve this property. What
 *is* shared across threads is global variable state and the procedure/mutex
 tables. `THREAD_CREATE` spawns a worker against the *same* `BytecodeChunk*`
 the parent is executing, and (VM 2.0 Phase 2b, plan §5.7) `chunk->global_slots[]`

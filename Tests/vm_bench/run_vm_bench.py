@@ -42,6 +42,10 @@ BENCHES = {
     "globals": ("globals.p", "3547984"),
     "json":    ("json.p",    "8011500"),
     "io_http": ("io_http.p", "2205120"),
+    # VM 2.0 Phase 3 (plan §5.9): recursion depth impossible before the
+    # growable stack (deep_recursion.p's countdown(50000) would have hit
+    # the old fixed VM_CALL_STACK_MAX=4096 within a couple thousand frames).
+    "deep_recursion": ("deep_recursion.p", "1000000"),
 }
 
 CHECK_RE = re.compile(r"^check=(\S+)$", re.M)

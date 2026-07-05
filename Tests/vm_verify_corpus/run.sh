@@ -7,4 +7,5 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="${PYTHON:-python3}"
 
 "$PY" "$SCRIPT_DIR/generate_corpus.py" "$@" || exit 1
-"$PY" "$SCRIPT_DIR/run_corpus_tests.py"
+"$PY" "$SCRIPT_DIR/run_corpus_tests.py" || exit 1
+"$PY" "$SCRIPT_DIR/test_stack_ceiling.py"

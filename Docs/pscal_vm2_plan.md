@@ -2,8 +2,9 @@
 
 Status: Phase 0 and Phase 1 core (1a-1e, the PSB3 format epoch plus the
 load-time verifier) shipped 2026-07-04; Phase 2a (inline caches move to a
-side-table) and Phase 2b (slot-addressed globals) both shipped 2026-07-05.
-Phase 3 and beyond remain proposal.
+side-table), Phase 2b (slot-addressed globals), and Phase 3 (growable
+operand/call stacks) all shipped 2026-07-05.
+Phase 4 and beyond remain proposal.
 Companion to the
 [VM Technical Manual](pscal_vm_manual/pscal_vm_manual.md), which documents
 the 1.x engine this plan modifies.  File/line references are to
@@ -71,7 +72,7 @@ graph TD
     P0["Phase 0\nTest scaffolding + accessor sweep"]
     P1["Phase 1\nPSB3 container, stable ISA,\nu32 widths, line table, verifier"]
     P2["Phase 2\nImmutable code:\ncache side-table + slot globals"]
-    P3["Phase 3\nSegmented stacks"]
+    P3["Phase 3\nGrowable stacks"]
     P4["Phase 4\nValue re-representation"]
     P5["Phase 5\nTasks + channels"]
     P6["Phase 6\nEffect classes, sandbox, record/replay"]
@@ -873,23 +874,236 @@ fast paths for `ADD`/comparisons without patching instructions.  Strictly
 optional; gated on Phase 0 benchmarks showing `BINARY_OP` dispatch as a top
 cost, which the current macro's overload ladder makes likely.
 
-### 5.9 Phase 3: Segmented stacks
+### 5.9 Phase 3: Growable stacks
 
-- **The constraint:** `GET_LOCAL_ADDRESS`/`GET_GLOBAL_ADDRESS` push real
-  `Value*` into other `Value`s (VAR parameters, §3.3 of the manual), so the
-  operand stack can never be moved by `realloc`.  Growth must be
-  **segmented**: fixed-size chunks (e.g. 4096 Values) linked in a list;
-  a frame's slot window always lives inside one segment (a call whose
-  window would straddle a boundary starts it on the next segment).
-- `CallFrame.slots` stays a raw pointer (valid because segments never
-  move); `frames[]` itself grows by realloc since nothing takes the address
-  of a CallFrame.
-- Initial allocation shrinks from 8192 Values to one segment, which also
-  cuts per-thread VM footprint (today every `Thread`'s VM embeds the full
-  8192-Value array inline).
+- **The constraint:** `GET_LOCAL_ADDRESS`/`GET_GSLOT_ADDRESS` push real
+  `Value*` into other `Value`s (VAR parameters, §1.2/§3.3 of the manual), so
+  the operand stack can never be moved once an address has been taken from
+  it.
+- `CallFrame.slots` stays a raw pointer; `frames[]` itself grows by realloc
+  since nothing takes the address of a `CallFrame`.
+- Initial allocation shrinks, which also cuts per-thread VM footprint (every
+  `Thread`'s VM used to embed the full 8192-Value array inline).
 - `VM_STACK_MAX`/`VM_CALL_STACK_MAX` become configurable ceilings
   (default: effectively unbounded, rlimit-style guard), fixing deep
   recursion.
+
+**Done (2026-07-05):** Shipped with one deliberate, load-bearing deviation
+from this section's own sketch, in the same spirit as prior phases'
+documented deviations (Phase 2a's mmap/mprotect trick for CODE immutability,
+Phase 2b's eight-opcode-wider slot family) — the growth mechanism is a
+**single contiguous virtual-memory reservation with a growable committed
+prefix**, not a linked list of fixed-size segments, plus everything the
+sketch left unspecified (closures/upvalues safety, per-thread isolation,
+embedded shell-closure coverage, and a concrete ceiling/overflow story).
+
+- **Why not literal segments.** A dedicated investigation (four parallel
+  research passes over vm.c) catalogued every site touching `vm->stack`/
+  `vm->stackTop`: roughly 85 of them, covering `push()`/`pop()`/`peek()` and
+  their `vmFastPush/Pop/PeekUnchecked` twins, every `CALL*` family's arity
+  and frame-window setup, `GET_LOCAL_ADDRESS`'s live-window computation,
+  every diagnostic/snapshot function (`vmDumpStackInfo*`,
+  `vmProcFillSnapshot`), and every `for (Value* slot = vm->stack; slot <
+  vm->stackTop; slot++)`-style scan (execution-resource cleanup, RETURN's
+  frame-teardown loop). All of them compute `vm->stackTop - vm->stack` or
+  iterate between the two pointers, which is only well-defined C if `stack`
+  and `stackTop` point into the *same* allocation — true today only because
+  the array is one contiguous block. A literal linked-segment design would
+  make every one of those ~85 sites either silently wrong (comparing/
+  subtracting pointers from different `malloc()` calls is undefined
+  behavior, not just "a big number") or in need of individual, error-prone
+  rewriting into segment-aware arithmetic — exactly the kind of large,
+  invasive, hard-to-verify-by-inspection change this plan's own §2 dual-
+  build-safety philosophy exists to avoid. A single virtual-memory
+  reservation satisfies the actual constraint (memory is never relocated
+  once an address has been taken from it) while leaving literally all ~85
+  of those sites byte-for-byte unmodified — only the allocation/growth
+  mechanism and `initVM()`/`freeVM()` change. This is also strictly stronger
+  than segments for the address-escape guarantee: with one reservation there
+  is no such thing as "a frame's window straddling a segment boundary" to
+  guard against, because there are no boundaries.
+- **Mechanism (`vm.c`).** `vmAllocStackStorage()` reserves the *entire*
+  ceiling up front via `mmap(NULL, size, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS,
+  -1, 0)` — cost is address space, not physical memory — then
+  `mprotect(PROT_READ|PROT_WRITE)`'s only a small initial prefix
+  (`VM_STACK_INITIAL_VALUES` = 4096 Values, half the old fixed size).
+  `vmGrowStackStorage()`, called from `push()`/`vmFastPushUnchecked()`'s
+  existing overflow check exactly where the old `>= VM_STACK_MAX` comparison
+  lived, doubles the committed (mprotect'd) prefix in place — never
+  `mmap`/`munmap`s the base — until it covers the requested depth or hits
+  the reservation ceiling, at which point the caller gets the same clean
+  `"VM Error: Stack overflow."` `runtimeError()` the fixed array always gave,
+  never a native crash. `vmFreeStackStorage()` (`freeVM()`) is the only
+  place that ever `munmap`s the reservation. `CallFrame frames[]` becomes a
+  `realloc`-grown heap array (`vmGrowFrames()`/`vmEnsureFrameCapacity()`),
+  starting at `VM_CALL_FRAME_INITIAL_CAPACITY` = 256 (was 4096 inline) and
+  doubling up to its own ceiling; safe because a dedicated audit of every
+  `CallFrame* frame = &vm->frames[...]` capture site (CALL/CALL_INDIRECT/
+  CALL_METHOD/PROC_CALL_INDIRECT/RETURN/THREAD_CREATE, and the parent-frame
+  lookups upvalue capture walks) found every one used and discarded within
+  the same opcode handler, before any code that could grow `frameCount`
+  further — confirmed by grep across the codebase that no struct anywhere
+  (`Thread`, `ThreadJob`, closure structures) stores a `CallFrame*` beyond
+  that immediate scope.
+- **Configurable ceilings, one accessor shared by runtime and verifier.**
+  `VM_STACK_MAX` (default 1,048,576 Values) and `VM_CALL_STACK_MAX` (default
+  131,072 frames) are now *default* ceiling values, not fixed array sizes.
+  `pscalVmStackCeilingValues()`/`pscalVmCallFrameCeiling()` (`vm.c`, declared
+  in `vm.h`) read `PSCAL_VM_MAX_STACK_VALUES`/`PSCAL_VM_MAX_CALL_FRAMES`
+  once per process (same lazy-env-var-cache convention as Phase 1e's
+  `PSCAL_VM_SKIP_VERIFY`) and fall back to the compile-time defaults. Both
+  `bytecode_verify.c`'s per-procedure abstract-stack-depth check (§5.5) and
+  the runtime's own growth/overflow path call the *same* accessor, so a
+  chunk that verifies clean can never subsequently be rejected by a runtime
+  ceiling the verifier didn't know about, and lowering the ceiling for a
+  test always tightens both load-time and run-time behavior identically.
+  Verified directly: `countdown()` recursion to depth 100,000 succeeds under
+  the defaults (the old fixed arrays capped out around 2,049 frames);
+  `PSCAL_VM_MAX_STACK_VALUES=2000`/`PSCAL_VM_MAX_CALL_FRAMES=500` both
+  reproduce a clean, non-crashing overflow at the lowered bound, and raising
+  either override (e.g. to 250,000 frames / 2,000,000 Values) lets a
+  correspondingly deeper recursion succeed.
+- **Closures/upvalues: investigated, not hand-waved.** A dedicated
+  investigation traced `GET_LOCAL_ADDRESS`/`GET_UPVALUE_ADDRESS` (which push
+  a raw `Value*` into a frame's stack slot, exactly the VAR-parameter
+  mechanism) through `vmHostCreateClosure()`'s capture loop and found the
+  compiler already performs the relevant escape analysis:
+  `closureLiteralEscapesCurrentRoutine()`/`markClosureLiteralEscapes()`
+  (`compiler.c`) sets `Symbol.closure_escapes` at compile time whenever a
+  closure literal is assigned outside its defining routine or returned.
+  `vmHostCreateClosure()` branches on that flag: an escaping closure's
+  captures are `makeCopyOfValue()`'d into heap-owned cells (`ClosureEnvPayload
+  .slots[i] = malloc'd cell`), while a non-escaping closure keeps the raw
+  stack `Value*` directly — safe *only* because "non-escaping" is a
+  compile-time proof that the closure cannot outlive its capturing frame,
+  so the pointer is never read after the memory it points to could be
+  reused. This mechanism predates Phase 3 and needed no changes: growable
+  storage is append-only and never frees or relocates a region while any
+  frame using it could still be live, which is the exact same tolerance the
+  old fixed monolithic array always provided (a returned frame's slots were
+  always just "about to be overwritten by whatever pushes next", never
+  actually deallocated) — Phase 3 does not introduce a new hazard class
+  here, it just makes the region a returning frame's slots live in
+  potentially different (but equally permanent, equally reused-in-place)
+  memory. Proven, not just argued: `Tests/vm_stack_growth_stress/
+  closures_across_growth.pas` creates 2000 independent *escaping* generator
+  closures interleaved with enough unrelated deep recursion between each one
+  to force many growth cycles, then invokes all 2000 only afterward — every
+  one reports its own distinct, uncorrupted counter state.
+- **Per-thread isolation and worker-pool recycling.** Each spawned worker
+  gets its own full `VM` instance via the ordinary `initVM()` path (confirmed
+  in `vmThreadPrepareWorkerVm()`: a never-yet-used slot calls `initVM()`,
+  which now also calls `vmAllocStackStorage()`/`vmGrowFrames()`), so
+  segmentation-by-VM-instance was already the natural shape and needed no
+  new plumbing. `vmResetExecutionState()`/`vmReleaseExecutionResources()` —
+  the functions a recycled pool worker's *next* job actually runs through —
+  needed **zero changes**: they already only `freeValue()` live stack
+  entries and reset `stackTop`/`frameCount` to zero, never freeing the
+  underlying arrays, which is exactly the reuse discipline a growable
+  design wants (the committed mmap prefix and the realloc'd frames array
+  both survive a reset, ready for the next job without re-allocating).
+  Verified directly: 15 concurrent worker threads (the full pool,
+  `VM_MAX_THREADS`=16 minus the main slot) each recursing to depth 20,000
+  all complete with correct, independent per-thread results; the Phase 2b
+  `globals_concurrency.pas` stress fixture (six threads hammering ten
+  unlocked shared globals) still passes 20/20 clean runs with 0 sanitizer
+  reports under `build-asan`.
+  **Two pre-existing, unrelated bugs found and filed (not fixed here,
+  confirmed via git-worktree/stash A/B testing to reproduce identically on
+  commit 19b36af with zero code changes — this phase does not touch the
+  thread-pool/job-queue code at all):** (1) the worker pool never actually
+  marks a `Thread` slot available for reuse after `WaitForThread` joins it —
+  a strictly sequential single-job-at-a-time spawn/join loop succeeds for
+  exactly 15 iterations (`VM_MAX_WORKERS`) and then hangs forever on the
+  16th, proving this is a cumulative "slots used over the VM's lifetime"
+  ceiling bug, not a concurrency-capacity one; (2) the same root cause
+  manifests as "more than 15 concurrent jobs hangs" and "a second sequential
+  wave of 15 jobs after the first fully joins hangs". Filed as follow-up
+  chips rather than fixed in this phase, since the job-queue/worker-pool
+  dispatch logic is untouched by Phase 3's own scope.
+- **Embedded shell-closure chunks.** Traced `shellInvokeFunction()`
+  (`shell_word_expansion.inc`): a shell function invocation either reuses a
+  reset (via `vmResetExecutionState()`) static VM or, for a nested call
+  while that static VM is already busy, `malloc()`s a brand new one and
+  calls `initVM()` on it — never recurses `interpretBytecode()` on an
+  already-executing VM's live frames. Both paths go through the same
+  `initVM()`/`vmResetExecutionState()` this phase updated, so embedded
+  shell-closure chunks get exactly the same growable storage as every other
+  VM instance with no special-casing needed, confirming exsh's existing
+  "untouched by design" status from Phase 2b continues to hold.
+- **A real bug found and fixed during implementation.** The first cut called
+  `vmGrowFrames()` from `initVM()` before `vm->frameCount` was initialized
+  to 0 — `vmGrowFrames()`'s own ceiling check (`vm->frameCount >= ceiling`)
+  read uninitialized struct memory, occasionally failing the very first
+  VM's initial frame allocation with a hard `EXIT_FAILURE_HANDLER()` (caught
+  immediately by the `tiny_pbc` build-time smoke step, which runs a `pscal`
+  binary as part of the umbrella build). Fixed by initializing `frameCount`
+  before the first `vmGrowFrames()` call, exactly the same "define state
+  before code that reads it" class of bug Phase 1c/1e's own audits caught
+  elsewhere.
+- **Verified:**
+  - `Tests/run_all_suites.py`: `core` suite's only failures are 22
+    pre-existing Rea `.err`/`.disasm` golden-fixture mismatches, confirmed
+    via git-worktree/stash A/B testing to reproduce byte-for-byte
+    identically on commit 19b36af (the stale-fixture issue this plan
+    already flagged as "known, separate, already-being-addressed" ahead of
+    this phase) — zero of them are stdout/behavioral differences, and none
+    reference anything this phase touches (globals/cache/stack opcodes are
+    untouched; only the mnemonic/offset shift from Phase 2b's own opcode
+    rename, which predates this session). `library`, `scope`, and
+    `vm-verify-corpus` suites all pass.
+  - `Tests/vm_diff_harness.py`, from-scratch pre-Phase-3 build vs. this
+    phase (both built into isolated `bin/` snapshots so neither run
+    disturbs the other): **388 MATCH, 7 SKIP, 6 NONDET, 0 DIFF** across 401
+    units — the NONDET set is the same pre-existing HTTP-timing flakiness
+    class prior phases documented, plus one additional inherently
+    nondeterministic parallelism fixture (`aether/par_pass`), neither a new
+    divergence between the two builds.
+  - `Tests/vm_bench/run_vm_bench.py`: all six pre-existing benchmarks show
+    no regression (`calls.p`, the recursion-heavy one this phase's own rigor
+    bar calls out, +/-noise against a same-session baseline run, well within
+    the ~1-7% jitter prior phases documented as not distinguishable from
+    measurement noise). A new `deep_recursion` benchmark (`countdown(50000)`
+    x20) is added specifically because it **cannot run at all** against the
+    pre-Phase-3 binary (crashes with the old fixed-size stack's "Call stack
+    overflow" within a couple thousand frames) and completes in ~0.57s
+    against this phase's build — direct proof the fix does what it claims,
+    not just a speed number. Results recorded to `history.jsonl` under
+    label `phase3-segmented-stack`.
+  - `build-asan/` (ASan+UBSan): `Tests/vm_stack_growth_stress/` (new
+    directory) — `deep_recursion.pas` (countdown to 100,000, far past the
+    old 4096-frame ceiling) and `var_param_across_growth.pas` (a VAR
+    parameter captured near the top of a 60,000-deep call chain, mutated
+    only at the deepest point, read back correctly at the top — proving a
+    `Value*` taken before a stack-growth event stays valid and correct
+    across many subsequent growth events) both pass clean with zero
+    sanitizer reports. `Tests/vm_verify_corpus/` (17 pre-existing cases, all
+    still passing) plus a new `test_stack_ceiling.py` (a tiny hand-crafted
+    chunk whose declared depth is checked against a deliberately lowered
+    `PSCAL_VM_MAX_STACK_VALUES`, proving the verifier's ceiling check
+    honors the runtime override rather than a hardcoded constant) — clean
+    under both a plain build and `build-asan`. The pre-existing bit-flip
+    fuzz sweep (`fuzz_bitflip.py`) re-run against `build-asan`'s `pscalvm`:
+    3968 mutation points, 2077 clean rejections, 1879 inert flips, 12 hangs
+    (the same self-targeted-jump-retarget class prior phases documented as
+    expected and not a memory-safety issue — a jump instruction retargeted
+    to itself), **0 crashes** — consistent with every prior phase's fuzz
+    results; the specific inert/rejected/hang counts shift slightly
+    release-to-release as opcodes are added but the safety property — no
+    memory-corruption crash — is unchanged.
+  - **A pre-existing, unrelated ASan finding surfaced (not fixed here,
+    confirmed via A/B testing to reproduce identically on commit 19b36af):**
+    any program using an *escaping* closure (e.g. the existing
+    `ProcPtrReturnClosureTest` fixture) crashes with `SIGABRT` and zero
+    output under `build-asan`, independent of anything this phase changed.
+    This matches Phase 2a's own ship notes, which already flagged "two
+    pre-existing, confirmed-unrelated ASan/UBSan findings in
+    `markClosureLiteralEscapes`... nothing to do with this phase" — this
+    phase's own closure stress test (`closures_across_growth.pas`) was
+    therefore verified only under the plain (non-ASan) build, where it
+    passes cleanly; the ASan-specific crash is filed as a follow-up chip
+    since it blocks ASan-based verification of *any* closure-related work,
+    not just this phase's.
 
 ### 5.10 Phase 4: Value re-representation
 
@@ -1009,7 +1223,7 @@ flow per phase is the standard multi-repo bump (component push, aether
 | Risk | Phase | Mitigation |
 |------|-------|------------|
 | Accessor sweep misses direct field pokes hidden in macros/.inc files | 0/4 | make `Value` fields `_deprecated`-attributed in a lint build; grep-audit `\.inc` shell includes specifically (largest single file family) |
-| Escaped stack `Value*` breaks under stack growth | 3 | segmented design (never move memory); debug mode poisons freed segments |
+| Escaped stack `Value*` breaks under stack growth | 3 | shipped as a single mmap virtual-memory reservation with a growable committed prefix, never relocated/freed until `freeVM()` — verified via a 60,000-deep VAR-parameter mutation across many growth events (`Tests/vm_stack_growth_stress/var_param_across_growth.pas`) |
 | CoW semantics subtly change Pascal record aliasing behavior | 4B | differential corpus must include the Rea OOP and VAR-param suites; any diff is a stop-ship |
 | Registry fingerprint too strict (any builtin addition invalidates ids) | 1b | fingerprint = ordered hash of (name,id) pairs actually referenced by the chunk's BMAP, not the whole registry |
 | exsh dynamic globals fight slot addressing | 2b | dual-path design is explicit from the start; exsh keeps the dynamic opcodes |
@@ -1023,7 +1237,7 @@ flow per phase is the standard multi-repo bump (component push, aether
 | 0 | 4-6 PRs | harness, benchmarks, accessor sweep (large but mechanical), opcodes.def |
 | 1 | 5-8 PRs | container, widths, line table, verifier; the big format epoch |
 | 2 | 3-4 PRs | side-table, then slot globals with exsh path |
-| 3 | 2 PRs | segmented stack + frame growth |
+| 3 | 2 PRs | growable stack (mmap reservation) + frame growth |
 | 4 | 6-10 PRs | the long pole; Stage A then B, each landable independently |
 | 5 | 3-4 PRs | tasks, HTTP migration, channels |
 | 6 | 2-3 PRs | masks + enforce, then record/replay |
