@@ -105,9 +105,21 @@ def read_sdl_enabled_from_cache(cache_path: Path) -> bool:
                 return True
     return False
 
+def read_sqlite_enabled_from_cache(cache_path: Path) -> bool:
+    if not cache_path.exists():
+        return False
+    marker = re.compile(r"^ENABLE_EXT_BUILTIN_SQLITE:BOOL=(ON|1|TRUE)$", re.IGNORECASE)
+    with cache_path.open("r", encoding="utf-8", errors="ignore") as fh:
+        for line in fh:
+            if marker.match(line.strip()):
+                return True
+    return False
 
 def is_sdl_example(path: Path) -> bool:
     return any(part.lower() == "sdl" for part in path.parts)
+
+def is_sqlite_example(path: Path) -> bool:
+    return "sqlite" in path.name.lower()
 
 
 def compile_example(binary: Path, script_path: Path, timeout_seconds: float) -> subprocess.CompletedProcess:
@@ -135,8 +147,10 @@ def run_compile_sweep(
     unexpected_successes: List[Path] = []
     discovered: Dict[str, int] = {}
     skipped_sdl: Dict[str, int] = {}
+    skipped_sqlite: Dict[str, int] = {}
     expected_failures_seen = 0
     sdl_enabled = read_sdl_enabled_from_cache(REPO_ROOT / "build/CMakeCache.txt")
+    sqlite_enabled = read_sqlite_enabled_from_cache(REPO_ROOT / "build/CMakeCache.txt")
 
     for language in languages:
         config = LANG_CONFIG[language]
@@ -152,18 +166,20 @@ def run_compile_sweep(
             return 2
 
         sources = discover_sources(root, source_suffixes)
-        if skip_sdl_when_disabled and not sdl_enabled:
-            filtered_sources: List[Path] = []
-            skipped = 0
-            for source in sources:
-                if is_sdl_example(source.relative_to(REPO_ROOT)):
-                    skipped += 1
-                else:
-                    filtered_sources.append(source)
-            sources = filtered_sources
-            skipped_sdl[language] = skipped
-        else:
-            skipped_sdl[language] = 0
+        filtered_sources: List[Path] = []
+        skipped_sdl_count = 0
+        skipped_sqlite_count = 0
+        for source in sources:
+            rel_path = source.relative_to(REPO_ROOT)
+            if skip_sdl_when_disabled and not sdl_enabled and is_sdl_example(rel_path):
+                skipped_sdl_count += 1
+            elif not sqlite_enabled and is_sqlite_example(rel_path):
+                skipped_sqlite_count += 1
+            else:
+                filtered_sources.append(source)
+        sources = filtered_sources
+        skipped_sdl[language] = skipped_sdl_count
+        skipped_sqlite[language] = skipped_sqlite_count
         discovered[language] = len(sources)
 
         if list_only:
@@ -210,10 +226,18 @@ def run_compile_sweep(
     listed_total = 0
     for language in languages:
         discovered_count = discovered.get(language, 0)
-        skipped_count = skipped_sdl.get(language, 0)
+        sdl_skip = skipped_sdl.get(language, 0)
+        sqlite_skip = skipped_sqlite.get(language, 0)
         listed_total += discovered_count
-        if skipped_count > 0:
-            print(f"  {language}: {discovered_count} source file(s) (skipped {skipped_count} SDL file(s))")
+
+        skip_msgs = []
+        if sdl_skip > 0:
+            skip_msgs.append(f"{sdl_skip} SDL file(s)")
+        if sqlite_skip > 0:
+            skip_msgs.append(f"{sqlite_skip} SQLite file(s)")
+
+        if skip_msgs:
+            print(f"  {language}: {discovered_count} source file(s) (skipped {', '.join(skip_msgs)})")
         else:
             print(f"  {language}: {discovered_count} source file(s)")
     print(f"  total: {listed_total} source file(s)")
