@@ -145,6 +145,22 @@ highest-risk item, and everything before it shrinks its blast radius.
    Dispatch table, `kOpcodeNames`, the disassembler's operand decoding, the
    verifier (§5.5), and instruction-length queries all generate from this
    file.  The manual's Chapter 3 tables become checkable against it.
+   **Done (2026-07-04):** `components/pscal-core/src/compiler/opcodes.def`
+   holds the full page with explicit ordinals (0x00-0x63), operand-spec
+   strings (`b`/`i`/`k`/`K`/`w`/`j`/`f`/`C`; `"?"` for the four
+   variable-length opcodes — DEFINE_GLOBAL[16], INIT_LOCAL_ARRAY,
+   INIT_FIELD_ARRAY — which keep bespoke decode logic) and stack effects
+   (-1 = operand-dependent; informational until the §5.5 verifier).
+   Generated from it: the OpCode enum + per-ordinal `_Static_assert` pins
+   (bytecode.h), the computed-goto dispatch table, its labels and
+   `kOpcodeNames` (vm.c), the `OpcodeInfo` metadata table +
+   `pscalOpcodeInfo()`/`pscalOpcodeOperandSpecLength()` driving
+   `getInstructionLength()` and the disassembler's operand decoding
+   (bytecode.c), and the pscald/pscalasm mnemonic table
+   (umbrella `src/disassembler/opcode_meta.c`).  Verified: disassembly
+   output byte-identical old-vs-new over a 95-program corpus, old-binary
+   .bc cache entries load unchanged in the new binary, zero-diff
+   `vm_diff_harness` (401 units), full suites at baseline.
 
 ## 5. Core Track
 
