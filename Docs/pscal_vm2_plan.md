@@ -116,9 +116,19 @@ highest-risk item, and everything before it shrinks its blast radius.
    Regression guard: configure with `-DPSCAL_VALUE_ACCESS_LINT=ON` to
    `#pragma GCC poison` the raw payload field names outside the
    representation layer (core/utils.c, core/cache.c stay raw by design).
-   Still raw: Value array/string *metadata* fields (`lower_bound(s)`,
-   `dimensions`, `element_type`, `max_length`, `base_type_node`; ~600
-   sites) — follow-up sweep needed before Phase 4 Stage A touches arrays.
+   **Metadata follow-up done (2026-07-04):** the array/string/file/pointer
+   metadata fields (`lower_bound(s)`, `upper_bound(s)`, `dimensions`,
+   `element_type(_def)`, `array_is_packed/_dynamic`, `array_refcount`,
+   `base_type_node`, `max_length`, `filename`, `record_size(_explicit)`,
+   `enum_meta`) now go through `ARRAY_*`/`STRING_MAX_LENGTH`/
+   `PTR_BASE_TYPE_NODE`/`FILE_*`/`ENUM_META` accessors in core/types.h
+   (~430 sites in vm.c, builtin.c, network API, symbol/compiler,
+   ext_builtins, sdl).  Same verification: -O2 object-code byte-identity
+   per file, full suites, zero-diff `vm_diff_harness` (388 MATCH /
+   0 diverge).  The lint poison covers the Value-unique metadata names;
+   the generic ones (`dimensions`, `element_type`, `filename`, ...) rely
+   on the `_Generic` guard.  Item 3 is fully complete; Phase 4 Stage A
+   can re-point array/string metadata freely.
 4. **`opcodes.def` single source of truth.** Replace the hand-maintained
    enum + `VM_OPCODE_LIST` X-macro + hand-written disassembler switch with
    one table:
