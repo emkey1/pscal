@@ -98,6 +98,9 @@ typedef struct {
     bool has_version;
     uint32_t version;
 
+    bool has_cache_count;
+    int cache_count;
+
     bool has_constants;
     int constants_count;
     Value *constants;
@@ -1292,6 +1295,24 @@ static int parsePscalasm2(const char *input_text, ParsedAsmProgram *program) {
             continue;
         }
 
+        // VM 2.0 Phase 2a: optional directive sizing the global-access cache
+        // side table (chunk.caches) for hand-assembled programs that use
+        // GET_GLOBAL/SET_GLOBAL/GET_GLOBAL16/SET_GLOBAL16 (whose cache_id
+        // operand is a raw byte pair the .asm author supplies directly, like
+        // any other operand). Defaults to 0 (no cache sites) when omitted --
+        // fine for programs that don't touch those opcodes.
+        if (strcmp(directive, "cache_count") == 0) {
+            long long v = 0;
+            if (!parseLongLongToken(&cursor, &v) || v < 0 || v > 0xFFFF) {
+                fprintf(stderr, "pscalasm:%d: invalid cache_count directive.\n", line_number);
+                free(copy);
+                return -1;
+            }
+            program->cache_count = (int)v;
+            program->has_cache_count = true;
+            continue;
+        }
+
         if (strcmp(directive, "constants") == 0) {
             long long count = 0;
             if (!parseLongLongToken(&cursor, &count) || count < 0 || count > INT32_MAX) {
@@ -2015,13 +2036,12 @@ static int assembleAndWritePscalasm2(const ParsedAsmProgram *program,
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
     chunk.version = program->has_version ? program->version : pscal_vm_version();
+    chunk.cache_count = program->has_cache_count ? program->cache_count : 0;
 
     if (program->constants_count > 0) {
         chunk.constants = (Value *)calloc((size_t)program->constants_count, sizeof(Value));
         chunk.builtin_lowercase_indices = (int *)malloc(sizeof(int) * (size_t)program->constants_count);
-        chunk.global_symbol_cache =
-            (Symbol **)calloc((size_t)program->constants_count, sizeof(Symbol *));
-        if (!chunk.constants || !chunk.builtin_lowercase_indices || !chunk.global_symbol_cache) {
+        if (!chunk.constants || !chunk.builtin_lowercase_indices) {
             fprintf(stderr, "pscalasm: out of memory allocating constants.\n");
             goto cleanup;
         }
@@ -2030,7 +2050,6 @@ static int assembleAndWritePscalasm2(const ParsedAsmProgram *program,
         for (int i = 0; i < program->constants_count; ++i) {
             chunk.constants[i] = makeCopyOfValue(&program->constants[i]);
             chunk.builtin_lowercase_indices[i] = -1;
-            chunk.global_symbol_cache[i] = NULL;
         }
     }
 

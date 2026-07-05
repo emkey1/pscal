@@ -1,7 +1,8 @@
 # PSCAL VM 2.0: Design & Implementation Plan
 
 Status: Phase 0 and Phase 1 core (1a-1e, the PSB3 format epoch plus the
-load-time verifier) shipped 2026-07-04; Phase 2 and beyond remain proposal.
+load-time verifier) shipped 2026-07-04; Phase 2a (inline caches move to a
+side-table) shipped 2026-07-05. Phase 2b and beyond remain proposal.
 Companion to the
 [VM Technical Manual](pscal_vm_manual/pscal_vm_manual.md), which documents
 the 1.x engine this plan modifies.  File/line references are to
@@ -496,6 +497,137 @@ execution-time regression either.
 - The `GET/SET_GLOBAL[16]_CACHED` opcode family collapses into the base
   opcodes.  Retired values are left as holes in `opcodes.def` (cheap, and
   keeps old disassembly listings readable), but nothing depends on that.
+
+**Done (2026-07-05):** Shipped largely as designed, with one deliberate
+deviation from this section's own example encoding, plus the concrete design
+of the pieces the sketch above left open.
+
+- **Encoding actually shipped.** `GET_GLOBAL`/`SET_GLOBAL` keep their existing
+  `name:u8` narrow form (the u8/u16 narrow-vs-wide split is an orthogonal,
+  pre-existing axis — same pattern as `CONSTANT`/`CONSTANT16` — and this
+  phase only touches the cache mechanism): `op name:u8 cache_id:u16` = **4
+  bytes** (was 10). `GET_GLOBAL16`/`SET_GLOBAL16`: `op name:u16 cache_id:u16`
+  = **5 bytes** (was 11) — this is the variant the plan's example actually
+  describes. New operand-spec letter `c` (opcodes.def) for the u16 cache_id,
+  distinct from the retired `C` (legacy 8-byte inline-cache-slot spec, kept
+  only so the four retired opcodes below still disassemble at their true
+  historical width).
+- **Side table.** `CacheSlot { Symbol* symbol; }` (`bytecode.h`) — a struct
+  rather than a bare pointer so a later Phase 8 quickening state machine has
+  somewhere to live without another format break. `BytecodeChunk` gained
+  `cache_count` (compile-time constant, incremented once per GET/SET_GLOBAL[16]
+  emission by the single shared `compiler.c` helper, `emitGlobalNameIdx`) and
+  `caches` (the runtime array, `NULL` until first execution). Deliberately
+  **not** shared by name: each call site gets its own slot, because a shared
+  per-name cache would fight a future Phase 8 quickening state machine if two
+  call sites for the same global see different runtime types — independent
+  per-site caches are what "monomorphic per call site" actually means. This
+  also let a genuinely dead, pre-existing per-name-constant-index cache
+  (`BytecodeChunk.global_symbol_cache`, added 2025-11-08, superseded by the
+  in-stream inline cache before Phase 2a began but never removed) get deleted
+  outright rather than accreting a second cache mechanism alongside the new
+  one.
+- **Allocation choke point.** `chunk->caches` is allocated exactly once, in
+  `interpretBytecode()`'s prologue, guarded by `globals_mutex` (double-checked
+  against `chunk->prepared_for_execution`) — the same lock already used for
+  other state shared across a chunk's multiple concurrent executions
+  (THREAD_CREATE spawns a new VM against the *same* chunk; an embedded shell
+  closure's chunk can likewise be invoked more than once). This is a single
+  choke point regardless of whether the chunk arrived via fresh compile,
+  cache load, explicit `.bc` load, or as a nested nested `ShellCompiledFunction`
+  chunk — `cache_count` is known by then in every case (compiler tally for a
+  fresh chunk; deserialized from the CODE section for a loaded one).
+- **CODE immutability (goal G2).** `pscalProtectChunkCode()` (`bytecode.c`),
+  gated by a new CMake option `PSCAL_VM_CODE_PROTECT` (defaults **on** for
+  `CMAKE_BUILD_TYPE=Debug`, i.e. `build-asan`, off otherwise — mmap+mprotect
+  has a small per-chunk cost not worth paying by default in Release). `code`
+  cannot be `mprotect`'d in place: a `malloc`/`realloc`'d buffer is neither
+  page-aligned nor page-sized, so protecting it in place would also fence off
+  whatever unrelated heap data shares its page. Instead the buffer is copied
+  into a fresh page-rounded anonymous `mmap`, the old buffer freed, and the
+  new one `mprotect(PROT_READ)`'d; `pscalReleaseChunkCode()` (used by every
+  teardown path that used to call `free(chunk->code)` directly) knows to
+  `munmap` instead of `free` once `code_is_mapped` is set. Verified: the full
+  suite plus the Phase 1e verifier's adversarial corpus (`vm_verify_corpus`,
+  both the 15-case corpus and the 3968-mutation bit-flip fuzz sweep) all run
+  clean under this build with zero `SIGSEGV`/ASan reports — proof nothing
+  left over from the old self-modifying design still writes into `CODE`,
+  which is the actual point of this item (a parallel unused table would not
+  have caught a missed self-modification site; an enforced page fault does).
+- **Retired opcodes.** `GET_GLOBAL_CACHED`/`SET_GLOBAL_CACHED`/
+  `GET_GLOBAL16_CACHED`/`SET_GLOBAL16_CACHED` (0x28-0x2B) keep their original
+  `opcodes.def` entries byte-for-byte (name, ordinal, `"kC"`/`"KC"` operand
+  spec, stack effects) — never emitted by the compiler and no longer given a
+  `case` in `vm.c`'s dispatch switch, so a hand-crafted chunk containing one
+  falls through to the existing `default:` and gets a clean "unknown opcode"
+  runtime error rather than undefined behavior. Keeping the entries (rather
+  than turning them into anonymous holes) is what lets a pre-Phase-2a
+  standalone `.bc` still disassemble with its real historical mnemonic and
+  byte width instead of "undefined opcode" if someone runs `pscald` against
+  an old file directly.
+- **Format epoch.** The CODE section gained a new field (`cache_count`,
+  written right after `byte_count`) — the first change to any section's
+  on-disk *shape* since PSB3's introduction (every phase since Phase 1b had
+  only changed what the opaque CODE bytes *mean*, never how the container
+  frames a section). `PSB3_FORMAT_VERSION` bumped 1→2 accordingly (this axis
+  is exactly what §2 describes as moving independently of
+  `PSCAL_VM_VERSION`, which stays untouched at 9). `psb3ParseHeader()` already
+  hard-rejects on any format_ver mismatch before touching a single section
+  body, so this alone gives "old already-compiled `.bc` files get invalidated
+  by the normal cache freshness check, not silently misparsed" for free —
+  verified directly by hand-flipping a fresh `.bc`'s format_ver byte back to
+  1 and confirming a clean `pscalvm` rejection instead of a misparse.
+- **Verifier.** `checkCacheIndex()` (`bytecode_verify.c`) validates every
+  `c`-spec `cache_id` against `chunk->cache_count`, same pattern and same
+  pass as `checkConstIndex()` for constant-pool indices.
+- **A real bug fixed along the way.** The old self-modifying
+  `SET_GLOBAL_CACHED`/`SET_GLOBAL16_CACHED` fast path (patched in after a
+  call site's first successful execution) never re-checked
+  `vmPasExceptionPending()` — only the slow (first-ever, uncached) execution
+  did. That means once a `SET_GLOBAL` call site got self-patched, it would
+  keep writing to its global even during Pascal exception unwinding, silently
+  defeating the unwind-skip check for every subsequent call through that
+  site. Unifying the cached/uncached paths (there is only one path now)
+  removes the asymmetry: the exception-pending check now runs on every
+  execution, matching the *intended* semantics rather than the old
+  self-modified fast path's accidental one.
+- **Performance.** The obvious naive port (check the cache, but still
+  bounds-check `name_idx` and dereference the constant pool for the
+  `myself`/textattr special cases on every hit) benchmarked flat-to-negative
+  on `Tests/vm_bench/globals.p` against a same-session Release baseline
+  built from the pre-Phase-2a commit — because it was doing genuinely more
+  work per cache hit than the old design, which never touched the constant
+  pool at all once self-patched. Restructured to check the cache *first* on
+  all four opcodes: a populated slot resolves straight from `cache_id` to
+  `Symbol*` to push/store, using `sym->name` wherever the miss path uses the
+  constant-pool string, with the `name_idx` bounds check and constant-pool
+  dereference only reachable on an actual miss — the same shape of fast path
+  the old self-modified opcode had, just without the opcode mutation. Net
+  result on `globals.p`: CODE section shrinks 614→411 bytes (33%) for the
+  same source; wall-clock is a noise-dominated wash (~0.22-0.23s median
+  either way across repeated same-session interleaved runs), i.e. this phase
+  is a clean size/immutability win with no speed regression, not the larger
+  speed win a naive read of "cache side-table" might suggest — the old
+  design's speed already came from skipping validation via self-modification,
+  and the new design gets the same skip via a branch instead, at parity.
+- **Verified:** `Tests/run_all_suites.py` at baseline after regenerating 20
+  stale fixture goldens (5 Pascal `.err`/`.disasm`, 15 Rea `.err`/`.disasm`)
+  whose expected output embedded the old byte offsets/`cache=0x...` format —
+  an expected, inherent consequence of shrinking these opcodes' encoding, not
+  a regression (confirmed pre-existing-only remaining failures: 3 `tiny_pbc`
+  fixtures with a stale post-monorepo-split path, unrelated). `vm_diff_harness`
+  vs. a from-scratch pre-Phase-2a worktree build: 372 MATCH, 7 SKIP, 6 NONDET
+  (pre-existing self-consistency flakiness, unrelated), **16 DIFF** — all 16
+  independently confirmed to be the same expected disassembly-offset/format
+  shift (zero `stdout` difference on every one; the only `stderr` deltas are
+  numeric offsets and `cache=0x0`→`cache_id=N`). `vm_verify_corpus` (15-case
+  corpus + 3968-mutation bit-flip fuzz) clean under both a plain build and
+  `build-asan` with `PSCAL_VM_CODE_PROTECT` on. Full suite additionally run
+  clean under `build-asan` for pascal/rea/clike/aether/exsh (two pre-existing,
+  confirmed-unrelated ASan/UBSan findings in `markClosureLiteralEscapes`
+  reproduce identically on the pre-Phase-2a commit under the same flags —
+  a misaligned-pointer bug in closure-escape tracking, nothing to do with
+  this phase).
 
 ### 5.7 Phase 2b: Slot-addressed globals
 

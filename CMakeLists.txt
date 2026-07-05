@@ -174,6 +174,17 @@ endif()
 option(PSCAL_VALUE_ACCESS_LINT
     "Forbid raw Value payload field access in pscal-core outside its representation layer" OFF)
 
+# VM 2.0 Phase 2a (plan Docs/pscal_vm2_plan.md §5.6, goal G2): mprotect(PROT_READ)
+# a chunk's CODE buffer once it's prepared for execution, so any code path
+# that still tries to write into it crashes loudly instead of silently
+# succeeding -- proof the self-modifying-code migration actually happened.
+# Defaults on for Debug builds (this is where build-asan lives), off otherwise.
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    option(PSCAL_VM_CODE_PROTECT "mprotect(PROT_READ) bytecode CODE after load (debug-only immutability enforcement)" ON)
+else()
+    option(PSCAL_VM_CODE_PROTECT "mprotect(PROT_READ) bytecode CODE after load (debug-only immutability enforcement)" OFF)
+endif()
+
 if(UNIX AND NOT APPLE)
     add_compile_definitions(_GNU_SOURCE _POSIX_C_SOURCE=200809L)
 endif()
@@ -1862,6 +1873,10 @@ if(PSCAL_HAS_LIBGIT2 AND PSCAL_LIBGIT2_TARGET)
     target_link_libraries(pscal_core_static PUBLIC ${PSCAL_LIBGIT2_TARGET})
 endif()
 target_compile_definitions(pscal_core_static PRIVATE PSCAL_NO_CLI_ENTRYPOINTS)
+if(PSCAL_VM_CODE_PROTECT)
+    target_compile_definitions(pscal_core_static PRIVATE PSCAL_VM_CODE_PROTECT)
+    message(STATUS "pscal-core: VM CODE-section mprotect ENABLED")
+endif()
 if(PSCAL_VALUE_ACCESS_LINT)
     target_compile_definitions(pscal_core_static PRIVATE PSCAL_VALUE_ACCESS_LINT)
     message(STATUS "pscal-core: Value access lint ENABLED")

@@ -44,9 +44,11 @@ The header is written by `psb3Write()` (`cache.c`):
 
 ```
 [magic   u32le]  0x50534233 ('PSB3'; little-endian bytes on disk read "3BSP")
-[format_ver u16] container-format version (currently 1; independent of the
-                 VM semantic version below — this axis can move without a
-                 VM version bump)
+[format_ver u16] container-format version (currently 2 as of VM 2.0 Phase 2a,
+                 up from 1; independent of the VM semantic version below —
+                 this axis can move without a VM version bump. The 1→2 bump
+                 is CODE's cache_count field, §2.2 — the first section-shape
+                 change since PSB3's introduction)
 [vm_ver  u16]    chunk->version (PSCAL_VM_VERSION at compile time)
 [flags   u32]    reserved, always 0 in this phase
 [section_count u32]
@@ -95,13 +97,30 @@ byte happened not to matter) unchanged output.
 
 ### 2.2 Section Bodies
 
-**CODE** (`writeCodeSection`/`readCodeSection`): `[varint byte_count][byte_count raw bytes]`.
-The raw instruction stream — opcode bytes and their operands, exactly as
-produced by the compiler (§2.3 is unchanged: the compiler doesn't know or
-care about the container). This section's own length prefix and the
-directory's recorded length are redundant by construction (defense in
-depth): a reader can trust either, and a mismatch between them is a
-corruption signal.
+**CODE** (`writeCodeSection`/`readCodeSection`): `[varint byte_count]
+[varint cache_count][byte_count raw bytes]`. The raw instruction stream —
+opcode bytes and their operands, exactly as produced by the compiler (§2.3 is
+unchanged: the compiler doesn't know or care about the container). This
+section's own length prefix and the directory's recorded length are
+redundant by construction (defense in depth): a reader can trust either, and
+a mismatch between them is a corruption signal.
+
+`cache_count` (VM 2.0 Phase 2a, `Docs/pscal_vm2_plan.md` §5.6) is the number
+of `GET_GLOBAL`/`SET_GLOBAL`/`GET_GLOBAL16`/`SET_GLOBAL16` call sites the
+compiler emitted — a compile-time constant, tallied once per emission by
+`compiler.c`'s shared `emitGlobalNameIdx` helper. It sizes the loader's
+`chunk->caches` array (`CacheSlot caches[cache_count]`, `bytecode.h`): a
+per-chunk, per-call-site runtime side table holding the `Symbol*` each call
+site resolves to, allocated once (lazily, on first execution) rather than
+serialized — cache *contents* are never written to disk, only the count
+needed to size the table, the same "written as zeros" spirit the pre-Phase-2a
+inline cache slots followed. Adding this field to CODE's shape is the reason
+`PSB3_FORMAT_VERSION` bumped 1→2 (§2.1): every phase before this one changed
+only what the opaque CODE bytes *mean*, never how the section frames itself,
+so format_ver had never needed to move since PSB3's introduction. Bounds:
+since a `cache_id` operand is `u16` (§2.3/Chapter 3), no chunk can
+legitimately need more than 65536 slots; the reader rejects a `cache_count`
+above that as corrupt.
 
 **LINE** (`writeLinesSection`/`readLinesSection`): a **varint run-length
 table**, replacing PSB2's per-code-byte `int[]` (4 bytes of debug info per
@@ -235,25 +254,29 @@ Pipeline actually run against the current tree:
 
 ```
 $ build/bin/pascal --dump-ast-json add2.pas > add2.json
-$ build/bin/pscaljson2bc -o add2.bc add2.json               # 296-byte PSB3 file
+$ build/bin/pscaljson2bc -o add2.bc add2.json               # 280-byte PSB3 file
 $ build/bin/pscalvm add2.bc
 42
 ```
 
-Header + section directory (`xxd add2.bc`, first 96 bytes):
+Header + section directory (`xxd add2.bc`, first 96 bytes; regenerated post
+VM 2.0 Phase 2a — `format_ver` is now 2 and CODE is smaller, both explained
+below):
 
 ```
-00000000: 3342 5350 0100 0900 0000 0000 0600 0000  3BSP............
-          └magic┘ └fmt┘└vm=9┘└flags──┘└count=6┘
-00000010: 434f 4445 5800 0000 3b00 0000 4c49 4e45  CODE offset=0x58=88 len=0x3b=59  LINE
-00000020: 9800 0000 0300 0000 434f 4e53 a000 0000  offset=0x98=152 len=3            CONS offset=0xa0=160
-00000030: 6100 0000 424d 4150 0801 0000 0f00 0000  len=0x61=97                      BMAP offset=0x108=264 len=15
-00000040: 5052 4f43 1801 0000 0200 0000 5459 5045  PROC offset=0x118=280 len=2      TYPE
-00000050: 2001 0000 0100 0000 ...                  offset=0x120=288 len=1
+00000000: 3342 5350 0200 0900 0000 0000 0600 0000  3BSP............
+          └magic┘ └fmt=2┘└vm=9┘└flags──┘└count=6┘
+00000010: 434f 4445 5800 0000 3000 0000 4c49 4e45  CODE offset=0x58=88 len=0x30=48  LINE
+00000020: 8800 0000 0300 0000 434f 4e53 9000 0000  offset=0x88=136 len=3            CONS offset=0x90=144
+00000030: 6100 0000 424d 4150 f800 0000 0b00 0000  len=0x61=97                      BMAP offset=0xf8=248 len=11
+00000040: 5052 4f43 0801 0000 0200 0000 5459 5045  PROC offset=0x108=264 len=2      TYPE
+00000050: 1001 0000 0100 0000 ...                  offset=0x110=272 len=1
 ```
 
 Six sections (no `META` — this is an explicit `.bc` file written by
-`saveBytecodeToFile`, not a cache entry).
+`saveBytecodeToFile`, not a cache entry). `format_ver` 2 (was 1) is the VM 2.0
+Phase 2a bump: CODE's body now starts with a `cache_count` varint (§2.2)
+before its raw bytes, sizing this chunk's `caches[]` side table.
 
 Disassembly (`pscaljson2bc --dump-bytecode-only add2.json`):
 
@@ -273,11 +296,11 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0027    | SWAP
 0028    | SET_INDIRECT
 0029    | CONST_1
-0030    | GET_GLOBAL          3 'a' cache=0x0
-0040    | GET_GLOBAL          5 'b' cache=0x0
-0050    | ADD
-0051    | CALL_BUILTIN_PROC   181 'write' (2 args)
-0057    | HALT
+0030    | GET_GLOBAL          3 'a' cache_id=0
+0034    | GET_GLOBAL          5 'b' cache_id=1
+0038    | ADD
+0039    | CALL_BUILTIN_PROC   181 'write' (2 args)
+0045    | HALT
 
 Constants (10):
   0000: STR   "myself"    0001: NIL          0002: STR   ""
@@ -285,6 +308,14 @@ Constants (10):
   0005: STR   "b"         0006: INT   2      0007: INT   40
   0008: INT   1           0009: STR   "write"
 ```
+
+Each `GET_GLOBAL` is 4 bytes now (`op name:u8 cache_id:u16`) instead of the
+pre-Phase-2a 10 (`op name:u8` + an 8-byte in-stream inline-cache slot), which
+is why offset 0034 follows 0030 by 4, not 10 — see
+`Docs/pscal_vm2_plan.md` §5.6 and Chapter 3 §3.0/§3.3 for the full mechanism
+(the `Symbol*` this used to self-patch into the instruction stream now lives
+in a per-chunk `caches[cache_id]` side table instead, keeping CODE read-only
+after load).
 
 This particular program has no jumps, so it doesn't show off VM 2.0 Phase
 1c's widened operand encodings — see Chapter 3 for the current opcode page,
