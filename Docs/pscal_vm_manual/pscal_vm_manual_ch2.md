@@ -147,7 +147,12 @@ exsh's compiled shell functions) recurses through the *same* six section
 writers (`writeChunkCoreInline`) sequentially into the surrounding buffer,
 with no directory of its own — it's never loaded standalone or randomly
 addressed, so it doesn't need the top-level container's per-section
-addressing.
+addressing. `readPointerValue()` runs `pscalVerifyBytecodeChunk()` (§5.5 of
+`Docs/pscal_vm2_plan.md`) on this nested chunk immediately after
+deserializing it, exactly as the top-level loaders do for the outer chunk —
+a malformed embedded closure fails the whole load rather than surfacing as
+undefined behavior the first time the closure is invoked (security fix,
+2026-07-05).
 
 **BMAP** (`writeBmapSection`/`readBmapSection`): `[varint builtin_map_count]`,
 then that many `(orig_idx:uvarint, lower_idx:uvarint)` pairs restoring

@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Generates the Phase 1e verifier's malformed-.bc test corpus
-(Docs/pscal_vm2_plan.md §5.5). Compiles two small fixtures with the real
-Pascal compiler to get well-formed PSB3 chunks, then splices in specific
-corruptions (truncation, bad jump targets, bad constant indices, a
-stack-underflow instruction sequence) so run_corpus_tests.py can assert
+(Docs/pscal_vm2_plan.md §5.5). Compiles small fixtures with the real Pascal
+compiler (and, for the embedded-closure case, exsh) to get well-formed PSB3
+chunks, then splices in specific corruptions (truncation, bad jump targets,
+bad constant indices, a stack-underflow instruction sequence, an
+unknown-region runtime-backstop underflow, a control-flow join-point
+depth-check bypass, a malformed embedded shell-closure chunk, and a
+self-attested trusted-skip-verify flag) so run_corpus_tests.py can assert
 every one fails cleanly (no crash, nonzero exit) through pscalvm.
 
-Usage: python3 generate_corpus.py [--pascal-bin PATH] [--out DIR]
+Usage: python3 generate_corpus.py [--pascal-bin PATH] [--exsh-bin PATH] [--out DIR]
 """
 
 import argparse
@@ -19,6 +22,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import psb3  # noqa: E402
+import psb3_value  # noqa: E402
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -27,10 +31,18 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 # _Static_asserts there, so this is low-risk).
 OP_CONSTANT = 0x01
 OP_CONSTANT16 = 0x02
+OP_CONST_FALSE = 0x06
 OP_ADD = 0x08
 OP_JUMP_IF_FALSE = 0x1C
 OP_JUMP = 0x1D
+OP_CALL_HOST = 0x53
 OP_HALT = 0x59
+HOST_FN_QUIT_REQUESTED = 0  # first entry of HostFunctionID (vm/vm.h); always
+                            # registered by vmInit regardless of frontend, and
+                            # its C implementation touches no VM stack slots
+                            # (see vmHostQuitRequested), so its net runtime
+                            # stack effect is exactly "push one result" --
+                            # deterministic and frontend-independent.
 
 HELLO_SRC = """program Hello;
 var i: integer;
@@ -51,6 +63,18 @@ begin
 end.
 """
 
+# A shell function is compiled to a ShellCompiledFunction (a TYPE_POINTER
+# constant, kind==1) embedded in the *enclosing* chunk's constant pool -- see
+# core/compiled_function.h and cache.c's writePointerValue/readPointerValue.
+# This fixture just needs one function definition so its cached .bc has an
+# embedded closure to corrupt (finding 3: the nested chunk bypassed
+# verification entirely before the fix).
+SHELL_CLOSURE_SRC = """myfunc() {
+  echo "hello from closure"
+}
+myfunc
+"""
+
 
 def compile_to_bc(pascal_bin, source, cache_root):
     src_dir = tempfile.mkdtemp()
@@ -65,6 +89,23 @@ def compile_to_bc(pascal_bin, source, cache_root):
     if not matches:
         raise RuntimeError(f"no .bc produced for fixture under {cache_root}")
     # Freshest entry is ours; cache_root is a scratch dir used once per fixture.
+    matches.sort(key=os.path.getmtime)
+    with open(matches[-1], "rb") as f:
+        return f.read()
+
+
+def compile_shell_to_bc(exsh_bin, source, cache_root):
+    src_dir = tempfile.mkdtemp()
+    src_path = os.path.join(src_dir, "prog.exsh")
+    with open(src_path, "w") as f:
+        f.write(source)
+    env = dict(os.environ)
+    env["HOME"] = cache_root
+    subprocess.run([exsh_bin, src_path], cwd=src_dir, env=env,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+    matches = glob.glob(os.path.join(cache_root, ".pscal", "bc_cache", "*.bc"))
+    if not matches:
+        raise RuntimeError(f"no .bc produced for shell fixture under {cache_root}")
     matches.sort(key=os.path.getmtime)
     with open(matches[-1], "rb") as f:
         return f.read()
@@ -119,6 +160,7 @@ def write_corpus(out_dir, name, data, expect_ok, note):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pascal-bin", default=os.path.join(REPO_ROOT, "build", "bin", "pascal"))
+    ap.add_argument("--exsh-bin", default=os.path.join(REPO_ROOT, "build", "bin", "exsh"))
     ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "corpus"))
     args = ap.parse_args()
 
@@ -210,6 +252,114 @@ def main():
     mutated = mutated.with_section(psb3.SEC_LINE, new_lines)
     manifest.append(write_corpus(args.out, "stack_underflow.bc", mutated.to_bytes(), False,
                                   "main body replaced with ADD;HALT against an empty stack"))
+
+    # --- Finding 1 regression: unknown-region runtime backstop.
+    # CALL_HOST taints the verifier's abstract depth to "unknown" (its net
+    # stack effect can't be resolved statically), so the ADD right after it
+    # is never checked at verify time -- by design; the runtime's own
+    # bounds-checked push()/pop() are supposed to be the backstop for that
+    # region. HOST_FN_QUIT_REQUESTED pushes exactly one result and touches no
+    # other stack slots, so the real depth after CALL_HOST is deterministic
+    # (1), one short of ADD's requirement (2): FAST_POP/FAST_PUSH used to have
+    # no bounds check at all here, so the second pop walked vm->stackTop
+    # below vm->stack -- real memory corruption, not just a wrong answer.
+    # Must now fail cleanly (at runtime, since the verifier itself still
+    # accepts this by design) instead of corrupting memory. ---
+    host_underflow_code = bytes([OP_CALL_HOST, HOST_FN_QUIT_REQUESTED, OP_ADD, OP_HALT])
+    host_underflow_lines = psb3.encode_varint(1) + psb3.encode_varint(0) + psb3.encode_svarint(1)
+    mutated = tpf.with_section(psb3.SEC_CODE, rebuild_code_section(host_underflow_code))
+    mutated = mutated.with_section(psb3.SEC_LINE, host_underflow_lines)
+    manifest.append(write_corpus(args.out, "unknown_region_fast_pop_underflow.bc", mutated.to_bytes(), False,
+                                  "CALL_HOST (taints depth unknown) then ADD; real depth after "
+                                  "CALL_HOST is 1, short of ADD's required 2 -- must fail cleanly "
+                                  "at runtime via the FAST_POP/FAST_PUSH bounds check, not corrupt "
+                                  "memory below vm->stack"))
+
+    # --- Finding 2 regression: control-flow join-point dataflow bug.
+    # CONST_FALSE; JUMP_IF_FALSE -> L; CALL_HOST (taints unknown); falls
+    # through to L: ADD; HALT. JUMP_IF_FALSE's own jump-target successor (L,
+    # known depth 0) and CALL_HOST's fallthrough successor (L, unknown depth)
+    # are both pushed to the verifier's worklist; LIFO popping visits the
+    # fallthrough/unknown edge into L *first*. The old join-point logic only
+    # ran req/underflow checks on a pc's first worklist visit, so the later,
+    # perfectly checkable known-depth arrival (0, insufficient for ADD's
+    # required 2) was silently accepted once L had already been marked
+    # "seen" by the unknown arrival -- a join-point bypass independent of any
+    # single opcode's own taint. Must now be rejected at verify time. ---
+    jif_disp = (8 - 6).to_bytes(4, "big")  # target L=pc8 from (pc1+len5)=pc6
+    join_code = bytes([OP_CONST_FALSE]) + bytes([OP_JUMP_IF_FALSE]) + jif_disp + \
+        bytes([OP_CALL_HOST, HOST_FN_QUIT_REQUESTED]) + bytes([OP_ADD, OP_HALT])
+    assert len(join_code) == 10 and join_code[8] == OP_ADD  # keep pc arithmetic honest
+    join_lines = psb3.encode_varint(1) + psb3.encode_varint(0) + psb3.encode_svarint(1)
+    mutated = tpf.with_section(psb3.SEC_CODE, rebuild_code_section(join_code))
+    mutated = mutated.with_section(psb3.SEC_LINE, join_lines)
+    manifest.append(write_corpus(args.out, "join_point_known_after_unknown.bc", mutated.to_bytes(), False,
+                                  "known-depth-0 arrival at a join point reached first via an "
+                                  "unknown-tainted edge must still be checked against ADD's "
+                                  "required depth of 2, not silently accepted"))
+
+    # --- Finding 4 regression: the self-attested trusted-skip-verify header
+    # flag must no longer bypass verification. Reuses the stack_underflow
+    # mutation (ADD;HALT against an empty stack) but also sets flags bit 0
+    # (the old PSB3_FLAG_TRUSTED_SKIP_VERIFY) -- pre-fix this bit, read
+    # straight out of the file's own bytes with no provenance binding, made
+    # psb3VerificationSkipped() skip the verifier entirely, so this exact
+    # malformed chunk would load and run (into finding 1's territory). Now
+    # the bit is ignored outright: the malformed chunk must still be
+    # rejected at verify time, identically to plain stack_underflow.bc. ---
+    trusted_skip_mutated = tpf.with_section(psb3.SEC_CODE, rebuild_code_section(new_code))
+    trusted_skip_mutated = trusted_skip_mutated.with_section(psb3.SEC_LINE, new_lines)
+    trusted_skip_mutated = psb3.Psb3File(trusted_skip_mutated.format_version,
+                                          trusted_skip_mutated.vm_version,
+                                          0x1,  # old PSB3_FLAG_TRUSTED_SKIP_VERIFY bit
+                                          trusted_skip_mutated.sections)
+    manifest.append(write_corpus(args.out, "trusted_skip_flag_bypass.bc", trusted_skip_mutated.to_bytes(), False,
+                                  "same corruption as stack_underflow.bc, but with the file's own "
+                                  "header flags bit 0 set (the removed self-attested "
+                                  "PSB3_FLAG_TRUSTED_SKIP_VERIFY) -- must still be rejected, proving "
+                                  "the bit is no longer honored"))
+
+    # --- Finding 3 regression: an embedded shell-closure's nested chunk must
+    # be verified too, not just the top-level chunk. Compiles a tiny exsh
+    # function definition to get a real cached .bc whose constant pool
+    # embeds a ShellCompiledFunction (TYPE_POINTER, kind==1) closure, then
+    # patches the *nested* chunk's first CONSTANT operand out of range
+    # in-place (same corruption class as bad_const_index.bc, just inside the
+    # embedded chunk instead of the top-level one). Before the fix, nothing
+    # ever called pscalVerifyBytecodeChunk() on this nested chunk, so it
+    # loaded successfully and only failed (via CONSTANT's completely
+    # unchecked `vm->chunk->constants[idx]` read -- no bounds check at all)
+    # when the closure was actually invoked. ---
+    if not os.path.exists(args.exsh_bin):
+        print(f"warning: exsh binary not found at {args.exsh_bin}; skipping "
+              "nested_closure_bad_const.bc", file=sys.stderr)
+    else:
+        with tempfile.TemporaryDirectory() as cache_c:
+            closure_bytes = compile_shell_to_bc(args.exsh_bin, SHELL_CLOSURE_SRC, cache_c)
+        # psb3.read_psb3() only takes a path; round-trip through a scratch file.
+        closure_path = os.path.join(args.out, "_closure_fixture.bc")
+        with open(closure_path, "wb") as f:
+            f.write(closure_bytes)
+        cpf = psb3.read_psb3(closure_path)
+        os.remove(closure_path)
+        cons_bytes = bytearray(cpf.section(psb3.SEC_CONS))
+        nested_code_start, nested_code_len = psb3_value.find_first_embedded_closure_code(bytes(cons_bytes))
+        nested_code = bytes(cons_bytes[nested_code_start:nested_code_start + nested_code_len])
+        bad_pc = find_first_opcode(nested_code, {OP_CONSTANT, OP_CONSTANT16})
+        if bad_pc is None:
+            print("warning: no CONSTANT/CONSTANT16 found in embedded closure body; skipping "
+                  "nested_closure_bad_const.bc", file=sys.stderr)
+        else:
+            if nested_code[bad_pc] == OP_CONSTANT:
+                cons_bytes[nested_code_start + bad_pc + 1] = 0xFF
+            else:
+                cons_bytes[nested_code_start + bad_pc + 1:nested_code_start + bad_pc + 3] = \
+                    (0xFFFF).to_bytes(2, "big")
+            mutated = cpf.with_section(psb3.SEC_CONS, bytes(cons_bytes))
+            manifest.append(write_corpus(args.out, "nested_closure_bad_const.bc", mutated.to_bytes(), False,
+                                          f"embedded shell-closure's nested CONSTANT* at inner code pc "
+                                          f"{bad_pc} index set out of range; the enclosing chunk is "
+                                          "well-formed, only the nested chunk is corrupt"))
 
     manifest_path = os.path.join(args.out, "manifest.json")
     import json
