@@ -99,12 +99,17 @@ highest-risk item, and everything before it shrinks its blast radius.
    string-heavy, global-heavy, JSON parse/walk, HTTP-loopback) with numbers
    recorded per phase, so wins and regressions are attributed to the phase
    that caused them.
+   **Done:** `Tests/vm_bench/` (`run_vm_bench.py`, results appended to
+   `history.jsonl` with git SHA + date).
 3. **Accessor sweep (prep for Phase 4).** Mechanical PR: replace all direct
    `Value` field pokes (`v->i_val`, `v.type == TYPE_...`) in vm.c, builtins,
    and ext_builtins with the existing accessor/constructor macro families
    (`AS_INTEGER`, `IS_NUMERIC`, `makeInt`, ...), extended to full coverage.
    Zero behavior change; verified by the differential harness.  This is what
    makes Phase 4 a representation swap instead of a codebase rewrite.
+   **Done:** payload sweep + metadata-field sweep shipped (2026-07-04), with
+   a `PSCAL_VALUE_ACCESS_LINT` build option guarding regressions; sweep
+   tooling in `Tests/vm_diff_work/`.
    **Done:** ~2,600 sites swept across vm.c, builtin.c, the network API,
    symbol/compiler, ext_builtins, gl/sdl/audio, the shell `.inc` family and
    smallclue integration.  New exact-alias accessors in core/types.h
@@ -145,6 +150,10 @@ highest-risk item, and everything before it shrinks its blast radius.
    Dispatch table, `kOpcodeNames`, the disassembler's operand decoding, the
    verifier (§5.5), and instruction-length queries all generate from this
    file.  The manual's Chapter 3 tables become checkable against it.
+   **Done:** `components/pscal-core/src/compiler/opcodes.def` (explicit
+   values pinned by `_Static_assert`s, operand-spec column, stack effects).
+
+Phase 0 is complete as of 2026-07-04.
    **Done (2026-07-04):** `components/pscal-core/src/compiler/opcodes.def`
    holds the full page with explicit ordinals (0x00-0x63), operand-spec
    strings (`b`/`i`/`k`/`K`/`w`/`j`/`f`/`C`; `"?"` for the four
