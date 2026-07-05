@@ -1,6 +1,7 @@
 # PSCAL VM 2.0: Design & Implementation Plan
 
-Status: proposal (2026-07-04).  Companion to the
+Status: Phase 0 and Phase 1 core (1a-1d, the PSB3 format epoch) shipped
+2026-07-04; Phase 1e (verifier) and beyond remain proposal.  Companion to the
 [VM Technical Manual](pscal_vm_manual/pscal_vm_manual.md), which documents
 the 1.x engine this plan modifies.  File/line references are to
 `components/pscal-core` at the manual's snapshot.
@@ -183,6 +184,18 @@ Phase 0 is complete as of 2026-07-04.
 - Dispatch table becomes 256 entries with holes pointing at
   `LABEL_INVALID`; no measurable dispatch cost change.
 
+**Done (2026-07-04):** `vm.c`'s computed-goto dispatch table is now
+`dispatch_table[256]`, one-time-filled (`static bool dispatch_table_ready`
+guard) with every slot defaulting to `&&LABEL_INVALID` before the
+`opcodes.def`-generated slots overwrite the defined ordinals; the old
+`if (instruction_val >= OPCODE_COUNT) goto LABEL_INVALID;` bounds check
+ahead of the dispatch is gone; `goto *dispatch_table[instruction_val]` is
+now unconditionally safe for any `uint8_t` value with no added branch on
+the hot path. Verified with a targeted fuzz pass: every single byte of a
+compiled `.bc` file flipped to a reserved/invalid opcode value, run through
+`pscalvm` — 0 crashes across 734 mutation points (136 clean errors, 598 no
+observable change), confirming the reserved range is dispatch-safe.
+
 ### 5.2 Phase 1b: PSB3 container
 
 Replaces the raw-`fwrite` PSB2 layout (`serializeBytecodeChunk`,
@@ -215,6 +228,24 @@ sections (8-byte aligned):
   registry, ids are trusted wholesale; if not, all ids re-resolve by name
   once at load time instead of per call-site checks.
 
+**Done (2026-07-04):** PSB3 container shipped in `components/pscal-core/src/core/cache.c`
+exactly as specified above (magic `0x50534233`, `format_ver`/`vm_ver`/`flags`/
+`section_count` header, 8-byte-aligned section directory, `CODE`/`LINE`/
+`CONS`/`BMAP`/`PROC`/`TYPE`/`META` sections — `PROCS`+const-globals and
+`TYPES` bundled as named above; `META` cache-only). All integers little-endian
+via `bufU16LE`/`bufU32LE`/`bufU64LE` (write) and `curU16LE`/`curU32LE`/`curU64LE`
+(read) helpers. `LINES` is a varint run-length table. The PSB2 reader/writer
+are gone from `cache.c` (hard cutover, not a fallback). One deliberate scope
+cut: the BMAP fingerprint is computed and stored, but **not** acted on —
+resolving builtin ids at write time (`getVmBuiltinID()`, called from
+`saveBytecodeToCache()` before VM/extension-builtin setup has finished) was
+found to corrupt unrelated interpreter state (surfaced as nil Pascal-closure
+upvalues after a cache round-trip); `builtin_resolved_ids` stays `NULL` after
+loading, same as PSB2, and the existing per-call-site lazy name resolution in
+vm.c is unchanged. Wholesale trust is left for a future phase once the id
+lookup can be made safe this early in the load path. See
+`Docs/pscal_vm_manual/pscal_vm_manual_ch2.md` for the full on-disk spec.
+
 ### 5.3 Phase 1c: u32 widths
 
 - `interpretBytecode(..., uint32_t entry)`; `THREAD_CREATE` operand u32;
@@ -222,11 +253,46 @@ sections (8-byte aligned):
 - Compiler emit paths updated; this is why it must ride the PSB3 format
   break rather than ship separately.
 
+**Done (2026-07-04):** New `opcodes.def` operand-spec letter `W` (u32 code
+address) for `CALL`'s and `THREAD_CREATE`'s address operands; `j` redefined
+i16→i32 for `JUMP`/`JUMP_IF_FALSE`. Every emission/patch site across
+`compiler/compiler.c` (~40 sites: goto/label backpatch, break/continue,
+if/else, case/switch, while/repeat/for loops, short-circuit and/or,
+ternary, the peephole optimizer's jump/absolute-address relocation pass,
+and `finalizeBytecode`'s CALL-address backpatch) updated in lockstep, plus
+the **independent** codegen in `components/exsh/src/shell/codegen.c`
+(exsh has its own from-scratch bytecode generator, not routed through
+`compiler.c` — missing this the first time produced a real regression,
+caught by the full `exsh` scope-test suite, not the differential harness
+since `exsh` isn't in its default corpus). `interpretBytecode`'s `entry`
+parameter and every `vm.c` local/field that narrowed a code address to
+`uint16_t` (closures' `entry_offset` was already `uint32_t`; the local
+truncating casts in `CALL`/`CALL_INDIRECT`/`CALL_METHOD`/`PROC_CALL_INDIRECT`/
+thread-spawn/closure-creation handling were not) widened to `uint32_t`, so a
+chunk's code section is no longer capped at 64KB of addressable jump/call
+targets. `vm.c`'s disassembler cases and `pscald`/`pscalasm`'s shared
+decoding (driven by the `opcodes.def` operand-spec table) picked up the new
+widths automatically.
+
 ### 5.4 Phase 1d: Loader hardening
 
 - `.bc` loading goes through bounds-checked cursor reads (no trusting
   stored counts against unchecked buffers).
 - Section directory validated (offsets/lengths within file, no overlap).
+
+**Done (2026-07-04):** `cache.c`'s `Cursor` (bounds-checked read cursor,
+sticky `error` flag on first overrun) backs every section reader; no `fread`
+against unchecked counts remains anywhere in the load path. `psb3ParseHeader()`
+validates every directory entry's byte range is fully inside the file and
+that no two sections overlap before any section body is touched, with a
+sanity cap on `section_count` (>64 rejected outright). Verified: 856
+single-byte-flip mutations of a real `.bc` file plus truncation at every
+8-byte boundary, all run through `pscalvm` — 0 crashes, only clean errors or
+(when a flip happened to land somewhere inert) unchanged output. Targeted
+adversarial cases (section offset past EOF, section length `0xFFFFFFFF`,
+two sections forced to overlap, `section_count` set to `0x7FFFFFFF` or `0`,
+corrupted magic, truncation mid-header/mid-directory) all fail cleanly with
+a nonzero exit, never a crash.
 
 ### 5.5 Phase 1e: Verifier
 
