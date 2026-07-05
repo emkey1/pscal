@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
 BASE_SUITE_KEYS = ["core", "library", "scope"]
-OPTIONAL_SUITE_KEYS = ["ios", "smallclue-git", "smallclue-git-mutation", "smallclue-git-path-truncate", "smallclue-git-remote"]
+OPTIONAL_SUITE_KEYS = ["ios", "smallclue-git", "smallclue-git-mutation", "smallclue-git-path-truncate", "smallclue-git-remote", "vm-verify-corpus"]
 SUITE_KEYS = BASE_SUITE_KEYS + OPTIONAL_SUITE_KEYS
 
 
@@ -151,6 +151,12 @@ def main(argv: Sequence[str]) -> int:
         default="",
         help="Extra arguments (shlex-split) forwarded to Tests/smallclue/run_git_remote_parity.py.",
     )
+    parser.add_argument(
+        "--include-vm-verify-corpus",
+        action="store_true",
+        help="Run the Phase 1e bytecode-verifier malformed-.bc corpus (opt-in, off by default; "
+        "needs build/bin/pascal and build/bin/pscalvm already built).",
+    )
     args = parser.parse_args(argv)
 
     skip = set(args.skip or [])
@@ -165,6 +171,8 @@ def main(argv: Sequence[str]) -> int:
         selected.append("smallclue-git-path-truncate")
     if args.include_smallclue_git_remote and "smallclue-git-remote" not in skip:
         selected.append("smallclue-git-remote")
+    if args.include_vm_verify_corpus and "vm-verify-corpus" not in skip:
+        selected.append("vm-verify-corpus")
 
     if not selected:
         print("No suites selected. Use --skip judiciously or omit it altogether.")
@@ -222,6 +230,10 @@ def main(argv: Sequence[str]) -> int:
             repo_root,
             False,
         )
+
+    if "vm-verify-corpus" in selected:
+        vm_verify_script = tests_root / "vm_verify_corpus" / "run.sh"
+        commands["vm-verify-corpus"] = (["bash", str(vm_verify_script)], repo_root, False)
 
     summary: List[Tuple[str, int]] = []
     for key in selected:

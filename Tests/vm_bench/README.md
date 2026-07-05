@@ -53,3 +53,21 @@ that file *is* the per-phase record.
 Changing a benchmark's workload constants changes its `check=` value and
 breaks history continuity: update the expected value in `run_vm_bench.py`,
 and treat older history rows for that benchmark as a separate series.
+
+## Verifier load-time overhead (Phase 1e)
+
+The benchmarks above self-time via `RealTimeClock()`, which only starts
+*after* the chunk is already loaded — so they never see chunk-loading or
+verification cost at all. `bench_verify_overhead.py` measures that
+separately: whole-process wall-clock time for a cache-hit run of `calls.p`
+with the Phase 1e verifier on vs. off (`PSCAL_VM_SKIP_VERIFY=1`), appending
+to [verify_overhead_history.jsonl](verify_overhead_history.jsonl).
+
+```sh
+python3 Tests/vm_bench/bench_verify_overhead.py --bin build-release/bin/pascal
+```
+
+Baseline (2026-07-04, Release build, MacBook-Pro-2): ~194ms median
+process time either way; verifier on/off delta ~1.8ms, smaller than
+run-to-run jitter (~10-20ms) -- not distinguishable from noise, i.e.
+negligible.
