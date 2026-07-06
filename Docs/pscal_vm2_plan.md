@@ -6,7 +6,10 @@ side-table), Phase 2b (slot-addressed globals), Phase 3 (growable
 operand/call stacks), and Phase 6 (effect classes, the `--deny` sandbox, and
 record/replay -- concurrency-track-independent, done out of sequence) all
 shipped 2026-07-05.
-Phase 4, 5, and 7 remain proposal.
+Phase 4's Stage A (§5.10.4 sub-phases 4a-4f: ObjHeader foundation;
+closures/interfaces/mstreams; strings/sets; records; arrays) shipped
+2026-07-06. 4g (files/pointers/enums) onward, and Phase 5 and 7, remain
+proposal.
 Companion to the
 [VM Technical Manual](pscal_vm_manual/pscal_vm_manual.md), which documents
 the 1.x engine this plan modifies.  File/line references are to
@@ -1109,11 +1112,15 @@ embedded shell-closure coverage, and a concrete ceiling/overflow story).
 
 ### 5.10 Phase 4: Value re-representation
 
-**Status: proposal, design-complete (this section), not started.** Everything
-below was verified against the actual source as of `pscal-core` commit
-19b36af (post-Phase-6), not against the plan's original one-paragraph
-sketch. The original sketch undersold the problem: it described Value as if
-it were already close to a tagged union of a handful of variants. It is not.
+**Status: Stage A sub-phases 4a-4f shipped (2026-07-06, through pscal-core
+commit 46c6e34 plus this section's own array work); 4g onward remain
+proposal.** Everything below was verified against the actual source as of
+`pscal-core` commit 19b36af (post-Phase-6) at design time, not against the
+plan's original one-paragraph sketch — the original sketch undersold the
+problem: it described Value as if it were already close to a tagged union
+of a handful of variants. It is not. Each shipped sub-phase's own
+"**Done (date):**" annotation below records where implementation deviated
+from this design, and should be read alongside it, not instead of it.
 
 #### 5.10.0 Current baseline (ground truth, not the sketch)
 
@@ -1676,6 +1683,154 @@ with the plan's existing Phase 1/2 convention of lettered sub-phases):
   Differential corpus for this sub-phase specifically must include
   multi-dimensional and jagged-array-heavy programs, not just the general
   suite.
+
+  **Done (2026-07-06):** shipped as one combined sub-phase, not split —
+  the static/dynamic distinction turned out to live entirely in the copy
+  logic (`makeCopyOfValue` branching on `ArrayObj.is_dynamic`), not in the
+  wrapper's shape, so splitting 4e from 4f would have meant touching the
+  same handful of representation-layer functions twice for no isolation
+  benefit. `ArrayObj` (`core/types.h`) holds `element_type`,
+  `element_type_def`, `is_packed`, `is_dynamic`, `dimensions`,
+  `lower_bound`/`upper_bound` (kept unfolded from `lower_bounds[0]`/
+  `upper_bounds[0]` as flagged — still deferred), `lower_bounds`/
+  `upper_bounds` (plain owned `int*`, not embedded), and a
+  `union { uint8_t *raw; Value *elements; }` for packed-byte vs.
+  general-Value storage — plain owned pointers throughout, not a flexible
+  array member, for the same reason 4c abandoned that shape: a real audit
+  found the identical whole-buffer-reassignment idiom here too
+  (`AS_ARRAY(v) = X` / `AS_ARRAY_RAW(v) = X`, ~20 sites across
+  `vm.c`/`builtin.c`). The refcount moved from a separately-malloc'd
+  `uint32_t *array_refcount` into the embedded `ObjHeader`, exactly as
+  planned; **the mutex pairing was preserved exactly where it already ran**
+  (`copyDynamicArraySnapshotValue`, `makeCopyOfValue`'s dynamic-share
+  branch, `makeDynamicArraySliceValue`'s view-retain) — per §5.10.5, full
+  mutex retirement is still Stage B's (4j's) job, since Value itself hasn't
+  shrunk to one atomic word yet. One refinement *not* in the original
+  sketch: `freeValue`'s decrement and `SetLength`'s storage-swap turned out
+  *not* to need the mutex at all, since both only ever run on a Value this
+  thread already exclusively owns (confirmed via `replaceValueCell`'s own
+  pattern of calling `freeValue` on a detached local copy *after* releasing
+  the mutex) — the mutex's real job (guarding a concurrent whole-struct
+  read of a still-*shared* cell) is a different concern than an ordinary
+  refcount decrement, and conflating the two would have added locking
+  where none was ever needed.
+
+  The flat-multi-dim slice view got the from-scratch redesign flagged
+  above: a new `ArrayObj.view_of` backpointer field. A view (produced when
+  a partial index into a genuinely flat, non-jagged multi-dim array yields
+  a sub-array rather than a scalar) aliases its owner's
+  `lower_bounds`/`upper_bounds`/`raw`/`elements` via pointer arithmetic —
+  the same trick the pre-4e/4f design used directly on `Value` fields —
+  but keeps the owner alive via a retained `ObjHeader` reference instead of
+  a shared flat refcount pointer. `arrayObjDestroy` checks `view_of` first
+  and, when set, releases the owner and frees only the view struct itself,
+  never touching the aliased buffers. The jagged case
+  (`element_type == TYPE_ARRAY`) needed no such mechanism — a jagged
+  partial index is just a share of that slot's already-independent nested
+  array Value, going through the existing
+  `copyDynamicArraySnapshotValue` convention.
+
+  The four `vm.c` opcode handlers (`GET_ELEMENT_ADDRESS[_CONST]`,
+  `LOAD_ELEMENT_VALUE[_CONST]`) that build a stack-local `temp_wrapper`
+  Value aliasing a raw pointer (a Pascal pointer-to-array-type dereference)
+  hit the exact chicken-and-egg construction problem 4c's
+  `pscalStringEnsureObj` was invented for — `AS_ARRAY(temp_wrapper) = X`
+  dereferences `temp_wrapper.array_val` before any wrapper exists. Fixed
+  with two new small helpers, `vmInitArrayIndexWrapper`/
+  `vmFreeArrayIndexWrapper` (`vm.c`) — but unlike `pscalStringEnsureObj`,
+  cleanup can *never* go through `pscalObjRelease`/`arrayObjDestroy`: the
+  wrapper aliases *borrowed* storage it never owns, so the generic
+  destructor would wrongly `freeValue`/`free()` the caller's live array
+  data. `vmFreeArrayIndexWrapper` instead frees only the wrapper struct and
+  the bounds arrays this code itself allocates, mirroring the original
+  manual cleanup exactly.
+
+  **Three real bugs found only by running programs, not by compiling**
+  (the same lesson 4c already established, reconfirmed here):
+  1. `TYPE_FILE` shares the pre-4e/4f `element_type`/`element_type_def`
+     top-level `Value` fields with arrays for its own, unrelated purpose
+     (a typed file's element type, e.g. `file of integer`) — never
+     migrated into any wrapper, since only `TYPE_ARRAY` moved this
+     sub-phase. Once `ARRAY_ELEMENT_TYPE`/`ARRAY_ELEMENT_TYPE_DEF`
+     started dereferencing `v.array_val` (a `TYPE_ARRAY`-only union
+     member), every one of the ~10 `TYPE_FILE` call sites still using
+     those macros (`vmBuiltinRewrite`/`Reset`, `INIT_LOCAL_FILE`, global
+     file-symbol init, several more in `builtin.c`) reinterpreted a live
+     `FILE*` as an `ArrayObj*` and crashed on first real file I/O test.
+     Fixed with two new dedicated macros, `FILE_ELEMENT_TYPE`/
+     `FILE_ELEMENT_TYPE_DEF` (`core/types.h`), reading the plain top-level
+     fields directly, and repointing every `TYPE_FILE` call site at them.
+  2. `raw`/`elements` being a union inside `ArrayObj` means `AS_ARRAY(v)`
+     (a truthiness check) is **no longer sufficient signal for "this array
+     has non-packed storage”** — for a packed byte array, `AS_ARRAY(v)`
+     is *also* non-NULL (identical bits to `.raw`). Any call site that
+     checked `AS_ARRAY(v)` before (or without) checking
+     `arrayUsesPackedBytes(v)`/`ARRAY_IS_PACKED(v)` would misread a raw
+     byte buffer as a `Value*` array — a heap-buffer-overflow read.
+     ASan caught one live instance (`cache.c`'s `hashValue`, hit by the
+     `global_byte_array_initializer` compiler-suite test) computing the
+     bytecode cache hash for a `packed array[0..8] of Byte` global
+     initializer; a targeted audit of every other `AS_ARRAY(...)`
+     truthiness check in the tree (`builtin.c`'s `writeStructuredValue`/
+     `readStructuredValue`/`computeValueSizeBytesInternal`, plus
+     `cache.c`'s `writeValue`, already fixed earlier the same way) found
+     three more latent instances of the identical pattern before they were
+     ever hit, and confirmed every other `AS_ARRAY` site in the tree
+     (BlockRead/BlockWrite, JSON serialization, the VM's internal
+     interface-vtable int arrays, SDL pixel/polygon buffers) already
+     checked packed-ness first or operates on element types that can
+     never be packed. Fixed uniformly: check `arrayUsesPackedBytes`/
+     `ARRAY_IS_PACKED` **before** treating `AS_ARRAY(v)`'s truthiness as
+     meaningful, everywhere.
+  3. `GET_ELEMENT_ADDRESS`/`LOAD_ELEMENT_VALUE`'s `element_base_type`
+     resolution dereferenced `PTR_BASE_TYPE_NODE(operand)` as a real `AST*`
+     whenever it was non-NULL and `->type == AST_ARRAY_TYPE`, without
+     accounting for the various `*_SENTINEL` fake-pointer markers
+     (`OWNED_POINTER_SENTINEL` etc., `string_sentinels.h`/`utils.h`) this
+     codebase tags onto `base_type_node` for unrelated reasons. This was
+     already a latent hazard pre-4e/4f, but the new slice/view mechanism
+     made it newly reachable through a common path (a `Value*` slice
+     pushed as `makePointer(slice, OWNED_POINTER_SENTINEL)`, later
+     re-indexed) whose `element_type_def` can legitimately be NULL
+     (inherited from an array whose element type has no AST def, e.g. a
+     plain scalar) — dereferencing `OWNED_POINTER_SENTINEL` (`(AST*)-1`)
+     as `->type` is an instant SIGSEGV. Fixed by gating the branch behind
+     `using_wrapper`, the flag this same opcode handler already sets only
+     when it validated `PTR_BASE_TYPE_NODE(operand)` as a genuine
+     `AST_ARRAY_TYPE` node earlier in the *same* function — reusing
+     already-proven information instead of re-deriving (and
+     re-risking) it a second time.
+
+  **One genuinely pre-existing, unrelated bug found during testing and
+  deliberately *not* fixed here:** `f[1][2]` (chained bracket indexing with
+  all-constant indices) on a flat, non-jagged static multi-dimensional
+  array (`array[1..2,1..3] of integer`) crashes the VM. Root cause is in
+  `compiler.c`'s opcode selection (it emits `LOAD_ELEMENT_VALUE_CONST` —
+  which has no partial-dimension/slicing concept at all — for the first
+  bracket of the chain), entirely orthogonal to `Value`/`ArrayObj`
+  representation. Confirmed via `git stash` to crash identically on
+  pscal-core `46c6e34` (the last commit before any 4e/4f change) — not a
+  regression this sub-phase introduced. The sentinel-guard fix above
+  incidentally turns the failure mode from a SIGSEGV into a clean runtime
+  error ("Expected a pointer to an array for element access") rather than
+  fixing the underlying compiler bug. Filed as a standalone follow-up
+  rather than folded in here, since it needs `compiler.c` codegen changes
+  with no connection to this phase's scope.
+
+  Verified: full `Tests/run_all_suites.py` (core/library/scope, all green
+  — this run is what caught findings 1 and 2 above, both real regressions
+  introduced by this sub-phase and fixed before shipping), the Phase 3
+  growth-stress corpus, the Phase 4a unit tests, and a hand-written array
+  regression matrix (static 1D and multi-dim arrays, `SetLength`
+  grow/shrink with correct content preservation across the resize, dynamic-
+  array aliasing/reference-semantics sharing a mutation across two `Value`s,
+  jagged dynamic arrays, packed byte arrays, VAR-parameter array aliasing,
+  const/open-array parameters, pointer-to-static-array and
+  pointer-to-dynamic-array dereference/indexing/write-through, and a
+  full-dimension slice of a jagged dynamic array observing a shared
+  mutation) — all correct on both the plain and `build-asan` trees, with
+  the `global_byte_array_initializer` ASan catch (finding 2) found and
+  fixed as part of this same verification pass, not left for a later one.
 - **4g — Files, pointers, enums.** Three boxed types, each with its own
   flagged subtlety: file identity (never CoW'd), the pointer copy-vs-share
   hazard (§5.10.3's `copyInterfaceReceiverAlias` finding, needs its own
@@ -2218,6 +2373,8 @@ flow per phase is the standard multi-repo bump (component push, aether
 | Long double serialization change alters numeric output | 1b | Pascal suite has numeric-format baselines; acceptable-diff list reviewed explicitly |
 | Whole-buffer reassignment idioms (`AS_STRING(v) = new_buf;`) break under a flexible-array-member heap shape | 4c | **Confirmed real, not hypothetical** — found ~15 sites across `vm.c`/`builtin.c`/`symbol.c`/exsh's `shell_builtins.inc`; `StringObj`/`SetObj` use a plain owned pointer field instead of a flexible array member specifically to preserve these sites unchanged. Any future sub-phase considering a flexible-array-member shape must run the same "does anything reassign this buffer wholesale" audit first, not assume it's safe by analogy. |
 | A boxed type's construction can leave the wrapper NULL between `memset`/`freeValue` and the accessor write that assumes it exists | 4c/4g/4h | `pscalStringEnsureObj`-style lazy-init helper, called at every identified construction site; **this class of bug compiles clean either way and was only caught by running real programs** (`updateSymbolInternal` in `symbol.c` freed a string's wrapper then immediately re-read `STRING_MAX_LENGTH` on it a few lines later, in a code path static review of the read site alone did not surface) — every future sub-phase boxing a type needs actual program-execution verification for this reason, a clean compile and a re-read of the diff are not sufficient evidence. |
+| A dual-purpose pre-Stage-A field, shared between the boxing type and an unrelated type that never migrates, silently breaks for the unrelated type once the shared accessor macro grows a layer of indirection | 4e/4f | **Confirmed real** — `TYPE_FILE` legitimately reused the pre-4e/4f top-level `element_type`/`element_type_def` fields (typed-file element type) that arrays also used; once `ARRAY_ELEMENT_TYPE`/`ARRAY_ELEMENT_TYPE_DEF` started dereferencing `v.array_val` (now `TYPE_ARRAY`-only), every `TYPE_FILE` call site still using those macros reinterpreted a live `FILE*` as an `ArrayObj*`. Compiled clean; only caught by running real file-I/O tests. Fixed via dedicated `FILE_ELEMENT_TYPE`/`FILE_ELEMENT_TYPE_DEF` macros. Any future sub-phase must grep for every OTHER type still reading a field the current sub-phase is about to box, not just the boxing type's own call sites. |
+| A `union` inside a new heap wrapper collapses a "which storage kind is this" signal that used to be two independently-nullable fields | 4e/4f | **Confirmed real** — pre-4e/4f, an array's `array_val` (`Value*`) and `array_raw` (`uint8_t*`) were separate top-level fields, so `if (v->array_val)` safely meant "non-packed". Once `ArrayObj.raw`/`.elements` became a `union`, that same NULL-check is true for packed arrays too (identical bits to `.raw`) — any site checking `AS_ARRAY(v)` truthiness without checking `arrayUsesPackedBytes(v)`/`ARRAY_IS_PACKED(v)` first misreads a raw byte buffer as a `Value*` array (heap-buffer-overflow read). Caught by ASan on `cache.c`'s bytecode-cache `hashValue`; audit found 3 more latent instances before they were hit. Any future sub-phase folding two previously-independent nullable fields into a `union` must re-audit every truthiness check on either field, not just the sites the new sub-phase itself touches. |
 
 ## 10. Effort Shape (relative, in PR-sized units)
 
