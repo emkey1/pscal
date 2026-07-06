@@ -1512,6 +1512,40 @@ with the plan's existing Phase 1/2 convention of lettered sub-phases):
   construction — proves the `ObjHeader` machinery against call sites that
   are already correctly refcounted today, before touching anything that
   isn't.
+  **Done (2026-07-06):** `ClosureEnvPayload`/`MStream` (`core/types.h`)
+  now embed `ObjHeader header` in place of their old ad hoc
+  `refcount` field; `retainClosureEnv`/`releaseClosureEnv`/
+  `retainMStream`/`releaseMStream` (`core/utils.c`) are thin wrappers over
+  `pscalObjRetain`/`pscalObjRelease`, with one shared destructor
+  (`closureEnvPayloadDestroy`) registered under *both* `TYPE_CLOSURE` and
+  `TYPE_INTERFACE` (they share the exact payload shape and teardown logic
+  today; the field that actually decides slot ownership is `env->symbol`,
+  not which VarType created the payload) and a second
+  (`mstreamDestroy`) under `TYPE_MEMORYSTREAM`; both registrations are
+  `pthread_once`-guarded (not the atomic-exchange pattern 4a's canary
+  used, deliberately — a losing thread here must *block* until
+  registration completes, not race ahead, since `pscalObjRelease` on an
+  unregistered type aborts). `createClosureEnv` gained a second parameter
+  (`VarType owner_type`) so the two call sites (`vm.c`'s escaping-closure
+  path and its 3-slot interface-dispatch path) can record which VarType
+  actually owns each payload — load-bearing once `ObjHeader.type` becomes
+  the sole source of truth for a boxed Value's type in 4i, not just a
+  destructor-dispatch key today. Required an unplanned prerequisite:
+  `ClosureEnvPayload`/`MStream` embedding `ObjHeader` created a circular
+  include (`types.h` → `obj_header.h` → `types.h` for `VarType`), resolved
+  by extracting `VarType` into a new standalone `core/var_type.h` both
+  files include instead. Also hardened `pscalObjRelease` itself (shared by
+  4a and 4b) against double-release: the original per-type functions
+  silently no-op'd on an already-zero refcount; the generic version didn't
+  and would have silently underflowed the atomic counter, so it now
+  detects `prev==0`, restores the counter, logs, and refuses to run the
+  destructor a second time. Verified: full `Tests/run_all_suites.py`
+  green across all five rebuilt frontends, the Phase 3 growth-stress
+  corpus (`closures_across_growth.pas` byte-exact, including under
+  `build-asan`), and the 4a unit tests extended with a new
+  double-release regression test. Not exercised: leak-detection under
+  ASan (unsupported on macOS, this developer's platform); UAF/overflow
+  detection did run and passed.
 - **4c — Strings and sets.** `StringObj`/`SetObj`, single-allocation
   flexible-array-member shapes, straightforward deep-copy semantics
   preserved exactly.
