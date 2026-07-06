@@ -1181,6 +1181,7 @@ set(PSCAL_CORE_SOURCES
     components/pscal-core/src/core/globals.c
     components/pscal-core/src/core/type_registry.c
     components/pscal-core/src/core/types.c components/pscal-core/src/core/utils.c components/pscal-core/src/core/list.c components/pscal-core/src/core/preproc.c components/pscal-core/src/core/version.c
+    components/pscal-core/src/core/obj_header.c
     components/pscal-core/src/ast/ast.c components/pscal-core/src/ast/closure_registry.c
     components/pscal-core/src/symbol/symbol.c
     components/pscal-core/src/lexer/lexer.c

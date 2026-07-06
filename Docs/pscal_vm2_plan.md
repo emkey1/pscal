@@ -1109,26 +1109,706 @@ embedded shell-closure coverage, and a concrete ceiling/overflow story).
 
 ### 5.10 Phase 4: Value re-representation
 
-Two stages, both behind the Phase 0 accessor macros:
+**Status: proposal, design-complete (this section), not started.** Everything
+below was verified against the actual source as of `pscal-core` commit
+19b36af (post-Phase-6), not against the plan's original one-paragraph
+sketch. The original sketch undersold the problem: it described Value as if
+it were already close to a tagged union of a handful of variants. It is not.
 
-- **Stage A (struct shrink):** `Value` becomes
-  `{ uint64_t bits; }`-sized tagged word: 48-bit-pointer NaN-boxing on
-  64-bit targets (integers ≤ 48 bits inline; larger ints spill to a boxed
-  cell), with strings/records/arrays/sets/files as pointers to heap objects
-  carrying an `ObjHeader { type, refcount/flags }`.  `TYPE_LONG_DOUBLE`
-  becomes a boxed type (measured as rare in generated code).
-- **Stage B (ownership rationalization):** with headers in place,
-  `DUP`/`CONSTANT`/`push` become word copies + refcount adjust instead of
-  deep copies; `freeValue` becomes decref.  Pascal value semantics for
-  records/arrays are preserved by copy-on-write (mutation through a
-  non-unique reference clones first), which the address-based mutation
-  paths (`SET_INDIRECT`, field writes) funnel through a single
-  `valueEnsureUnique()` choke point.
-- Builtins recompile unchanged thanks to the accessor layer; the ABI break
-  is source-compatible.  The differential harness and full suites gate each
-  stage; expected outcome per the Phase 0 benchmarks: the largest single
-  performance win in the plan (stack traffic drops ~4-8x, allocation churn
-  on hot paths drops with it).
+#### 5.10.0 Current baseline (ground truth, not the sketch)
+
+`Value` (`components/pscal-core/src/core/types.h:115-166`) is a ~20-field
+struct:
+
+```c
+typedef struct ValueStruct {
+    VarType type;
+    Type *enum_meta;
+    long long i_val;
+    unsigned long long u_val;
+    RealValue real;                 // { float f32_val; double d_val; long double r_val; } -- ALL THREE always populated
+    union { s_val, c_val, record_val, f_val, array_val, mstream,
+            enum_val{enum_name,ordinal}, ptr_val,
+            closure{entry_offset,symbol,env}, interface{type_def,payload} };
+    uint8_t *array_raw;
+    bool array_is_packed;
+    bool array_is_dynamic;
+    uint32_t *array_refcount;
+    AST *base_type_node;
+    char *filename;
+    int record_size;
+    bool record_size_explicit;
+    int lower_bound, upper_bound;   // single-dim convenience fields
+    int max_length;
+    VarType element_type;
+    int dimensions;
+    int *lower_bounds, *upper_bounds;
+    AST *element_type_def;
+    struct { int set_size; long long *set_values; } set_val;
+} Value;
+```
+
+Load-bearing facts that shape every decision below:
+
+1. **`RealValue` stores all three widths simultaneously, always**, regardless
+   of declared type (`SET_REAL_VALUE`, `types.h:171-173`). Every numeric
+   Value pays 4+8+16=28 bytes for widths it almost never needs concurrently.
+   This is pure waste Stage A should eliminate outright, not preserve.
+2. **Two heap types are already refcounted today**, independently of the
+   accessor sweep: `ClosureEnvPayload` (`types.h:39-44`,
+   `retainClosureEnv`/`releaseClosureEnv` at `core/utils.c:2040/2047`) backs
+   both `TYPE_CLOSURE` and `TYPE_INTERFACE`; `MStream`
+   (`types.h:96-101`) carries its own `int refcount` for
+   `TYPE_MEMORYSTREAM`. These are the closest thing to a working `ObjHeader`
+   prototype in the codebase today and should be the *first* types ported to
+   the new generic scheme (proven call sites, not a leap of faith).
+3. **`TYPE_ARRAY` already has two genuinely different value-semantics
+   coexisting under one VarType**, distinguished by `array_is_dynamic`:
+   - *Static* (`array[1..N] of T]`, `array_is_dynamic == false`):
+     `makeCopyOfValue` (`core/utils.c:3405-3470`) does a full deep copy of
+     bounds + every element on every assignment. Real Pascal value
+     semantics.
+   - *Dynamic* (`SetLength`-managed, `array_is_dynamic == true`):
+     `makeCopyOfValue` does **not** copy anything — it aliases
+     `array_val`/`array_raw`/bounds and increments `*array_refcount`
+     (`core/utils.c:3414-3425`), guarded by `dynamic_array_refcount_mutex`.
+     `freeValue` (`core/utils.c:2327-2349`) decrements and only frees
+     storage at zero. **This is already reference semantics, not
+     copy-on-write-emulating-value-semantics** — multiple `Value`s
+     legitimately share one buffer today, by design, matching how
+     Free/Delphi-style dynamic arrays actually behave.
+   This distinction is not a storage-strategy accident Stage A can paper
+   over; it is observable Pascal-level behavior that must survive Stage A
+   and Stage B unchanged (see §5.10.6).
+4. **Jagged arrays (`array of array of X`) are outer-array-of-inner-Value,
+   not flat.** `makeDynamicArraySliceValue`
+   (`core/utils.c:3603-3665`, comment at `:3567-3602`) documents two
+   distinct multi-dimension storage shapes under one `dimensions > 1`
+   umbrella: jagged (`element_type == TYPE_ARRAY`, each outer slot is an
+   independently-allocated nested array `Value`, sharing via the same
+   refcount/snapshot convention as any dynamic-array read) versus flat
+   (`array[a..b, c..d] of Scalar`, one contiguous buffer, all dims in one
+   allocation). The flat case additionally builds **view Values whose
+   `lower_bounds`/`upper_bounds`/`array_val` are pointer arithmetic into the
+   *middle* of another Value's own arrays**
+   (`out->lower_bounds = src->lower_bounds + consumed_dims`,
+   `out->array_val = src->array_val + partial_offset`,
+   `core/utils.c:3648-3659`) while sharing `src`'s refcount. This
+   "sub-array is an interior pointer into a sibling's heap block" trick has
+   no direct equivalent once arrays are opaque `ObjHeader`-tagged objects
+   behind a single pointer word — see the ArrayObj design in §5.10.3 for how
+   this must be re-expressed as an explicit view/offset object rather than
+   raw pointer arithmetic.
+5. **`TYPE_POINTER` already overloads `base_type_node` as a 4-state
+   discriminant**, not just "the AST node this pointer's type points to":
+   `OWNED_POINTER_SENTINEL` (`core/utils.h:7`, `(AST*)(uintptr_t)-1`) means
+   "this Value's `ptr_val` owns a heap `Value*` and must `freeValue`+`free`
+   it on destruction" (`core/utils.c:2279-2291`);
+   `STRING_CHAR_PTR_SENTINEL`/`SERIALIZED_CHAR_PTR_SENTINEL` mark
+   "non-owning pointer into a managed string's buffer" and "owns a raw
+   `strdup`'d buffer" respectively. A real `AST*` means "ordinary
+   type-checked pointer, dereference/`new`/`dispose` consult this node."
+   Four states, two independent axes (owns-heap-Value /
+   owns-raw-buffer / points-into-string / plain), packed into one pointer
+   field via sentinel values. This must be represented explicitly in the
+   boxed pointer object (§5.10.3), not smuggled through pointer-value
+   comparison against magic constants, once the field moves off `Value`
+   itself.
+6a. **Stage B's target behavior already exists in miniature.**
+   `copyValueForStack` (`vm.c:3621-3676`, the function every `DUP`/
+   `CONSTANT`/return-value path already calls) is *not* purely today's deep-
+   copy machinery — for `TYPE_VOID`/numeric/`TYPE_NIL` it is already a bare
+   `Value copy = *src;` word-copy fast path with no retain needed (no
+   reference to adjust), and for `TYPE_MEMORYSTREAM`/`TYPE_CLOSURE` it is
+   already exactly "shallow-copy the struct, then explicitly retain the
+   shared payload" (`retainMStream`/`retainClosureEnv`) before falling back
+   to full `makeCopyOfValue` for everything else. This is a working,
+   already-shipped prototype of precisely the mechanism Stage B (4j)
+   generalizes to every type — de-risks Stage B non-trivially, since two of
+   the ~11 heap types already prove the pattern in production. `vm.c`'s
+   `copyValueForStack` should be treated as a third de facto representation-
+   layer location alongside `core/utils.c`/`core/cache.c` (it does
+   intentional whole-struct copies by design, not a lint gap), and updating
+   it type-by-type is exactly the work sub-phases 4b-4h already call for.
+6b. **The accessor-poison lint has a real, currently-undocumented blind
+   spot: whole-struct assignment.** `#pragma GCC poison` (`core/utils.h:
+   374-378`) only fires on bare identifier use of the poisoned field names.
+   It cannot and does not catch `Value temp = *src; *src = *dst; *dst =
+   temp;` — no field name is spelled anywhere in that code. A repo-wide
+   audit for exactly this pattern (see §5.10.7) found one real instance:
+   `components/pscal-core/src/ext_builtins/system/swap.c:25` implements the
+   `Swap` builtin as a raw three-way struct swap of two `Value*` obtained via
+   `AS_POINTER`. It is functionally harmless under refcounting (a swap
+   permutes ownership, it never duplicates or drops a reference, so no
+   refcount adjustment is owed either before or after Stage A/B), but it is
+   the one site in the entire tree the poison mechanism cannot see by
+   construction, and the fact that a full mechanical sweep still left one
+   surviving raw whole-Value copy outside `core/utils.c`/`core/cache.c`
+   means "the lint build is green" cannot by itself be trusted as proof of
+   "no more raw Value copies exist" — see §5.10.7 for the fuller audit and
+   a recommended supplementary gate.
+
+#### 5.10.1 Stage A: the tagged 64-bit word
+
+**Encoding: 64-bit NaN-boxing, portable across all shipping targets
+(macOS/Linux/iOS, x86_64 and ARM64; no Windows target exists to worry
+about).** The scheme is architecture-uniform by construction — boxed words
+are only ever unmasked in software before use, never treated as literal
+hardware addresses with ARM64 TBI or any other tagged-pointer hardware
+feature, so there is no ARM64-vs-x86_64 divergence to design around, only a
+shared assumption about user virtual-address width (flagged explicitly
+below, with a mitigation, rather than assumed silently).
+
+```
+Bit:   63        62-52         51        50-46      45-0
+      [sign=0] [exp=0x7FF]  [qnan=1]   [kind:5]   [payload:46]
+      \_____________________________/
+        13 fixed header bits: any 64-bit pattern with these exact 13 bits
+        set is UNAMBIGUOUSLY a boxed PSCAL value, never a legitimate finite
+        double (finite doubles never have exp==0x7FF) and never +/-Infinity
+        (mantissa all-zero) as long as `kind` is never 0-with-empty-payload
+        for a "real" boxed value (kind 0 is reserved for HEAP_PTR, whose
+        payload is a live pointer and therefore never all-zero for a valid
+        object).  A pattern NOT matching this 13-bit header is read
+        directly as an IEEE-754 double -- TYPE_DOUBLE costs nothing to box
+        or unbox, full 64-bit precision, no separate inline-double variant
+        needed.  This is a correction to the original sketch's "≤48 bits
+        inline" phrasing, which conflated the *integer* budget with the
+        general inline budget: doubles are not integers and are not
+        capacity-constrained by this scheme at all.
+```
+
+`kind` (5 bits, 32 values) assignment:
+
+| kind | Meaning | Payload (46 bits) |
+|------|---------|--------------------|
+| 0 | `HEAP_PTR` | pointer to `ObjHeader`, see §5.10.3 |
+| 1 | `VOID` | unused (always 0) |
+| 2 | `NIL` | unused (always 0) |
+| 3 | `BOOLEAN` | low 1 bit |
+| 4 | `CHAR` | low 8 bits (ASCII/byte char) |
+| 5 | `WIDECHAR` | low 32 bits (Unicode code point) |
+| 6 | `BYTE` | low 8 bits, zero-extend |
+| 7 | `WORD` | low 16 bits, zero-extend |
+| 8 | `INT8` | low 8 bits, sign-extend |
+| 9 | `UINT8` | low 8 bits, zero-extend |
+| 10 | `INT16` | low 16 bits, sign-extend |
+| 11 | `UINT16` | low 16 bits, zero-extend |
+| 12 | `INT32` | low 32 bits, sign-extend |
+| 13 | `UINT32` | low 32 bits, zero-extend |
+| 14 | `FLOAT` | low 32 bits = IEEE-754 single bit pattern, widened to `double` at read time via the existing `AS_REAL`-family coercion, never carried as a separate stored width |
+| 15-31 | reserved | headroom for future inline types without another Stage-A-shaped migration |
+
+Boxed (never inline): `TYPE_INT64`, `TYPE_UINT64` (full 64-bit range does not
+fit in 46 payload bits), `TYPE_LONG_DOUBLE` (§5.10.4), `TYPE_STRING`,
+`TYPE_UNICODE_STRING`, `TYPE_RECORD`, `TYPE_ARRAY`, `TYPE_SET`,
+`TYPE_FILE`, `TYPE_ENUM`, `TYPE_POINTER`, `TYPE_CLOSURE`, `TYPE_INTERFACE`,
+`TYPE_MEMORYSTREAM`, `TYPE_THREAD`. All of these use `kind = HEAP_PTR`; the
+concrete C type is discriminated by `ObjHeader.type` (a `VarType`, reusing
+the existing enum), not by a second tag layer.
+
+**Two correctness-critical mitigations, not optional:**
+
+- **NaN canonicalization on box/unbox.** Pascal REAL arithmetic legitimately
+  produces IEEE NaN (`0.0/0.0`, `Sqrt(-1)`, etc.). A `BOX_DOUBLE`/
+  `UNBOX_DOUBLE` pair must canonicalize any *genuine* NaN result to a fixed
+  bit pattern outside the reserved 13-bit header before it is ever stored in
+  a `Value` word (flip one guaranteed-safe low bit), and reverse it on read.
+  Skipping this silently reinterprets an arithmetic NaN as a boxed pointer
+  or integer — memory corruption, not a wrong-answer bug. (Standard practice
+  in every NaN-boxing VM; called out explicitly here because it is the one
+  place a missed step turns into a security bug rather than a test
+  failure.)
+- **Pointer-width canary.** 46-bit pointer payload covers 64TB of address
+  space — comfortably above what glibc/jemalloc/macOS malloc/mmap-without-
+  a-high-hint ever return in practice on the targeted platforms, but this is
+  an empirical assumption about allocator behavior, not a language
+  guarantee. `initVM()` should call a canary allocation once at startup and
+  abort cleanly ("PSCAL VM 2.0: tagged-pointer address-space assumption
+  violated") if any pointer the VM is about to box has bit 46 or above set,
+  rather than silently truncating and corrupting a reference. Cheap,
+  one-time, and turns a would-be heisenbug into a clear diagnostic.
+
+**Decided: 5-bit kind / 46-bit payload.** The alternative (4-bit/47-bit)
+only buys 2x more address-space headroom that the pointer canary already
+makes moot (46 bits is 64TB; the canary catches the never-observed case
+where that's not enough and fails loudly rather than silently). The 5-bit
+split buys 17 spare inline-type slots instead of 1, which is the more
+valuable trade given "flexible": a future `VarType` addition (there have
+been several over this plan's lifetime already — the `INT8`/`UINT8`/etc.
+extended-integer family didn't always exist) gets a free inline slot
+instead of another Stage-A-shaped migration. Locked in before 4a.
+
+#### 5.10.2 `RealValue` and `TYPE_LONG_DOUBLE`
+
+Verified via grep: `TYPE_LONG_DOUBLE` appears 10 times in `pscal-core/src`
+and 18 times total across all five frontends combined (mostly in type-
+coercion tables and a handful of frontend-specific literal-suffix handling)
+— genuinely rare in generated code, confirming the original sketch's boxed-
+type call. Direct, non-accessor use of `real.r_val` outside
+`core/utils.c`/`core/cache.c` is limited to the `AS_REAL` macro's own
+definition (`core/utils.h:211,215`) — i.e., already representation-layer by
+construction, zero external call sites to migrate.
+
+Disposition: `TYPE_LONG_DOUBLE` boxes as a trivial `LongDoubleBox {
+ObjHeader header; long double value; }`. `TYPE_FLOAT`/`TYPE_DOUBLE` fold
+into the single canonical inline-double representation (kind 14 / NaN-box
+fallthrough respectively) — the current practice of storing `f32_val`,
+`d_val`, and `r_val` simultaneously for *every* real value regardless of
+declared type is eliminated outright, not preserved behind a new tag. Any
+precision-narrowing behavior Pascal's `FLOAT` type is supposed to exhibit
+(e.g. display formatting, comparison tolerance) is a coercion-time concern
+already handled by `AS_REAL`/`SET_REAL_VALUE`-family code, not something the
+storage layer needs to carry three ways.
+
+#### 5.10.3 `ObjHeader` and the exhaustive per-field disposition
+
+```c
+typedef struct ObjHeader {
+    VarType type;       // which concrete heap shape follows this header
+    uint32_t refcount;
+} ObjHeader;
+```
+
+Every non-inline `Value` is `kind=HEAP_PTR` pointing at one of the following
+shapes, each starting with an embedded `ObjHeader`:
+
+| VarType | Heap shape | Notes |
+|---|---|---|
+| `TYPE_STRING`/`TYPE_UNICODE_STRING` | `StringObj { ObjHeader; uint32_t max_length; char data[]; }` | Flexible-array-member: one allocation instead of today's two (`Value.max_length` + separately-malloc'd `s_val`). Straightforward deep-copy-on-write semantics (strings have no dynamic/static distinction to preserve). |
+| `TYPE_SET` | `SetObj { ObjHeader; int set_size; long long set_values[]; }` | Same treatment as string; `makeCopyOfValue`'s current `memcpy` of `set_values` (`core/utils.c:3506-3521`) becomes a decision at the refcount choke point, not a change to the copy technique itself. |
+| `TYPE_RECORD` | `RecordObj { ObjHeader; FieldValue *fields; }` | Thin wrapper only. `FieldValue` itself (`types.h:243-252`) is **unchanged** — still a linked list, still supports the `owns_storage`/aliased-`storage` trick OOP field-address-taking depends on (`vm.c:7337-7371`, `core/utils.c:743-789`). Each embedded `struct ValueStruct value` shrinks automatically because `Value` shrinks; no `FieldValue`-level code changes needed beyond the outer wrapper. (Opportunistic, *not required*, idea: `FieldValue` already carries `slot_index`; flattening the linked list into a slot-indexed array would improve cache locality, but that is a separable enhancement outside Stage A's critical path — don't bundle it in.) |
+| `TYPE_ARRAY` | `ArrayObj { ObjHeader; VarType element_type; AST *element_type_def; bool is_packed; bool is_dynamic; uint8_t dimensions; int *lower_bounds; int *upper_bounds; union { uint8_t *raw; Value *elements; }; }` | **Highest-risk single item in Stage A.** `is_dynamic` moves from a storage-strategy flag to a **semantic** flag `valueEnsureUnique()` must branch on (§5.10.6) — it is not merely inherited for compatibility, it encodes real Pascal-level reference-vs-value semantics that must not be collapsed into one CoW policy. The jagged case (element_type==TYPE_ARRAY) needs no new machinery: each outer slot is already an independent Value (now an independent boxed word), refcounted exactly like any other shared read. The flat multi-dim slice-view case (`makeDynamicArraySliceValue`, finding 4 above) **cannot** be re-expressed as raw pointer-into-the-middle-of-another-object's-buffer once arrays are opaque pointers — it needs an explicit `ArraySliceView { ObjHeader; ArrayObj *backing; size_t consumed_dims; ptrdiff_t element_offset; }` variant (or an offset field folded into `ArrayObj` itself, distinguishing "owns its buffer" from "views a backing object's buffer") that holds a *retained* reference to the backing `ArrayObj` rather than a bare interior pointer. This is new design surface the original sketch did not anticipate at all; recommend splitting it into its own sub-phase (4f below) specifically so a regression bisects to one of {static/dynamic conversion, slice-view redesign}, not both at once. |
+| `TYPE_FILE` | `FileObj { ObjHeader; FILE *f; char *filename; int record_size; bool record_size_explicit; }` | **Exempt from Stage B's CoW/uniqueness path entirely** — a file's OS handle has identity that must never be cloned, matching the Phase 6 finding that `assign`/`reset`/`rewrite`/`close` already pass file variables *by address* specifically because the real handler mutates the live handle in place (§6.3's `TYPE_FILE has no PSB3 encoding` / non-substitutable-journal finding is the same identity property surfacing in a different phase). Destructor must preserve today's `pscalRuntimeVmIsSharedFileStream` check (`core/utils.c:2400`) distinguishing runtime-owned stdio wrappers from real owned handles. |
+| `TYPE_ENUM` | `EnumObj { ObjHeader; Type *enum_meta; int32_t ordinal; }` | **Decided: drop** the current per-instance `strdup`'d `enum_val.enum_name` (`core/utils.c:3395`, re-`strdup`'d on *every* copy — a real, avoidable allocation on every enum value copy today) in favor of deriving the display name from the already-shared, non-owned `enum_meta->name` at read time. Gate, not open question: 4g's own worklist includes a one-time grep/audit for any path that constructs an enum Value with `enum_name` set but `enum_meta` NULL before the cut lands; if one exists, special-case it there rather than block the simplification on principle. |
+| `TYPE_POINTER` | `PointerObj { ObjHeader; void *address; AST *base_type_node; uint8_t mode; }` where `mode ∈ {NORMAL, OWNED_HEAP_VALUE, STRING_CHAR_PTR, SERIALIZED_CHAR_PTR}` | Replaces the sentinel-in-`base_type_node` overload (finding 5) with an explicit field. **Correctness hazard, not hypothetical — found one concrete site:** `copyInterfaceReceiverAlias` (`vm.c:3688-3694`) does `PTR_BASE_TYPE_NODE(alias) = NULL;` on an *already-copied* alias — i.e. it mutates one Value's pointer metadata in place after copying. Today this is safe because `base_type_node` is a plain scalar field, independently stored per `Value` struct copy even though the pointee `AST*` itself is shared — mutating the copy never touches the original. Once `PointerObj` is a refcounted heap object, two `Value`s sharing one `PointerObj` by reference (as Stage B's cheap-copy design intends) would **also share this mutation** — a real semantic regression, not present today. Mitigation: `copyValueForStack`/`makeCopyOfValue` for `TYPE_POINTER` must always allocate a **fresh** `PointerObj` (refcount starts at 1, values copied in) rather than incrementing an existing one's refcount, i.e. `PointerObj` is copy-on-construct only, never alias-shared between distinct `Value` instances created via the copy path — only true stack `DUP` (duplicating a reference already known to be consumed immediately, not further copied) may legitimately share one `PointerObj` between two stack slots. This needs an explicit audit pass beyond the one site found here before Stage A ships pointer boxing, not an assumption that one grep hit is the only instance. |
+| `TYPE_CLOSURE`/`TYPE_INTERFACE` | Thin `ClosureObj`/`InterfaceObj` wrapping today's inline `closure{entry_offset,symbol,env}`/`interface{type_def,payload}` union members, with `env`/`payload` (`ClosureEnvPayload*`) retained/released exactly as today via `retainClosureEnv`/`releaseClosureEnv` | **Lowest risk of the boxed types** — `ClosureEnvPayload` is already a battle-tested refcounted object; this sub-phase mostly proves the generic `ObjHeader` retain/release dispatch against known-good call sites before touching riskier types (see 4b in §5.10.5). |
+| `TYPE_MEMORYSTREAM` | `MStream` (`types.h:96-101`) essentially unchanged; wrap with (or adapt to satisfy) the generic `ObjHeader` retain/release dispatch, reusing its existing `int refcount` field rather than duplicating one | Second already-refcounted type; same low-risk rationale as closures. |
+| `TYPE_INT64`/`TYPE_UINT64` | `Int64Box { ObjHeader; int64_t/uint64_t value; }` | Full 64-bit range doesn't fit in 46 payload bits (see §5.10.1). One heap alloc per wide-integer value is a real, measurable cost for any int64-heavy hot loop; PSCAL's own benchmark categories (`arith`/`calls`/`globals`/`io_http`, `Tests/vm_bench/`) skew int32/double, so this is provisionally acceptable but should be an explicit line item in the post-4h/4i benchmark comparison rather than assumed away. |
+| `TYPE_LONG_DOUBLE` | see §5.10.2 | |
+| `TYPE_THREAD` | boxed pointer to whatever `Thread`-slot handle Phase 5a's `TYPE_TASK` design settles on wrapping (out of this phase's scope; noted for consistency with the concurrency track) | |
+
+Metadata-field disposition summary (all ~20 original struct-level fields,
+none hand-waved):
+
+| Field | Disposition |
+|---|---|
+| `type` | Encoded in the tagged word's `kind`, or in `ObjHeader.type` for boxed values. `VALUE_TYPE(v)` macro becomes a bit-extraction, not a struct read. |
+| `enum_meta` | Moves into `EnumObj`. |
+| `i_val`/`u_val` | Split: small ordinals inline in the tagged word's payload; `INT64`/`UINT64` in `Int64Box`. |
+| `real.{f32_val,d_val,r_val}` | Collapses to one canonical inline double (kind 14/NaN-fallthrough) for `FLOAT`/`DOUBLE`; `r_val`'s extra precision survives only in `LongDoubleBox`. The redundant simultaneous-triple-storage is eliminated, not relocated. |
+| `s_val` | Moves into `StringObj.data[]`. |
+| `c_val` | Inline (`CHAR`/`WIDECHAR` kinds). |
+| `record_val` | Moves into `RecordObj.fields` (same `FieldValue*` list). |
+| `f_val` | Moves into `FileObj.f`. |
+| `array_val` | Moves into `ArrayObj.elements` (non-packed) or the slice-view's backing reference. |
+| `mstream` | Becomes the `HEAP_PTR` payload directly (MStream already self-describing via its own refcount). |
+| `enum_val.{enum_name,ordinal}` | `ordinal` moves into `EnumObj.ordinal`; `enum_name` is dropped (derived from `enum_meta` — see caveat above). |
+| `ptr_val` | Moves into `PointerObj.address`. |
+| `closure{...}`/`interface{...}` | Move into `ClosureObj`/`InterfaceObj`. |
+| `set_val.{set_size,set_values}` | Move into `SetObj`. |
+| `array_raw` | Moves into `ArrayObj`'s union (packed-storage branch). |
+| `array_is_packed`/`array_is_dynamic` | Move into `ArrayObj` as ordinary (non-poisoned-elsewhere) bool fields; `is_dynamic` keeps its semantic weight (§5.10.0 point 3). |
+| `array_refcount` | Subsumed by `ArrayObj.header.refcount` — the bespoke `uint32_t*` + `dynamic_array_refcount_mutex` scheme (`core/utils.c`) is replaced by the generic `ObjHeader` refcount and whatever locking discipline Stage B settles on for it (see open question in §5.10.6). |
+| `base_type_node` | Moves into `PointerObj.base_type_node`; the sentinel-value overload becomes the explicit `mode` field. |
+| `filename` | Moves into `FileObj.filename`. |
+| `record_size`/`record_size_explicit` | Move into `FileObj`. |
+| `lower_bound`/`upper_bound` | **Decided: fold** these single-dimension convenience fields (distinct from the `lower_bounds`/`upper_bounds` arrays) into `ArrayObj.lower_bounds[0]`/`upper_bounds[0]`, dropping the separate scalar fields — they are redundant with the `dimensions==1` case of the general bounds arrays. Gate, not open question: 4e's worklist includes checking for any caller that reads the scalar fields when `dimensions != 1` (which would indicate they carry independent meaning somewhere) before the drop lands. |
+| `max_length` | Moves into `StringObj.max_length`. |
+| `element_type`/`element_type_def` | Move into `ArrayObj`. |
+| `dimensions`/`lower_bounds`/`upper_bounds` | Move into `ArrayObj`. |
+
+#### 5.10.4 Migration ordering and the accessor-coexistence trick
+
+**The mechanism that makes staged validation possible:** for the duration
+of sub-phases 4a-4h below, `Value`'s *physical size does not shrink*. Its
+old fields stay exactly where they are. What changes, one type family at a
+time, is the *meaning* of one field's bit pattern for that family: e.g.
+once strings convert (4c), the old `s_val` field (still physically present
+in the struct) is repointed to hold a `StringObj*` instead of a raw owned
+`char*`, and only the `AS_STRING`/related accessor macros' *definitions* in
+`types.h` change to add the one extra level of indirection. Every one of
+the ~2,600+430 call sites the Phase 0 sweep already converted to go through
+these macros needs **zero edits** — they still write `AS_STRING(v)`, call
+`makeString()`, etc., unaware that the storage underneath just gained a
+heap object and a refcount. Only `core/utils.c`/`core/cache.c` (the
+designated representation layer, which the Phase 0 sweep deliberately left
+on raw field access) and that one type's constructor/destructor/copy logic
+need rewriting per sub-phase.
+
+This lets each type family be converted and independently gated by the
+differential harness + full suites, entirely isolated from every other
+family, with the actual physical struct-shrink deferred to a single final
+mechanical step (4i) that has no new *semantic* risk of its own — all the
+semantic risk was already retired family-by-family before it.
+
+**Important benchmarking caveat this ordering implies:** during 4a-4h,
+`Value` is *not smaller* (so no stack-traffic win yet) and several
+type families now pay one extra pointer indirection they didn't pay before
+(`StringObj*` dereference vs. inline `s_val`), while `DUP`/`CONSTANT`/`push`
+still call the *old* deep-copy `copyValueForStack`/`makeCopyOfValue` logic
+until Stage B (4j) rewrites them. **A naive per-PR benchmark gate would
+likely show 4a-4h as flat-to-slightly-regressed, by design — a real
+regression at this stage should not block the sub-phase**, only 4i+4j need
+to show the promised win. Set this expectation in the tracking doc up
+front so an implementation chip doesn't get stuck fighting `Tests/vm_bench`
+for the wrong reason.
+
+Sub-phase breakdown (effort estimates are single-PR-sized units, consistent
+with the plan's existing Phase 1/2 convention of lettered sub-phases):
+
+- **4a — Foundation.** `ObjHeader`, generic `pscalObjRetain`/`pscalObjRelease`
+  dispatch-by-`ObjHeader.type`, the `BOX_DOUBLE`/`UNBOX_DOUBLE` NaN-
+  canonicalization pair, the pointer-width startup canary. No `Value`
+  call site changes yet — purely additive, unit-tested in isolation
+  against the new types directly. **Prerequisite gate, not part of 4a's own
+  work:** re-verify the Phase 0 sweep's completeness for the fields the
+  `_Generic` guard alone protects (`type`, `i_val`, `real`, `closure`,
+  `interface`, `mstream`, `lower_bound(s)`, `upper_bound(s)`, `dimensions`,
+  `element_type(_def)`, `max_length`, `filename`, `record_size`) — the
+  poison pragma covers the *other* dozen field names but was deliberately
+  not applied to these because of name collisions elsewhere in the codebase
+  (`core/utils.h:360-372`). A one-time mechanical check (e.g. temporarily
+  rename each of these fields on a scratch branch and let the compiler
+  enumerate every remaining raw access) closes a real gap the swap.c
+  finding (§5.10.0 point 6b) already demonstrates exists: whole-struct
+  assignment is invisible to poison-based lints by construction, so "the
+  lint build is green" is necessary but not sufficient evidence of
+  readiness.
+- **4b — Adopt-in-place: closures, interfaces, memory streams.** Route
+  `TYPE_CLOSURE`/`TYPE_INTERFACE`/`TYPE_MEMORYSTREAM` through the new
+  generic retain/release, reusing their existing refcounted payloads
+  (`ClosureEnvPayload`, `MStream`) nearly as-is. Lowest-risk sub-phase by
+  construction — proves the `ObjHeader` machinery against call sites that
+  are already correctly refcounted today, before touching anything that
+  isn't.
+- **4c — Strings and sets.** `StringObj`/`SetObj`, single-allocation
+  flexible-array-member shapes, straightforward deep-copy semantics
+  preserved exactly.
+- **4d — Records.** `RecordObj` thin wrapper; `FieldValue` list body
+  unchanged.
+- **4e — Arrays, static case.** `ArrayObj` for `array_is_dynamic == false`
+  values only; preserves today's eager deep-copy-on-assign behavior exactly
+  (Stage A may make it lazy/CoW-eligible as a pure optimization, but must
+  not change observable semantics — see §5.10.6).
+- **4f — Arrays, dynamic + jagged + slice views.** Split from 4e
+  specifically because it is the highest-risk single item in the whole
+  phase (§5.10.3): the reference-semantics preservation for dynamic arrays,
+  jagged-array element sharing, and the from-scratch redesign of the
+  flat-multi-dim slice view (no more raw pointer-into-a-sibling's-buffer).
+  Differential corpus for this sub-phase specifically must include
+  multi-dimensional and jagged-array-heavy programs, not just the general
+  suite.
+- **4g — Files, pointers, enums.** Three boxed types, each with its own
+  flagged subtlety: file identity (never CoW'd), the pointer copy-vs-share
+  hazard (§5.10.3's `copyInterfaceReceiverAlias` finding, needs its own
+  audit pass beyond the one site found), enum's redundant-name-string
+  cleanup (verify-before-cutting).
+- **4h — Numeric/scalar tagged-word encoding.** Land the actual bit-packing
+  from §5.10.1 for `VOID`/`NIL`/`BOOLEAN`/`CHAR`/`WIDECHAR`/`BYTE`/`WORD`/
+  `INT8-32`/`UINT8-32`/`FLOAT`, plus `Int64Box`/`LongDoubleBox` for the
+  types that must stay boxed. `Value` is *still its old physical size* at
+  this point — this sub-phase validates the encoding/decoding logic itself
+  (round-trip tests, the canary, NaN canonicalization) without yet
+  committing to the layout change.
+- **4i — The flag day.** Physically collapse `struct ValueStruct` to
+  `{ uint64_t bits; }`. Delete every now-dead field. Finalize every
+  accessor macro's body to do real bit-packing instead of struct-field
+  access. By this point every type family's ownership/copy semantics has
+  already been independently validated in 4b-4h, so this step is
+  mechanical deletion + macro rewrite with no new semantic surface — the
+  differential harness + full suites (including the standalone aether
+  build, per the plan's standing per-phase checklist) are the gate, not new
+  design decisions.
+- **4j — Stage B: ownership rationalization.** `DUP`/`CONSTANT`/`push`
+  become word copies + `pscalObjRetain`; `freeValue` becomes
+  `pscalObjRelease`; `valueEnsureUnique()` becomes the single choke point
+  address-based mutation paths (`SET_INDIRECT`, field writes) funnel
+  through, **with the dynamic-array-alias and file-identity exemptions from
+  §5.10.6 baked in as explicit branches, not an afterthought**. Existing
+  Risk Register entry ("CoW semantics subtly change Pascal record aliasing
+  behavior... differential corpus must include the Rea OOP and VAR-param
+  suites") applies unchanged and is now joined by the array-semantics and
+  file-identity risks this design surfaced.
+
+Total: 10 sub-phases against the plan's existing "6-10 PRs" estimate for
+Phase 4 — consistent if 4a/4h (both mechanical/infrastructure-heavy) or
+4c/4d (both low-risk, similarly-shaped) end up combined in practice; kept
+separate here so a regression during implementation bisects to the
+smallest possible unit.
+
+#### 5.10.5 Stage B sanity check against this Stage A design
+
+The plan's existing Stage B sketch (`valueEnsureUnique()` as a single
+choke point for `SET_INDIRECT`/field writes, cloning on write through a
+non-unique reference) is sound **only if it is not applied uniformly to
+every boxed type**. Three exemptions this design surfaces, none optional:
+
+1. **`TYPE_ARRAY` with `is_dynamic == true` must never CoW-clone on write.**
+   Dynamic arrays already implement genuine reference semantics today
+   (§5.10.0 point 3) — `Engine^.Matrix := BuildGrid(...)` observed from a
+   second alias is *supposed* to see the mutation, matching real
+   Free/Delphi dynamic-array behavior. A generic "clone on any non-unique
+   mutation" rule would silently change this to value semantics — a
+   regression, not a bug fix. `valueEnsureUnique()` must branch on
+   `ArrayObj.is_dynamic` and pass dynamic arrays through untouched
+   (mutate shared storage in place, exactly as today), reserving actual
+   CoW-cloning for `is_dynamic == false` (static arrays), where Stage A can
+   legitimately make today's eager deep-copy lazy as a pure performance
+   optimization without changing any observable behavior.
+2. **`TYPE_FILE` must never CoW-clone.** A file's OS handle is identity-
+   bearing state; cloning it would silently open a second, independent
+   handle where the program expects one shared, mutating-in-place resource
+   — exactly the class of bug the Phase 6 fx-policy work already found and
+   fixed once (the `assign`/`reset`/`rewrite`/`close`-by-address,
+   non-substitutable-journal-entry finding in §6.3). `valueEnsureUnique()`
+   must treat `TYPE_FILE` as always-unique/always-in-place, never subject
+   to the clone path.
+3. **`TYPE_POINTER` needs copy-on-construct, not copy-on-write, for its
+   boxed cell** — see the `copyInterfaceReceiverAlias` finding in
+   §5.10.3. This is a distinct concern from `valueEnsureUnique()` (which
+   guards *mutation through an address*, not *value copy*), but it lives in
+   the same risk category: getting either wrong produces a latent aliasing
+   bug that only manifests when two `Value`s happen to end up sharing state
+   that should have been independent.
+
+No other boxed type needs an exemption: strings, sets, and static arrays
+have always had value semantics and CoW is a pure optimization for them;
+records inherit whatever semantics their `FieldValue` list already
+implements (including the OOP `owns_storage`-aliased-field case, which
+`valueEnsureUnique()` must be aware of but which is orthogonal to
+record-level CoW — a field explicitly marked as aliased storage is already
+opting out of ownership, same as today); closures/interfaces/memory
+streams already have working, tested retain/release and don't need
+CoW at all (they are reference types by design, same category as dynamic
+arrays but with no static-vs-dynamic ambiguity to resolve).
+
+**Decided: atomic refcounts, no mutex, for every `ObjHeader` type
+uniformly** — `ObjHeader.refcount` is a `_Atomic uint32_t`, retained/
+released via `__atomic_fetch_add`/`__atomic_fetch_sub` (portable, single
+instruction on both x86_64 and ARM64, well-precedented — this is exactly
+how every mainstream refcounted-object runtime does it). This beats all
+three options originally on the table (per-type mutex, one global mutex,
+or "atomics plus a separate lock for the torn-snapshot case"), because the
+torn-snapshot problem the existing `dynamic_array_refcount_mutex` and
+`value_cell_mutex` protect against (`vm.c:1205-1214`,
+`dynamic_array_fresh_publish_race`: a concurrent reader observing new
+dims/bounds paired with old data) is a property of today's Value being a
+**multi-word struct that cannot be replaced in one instruction** — no
+locking scheme can make a ~200-byte struct update atomic, only serialize
+access to it. Once `Value` is a single 64-bit tagged word, replacing a
+variable's contents *is* a naturally-aligned 64-bit store, which x86_64 and
+ARM64 both guarantee is atomic — the torn-header failure mode is
+structurally eliminated by the representation change itself, not patched
+over with a lock. `replaceValueCell` (`vm.c:1217`) becomes a single atomic
+store of the new tagged word; `copyDynamicArraySnapshotValue`
+(`core/utils.c:3558`) becomes a single atomic load. `value_cell_mutex` and
+`dynamic_array_refcount_mutex` are retired entirely under Stage B, not
+folded into something bigger — this is a straightforward net win for all
+four of "robust" (no lock-ordering hazard across types, ever), "fast" (no
+uncontended-mutex overhead on the hottest refcount path, and no contention
+growth as Phase 5's tasks/channels add concurrent readers/writers), and
+"flexible" (one uniform mechanism for every current and future `ObjHeader`
+type, no per-type lock to add when a new boxed type shows up).
+
+**The one thing atomics don't give you for free, called out so it isn't
+missed:** publishing a *newly constructed* heap object still needs the
+"fully build it (refcount=1, all fields set), then atomically publish the
+pointer into the `Value` slot" ordering — never publish a pointer to a
+partially-initialized object and fix it up afterward. This is the same
+discipline every lock-free publish pattern requires and is a construction-
+order rule for 4f's implementation, not a locking mechanism to design.
+**Test for this explicitly** (see §5.10.8): the existing
+`Tests/vm_stack_growth_stress/var_param_across_growth.pas`-style stress
+harness (60,000-deep mutation across growth events, per Phase 3's Risk
+Register precedent) should grow a companion multi-threaded variant that
+specifically hammers concurrent dynamic-array reassignment across many
+threads — this is the exact scenario `dynamic_array_fresh_publish_race`
+surfaced originally, and it is the one place in this whole design where
+"looks right" and "is right under TSan" can diverge.
+
+#### 5.10.6 What breaks and what doesn't (verified, not assumed)
+
+A full repo-wide audit (all five frontend trees plus `pscal-core`,
+`PBuild/src`, `exsh`) for every pattern that could depend on `Value`'s
+current size/layout rather than going through an accessor:
+
+- **`sizeof(Value)` (~87 sites across the tree, per two independent
+  audits):** the overwhelming
+  majority (`vm.c`, `symbol.c`, `builtin.c`, etc.) are `malloc(sizeof(Value))`
+  allocating storage for exactly *one* Value (symbol storage cells, VAR-
+  param/closure/interface boxing cells). These are representation-agnostic
+  and need **zero changes** — they get cheaper for free once `Value`
+  shrinks. A smaller set allocate *contiguous arrays* of N Values
+  (`core/utils.c:1556,1572,3458`, `core/cache.c:1272,1851`,
+  `backend_ast/builtin.c:3441`, `compiler/bytecode.c:264-265`, three shell
+  `.inc` call-argument buffers, `src/disassembler/assembler_main.c`) for
+  array element storage, the bytecode constant pool, and call-argument
+  buffers. These also need **zero code changes** — `malloc(sizeof(Value) *
+  n)` still correctly allocates n contiguous tagged words after the shrink,
+  just 8n bytes instead of ~200n. The one real *behavioral* (not
+  correctness) consequence: array-of-composite-element storage changes from
+  "N inline nested payloads colocated in one buffer" to "N 8-byte pointers
+  into N separately-heap-allocated objects" — a cache-locality regression
+  worth benchmarking explicitly for array-of-record-heavy code, not a
+  hazard.
+- **Plain whole-struct assignment (`Value x = *src` outside
+  `core/utils.c`/`core/cache.c`):** a full audit (including a second,
+  independent pass) found seven sites, six of them intentional and correct,
+  one that needs rewriting anyway, and one genuine loose end:
+  - `vm.c:1217` (`replaceValueCell`: `old_value = *target; *target =
+    replacement; ...; freeValue(&old_value);`) — an assignment-with-decref
+    pattern that is *already* exactly right for a refcounted world (capture
+    old, install new, release old); needs no change in *shape*, but this is
+    also the exact function the `dynamic_array_fresh_publish_race` fix
+    (shipped pscal-core dbac64a) lives in — its mutex pairing with
+    `copyDynamicArraySnapshotValue` (`core/utils.c:3558-3563`, "lock order:
+    value_cell_mutex then dynamic_array_refcount_mutex") is **deliberately
+    retired, not preserved**, per the atomic-refcount decision in §5.10.5:
+    once the whole `Value` is one atomically-storable word, `old_value =
+    *target; *target = replacement;` becomes an atomic load-then-store of
+    a single word, and the mutex pair this function currently takes has
+    nothing left to protect.
+  - `vm.c:3639-3676` (`copyValueForStack`'s three internal branches: a bare
+    `Value copy = *src;` fast path for scalar/void/nil types, and
+    `Value alias = *src;` + explicit `retainMStream`/`retainClosureEnv` for
+    `TYPE_MEMORYSTREAM`/`TYPE_CLOSURE`) — see finding 6a above: this is the
+    working prototype for Stage B's generalized behavior, not a hazard.
+  - `vm.c:3839` (`pop()`'s own `Value result = *vm->stackTop;`) — a pure
+    move of the top-of-stack slot; safe.
+  - `backend_ast/builtin.c:3484` (`SetLength`'s resize algorithm snapshotting
+    `old_array_stub = *array_value` to read old bounds/offsets during
+    migration, paired with the `memset(&new_array_stub, 0, sizeof(Value))`
+    two lines later at `:3486`) — this **does** need rewriting, but it was
+    always going to be, since `SetLength` is core array-mutation logic
+    directly manipulating the metadata Stage A relocates onto `ArrayObj`
+    regardless of this finding; folded into sub-phase 4e/4f, not a new
+    surprise.
+  - The one genuine loose end, outside `core/utils.c`/`core/cache.c`/
+    `vm.c`'s `copyValueForStack` entirely: `ext_builtins/system/swap.c:25`,
+    the `Swap` builtin's raw three-way struct swap (§5.10.0 point 6b) —
+    functionally harmless (a swap conserves references, so no refcount
+    adjustment is owed) but worth converting to a copy-constructor-style
+    helper anyway, purely so no whole-struct `Value` copy exists outside a
+    named representation-layer location by the time 4i ships, closing the
+    "poison lint can't see this" gap rather than leaving one unexplained
+    exception on record.
+  - **On the mmap-backed operand stack's pointer-stability invariant**
+    (Phase 3, §5.9): shrinking `Value` does **not** threaten it. The
+    guarantee is that the reservation's *base address* never moves; nothing
+    about it depends on `sizeof(Value)`. Every stack/array access found in
+    the audit indexes through typed `Value*` subscript syntax or
+    `computeFlatOffset()` — zero sites do raw byte-offset pointer
+    arithmetic on a `Value*` (verified explicitly: no `(Value*)ptr + i`-
+    style construction anywhere in any tree) — so the compiler-generated
+    stride for every `stack[i]`/`slots[i]`/`array_val[i]` access
+    automatically shrinks from ~200 bytes to 8 bytes with zero call-site
+    changes. A `Value*` taken before Stage A ships and dereferenced after
+    is the one thing that would be unsafe (its target's in-memory shape
+    changes), but no such cross-version pointer can exist within a single
+    running VM instance, which is the only scenario `GET_LOCAL_ADDRESS`/
+    VAR-parameter aliasing actually needs to support.
+- **`memcmp`/raw equality on `Value`:** zero found, anywhere, in any tree.
+- **On-disk/journal serialization (`writeValue`/`readValue`,
+  `core/cache.c:1059`/`1729`, backing both the PSB3 bytecode cache and the
+  Phase 6 fx-policy record/replay journal):** already encodes field-by-
+  field with an explicit switch on `VarType`, recursing into nested
+  elements rather than ever memcpy-ing the raw struct
+  (`core/cache.c:1131,1135,1846,1854`). **This format needs no version
+  bump for Stage A** — only the accessor calls inside `writeValue`/
+  `readValue` themselves (already representation-layer, expected to
+  change) need updating to pull fields from the new heap shapes.  One
+  adjacent item worth a second look during that work, not a layout hazard
+  per se: `writePointerValue` (`core/cache.c:~1512-1537`) persists a raw
+  `TYPE_POINTER` address as an opaque 8-byte integer today — already
+  unstable across runs by nature (addresses aren't stable), so no new
+  problem, but its round-trip logic will need to pull `address`/`mode`
+  out of the new `PointerObj` rather than the tagged word directly.
+- **`(Value*)` casts and pointer-payload dereferences (~140+ sites across
+  the tree):** every one reviewed falls into two safe buckets — ordinary
+  heap-allocation casts (`(Value*)malloc(...)`) and `(Value*)AS_POINTER(x)`-
+  style re-dereferencing of a pointer the VM already manages (VAR params,
+  `new`/`dispose`, file/pointer builtins, SDL out-params). Zero instances of
+  reinterpreting an arbitrary byte buffer as a `Value*` or memcpy-ing
+  through such a cast.
+
+**Net assessment:** the "builtins recompile unchanged" claim holds with two
+narrow, now-named qualifications rather than needing to be walked back:
+`ext_builtins/system/swap.c`'s raw struct swap (functionally fine, worth
+tidying anyway) and `backend_ast/builtin.c`'s `SetLength` resize algorithm
+(always going to be touched, not a surprise). No other builtin, in any of
+the five frontends, does anything that depends on `Value`'s current size or
+layout. One out-of-tree consumer worth a one-line note: the standalone
+`pscalasm` assembler (`src/disassembler/assembler_main.c:83-88`, `struct
+ParsedConstSymbol { char *name; VarType type; Value value; bool is_set; }`)
+**embeds a `Value` directly inside another struct** and zeroes the whole
+container via `memset(slot, 0, sizeof(*slot))` (`:373`). This needs no
+change — `sizeof(*slot)` automatically reflects whatever `Value` becomes —
+but it's a different pattern from every in-VM site (a struct *containing* a
+Value by value, not a pointer to one) and is called out so it isn't missed
+during the tool's own rebuild-and-verify pass alongside the six main trees.
+
+#### 5.10.7 Decisions locked in (previously open questions)
+
+All four items previously listed as open questions are decided, in favor of
+robustness/speed/flexibility over deferring to a future call:
+
+1. **5-bit kind / 46-bit payload** (§5.10.1) — more inline-type headroom
+   over marginally more address-space headroom the canary already covers;
+   see §5.10.1 for the reasoning.
+2. **Atomic refcounts, no mutex, uniform across every `ObjHeader` type**
+   (§5.10.5) — supersedes all three originally-listed locking options;
+   the representation change itself (Value becomes one atomically-
+   storable/loadable 64-bit word) eliminates the torn-header failure class
+   the current mutexes exist for, rather than re-implementing that
+   protection under a new name. `value_cell_mutex` and
+   `dynamic_array_refcount_mutex` are retired under Stage B (4j), not
+   generalized.
+3. **Fold `lower_bound`/`upper_bound` into `lower_bounds[0]`/
+   `upper_bounds[0]`** (§5.10.3) — proceed, gated by a one-time "any caller
+   reads these when `dimensions != 1`" check that is now part of 4e's own
+   worklist rather than a precondition for the whole phase.
+4. **Drop `enum_val.enum_name`, derive from `enum_meta`** (§5.10.3) —
+   proceed, gated by the equivalent one-time audit, now part of 4g's
+   worklist.
+
+None of these block 4a from starting; the gated verification steps for (3)
+and (4) are scoped work items inside the sub-phases that actually touch
+those fields, not standalone prerequisites.
+
+#### 5.10.8 Testing strategy specific to this phase
+
+Section 8's cross-cutting checklist (differential harness, full suites,
+benchmark tracking) applies to every sub-phase as already stated, but three
+items in this design are specifically the kind of thing "full suite passes"
+won't catch by itself, and each gets a named test before its sub-phase is
+considered done, not just before Phase 4 as a whole ships:
+
+- **`ObjHeader` retain/release in isolation (4a).** Unit tests against the
+  new atomic retain/release primitives directly — construct, share, drop
+  references, verify the count and the free-at-zero behavior — before any
+  `Value` call site depends on them. Cheap to write, and catches
+  off-by-one refcount bugs before they're entangled with sixty other
+  changes happening in the same sub-phase.
+- **A multithreaded dynamic-array-reassignment stress test (4j, alongside
+  Stage B).** The exact scenario `dynamic_array_fresh_publish_race`
+  surfaced originally (§5.10.5) — many threads racing reads against
+  reassignment of a shared dynamic array — run under `build-asan`'s
+  ThreadSanitizer-capable configuration, not just the plain build, since
+  this class of bug is precisely the kind that passes clean under a normal
+  build and only shows up under a race detector or bad luck in production.
+  Model it on the existing `Tests/vm_stack_growth_stress/
+  var_param_across_growth.pas` precedent (Phase 3, 60,000-deep mutation
+  across growth events) but multithreaded instead of single-threaded-deep.
+- **A slice-view adversarial corpus (4f).** Since §5.10.3 flags the flat
+  multi-dim slice-view redesign as the highest-risk single item in Stage A,
+  its differential-harness corpus for that sub-phase specifically should
+  include: multi-dimensional static arrays, jagged (`array of array of X`)
+  arrays at 2 and 3+ levels of nesting, partial-index access (fewer indices
+  than dimensions, exercising the view-construction path directly), and
+  concurrent read-while-resize (`SetLength` on one thread, indexed read via
+  a slice view on another) — not just the general suite, which was not
+  written with this specific redesign's failure modes in mind.
 
 ## 6. Concurrency Track
 
@@ -1349,9 +2029,12 @@ flow per phase is the standard multi-repo bump (component push, aether
 
 | Risk | Phase | Mitigation |
 |------|-------|------------|
-| Accessor sweep misses direct field pokes hidden in macros/.inc files | 0/4 | make `Value` fields `_deprecated`-attributed in a lint build; grep-audit `\.inc` shell includes specifically (largest single file family) |
+| Accessor sweep misses direct field pokes hidden in macros/.inc files | 0/4 | make `Value` fields `_deprecated`-attributed in a lint build; grep-audit `\.inc` shell includes specifically (largest single file family). **Confirmed non-empty by the 4a prerequisite-gate sweep** (run 2026-07-06): real raw `.type`/`.i_val`/`.real.*`/`.mstream` access outside `core/utils.c`/`core/cache.c`/`copyValueForStack` exists in `compiler/compiler.c` (~9 sites across 6 functions, e.g. `:1849,1853,1917,3303,3458-3459,5082,5515,5519`), `compiler/bytecode.c` (~8 sites, e.g. `:242,252,254,629,671,1314,1361`), `vm/vm_fx_policy.c` (~10 sites, local `Value`s in the record/replay journal path), `symbol/symbol.c:550`, `core/types.c` (`setTypeValue` itself, `:9,11,14`), `core/utils.h`'s own `tryValueToOrdinal`/`asI64`/`asLd` inline helpers, and the pascal/rea/aether parsers/semantic layers (each has its own `Value v = evaluateCompileTimeValue(...); if (v.type == ...)` pattern). Also `.lower_bound(s)`/`.upper_bound(s)`/`.dimensions`/`.element_type` raw access in PBuild's own `src/disassembler/{assembler_main.c,main.c}`. **Not a blocker for 4a** (nothing in 4a changes any of these fields' representation), but this is the concrete checklist to clear before the sub-phase that boxes each field: `.mstream`/closure-adjacent before 4b, `.lower_bound(s)`/`.upper_bound(s)`/`.dimensions`/`.element_type` before 4f, `.type`/`.i_val`/`.real.*` before 4h. Re-run the same sweep as a gate immediately before each of those sub-phases starts, not just once before 4a. |
 | Escaped stack `Value*` breaks under stack growth | 3 | shipped as a single mmap virtual-memory reservation with a growable committed prefix, never relocated/freed until `freeVM()` — verified via a 60,000-deep VAR-parameter mutation across many growth events (`Tests/vm_stack_growth_stress/var_param_across_growth.pas`) |
-| CoW semantics subtly change Pascal record aliasing behavior | 4B | differential corpus must include the Rea OOP and VAR-param suites; any diff is a stop-ship |
+| CoW semantics subtly change Pascal record aliasing behavior | 4j | differential corpus must include the Rea OOP and VAR-param suites; any diff is a stop-ship |
+| `valueEnsureUnique()` CoW applied uniformly would break dynamic-array reference semantics and file-handle identity | 4j | explicit exemption branches for `ArrayObj.is_dynamic==true` and `TYPE_FILE` (§5.10.6); differential corpus must include multi-dim/jagged-array and file-I/O suites specifically, not just the general one |
+| `PointerObj` boxing turns an independent-per-copy field (`base_type_node`) into shared-by-reference state | 4g | copy-on-construct discipline for `TYPE_POINTER` (never alias-share a `PointerObj` between distinct `Value` copies); audit beyond the one found site (`copyInterfaceReceiverAlias`, `vm.c:3688-3694`) before shipping |
+| Accessor-poison lint cannot see whole-struct `Value` assignment (only bare-identifier field access) | 0/4 | one confirmed instance (`ext_builtins/system/swap.c:25`) found only by a targeted grep sweep, not the lint; run that sweep as an explicit one-time gate before 4a, don't rely on "lint is green" alone |
 | Registry fingerprint too strict (any builtin addition invalidates ids) | 1b | fingerprint = ordered hash of (name,id) pairs actually referenced by the chunk's BMAP, not the whole registry |
 | exsh dynamic globals fight slot addressing | 2b | dual-path design is explicit from the start; exsh keeps the dynamic opcodes |
 | iOS build (static libs, no dlopen culture) vs plugin ABI | 7 | plugins are a desktop/server feature; iOS keeps static registration (already special-cased in `register.c`) |
@@ -1365,7 +2048,7 @@ flow per phase is the standard multi-repo bump (component push, aether
 | 1 | 5-8 PRs | container, widths, line table, verifier; the big format epoch |
 | 2 | 3-4 PRs | side-table, then slot globals with exsh path |
 | 3 | 2 PRs | growable stack (mmap reservation) + frame growth |
-| 4 | 6-10 PRs | the long pole; Stage A then B, each landable independently |
+| 4 | 10 PRs (4a-4j, §5.10.4) | the long pole; each sub-phase independently landable/gated; 4a-4h show flat-to-regressed `vm_bench` by design (Value not yet smaller), the promised win lands at 4i/4j only — don't gate early sub-phases on the benchmark |
 | 5 | 3-4 PRs | tasks, HTTP migration, channels |
 | 6 | 2-3 PRs | masks + enforce, then record/replay |
 | 7 | 2-3 PRs | ABI header, loader, sqlite-as-plugin proof |
