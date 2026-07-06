@@ -1,21 +1,21 @@
 == Disassembly: tiny/Arithmetic.pbc ==
 Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
-0000    0 DEFINE_GLOBAL    NameIdx:5   'x' Type:INTEGER ('integer')
-0005    | CONSTANT            2 '1'
-0007    | CONSTANT            6 '2'
-0009    | ADD
-0010    | CONSTANT            7 '3'
-0012    | MULTIPLY
-0013    | GET_GLOBAL_ADDRESS    5 'x'
-0015    | SWAP
-0016    | SET_INDIRECT
-0017    | CONSTANT            3 '0'
-0019    | GET_GLOBAL          5 'x' cache=0x0
-0029    | CALL_BUILTIN         1 'write' (2 args)
-0033    | CONSTANT            2 '1'
-0035    | CALL_BUILTIN         1 'write' (1 args)
-0039    | HALT
+0000    0 DEFINE_GLOBAL_SLOT Slot:0   'x' Type:INTEGER ('integer')
+0006    | CONSTANT            2 '1'
+0008    | CONSTANT            6 '2'
+0010    | ADD
+0011    | CONSTANT            7 '3'
+0013    | MULTIPLY
+0014    | GET_GSLOT_ADDRESS    0 'x'
+0017    | SWAP
+0018    | SET_INDIRECT
+0019    | CONSTANT            3 '0'
+0021    | GET_GSLOT           0 'x'
+0024    | CALL_BUILTIN         1 'write' (2 args)
+0028    | CONSTANT            2 '1'
+0030    | CALL_BUILTIN         1 'write' (1 args)
+0034    | HALT
 == End Disassembly: tiny/Arithmetic.pbc ==
 
 Constants (8):\n  0000: STR   "read"

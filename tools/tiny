@@ -17,7 +17,6 @@ The output file can be executed with ``pscalvm``::
 """
 from __future__ import annotations
 
-import ctypes
 import re
 import struct
 import sys
@@ -29,32 +28,54 @@ from typing import List, Optional, Tuple, Dict, Any, Set
 # Opcode loading
 # ---------------------------------------------------------------------------
 
+def pscal_core_root(root: Path) -> Path:
+    """The umbrella repo builds pscal-core out of ``components/pscal-core``
+    (see CLAUDE.md); the opcode/version sources this tool needs to stay in
+    sync with live there, not directly under the umbrella's own ``src/``."""
+    return root / "components" / "pscal-core"
+
+
 def load_opcodes(root: Path) -> Dict[str, int]:
-    """Parse ``bytecode.h`` to recover opcode values."""
-    header = root / "src" / "compiler" / "bytecode.h"
-    pattern = re.compile(r"^\s*([A-Z0-9_]+)\s*,")
+    """Parse ``opcodes.def`` (the single source of truth for the opcode page
+    since VM 2.0 Phase 0 item 4 -- see that file's own header comment and
+    Docs/pscal_vm_manual/pscal_vm_manual_ch3.md) to recover pinned opcode
+    values. Values are explicit (hex or decimal) and NOT positional, unlike
+    the old plain-enum scheme this used to (incorrectly, post-Phase 1a)
+    assume."""
+    opdef = pscal_core_root(root) / "src" / "compiler" / "opcodes.def"
+    pattern = re.compile(r"^\s*OP\s*\(\s*([A-Z0-9_]+)\s*,\s*(0[xX][0-9A-Fa-f]+|\d+)\s*,")
     opcodes: Dict[str, int] = {}
-    enum_started = False
-    index = 0
-    with open(header, "r", encoding="utf-8") as f:
+    with open(opdef, "r", encoding="utf-8") as f:
         for line in f:
-            if not enum_started:
-                if line.strip().startswith("typedef enum"):
-                    enum_started = True
+            stripped = line.strip()
+            if stripped.startswith("//"):
                 continue
-            if line.strip().startswith("}"):
-                break
-            m = pattern.search(line)
+            m = pattern.match(line)
             if m:
-                name = m.group(1)
-                opcodes[name] = index
-                index += 1
+                opcodes[m.group(1)] = int(m.group(2), 0)
     return opcodes
 
-# VarType enum (partial)
+
+def load_format_version(root: Path) -> int:
+    """Parse ``cache.c`` for ``PSB3_FORMAT_VERSION``. This is a container-
+    format constant (rare hard-cutover epoch bumps, e.g. 1->2 for the
+    global-access cache side table, 2->3 for slot-addressed globals -- see
+    Docs/pscal_vm2_plan.md), distinct from the per-compile ``PSCAL_VM_VERSION``
+    in ``version.h`` that ``load_vm_version`` below reads."""
+    cache_c = pscal_core_root(root) / "src" / "core" / "cache.c"
+    pattern = re.compile(r"#define\s+PSB3_FORMAT_VERSION\s+(\d+)")
+    with open(cache_c, "r", encoding="utf-8") as f:
+        for line in f:
+            m = pattern.search(line)
+            if m:
+                return int(m.group(1))
+    raise RuntimeError("Unable to determine PSB3_FORMAT_VERSION")
+
+# VarType enum (partial). Stable, positional values (unlike OpCode, VarType
+# has not been given the pinned-explicit-value treatment): TYPE_UNKNOWN=0,
+# TYPE_VOID=1, TYPE_INT32(aliased TYPE_INTEGER)=2, TYPE_DOUBLE=3, TYPE_STRING=4.
 TYPE_INTEGER = 2
 TYPE_STRING = 4
-INLINE_CACHE_SLOT_SIZE = ctypes.sizeof(ctypes.c_void_p)
 
 # ---------------------------------------------------------------------------
 # Lexer
@@ -290,6 +311,15 @@ class BytecodeBuilder:
         self.emit((value >> 8) & 0xFF)
         self.emit(value & 0xFF)
 
+    def emit_int32(self, value: int) -> None:
+        # Big-endian i32, matching opcodes.def's 'j' spec (VM 2.0 Phase 1c
+        # widened jump displacements from i16 to i32 -- rides the PSB3 format
+        # epoch since it changes the on-disk code-stream encoding).
+        self.emit((value >> 24) & 0xFF)
+        self.emit((value >> 16) & 0xFF)
+        self.emit((value >> 8) & 0xFF)
+        self.emit(value & 0xFF)
+
     def add_constant(self, ctype: int, value: Any) -> int:
         key = (ctype, value)
         if key in self.const_map:
@@ -307,10 +337,6 @@ class BytecodeBuilder:
         else:
             self.emit(self.opcodes["CONSTANT16"])
             self.emit_short(idx)
-
-    def emit_inline_cache_slot(self) -> None:
-        for _ in range(INLINE_CACHE_SLOT_SIZE):
-            self.emit(0)
 
 # ---------------------------------------------------------------------------
 # Compiler
@@ -344,16 +370,17 @@ class tinyCompiler:
     # --- Top-level compile ---
     def compile(self, program: Program) -> BytecodeBuilder:
         self.collect_vars(program)
-        # Emit definitions for all variables
+        # Emit definitions for all variables. VM 2.0 Phase 2b (plan §5.7)
+        # retired DEFINE_GLOBAL/DEFINE_GLOBAL16 in favor of a single
+        # DEFINE_GLOBAL_SLOT opcode carrying a u16 field: the compiler still
+        # emits a constant-pool NAME index here (the load-time link step
+        # rewrites it into a slot index before verification/execution), but
+        # the width is now always 16 bits, so there is no size split to emit.
         for name in sorted(self.vars):
             name_idx = self.builder.add_constant(TYPE_STRING, name)
             self.var_name_idx[name] = name_idx
-            if name_idx <= 0xFF:
-                self.builder.emit(self.opcodes["DEFINE_GLOBAL"])
-                self.builder.emit(name_idx)
-            else:
-                self.builder.emit(self.opcodes["DEFINE_GLOBAL16"])
-                self.builder.emit_short(name_idx)
+            self.builder.emit(self.opcodes["DEFINE_GLOBAL_SLOT"])
+            self.builder.emit_short(name_idx)
             self.builder.emit(TYPE_INTEGER)
             self.builder.emit_short(self.type_integer_idx)
         # Compile statements
@@ -401,30 +428,30 @@ class tinyCompiler:
             self.compile_expression(stmt.cond)
             self.builder.emit(self.opcodes["JUMP_IF_FALSE"])
             jump_to_else = len(self.builder.code)
-            self.builder.emit_short(0)
+            self.builder.emit_int32(0)
             for s in stmt.then_branch:
                 self.compile_statement(s)
             if stmt.else_branch:
                 self.builder.emit(self.opcodes["JUMP"])
                 jump_over_else = len(self.builder.code)
-                self.builder.emit_short(0)
-                offset = len(self.builder.code) - (jump_to_else + 2)
-                self.patch_short(jump_to_else, offset)
+                self.builder.emit_int32(0)
+                offset = len(self.builder.code) - (jump_to_else + 4)
+                self.patch_int32(jump_to_else, offset)
                 for s in stmt.else_branch:
                     self.compile_statement(s)
-                offset = len(self.builder.code) - (jump_over_else + 2)
-                self.patch_short(jump_over_else, offset)
+                offset = len(self.builder.code) - (jump_over_else + 4)
+                self.patch_int32(jump_over_else, offset)
             else:
-                offset = len(self.builder.code) - (jump_to_else + 2)
-                self.patch_short(jump_to_else, offset)
+                offset = len(self.builder.code) - (jump_to_else + 4)
+                self.patch_int32(jump_to_else, offset)
         elif isinstance(stmt, Repeat):
             loop_start = len(self.builder.code)
             for s in stmt.body:
                 self.compile_statement(s)
             self.compile_expression(stmt.cond)
             self.builder.emit(self.opcodes["JUMP_IF_FALSE"])
-            backward = loop_start - (len(self.builder.code) + 2)
-            self.builder.emit_short(backward)
+            backward = loop_start - (len(self.builder.code) + 4)
+            self.builder.emit_int32(backward)
         else:
             raise NotImplementedError(f"Unhandled statement {stmt}")
 
@@ -432,27 +459,31 @@ class tinyCompiler:
         self.builder.code[pos] = (value >> 8) & 0xFF
         self.builder.code[pos + 1] = value & 0xFF
 
+    def patch_int32(self, pos: int, value: int) -> None:
+        self.builder.code[pos] = (value >> 24) & 0xFF
+        self.builder.code[pos + 1] = (value >> 16) & 0xFF
+        self.builder.code[pos + 2] = (value >> 8) & 0xFF
+        self.builder.code[pos + 3] = value & 0xFF
+
     def emit_global_addr(self, name_idx: int) -> None:
-        if name_idx <= 0xFF:
-            self.builder.emit(self.opcodes["GET_GLOBAL_ADDRESS"])
-            self.builder.emit(name_idx)
-        else:
-            self.builder.emit(self.opcodes["GET_GLOBAL_ADDRESS16"])
-            self.builder.emit_short(name_idx)
+        # GET_GLOBAL_ADDRESS/GET_GLOBAL_ADDRESS16 -> GET_GSLOT_ADDRESS
+        # (VM 2.0 Phase 2b, plan §5.7): single opcode, u16 field.
+        self.builder.emit(self.opcodes["GET_GSLOT_ADDRESS"])
+        self.builder.emit_short(name_idx)
 
     # --- Expression compilation ---
     def compile_expression(self, expr: Node) -> None:
         if isinstance(expr, Num):
             self.builder.emit_constant(expr.value)
         elif isinstance(expr, Var):
+            # GET_GLOBAL/GET_GLOBAL16 -> GET_GSLOT (VM 2.0 Phase 2b, plan
+            # §5.7): a plain slot-indexed load, no inline cache slot to emit
+            # at all (Phase 2a's global-access cache side table exists only
+            # for the retired name-addressed family; slot access needs no
+            # caching -- it's already just an array index).
             name_idx = self.var_name_idx[expr.name]
-            if name_idx <= 0xFF:
-                self.builder.emit(self.opcodes["GET_GLOBAL"])
-                self.builder.emit(name_idx)
-            else:
-                self.builder.emit(self.opcodes["GET_GLOBAL16"])
-                self.builder.emit_short(name_idx)
-            self.builder.emit_inline_cache_slot()
+            self.builder.emit(self.opcodes["GET_GSLOT"])
+            self.builder.emit_short(name_idx)
         elif isinstance(expr, BinOp):
             self.compile_expression(expr.left)
             self.compile_expression(expr.right)
@@ -469,10 +500,31 @@ class tinyCompiler:
             raise NotImplementedError(f"Unhandled expression {expr}")
 
 # ---------------------------------------------------------------------------
-# Serialization
+# Serialization -- PSB3 container (VM 2.0 plan §5.2; Docs/pscal_vm_manual/
+# pscal_vm_manual_ch2.md documents the format this replicates). PSB3 is a
+# hard cutover from the old PSB2 layout this used to emit directly (plan §2:
+# "one format, one loader" -- there is no PSB2 reader left in the VM at all),
+# so this whole section is a from-scratch reimplementation, not a patch.
 # ---------------------------------------------------------------------------
 
-CACHE_MAGIC = 0x50534232  # 'PSB2'
+PSB3_MAGIC = 0x50534233  # 'PSB3'
+
+
+def psb3_fourcc(s: str) -> int:
+    b = s.encode("ascii")
+    return b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24)
+
+
+PSB3_SEC_CODE = psb3_fourcc("CODE")
+PSB3_SEC_LINE = psb3_fourcc("LINE")
+PSB3_SEC_CONS = psb3_fourcc("CONS")
+PSB3_SEC_BMAP = psb3_fourcc("BMAP")
+PSB3_SEC_PROC = psb3_fourcc("PROC")
+PSB3_SEC_TYPE = psb3_fourcc("TYPE")
+PSB3_SECTION_ALIGN = 8
+
+FNV1A64_OFFSET = 1469598103934665603
+FNV1A64_MASK = (1 << 64) - 1
 
 
 def load_vm_version(root: Path) -> int:
@@ -486,7 +538,7 @@ def load_vm_version(root: Path) -> int:
     version changes.
     """
 
-    version_header = root / "src" / "core" / "version.h"
+    version_header = pscal_core_root(root) / "src" / "core" / "version.h"
     pattern = re.compile(r"#define\s+PSCAL_VM_VERSION\s+(\d+)")
     with open(version_header, "r", encoding="utf-8") as f:
         for line in f:
@@ -496,35 +548,152 @@ def load_vm_version(root: Path) -> int:
     raise RuntimeError("Unable to determine PSCAL_VM_VERSION")
 
 
-def write_bytecode(builder: BytecodeBuilder, path: Path, version: int) -> None:
+def _put_varint(buf: bytearray, v: int) -> None:
+    """Unsigned LEB128: 7 payload bits per byte, MSB = continuation."""
+    if v < 0:
+        raise ValueError("varint requires a non-negative value")
+    while True:
+        byte = v & 0x7F
+        v >>= 7
+        if v:
+            buf.append(byte | 0x80)
+        else:
+            buf.append(byte)
+            return
+
+
+def _put_svarint(buf: bytearray, v: int) -> None:
+    """Zigzag-encoded signed varint, matching cache.c's bufSVarint."""
+    zigzag = ((v << 1) ^ (v >> 63)) & FNV1A64_MASK
+    _put_varint(buf, zigzag)
+
+
+def _put_len_prefixed(buf: bytearray, data: bytes) -> None:
+    _put_varint(buf, len(data))
+    buf.extend(data)
+
+
+def _fnv1a64_update(h: int, data: bytes) -> int:
+    for byte in data:
+        h ^= byte
+        h = (h * 0x100000001B3) & FNV1A64_MASK
+    return h
+
+
+def _write_value(buf: bytearray, ctype: int, val) -> None:
+    """Mirrors cache.c's writeValue() for the two constant kinds tiny emits."""
+    buf.extend(struct.pack("<I", ctype))
+    if ctype == TYPE_INTEGER:
+        buf.extend(struct.pack("<Q", int(val) & 0xFFFFFFFFFFFFFFFF))
+    elif ctype == TYPE_STRING:
+        if val is None:
+            buf.append(0)
+        else:
+            buf.append(1)
+            _put_len_prefixed(buf, val.encode("utf-8"))
+    else:
+        raise NotImplementedError("Unsupported constant type")
+
+
+def _write_code_section(code: bytes) -> bytes:
+    buf = bytearray()
+    _put_varint(buf, len(code))
+    _put_varint(buf, 0)  # cache_count: tiny never uses global-access caches
+    buf.extend(code)
+    return bytes(buf)
+
+
+def _write_lines_section(line_count: int) -> bytes:
+    # tiny doesn't track source lines; one run covering the whole chunk at
+    # line 0 (matching the old PSB2 output's all-zero lines[] array).
+    buf = bytearray()
+    if line_count == 0:
+        _put_varint(buf, 0)
+        return bytes(buf)
+    _put_varint(buf, 1)          # run_count
+    _put_varint(buf, 0)          # pc_delta (first run always starts at pc 0)
+    _put_svarint(buf, 0)         # line_delta (line stays 0)
+    return bytes(buf)
+
+
+def _write_const_section(consts: List[Tuple[int, Any]]) -> bytes:
+    buf = bytearray()
+    _put_varint(buf, len(consts))
+    for ctype, val in consts:
+        _write_value(buf, ctype, val)
+    return bytes(buf)
+
+
+def _write_bmap_section() -> bytes:
+    # tiny emits no builtin-lowercase-map entries; an empty map's fingerprint
+    # is simply the untouched FNV-1a offset basis (cache.c's
+    # computeBuiltinFingerprintEntry/writeBmapSection never folds anything in
+    # when builtin_map_count is 0).
+    buf = bytearray()
+    _put_varint(buf, 0)  # builtin_map_count
+    buf.extend(struct.pack("<Q", FNV1A64_OFFSET))
+    return bytes(buf)
+
+
+def _write_procs_section() -> bytes:
+    # tiny never emits procedures or Pascal-style const globals.
+    buf = bytearray()
+    _put_varint(buf, 0)  # proc_count
+    _put_varint(buf, 0)  # const_sym_count
+    return bytes(buf)
+
+
+def _write_types_section() -> bytes:
+    buf = bytearray()
+    _put_varint(buf, 0)  # type_count
+    return bytes(buf)
+
+
+def write_bytecode(builder: BytecodeBuilder, path: Path, vm_version: int, format_version: int) -> None:
     code = bytes(builder.code)
-    lines = [0] * len(code)
-    consts = builder.constants
+    sections = [
+        (PSB3_SEC_CODE, _write_code_section(code)),
+        (PSB3_SEC_LINE, _write_lines_section(len(code))),
+        (PSB3_SEC_CONS, _write_const_section(builder.constants)),
+        (PSB3_SEC_BMAP, _write_bmap_section()),
+        (PSB3_SEC_PROC, _write_procs_section()),
+        (PSB3_SEC_TYPE, _write_types_section()),
+    ]
+
+    header = bytearray()
+    header.extend(struct.pack("<I", PSB3_MAGIC))
+    header.extend(struct.pack("<H", format_version))
+    header.extend(struct.pack("<H", vm_version))
+    header.extend(struct.pack("<I", 0))            # flags: reserved
+    header.extend(struct.pack("<I", len(sections)))  # section_count
+
+    dir_entry_size = 12  # id:u32 + offset:u32 + length:u32
+    running_offset = len(header) + len(sections) * dir_entry_size
+    running_offset = (running_offset + (PSB3_SECTION_ALIGN - 1)) & ~(PSB3_SECTION_ALIGN - 1)
+    offsets = []
+    for _sec_id, body in sections:
+        offsets.append(running_offset)
+        running_offset += len(body)
+        running_offset = (running_offset + (PSB3_SECTION_ALIGN - 1)) & ~(PSB3_SECTION_ALIGN - 1)
+
+    directory = bytearray()
+    for (sec_id, body), offset in zip(sections, offsets):
+        directory.extend(struct.pack("<III", sec_id, offset, len(body)))
+
     with open(path, "wb") as f:
-        f.write(struct.pack("<II", CACHE_MAGIC, version))
-        # source_hash and combined_hash are unused for tiny output; write zeros
-        f.write(struct.pack("<QQ", 0, 0))
-        path_bytes = b"tiny"
-        f.write(struct.pack("<i", -len(path_bytes)))
-        if path_bytes:
-            f.write(path_bytes)
-        f.write(struct.pack("<ii", len(code), len(consts)))
-        f.write(code)
-        f.write(struct.pack("<" + "i" * len(lines), *lines))
-        for ctype, val in consts:
-            f.write(struct.pack("<i", ctype))
-            if ctype == TYPE_INTEGER:
-                f.write(struct.pack("<q", int(val)))
-            elif ctype == TYPE_STRING:
-                if val is None:
-                    f.write(struct.pack("<i", -1))
-                else:
-                    data = val.encode("utf-8")
-                    f.write(struct.pack("<i", len(data)))
-                    if data:
-                        f.write(data)
-            else:
-                raise NotImplementedError("Unsupported constant type")
+        f.write(bytes(header))
+        f.write(bytes(directory))
+        written = len(header) + len(directory)
+        for (_sec_id, body), offset in zip(sections, offsets):
+            if written < offset:
+                f.write(b"\x00" * (offset - written))
+                written = offset
+            f.write(body)
+            written += len(body)
+            aligned = (written + (PSB3_SECTION_ALIGN - 1)) & ~(PSB3_SECTION_ALIGN - 1)
+            if written < aligned:
+                f.write(b"\x00" * (aligned - written))
+                written = aligned
         # Builtin lowercase mapping count (tiny backend does not emit metadata)
         f.write(struct.pack("<i", 0))
         # Procedure table uses the convention stored_proc_count = -(count + 1).
@@ -550,8 +719,9 @@ def main(argv: List[str]) -> int:
     program = Parser(tokens).parse()
     compiler = tinyCompiler(Path(__file__).resolve().parent.parent)
     builder = compiler.compile(program)
-    version = load_vm_version(compiler.root)
-    write_bytecode(builder, out_path, version)
+    vm_version = load_vm_version(compiler.root)
+    format_version = load_format_version(compiler.root)
+    write_bytecode(builder, out_path, vm_version, format_version)
     return 0
 
 if __name__ == "__main__":
