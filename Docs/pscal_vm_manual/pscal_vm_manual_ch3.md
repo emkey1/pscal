@@ -209,24 +209,28 @@ at runtime, one `u8` operand each.
 
 | Hex | Mnemonic | Encoding | Stack Effect | Mechanics |
 |----:|----------|----------|--------------|-----------|
-| 0x1C | `JUMP_IF_FALSE` | `op off:i16` | `( cond -- )` | Pop; if falsy, `ip += off` (relative to the *end* of this 3-byte instruction) |
-| 0x1D | `JUMP` | `op off:i16` | `( -- )` | Unconditional relative jump, same base |
+| 0x1C | `JUMP_IF_FALSE` | `op off:i32` | `( cond -- )` | Pop; if falsy, `ip += off` (relative to the *end* of this 5-byte instruction) |
+| 0x1D | `JUMP` | `op off:i32` | `( -- )` | Unconditional relative jump, same base |
 | 0x59 | `HALT` | `op` | `( -- )` | Terminate `interpretBytecode()` for the whole chunk — top-level program exit |
 | 0x5A | `EXIT` | `op` | `( -- )` | Pascal `Exit`: unwind the current routine early without halting the VM |
 
 There is no dedicated loop/`BREAK`/`case` opcode: `while`/`for`/`repeat`,
 `break`, and `case` all compile to `JUMP`/`JUMP_IF_FALSE` patterns (plus
-`INC_LOCAL`/`DEC_LOCAL` for counted loops). The ±32767-byte signed offset
-bounds how far a single jump can reach; the compiler is responsible for
-keeping jump targets in range. Note also there are **no contract-check
-opcodes** — no `@pre`/`@post` instruction exists in this ISA; assertion-like
+`INC_LOCAL`/`DEC_LOCAL` for counted loops). **VM 2.0 Phase 1c** widened this
+displacement from i16 to i32 (rides the PSB3 format epoch, since it changes
+the on-disk code-stream encoding); the ±~2.1-billion-byte signed offset now
+bounds how far a single jump can reach, up from the old ±32767. The stale
+i16-era `tools/tiny`/`pscalasm` both silently mis-sized every instruction
+downstream of a jump before this was caught and fixed. The compiler is
+responsible for keeping jump targets in range. Note also there are **no
+contract-check opcodes** — no `@pre`/`@post` instruction exists in this ISA; assertion-like
 semantics are frontend lowerings onto `JUMP_IF_FALSE` + builtin error calls.
 
 #### Calls & Returns
 
 | Hex | Mnemonic | Encoding | Stack Effect | Mechanics |
 |----:|----------|----------|--------------|-----------|
-| 0x55 | `CALL` | `op name:u16 addr:u16 argc:u8` | `( args… -- ret )` | Direct call: push a `CallFrame` (return address, `slots` window over the `argc` args), jump to `addr`. `name` is for diagnostics/frame metadata |
+| 0x55 | `CALL` | `op name:u16 addr:u32 argc:u8` | `( args… -- ret )` | Direct call: push a `CallFrame` (return address, `slots` window over the `argc` args), jump to `addr`. `name` is for diagnostics/frame metadata. `addr` widened u16→u32 in VM 2.0 Phase 1c, lifting the old 64KiB code-offset ceiling |
 | 0x52 | `CALL_USER_PROC` | `op name:u16 argc:u8` | `( args… -- ret )` | Late-bound call: target address resolved by name through `procedureTable` at call time (separately compiled / forward refs) |
 | 0x56 | `CALL_INDIRECT` | `op argc:u8` | `( args… fnptr -- ret )` | Call through a function-pointer/closure value on the stack |
 | 0x58 | `PROC_CALL_INDIRECT` | `op argc:u8` | `( args… fnptr -- )` | Statement-context indirect call; sets `discard_result_on_return` so any result is dropped |
@@ -303,7 +307,7 @@ express as cleanly.
 
 | Hex | Mnemonic | Encoding | Stack Effect | Mechanics |
 |----:|----------|----------|--------------|-----------|
-| 0x5C | `THREAD_CREATE` | `op entry:u16` | `( -- tid )` | Spawn a worker: claim a `Thread` slot (§1.4), give it its own `VM` (own stack/frames, shared globals), start `interpretBytecode()` at bytecode offset `entry`; push the thread id |
+| 0x5C | `THREAD_CREATE` | `op entry:u32` | `( -- tid )` | Spawn a worker: claim a `Thread` slot (§1.4), give it its own `VM` (own stack/frames, shared globals), start `interpretBytecode()` at bytecode offset `entry`; push the thread id |
 | 0x5D | `THREAD_JOIN` | `op` | `( tid -- result )` | Block on the worker's `resultCond` until `resultReady`; push the thread's result value |
 | 0x5E | `MUTEX_CREATE` | `op` | `( -- mid )` | Allocate a slot in `vm->mutexes[]` (max 64), init a `pthread_mutex_t`; push its id |
 | 0x5F | `RCMUTEX_CREATE` | `op` | `( -- mid )` | As above with `PTHREAD_MUTEX_RECURSIVE` |
@@ -311,11 +315,13 @@ express as cleanly.
 | 0x61 | `MUTEX_UNLOCK` | `op` | `( mid -- )` | Release |
 | 0x62 | `MUTEX_DESTROY` | `op` | `( mid -- )` | Destroy and free the slot for reuse |
 
-`THREAD_CREATE`'s `u16` entry operand mirrors `interpretBytecode()`'s
-`uint16_t entry` parameter (§1.1): a spawned thread's entry point must lie in
-the first 64 KiB of the chunk. Cooperative pause/cancel/kill (§1.4) has no
-opcodes — it is host-API-driven (`vmThreadPause` etc.), with the interpreter
-checking the atomics at safe points.
+`THREAD_CREATE`'s `u32` entry operand mirrors `interpretBytecode()`'s
+`uint32_t entry` parameter (§1.1) — widened from `uint16_t` in **VM 2.0
+Phase 1c** alongside `CALL`'s address operand and `JUMP`/`JUMP_IF_FALSE`'s
+displacement, lifting the old 64 KiB entry-point ceiling. Cooperative
+pause/cancel/kill (§1.4) has no opcodes — it is host-API-driven
+(`vmThreadPause` etc.), with the interpreter checking the atomics at safe
+points.
 
 ### 3.6 Reading a Real Instruction Stream
 

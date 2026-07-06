@@ -16,7 +16,7 @@ operating over a flat `uint8_t*` instruction stream.
 ```c
 InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk,
                                    HashTable* globals, HashTable* const_globals,
-                                   HashTable* procedures, uint16_t entry) {
+                                   HashTable* procedures, uint32_t entry) {
     if (!vm || !chunk) return INTERPRET_RUNTIME_ERROR;
 
     vm->chunk = chunk;
@@ -34,9 +34,11 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk,
 
 `entry` is a byte offset into `chunk->code`, letting one chunk hold multiple
 entry points (the top-level program plus every procedure/function body,
-addressed by offset rather than by a separate function-table jump). Note the
-`uint16_t` type: an entry point must sit within the first 65535 bytes of the
-chunk.
+addressed by offset rather than by a separate function-table jump). **VM 2.0
+Phase 1c** widened this from `uint16_t` to `uint32_t` (alongside `CALL`'s
+address operand, `THREAD_CREATE`'s entry operand, and `JUMP`/`JUMP_IF_FALSE`'s
+displacement — see Chapter 3 §3.3/§3.5) — an entry point is no longer capped
+at the first 65535 bytes of the chunk.
 
 The prologue does more setup than the excerpt shows: it defensively creates
 the `globals`/`const_globals` tables if the caller passed `NULL`, sets
@@ -493,7 +495,7 @@ wrapper: `mutexes[VM_MAX_MUTEXES]` (64 max) backs `MUTEX_CREATE` /
 active }` slot.
 
 ```
-THREAD_CREATE <entry:u16>   ( -- thread_id )   ; spawns worker VM at bytecode offset
+THREAD_CREATE <entry:u32>   ( -- thread_id )   ; spawns worker VM at bytecode offset
 THREAD_JOIN                 ( thread_id -- )   ; blocks; result value is discarded
 MUTEX_CREATE                ( -- mutex_id )
 MUTEX_LOCK                  ( mutex_id -- )
