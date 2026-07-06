@@ -1252,16 +1252,64 @@ registration helper rather than auditing every entry individually.
   deny/record/replay adversarial test passes under both the normal and
   `build-asan/` (ASan+UBSan) trees, including two corrupted-journal cases
   (truncated, byte-flipped) that both abort cleanly with a diagnostic and
-  exit 1 rather than crash. `vm_bench`'s wall-clock numbers were unusable
-  this session (host under ~10 load average from unrelated concurrent
-  work -- a Parallels VM and other agent sessions) and were deliberately
-  **not** committed to `history.jsonl` to avoid corrupting the phase-over-phase
-  record with noise; the zero-cost claim rests on the dispatch-path code
-  itself (`pscalFxPolicyActive()` is a handful of static-bool/int comparisons,
-  no mutex, no per-id lookup, before anything else in this phase runs) plus
-  Phase 1e's own precedent that a check this cheap is below the noise floor
-  of this exact benchmark suite. A clean re-run on an idle host is a good
-  follow-up, not a blocker.
+  exit 1 rather than crash.
+- **`vm_diff_harness.py` zero-diff, done properly:** a first pass skipped
+  this (couldn't find a `clike`/`rea`/`aether` binary predating the change,
+  substituted `run_all_suites.py` instead, which checks pass/fail against
+  known baselines, not byte-for-byte stdout/stderr/exit-code equivalence
+  between two builds -- not actually the same claim). Redone by checking out
+  each changed component (`pscal-core`, `pascal`, `clike`, `rea`, `smallclue`)
+  at the exact parent commit of its Phase 6 change, building all 4
+  harness-covered frontends from that "before" state into an isolated tree,
+  and diffing against the shipped "after" binaries across the full 404-unit
+  corpus: **392 MATCH, 0 DIFF, 5 NONDET** (self-inconsistent on rerun of the
+  *same* binary -- the harness's own design classifies those separately from
+  `DIFF` for exactly that reason, not attributable to this change).
+- **`vm_bench` overhead, done properly:** a first attempt produced numbers
+  2x slower than history and was blamed on "heavy unrelated host load"
+  without comparing against a load baseline or isolating the cause --
+  overclaimed. Redone as a controlled A/B: build genuine before/after
+  `pascal` binaries from the same commit lineage, run both interleaved
+  (3 rounds, `arith`/`calls`/`globals`/`io_http`) under whatever load
+  currently exists, so contention affects both sides equally instead of
+  comparing against a historical baseline recorded under unknown conditions.
+  Result: arith/globals within ~0.5% (noise), calls/io_http 1-3% *faster*
+  after (still noise, not a real speedup) -- no measurable regression.
+  Not committed to `history.jsonl` (different purpose/methodology than that
+  file's per-phase convention: Release build, a benchmark subset, informal
+  A/B rather than the runner's own recording format).
+- **Per-frontend regression suites, not just the shared corpora above:**
+  `pascal`/`clike`/`rea`/`exsh` each have their own dedicated suite
+  (`Tests/run_pascal_tests.sh` etc.) already wired into `Tests/run_all_tests`
+  (the "core" suite `run_all_suites.py` runs), so the green run above already
+  covered them -- easy to miss since `run_all_suites.py`'s per-suite summary
+  doesn't break "core" out by frontend. **Aether's own suite
+  (`components/aether/tests/run.sh`, ~2073 lines, FX-001/contracts/tuples/
+  toon/etc.) is not wired into `Tests/run_all_tests` and was never run this
+  session** until asked about directly -- run manually against the shipped
+  binary (`AETHER_BIN=build/bin/aether bash components/aether/tests/run.sh`):
+  clean pass, including the FX-001 effect-fence tests that exercise
+  `pscalBuiltinNameIsEffectful()` directly. **exsh's suite**
+  (`Tests/run_exsh_tests.sh`, 116 cases) *is* wired into `Tests/run_all_tests`
+  and had already passed as part of the green run above.
+- **Per-frontend `--deny`/`--fx-record`/`--fx-replay` smoke tests,** not just
+  through `pascal`: run directly against `aether` and `exsh` too (live,
+  `--deny io`, `--deny net`/`--deny proc` as a negative control, record,
+  replay, a corrupted-journal abort), each under both the normal and
+  `build-asan/` trees. All behave identically to the `pascal` case.
+- **exsh's `--deny` is coarser than the other frontends' --
+  a real asymmetry, not a bug.** Every exsh shell builtin shares one blanket
+  `FX_PROC | FX_IO` mask (§4.0a's ext_builtins sweep found ~80 shell commands
+  not worth auditing individually). Concretely, this means `--deny io` *or*
+  `--deny proc` blocks nearly everything in exsh, including a bare
+  `echo hello`, because the shell's own internal command-dispatch primitive
+  (`__shell_pipeline`) carries both bits. Pascal/Rea/CLike/Aether have a real
+  "pure" tier underneath their effectful calls (`--deny io` still leaves
+  arithmetic and control flow running); exsh doesn't, because a shell script
+  is almost entirely made of the exact OS-facing primitives being denied --
+  there's no meaningful "pure" shell command to fall back to. Anyone reaching
+  for `--deny` on exsh expecting Pascal-style granularity (block network,
+  keep everything else) should know it's closer to an on/off switch there.
 
 ## 7. Extension Track
 
