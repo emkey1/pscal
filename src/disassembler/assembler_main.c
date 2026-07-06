@@ -570,8 +570,8 @@ static int instructionLengthForAsm(const ParsedInstruction *inst, int *out_lengt
     }
     int length = 1;
     if (inst->opcode == JUMP || inst->opcode == JUMP_IF_FALSE) {
-        if (inst->operand_count == 1 || inst->operand_count == 2) {
-            length = 3;
+        if (inst->operand_count == 1 || inst->operand_count == 4) {
+            length = 5;
         } else {
             return 0;
         }
@@ -648,29 +648,31 @@ static int buildCodeFromInstructions(ParsedAsmProgram *program,
         }
 
         if (inst->opcode == JUMP || inst->opcode == JUMP_IF_FALSE) {
-            int16_t distance = 0;
-            if (inst->operand_count == 2) {
-                uint8_t b0 = 0;
-                uint8_t b1 = 0;
+            int32_t distance = 0;
+            if (inst->operand_count == 4) {
+                uint8_t b0 = 0, b1 = 0, b2 = 0, b3 = 0;
                 if (!parseByteExact(inst->operands[0], &b0) ||
-                    !parseByteExact(inst->operands[1], &b1)) {
-                    fprintf(stderr, "pscalasm:%d: jump with two operands requires byte values.\n",
+                    !parseByteExact(inst->operands[1], &b1) ||
+                    !parseByteExact(inst->operands[2], &b2) ||
+                    !parseByteExact(inst->operands[3], &b3)) {
+                    fprintf(stderr, "pscalasm:%d: jump with four operands requires byte values.\n",
                             inst->asm_line_number);
                     free(offsets);
                     return 0;
                 }
-                distance = (int16_t)(((uint16_t)b0 << 8) | (uint16_t)b1);
+                distance = (int32_t)(((uint32_t)b0 << 24) | ((uint32_t)b1 << 16) |
+                                     ((uint32_t)b2 << 8) | (uint32_t)b3);
             } else if (inst->operand_count == 1) {
                 const char *op = inst->operands[0];
                 long long numeric_distance = 0;
                 if (parseInt64Exact(op, &numeric_distance)) {
-                    if (numeric_distance < INT16_MIN || numeric_distance > INT16_MAX) {
+                    if (numeric_distance < INT32_MIN || numeric_distance > INT32_MAX) {
                         fprintf(stderr, "pscalasm:%d: jump distance out of range: %lld.\n",
                                 inst->asm_line_number, numeric_distance);
                         free(offsets);
                         return 0;
                     }
-                    distance = (int16_t)numeric_distance;
+                    distance = (int32_t)numeric_distance;
                 } else {
                     const char *label_name = op;
                     if (*label_name == '@') {
@@ -684,25 +686,27 @@ static int buildCodeFromInstructions(ParsedAsmProgram *program,
                         return 0;
                     }
                     int target_offset = offsets[target->instruction_index];
-                    int origin_after_inst = offsets[i] + 3;
-                    int delta = target_offset - origin_after_inst;
-                    if (delta < INT16_MIN || delta > INT16_MAX) {
-                        fprintf(stderr, "pscalasm:%d: jump to label '%s' out of int16 range.\n",
+                    int origin_after_inst = offsets[i] + 5;
+                    long long delta = (long long)target_offset - (long long)origin_after_inst;
+                    if (delta < INT32_MIN || delta > INT32_MAX) {
+                        fprintf(stderr, "pscalasm:%d: jump to label '%s' out of int32 range.\n",
                                 inst->asm_line_number, label_name);
                         free(offsets);
                         return 0;
                     }
-                    distance = (int16_t)delta;
+                    distance = (int32_t)delta;
                 }
             } else {
-                fprintf(stderr, "pscalasm:%d: jump opcode requires 1 label/offset operand or 2 raw bytes.\n",
+                fprintf(stderr, "pscalasm:%d: jump opcode requires 1 label/offset operand or 4 raw bytes.\n",
                         inst->asm_line_number);
                 free(offsets);
                 return 0;
             }
 
-            uint16_t encoded = (uint16_t)distance;
-            if (!appendCodeByte(program, (uint8_t)((encoded >> 8) & 0xFF), inst->line) ||
+            uint32_t encoded = (uint32_t)distance;
+            if (!appendCodeByte(program, (uint8_t)((encoded >> 24) & 0xFF), inst->line) ||
+                !appendCodeByte(program, (uint8_t)((encoded >> 16) & 0xFF), inst->line) ||
+                !appendCodeByte(program, (uint8_t)((encoded >> 8) & 0xFF), inst->line) ||
                 !appendCodeByte(program, (uint8_t)(encoded & 0xFF), inst->line)) {
                 free(offsets);
                 return 0;

@@ -108,7 +108,7 @@ builtin_map 0
 const_symbols 0
 procedures 1
 proc 0 "foo" 3 0 0 1 0 -1
-code 10
+code 12
 inst 1 JUMP @main
 label L0003
 inst 2 CONST_TRUE
@@ -979,8 +979,23 @@ run_real_source_roundtrip_test() {
         cp "$fixture" "$source_path"
     fi
 
+    # A few clike fixtures (e.g. ImportSimple.cl) bake in import paths relative
+    # to the old umbrella Tests/ layout (Tests/clike/imports/...). The clike
+    # submodule's own test runner (components/clike/tests/run.sh) resolves
+    # this by staging symlinks that recreate those paths; do the same here
+    # rather than rewriting the fixtures.
+    local compile_cwd="$ROOT_DIR"
+    if [ "$compiler_id" = "clike" ]; then
+        local clike_tests_dir="$ROOT_DIR/components/clike/tests"
+        local stage_dir="$tmpd/stage"
+        mkdir -p "$stage_dir/Tests"
+        ln -s "$clike_tests_dir" "$stage_dir/Tests/clike"
+        ln -s "$clike_tests_dir/data" "$stage_dir/Tests/data"
+        compile_cwd="$stage_dir"
+    fi
+
     if ! (
-        cd "$ROOT_DIR" &&
+        cd "$compile_cwd" &&
         HOME="$test_home" "$compiler_bin" --dump-bytecode-only "$source_path"
     ) > "$tmpd/${compiler_id}.compile.out" 2> "$tmpd/${compiler_id}.compile.err"; then
         fail_with_details "$test_id" "$description" "source compilation failed:\n$(sed -n '1,160p' "$tmpd/${compiler_id}.compile.err")"
@@ -1111,7 +1126,7 @@ run_real_source_roundtrip_tests() {
         "source->bytecode cache round-trip (pascal nested routines)" \
         "pascal" \
         "$PASCAL_BIN" \
-        "Tests/Pascal/NestedRoutineSuite" \
+        "components/pascal/tests/Pascal/NestedRoutineSuite" \
         "pas" \
         "in_place"
 
@@ -1120,7 +1135,7 @@ run_real_source_roundtrip_tests() {
         "source->bytecode cache round-trip (clike imports)" \
         "clike" \
         "$CLIKE_BIN" \
-        "Tests/clike/ImportSimple.cl" \
+        "components/clike/tests/ImportSimple.cl" \
         "cl" \
         "in_place"
 
@@ -1129,7 +1144,7 @@ run_real_source_roundtrip_tests() {
         "source->bytecode cache round-trip (rea constructors)" \
         "rea" \
         "$REA_BIN" \
-        "Tests/rea/constructor_default.rea" \
+        "components/rea/tests/rea/constructor_default.rea" \
         "rea" \
         "in_place"
 }
@@ -1219,7 +1234,7 @@ run_negative_source_compile_tests() {
         "invalid source compile is stable (pascal)" \
         "pascal" \
         "$PASCAL_BIN" \
-        "Tests/Pascal/ArgumentTypeMismatch" \
+        "components/pascal/tests/Pascal/ArgumentTypeMismatch" \
         "pas"
 
     run_negative_source_compile_test \
@@ -1227,7 +1242,7 @@ run_negative_source_compile_tests() {
         "invalid source compile is stable (clike)" \
         "clike" \
         "$CLIKE_BIN" \
-        "Tests/clike/TypeError.cl" \
+        "components/clike/tests/TypeError.cl" \
         "cl"
 
     run_negative_source_compile_test \

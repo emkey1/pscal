@@ -94,6 +94,7 @@ int pscalOpcodeOperandInfo(uint8_t opcode, int *exact_operand_count_out, int *mi
             }
             return 1;
         case DEFINE_GLOBAL16:
+        case DEFINE_GLOBAL_SLOT:
             if (minimum_operand_count_out) {
                 *minimum_operand_count_out = 5;
             }

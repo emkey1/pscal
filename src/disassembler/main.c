@@ -572,10 +572,12 @@ static int emitAsmV2(FILE *out, const BytecodeChunk *chunk, HashTable *procedure
                     offset);
             return 0;
         }
-        if ((opcode == JUMP || opcode == JUMP_IF_FALSE) && length >= 3) {
-            int16_t distance = (int16_t)(((uint16_t)chunk->code[offset + 1] << 8) |
-                                         (uint16_t)chunk->code[offset + 2]);
-            int target = offset + 3 + (int)distance;
+        if ((opcode == JUMP || opcode == JUMP_IF_FALSE) && length >= 5) {
+            int32_t distance = (int32_t)(((uint32_t)chunk->code[offset + 1] << 24) |
+                                         ((uint32_t)chunk->code[offset + 2] << 16) |
+                                         ((uint32_t)chunk->code[offset + 3] << 8) |
+                                         (uint32_t)chunk->code[offset + 4]);
+            int target = offset + 5 + (int)distance;
             if (target >= 0 && target <= chunk->count) {
                 label_offsets[target] = 1;
             }
@@ -606,16 +608,20 @@ static int emitAsmV2(FILE *out, const BytecodeChunk *chunk, HashTable *procedure
         }
 
         fprintf(out, "inst %d %s", line, name);
-        if ((opcode == JUMP || opcode == JUMP_IF_FALSE) && length >= 3) {
-            int16_t distance = (int16_t)(((uint16_t)chunk->code[offset + 1] << 8) |
-                                         (uint16_t)chunk->code[offset + 2]);
-            int target = offset + 3 + (int)distance;
+        if ((opcode == JUMP || opcode == JUMP_IF_FALSE) && length >= 5) {
+            int32_t distance = (int32_t)(((uint32_t)chunk->code[offset + 1] << 24) |
+                                         ((uint32_t)chunk->code[offset + 2] << 16) |
+                                         ((uint32_t)chunk->code[offset + 3] << 8) |
+                                         (uint32_t)chunk->code[offset + 4]);
+            int target = offset + 5 + (int)distance;
             if (target >= 0 && target <= chunk->count && label_offsets[target]) {
                 fprintf(out, " @L%04d", target);
             } else {
-                fprintf(out, " %u %u",
+                fprintf(out, " %u %u %u %u",
                         (unsigned)chunk->code[offset + 1],
-                        (unsigned)chunk->code[offset + 2]);
+                        (unsigned)chunk->code[offset + 2],
+                        (unsigned)chunk->code[offset + 3],
+                        (unsigned)chunk->code[offset + 4]);
             }
         } else {
             for (int i = 1; i < length; ++i) {
@@ -748,12 +754,34 @@ int pscald_main(int argc, char* argv[]) {
     const char* disasm_name = bytecodeDisplayNameForPath(path);
     disassembleBytecodeChunk(&chunk, disasm_name ? disasm_name : path, procedure_table);
 
-    if (emit_asm_v2 && !emitAsmV2(stdout, &chunk, procedure_table)) {
-        freeBytecodeChunk(&chunk);
-        if (globalSymbols) freeHashTable(globalSymbols);
-        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
-        if (procedure_table) freeHashTable(procedure_table);
-        PSCALD_RETURN(EXIT_FAILURE);
+    if (emit_asm_v2) {
+        // --emit-asm must reproduce the raw, pre-link encoding: `chunk` above
+        // has already been through pscalLinkGlobalSlots (VM 2.0 Phase 2b),
+        // which rewrites DEFINE_GLOBAL_SLOT/GET_GSLOT/SET_GSLOT/
+        // GET_GSLOT_ADDRESS operands from constant-pool name indices into
+        // resolved slot indices in place. Dumping that would bake slot
+        // indices into the emitted assembly as if they were name indices;
+        // pscalasm would re-embed them verbatim and the rebuilt file would
+        // fail to link. Load a second, unlinked copy just for this dump.
+        BytecodeChunk raw_chunk;
+        initBytecodeChunk(&raw_chunk);
+        if (!loadBytecodeFromFileUnlinked(path, &raw_chunk)) {
+            fprintf(stderr, "Failed to load bytecode from %s\n", path);
+            freeBytecodeChunk(&chunk);
+            if (globalSymbols) freeHashTable(globalSymbols);
+            if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
+            if (procedure_table) freeHashTable(procedure_table);
+            PSCALD_RETURN(EXIT_FAILURE);
+        }
+        int emit_ok = emitAsmV2(stdout, &raw_chunk, procedure_table);
+        freeBytecodeChunk(&raw_chunk);
+        if (!emit_ok) {
+            freeBytecodeChunk(&chunk);
+            if (globalSymbols) freeHashTable(globalSymbols);
+            if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
+            if (procedure_table) freeHashTable(procedure_table);
+            PSCALD_RETURN(EXIT_FAILURE);
+        }
     }
 
     if (emit_asm_block && !pscaldDumpAsmBlock(path)) {
