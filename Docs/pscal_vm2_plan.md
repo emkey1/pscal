@@ -1260,50 +1260,63 @@ shared assumption about user virtual-address width (flagged explicitly
 below, with a mitigation, rather than assumed silently).
 
 ```
-Bit:   63        62-52         51        50-46      45-0
-      [sign=0] [exp=0x7FF]  [qnan=1]   [kind:5]   [payload:46]
+Bit:   63        62-52         51        50           49-0 (if bit50=0)
+      [sign=0] [exp=0x7FF]  [qnan=1]  [ptr?=0]      [pointer payload: 50 bits]
+      \_____________________________/
+
+Bit:   63        62-52         51        50        49-45        44-0 (if bit50=1)
+      [sign=0] [exp=0x7FF]  [qnan=1]  [ptr?=1]   [kind: 5]   [immediate payload: 45 bits]
       \_____________________________/
         13 fixed header bits: any 64-bit pattern with these exact 13 bits
         set is UNAMBIGUOUSLY a boxed PSCAL value, never a legitimate finite
         double (finite doubles never have exp==0x7FF) and never +/-Infinity
-        (mantissa all-zero) as long as `kind` is never 0-with-empty-payload
-        for a "real" boxed value (kind 0 is reserved for HEAP_PTR, whose
-        payload is a live pointer and therefore never all-zero for a valid
-        object).  A pattern NOT matching this 13-bit header is read
-        directly as an IEEE-754 double -- TYPE_DOUBLE costs nothing to box
-        or unbox, full 64-bit precision, no separate inline-double variant
-        needed.  This is a correction to the original sketch's "≤48 bits
-        inline" phrasing, which conflated the *integer* budget with the
-        general inline budget: doubles are not integers and are not
-        capacity-constrained by this scheme at all.
+        (mantissa all-zero, which the qnan bit already excludes). A pattern
+        NOT matching this 13-bit header is read directly as an IEEE-754
+        double -- TYPE_DOUBLE costs nothing to box or unbox, full 64-bit
+        precision, no separate inline-double variant needed. This is a
+        correction to the original sketch's "≤48 bits inline" phrasing,
+        which conflated the *integer* budget with the general inline
+        budget: doubles are not integers and are not capacity-constrained
+        by this scheme at all.
 ```
 
-`kind` (5 bits, 32 values) assignment:
+**Revised design, corrected by the canary catching a real violation on
+first deploy (see below) — not the flat 5-bit-kind/46-bit-payload split
+originally drafted here.** Bit 50 is a single discriminant: 0 means "the
+remaining 50 bits (49-0) are a pointer, in full"; 1 means "the remaining
+50 bits split into a 5-bit `kind` (bits 49-45) plus a 45-bit immediate
+payload (bits 44-0)." This asymmetric split — rather than dividing the 51
+post-header bits evenly between kind and payload for every case — exists
+specifically because pointers need meaningfully more payload space than
+any scalar immediate does, and giving them their own undivided branch
+costs only the one discriminant bit.
 
-| kind | Meaning | Payload (46 bits) |
+`kind` (5 bits when bit 50=1, 32 values) assignment:
+
+| kind | Meaning | Payload (45 bits) |
 |------|---------|--------------------|
-| 0 | `HEAP_PTR` | pointer to `ObjHeader`, see §5.10.3 |
-| 1 | `VOID` | unused (always 0) |
-| 2 | `NIL` | unused (always 0) |
-| 3 | `BOOLEAN` | low 1 bit |
-| 4 | `CHAR` | low 8 bits (ASCII/byte char) |
-| 5 | `WIDECHAR` | low 32 bits (Unicode code point) |
-| 6 | `BYTE` | low 8 bits, zero-extend |
-| 7 | `WORD` | low 16 bits, zero-extend |
-| 8 | `INT8` | low 8 bits, sign-extend |
-| 9 | `UINT8` | low 8 bits, zero-extend |
-| 10 | `INT16` | low 16 bits, sign-extend |
-| 11 | `UINT16` | low 16 bits, zero-extend |
-| 12 | `INT32` | low 32 bits, sign-extend |
-| 13 | `UINT32` | low 32 bits, zero-extend |
-| 14 | `FLOAT` | low 32 bits = IEEE-754 single bit pattern, widened to `double` at read time via the existing `AS_REAL`-family coercion, never carried as a separate stored width |
-| 15-31 | reserved | headroom for future inline types without another Stage-A-shaped migration |
+| 0 | `VOID` | unused (always 0) |
+| 1 | `NIL` | unused (always 0) |
+| 2 | `BOOLEAN` | low 1 bit |
+| 3 | `CHAR` | low 8 bits (ASCII/byte char) |
+| 4 | `WIDECHAR` | low 32 bits (Unicode code point) |
+| 5 | `BYTE` | low 8 bits, zero-extend |
+| 6 | `WORD` | low 16 bits, zero-extend |
+| 7 | `INT8` | low 8 bits, sign-extend |
+| 8 | `UINT8` | low 8 bits, zero-extend |
+| 9 | `INT16` | low 16 bits, sign-extend |
+| 10 | `UINT16` | low 16 bits, zero-extend |
+| 11 | `INT32` | low 32 bits, sign-extend |
+| 12 | `UINT32` | low 32 bits, zero-extend |
+| 13 | `FLOAT` | low 32 bits = IEEE-754 single bit pattern, widened to `double` at read time via the existing `AS_REAL`-family coercion, never carried as a separate stored width |
+| 14-31 | reserved | headroom for future inline types without another Stage-A-shaped migration |
 
-Boxed (never inline): `TYPE_INT64`, `TYPE_UINT64` (full 64-bit range does not
-fit in 46 payload bits), `TYPE_LONG_DOUBLE` (§5.10.4), `TYPE_STRING`,
-`TYPE_UNICODE_STRING`, `TYPE_RECORD`, `TYPE_ARRAY`, `TYPE_SET`,
-`TYPE_FILE`, `TYPE_ENUM`, `TYPE_POINTER`, `TYPE_CLOSURE`, `TYPE_INTERFACE`,
-`TYPE_MEMORYSTREAM`, `TYPE_THREAD`. All of these use `kind = HEAP_PTR`; the
+Boxed (never inline, bit 50=0, full 50-bit pointer payload): `TYPE_INT64`,
+`TYPE_UINT64` (full 64-bit range does not fit in any inline payload),
+`TYPE_LONG_DOUBLE` (§5.10.4), `TYPE_STRING`, `TYPE_UNICODE_STRING`,
+`TYPE_RECORD`, `TYPE_ARRAY`, `TYPE_SET`, `TYPE_FILE`, `TYPE_ENUM`,
+`TYPE_POINTER`, `TYPE_CLOSURE`, `TYPE_INTERFACE`, `TYPE_MEMORYSTREAM`,
+`TYPE_THREAD`. All of these point to an `ObjHeader`, see §5.10.3; the
 concrete C type is discriminated by `ObjHeader.type` (a `VarType`, reusing
 the existing enum), not by a second tag layer.
 
@@ -1313,31 +1326,48 @@ the existing enum), not by a second tag layer.
   produces IEEE NaN (`0.0/0.0`, `Sqrt(-1)`, etc.). A `BOX_DOUBLE`/
   `UNBOX_DOUBLE` pair must canonicalize any *genuine* NaN result to a fixed
   bit pattern outside the reserved 13-bit header before it is ever stored in
-  a `Value` word (flip one guaranteed-safe low bit), and reverse it on read.
-  Skipping this silently reinterprets an arithmetic NaN as a boxed pointer
-  or integer — memory corruption, not a wrong-answer bug. (Standard practice
-  in every NaN-boxing VM; called out explicitly here because it is the one
-  place a missed step turns into a security bug rather than a test
-  failure.)
-- **Pointer-width canary.** 46-bit pointer payload covers 64TB of address
-  space — comfortably above what glibc/jemalloc/macOS malloc/mmap-without-
-  a-high-hint ever return in practice on the targeted platforms, but this is
-  an empirical assumption about allocator behavior, not a language
-  guarantee. `initVM()` should call a canary allocation once at startup and
-  abort cleanly ("PSCAL VM 2.0: tagged-pointer address-space assumption
-  violated") if any pointer the VM is about to box has bit 46 or above set,
-  rather than silently truncating and corrupting a reference. Cheap,
-  one-time, and turns a would-be heisenbug into a clear diagnostic.
+  a `Value` word (flip the sign bit, moving it unambiguously out of the
+  reserved region — a NaN's sign bit carries no IEEE-754 semantic meaning,
+  so this is a safe, one-way canonicalization), and no correction is needed
+  on unbox. Skipping this silently reinterprets an arithmetic NaN as a
+  boxed pointer or integer — memory corruption, not a wrong-answer bug.
+  (Standard practice in every NaN-boxing VM; called out explicitly here
+  because it is the one place a missed step turns into a security bug
+  rather than a test failure.) **Shipped and unit-tested in sub-phase 4a**
+  (`pscalBoxDouble`/`pscalUnboxDouble`, `core/obj_header.h`) — verified
+  against the exact collision case, `0.0/0.0`'s canonical quiet-NaN bit
+  pattern, which does collide with the reserved header on every targeted
+  platform (`Tests/vm2_phase4/test_obj_header.c`).
+- **Pointer-width canary — caught a real violation within minutes of first
+  deploy, exactly as designed.** The initial draft of this section (before
+  4a shipped) reserved only 46 bits for pointers, reasoned from this
+  plan's own author's development machine (macOS/ARM64, which does stay
+  under 46 bits) generalized to "every targeted platform" without actually
+  checking one. `pscalObjRunPointerWidthCanary()` (wired into `initVM()`)
+  aborted on first real-world run on claw1 (Linux/ARM64, part of the claw
+  fleet CLAUDE.md documents): `heap pointer 0xbead59ec2090 exceeds the
+  46-bit payload budget` — a real address needing the full 48 bits, from
+  glibc on Linux/ARM64, which uses close to the entire 48-bit user address
+  space (a follow-up probe found a stack address at `0xfffffcd91b20`, only
+  slightly below 2^48). This is exactly the failure mode the canary exists
+  to catch — a clean abort with a diagnostic pointing at the exact
+  assumption that broke, not silent corruption three sub-phases later. The
+  budget was corrected the same session (46→50 bits, see below) precisely
+  *because* the canary made the gap impossible to miss. This is the
+  strongest evidence in this whole design that the canary is not
+  belt-and-suspenders caution — it caught a real, would-be-shipped defect
+  on the very first platform it ran on outside the author's own laptop.
 
-**Decided: 5-bit kind / 46-bit payload.** The alternative (4-bit/47-bit)
-only buys 2x more address-space headroom that the pointer canary already
-makes moot (46 bits is 64TB; the canary catches the never-observed case
-where that's not enough and fails loudly rather than silently). The 5-bit
-split buys 17 spare inline-type slots instead of 1, which is the more
-valuable trade given "flexible": a future `VarType` addition (there have
-been several over this plan's lifetime already — the `INT8`/`UINT8`/etc.
-extended-integer family didn't always exist) gets a free inline slot
-instead of another Stage-A-shaped migration. Locked in before 4a.
+**Decided (revised): a 1-bit pointer/immediate discriminant, giving
+pointers a 50-bit payload and immediates a 5-bit kind / 45-bit payload
+split**, replacing the original flat 5-bit-kind/46-bit-payload design.
+50 bits covers the observed real-world maximum (48 bits, Linux/ARM64) with
+a full 4x margin, comfortably survives ASLR variance run to run, and the
+5-bit kind space is unchanged from the original plan (still 18 spare slots
+after the 14 scalar kinds above, versus 32 candidate VarTypes total) — the
+only thing that changed is which bits pointers get, not how many inline
+scalar kinds are supported. Locked in for 4a (shipped) and all later
+sub-phases that depend on this encoding.
 
 #### 5.10.2 `RealValue` and `TYPE_LONG_DOUBLE`
 
