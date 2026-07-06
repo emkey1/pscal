@@ -6342,9 +6342,45 @@ dispatch_switch:
                 push(vm, makePointer(&frame->slots[slot], NULL));
                 break;
             }
-            case ADD:      BINARY_OP("+", instruction_val); break;
-            case SUBTRACT: BINARY_OP("-", instruction_val); break;
-            case MULTIPLY: BINARY_OP("*", instruction_val); break;
+            case ADD: {
+                if (vm->stackTop[-2].type == TYPE_INT32 && vm->stackTop[-1].type == TYPE_INT32) {
+                    int32_t iresult;
+                    if (!__builtin_add_overflow((int32_t)vm->stackTop[-2].i_val, (int32_t)vm->stackTop[-1].i_val, &iresult)) {
+                        vm->stackTop[-2].i_val = iresult;
+                        vm->stackTop[-2].u_val = (unsigned long long)iresult;
+                        vm->stackTop--;
+                        break;
+                    }
+                }
+                BINARY_OP("+", instruction_val);
+                break;
+            }
+            case SUBTRACT: {
+                if (vm->stackTop[-2].type == TYPE_INT32 && vm->stackTop[-1].type == TYPE_INT32) {
+                    int32_t iresult;
+                    if (!__builtin_sub_overflow((int32_t)vm->stackTop[-2].i_val, (int32_t)vm->stackTop[-1].i_val, &iresult)) {
+                        vm->stackTop[-2].i_val = iresult;
+                        vm->stackTop[-2].u_val = (unsigned long long)iresult;
+                        vm->stackTop--;
+                        break;
+                    }
+                }
+                BINARY_OP("-", instruction_val);
+                break;
+            }
+            case MULTIPLY: {
+                if (vm->stackTop[-2].type == TYPE_INT32 && vm->stackTop[-1].type == TYPE_INT32) {
+                    int32_t iresult;
+                    if (!__builtin_mul_overflow((int32_t)vm->stackTop[-2].i_val, (int32_t)vm->stackTop[-1].i_val, &iresult)) {
+                        vm->stackTop[-2].i_val = iresult;
+                        vm->stackTop[-2].u_val = (unsigned long long)iresult;
+                        vm->stackTop--;
+                        break;
+                    }
+                }
+                BINARY_OP("*", instruction_val);
+                break;
+            }
             case DIVIDE:   BINARY_OP("/", instruction_val); break;
 
             case NEGATE: {
