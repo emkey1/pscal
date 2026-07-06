@@ -1203,6 +1203,7 @@ set(PSCAL_CORE_SOURCES
     components/pscal-core/src/common/pascal_state.c
     components/pscal-core/src/core/diagmap.c
     components/pscal-core/src/vm/vm.c
+    components/pscal-core/src/vm/vm_fx_policy.c
     components/pscal-core/lib/noise/noise.c
     components/pscal-core/src/runtime/terrain/terrain_generator.c
     components/pscal-core/src/runtime/shaders/shader_common.c

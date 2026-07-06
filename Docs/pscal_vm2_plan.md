@@ -2,9 +2,11 @@
 
 Status: Phase 0 and Phase 1 core (1a-1e, the PSB3 format epoch plus the
 load-time verifier) shipped 2026-07-04; Phase 2a (inline caches move to a
-side-table), Phase 2b (slot-addressed globals), and Phase 3 (growable
-operand/call stacks) all shipped 2026-07-05.
-Phase 4 and beyond remain proposal.
+side-table), Phase 2b (slot-addressed globals), Phase 3 (growable
+operand/call stacks), and Phase 6 (effect classes, the `--deny` sandbox, and
+record/replay -- concurrency-track-independent, done out of sequence) all
+shipped 2026-07-05.
+Phase 4, 5, and 7 remain proposal.
 Companion to the
 [VM Technical Manual](pscal_vm_manual/pscal_vm_manual.md), which documents
 the 1.x engine this plan modifies.  File/line references are to
@@ -1183,6 +1185,83 @@ Two stages, both behind the Phase 0 accessor macros:
 - Explicitly not: static purity checking or an `fx` language construct.
   Frontends may later surface effect annotations that compile to policy
   setup, but the VM mechanism is dynamic.
+
+**Done (2026-07-05):** Shipped largely as designed, with the storage split
+this section left open resolved in favor of not touching the ~500-entry core
+dispatch table: core builtins are classified by name against
+`kEffectClassifiedNames[]` (the same 130-name set `kEffectfulNames` used,
+now carrying a mask instead of a bare bool, so `pscalBuiltinNameIsEffectful`
+-- the Aether FX-001 gate's single source of truth -- is unchanged
+byte-for-byte in behavior), cached lazily per-id on first use. Builtins added
+via `registerVmBuiltin()` (77 call sites in pscal-core's `ext_builtins/*`,
+plus 3 more in PBuild's `src/smallclue/`, `components/rea/.../thread.c`, and
+`components/clike/.../thread.c`) now pass an explicit mask; a handful of
+per-category tables (SDL graphics, exsh shell builtins, the smallclue
+busybox tools) get one blanket conservative mask at their shared
+registration helper rather than auditing every entry individually.
+
+- **Storage:** a sparse per-id override array (`g_effect_overrides`,
+  grown lazily) holds explicit masks for anything registered via
+  `registerVmBuiltin()`, including the rare case of a category overriding a
+  core dispatch-table placeholder (SDL's NULL-handler swap trick, per
+  Chapter 4). Ids without an override fall back to name classification
+  (core builtins) or `FX_IO` (defensive-only; every real call site sets one).
+- **CLI/env surface:** `--deny <list>` (`io,net,proc,clock,random,all`),
+  `--fx-record <path>`, `--fx-replay <path>`, all wired through a shared
+  `pscalFxIsCliFlag`/`pscalFxHandleCliFlag` pair in the new
+  `src/vm/vm_fx_policy.c` so the 5 frontend `main()`s (no shared arg parser
+  exists, each hand-rolls its own loop) don't reimplement the parsing;
+  `PSCAL_VM_DENY` is the env-var equivalent, read lazily once (Phase 1e's
+  `PSCAL_VM_SKIP_VERIFY` convention).
+- **Journal format deviation, found by adversarial testing, not sketched
+  in this section's own outline:** a naive "record every effectful call's
+  result and VAR-param writebacks as a generic PSB3 Value" corrupts state
+  for any builtin whose writeback is a live handle rather than data.
+  `assign`/`reset`/`rewrite`/`close` pass their file variable by *address*
+  (`TYPE_POINTER` to a `TYPE_FILE` Value) -- the real handler opens/closes
+  the OS file descriptor in place. `TYPE_FILE` has no PSB3 encoding
+  (`writeValue` returns false for it), and the first version of this feature
+  papered over that by writing a `TYPE_NIL` placeholder writeback instead;
+  replaying that placeholder overwrote the file variable with `nil`, and the
+  next `close`/`reset` call on it produced "Argument to Close must be a file
+  variable" -- a real, reproducible corruption bug, not a hypothetical. The
+  fix: each journaled call carries a `substitutable: BOOLEAN` flag. A call
+  becomes non-substitutable if its result or any writeback can't be
+  faithfully captured; replay then returns `PSCAL_FX_REPLAY_RUN_LIVE`
+  instead of substituting, and the VM calls the real handler for that one
+  call, exactly as happened when it was recorded (still verifying
+  name/arg-count against the journal first, so a genuine desync is still
+  caught). `MStream` out-params (`HttpRequest`'s `Contents` arg, etc.) are
+  the important case that *is* substitutable: unlike a file handle, an
+  `MStream` is already reference-counted shared state passed **by value**
+  (no address-of -- confirmed empirically the same call arrives as
+  `TYPE_POINTER` for file args but as a bare `TYPE_MEMORYSTREAM` for
+  mstream args), so the journal captures its buffer bytes directly
+  (length-prefixed, NUL-terminated per this codebase's `MStreamBuffer()`
+  convention -- omitting the terminator was a second ASan-caught
+  heap-buffer-overflow during testing) and replays them into the
+  already-live `MStream` the caller passed. Net effect: **file I/O always
+  re-executes live under replay** (a live handle can't be faithfully
+  replayed, and that's the correct behavior, not a limitation to work
+  around), while **HTTP responses genuinely replay from the journal** even
+  against a mutated on-disk fixture (verified in
+  `Tests/vm_fx_policy/replay_http_file.p`).
+- **Verification:** `Tests/run_all_suites.py` green on the changed binaries
+  (rebuilt from a clean tree, not stale ones -- the earlier same-session run
+  used pre-fix binaries and would have masked the bugs above). The
+  deny/record/replay adversarial test passes under both the normal and
+  `build-asan/` (ASan+UBSan) trees, including two corrupted-journal cases
+  (truncated, byte-flipped) that both abort cleanly with a diagnostic and
+  exit 1 rather than crash. `vm_bench`'s wall-clock numbers were unusable
+  this session (host under ~10 load average from unrelated concurrent
+  work -- a Parallels VM and other agent sessions) and were deliberately
+  **not** committed to `history.jsonl` to avoid corrupting the phase-over-phase
+  record with noise; the zero-cost claim rests on the dispatch-path code
+  itself (`pscalFxPolicyActive()` is a handful of static-bool/int comparisons,
+  no mutex, no per-id lookup, before anything else in this phase runs) plus
+  Phase 1e's own precedent that a check this cheap is below the noise floor
+  of this exact benchmark suite. A clean re-run on an idle host is a good
+  follow-up, not a blocker.
 
 ## 7. Extension Track
 

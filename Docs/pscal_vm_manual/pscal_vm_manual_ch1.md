@@ -347,10 +347,13 @@ instead. The dual-path design the original Phase 2b proposal anticipated
 
 ### 1.3 Builtins, Extensibility, and Side Effects
 
-There is no distinct "effect boundary" instruction or VM-level purity
-tracking in PSCAL — no `fx` block construct exists in the bytecode or the
-interpreter. Side effects are ordinary builtin calls, via two opcodes that
-both dispatch into native C functions:
+There is no `fx` block construct or static purity checking in the bytecode
+or the interpreter, and VM 2.0 Phase 6 (below) doesn't add one — but the VM
+does now carry a *dynamic* effect classification for every builtin, used to
+sandbox untrusted programs and to record/replay effectful calls
+deterministically (§4.0a has the full mechanism). Side effects themselves
+are still ordinary builtin calls, via two opcodes that both dispatch into
+native C functions:
 
 - `CALL_BUILTIN` — operands: 2-byte name-constant index + 1-byte argument
   count. The builtin is resolved **by name** at each call (with a
@@ -379,21 +382,28 @@ and the shipped categories in full.
 The same call mechanism serves `Sin()`, `WriteLn()`, and `HttpRequest()`
 alike. `vm->current_builtin_name` is set for the duration of the call purely
 for diagnostics (error messages, opcode/builtin profiling via
-`EXSH_PROFILE_OPCODES`), not for effect tracking.
+`EXSH_PROFILE_OPCODES`); effect tracking (§4.0a) is a separate, cheap check
+(`vmApplyFxPolicy()`) sitting right before the handler call in both opcodes'
+case blocks, not woven into this diagnostic bookkeeping.
 
 Practically, this means:
 - **Determinism is a property of which builtins a program calls**, not
-  something the VM enforces or can statically verify.
+  something the VM statically verifies — but it is now something the VM can
+  *enforce* (`--deny`) or *replay* (`--fx-replay`) dynamically at the
+  dispatch point, per program run, without any frontend involvement.
 - A builtin that blocks (synchronous `HttpRequest`) blocks the calling
   thread's interpreter loop outright; there is no automatic yielding.
 - Async variants (`HttpRequestAsync` + `HttpAwait`/`HttpIsDone`) are a
   *library-level* convention layered on top of the plain call mechanism and
   the thread pool below — not a separate VM-level effect system.
 
-If your architecture calls for a genuine effect-isolation layer, it does not
-exist yet at the pscal-core level; it would need to be a frontend-level
-convention (e.g. a compiler pass in Aether/Rea) enforced before code reaches
-this VM, since the VM itself treats every builtin call identically.
+A genuine *static* effect-isolation layer (a language-level `fx` construct,
+compile-time purity checking) still does not exist at the pscal-core level
+and isn't in scope for Phase 6 — Aether's own `fx`/`@pure` checks (FX-001,
+ANN-001) are a frontend-level convention layered on top, unrelated to this
+VM-level mechanism. What Phase 6 adds is dynamic and process-wide: a
+`--deny` policy or an active record/replay journal, checked once per
+effectful builtin call, with zero cost when neither is configured.
 
 ### 1.4 Multithreading
 

@@ -74,6 +74,81 @@ languages. This is the intended extension seam — not new opcodes (which
 renumber the ISA, §3.0), and not `CALL_HOST` (reserved for the small set of
 VM↔frontend-runtime hooks like closure creation).
 
+### 4.0a Effect classes, the `--deny` sandbox, and record/replay (VM 2.0 Phase 6)
+
+> Source of truth: `src/backend_ast/builtin.h`/`.c` (effect-mask storage and
+> classification) and `src/vm/vm_fx_policy.{h,c}` (the CLI/env surface,
+> the deny check, and the record/replay journal). Docs/pscal_vm2_plan.md §6.3
+> has the full design history, including two real bugs this feature's own
+> adversarial testing found and fixed.
+
+`registerVmBuiltin()` (§4.0) now takes a fifth argument, `EffectMask
+effect_mask` — a bitmask over `FX_PURE | FX_IO | FX_NET | FX_PROC | FX_CLOCK
+| FX_RANDOM` (`core/effect_mask.h`). Every call site across `ext_builtins/*`
+passes one explicitly; the ~500-entry core dispatch table (§4.0's static
+`vmBuiltinDispatchTable[]`) is classified by name instead, against the same
+130-name table `pscalBuiltinNameIsEffectful()` already used for the Aether
+FX-001 gate — so that predicate's behavior didn't change, only its backing
+data type (bool → mask). `getVmBuiltinEffectMaskById(id)` is the one lookup
+that matters at runtime: O(1) after the first call (core-table masks are
+computed once and cached; extension masks are stored directly at
+registration time in a sparse per-id override array).
+
+This mask is checked at exactly one place: right before
+`CALL_BUILTIN`/`CALL_BUILTIN_PROC` would otherwise invoke the handler
+(`vmApplyFxPolicy()` in `vm.c`). When no policy is configured
+(`pscalFxPolicyActive()` false — no `--deny`, no `PSCAL_VM_DENY`, no active
+record/replay journal), that's the entire cost: a few static-bool/int
+comparisons, no mutex, no per-id lookup. This is what makes the feature a
+true no-op for every program that doesn't opt in.
+
+**Enforce (the sandbox).** `--deny io,net,proc,clock,random` (or `all`; also
+settable via `PSCAL_VM_DENY`) makes any builtin whose mask intersects the
+denied set raise a clean `runtimeError()` before the handler runs — the same
+error path as any other runtime error, not a crash. This is the mechanism
+that makes it safe to run untrusted or model-generated PSCAL programs
+unattended at fleet scale (the aether_doc_bench / idea-miner harnesses'
+motivating use case): `--deny net,proc` denies network egress and
+process/thread spawning while leaving ordinary compute and stdout intact.
+
+**Record/replay.** `--fx-record <path>` journals every *effectful*
+builtin call's return value and VAR-parameter writebacks, in call order;
+`--fx-replay <path>` substitutes the journal for execution on a later run,
+so a flaky or hard-to-reproduce program (an HTTP-dependent eval, say) can be
+replayed byte-identically without touching the network again. A
+name/arg-count mismatch between the journal and the program's actual call
+sequence aborts cleanly with a diagnostic — never a silent desync.
+
+Not every effectful call is safely substitutable, and getting this wrong
+corrupts state rather than merely producing a wrong answer — adversarial
+testing found this the hard way (Docs/pscal_vm2_plan.md §6.3 has the full
+account). The rule the implementation landed on: a call is journaled as
+`substitutable` only if its result and every `VAR` writeback can be
+faithfully captured.
+- **File handles are not substitutable.** `assign`/`reset`/`rewrite`/`close`
+  take their file variable by address (`TYPE_POINTER` to a `TYPE_FILE`
+  Value) because the real handler must open/close an actual OS file
+  descriptor in place; there's no meaningful way to "replay" that. These
+  calls are marked non-substitutable at record time and always re-execute
+  live on replay too (`PSCAL_FX_REPLAY_RUN_LIVE`) — after first verifying
+  the journal's name/arg-count still match, so a genuine desync is still
+  caught.
+- **`MStream` out-params are substitutable.** `HttpRequest`'s `Contents`
+  argument (and similar) arrives as a bare `TYPE_MEMORYSTREAM`, not a
+  pointer — `MStream` is already reference-counted shared state, so passing
+  it by ordinary value is sufficient for the callee to mutate what the
+  caller sees. The journal captures its buffer bytes directly (kept
+  NUL-terminated, matching `MStreamBuffer()`'s expectation that the buffer
+  is a C string) and replays them into the caller's already-live `MStream`.
+
+Net effect: a program mixing file I/O and HTTP requests replays with
+byte-identical output — the file operations simply re-execute against the
+same on-disk files (correct, since a live handle can't be faithfully
+replayed), while the HTTP responses genuinely come from the journal, even
+if the on-disk fixture backing a `file://` loopback request changed between
+the record and replay runs. `Tests/vm_fx_policy/replay_http_file.p` is the
+regression test for exactly this.
+
 ### 4.1 The Network Operations Engine
 
 #### Session model
