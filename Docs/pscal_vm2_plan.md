@@ -1405,8 +1405,8 @@ shapes, each starting with an embedded `ObjHeader`:
 
 | VarType | Heap shape | Notes |
 |---|---|---|
-| `TYPE_STRING`/`TYPE_UNICODE_STRING` | `StringObj { ObjHeader; uint32_t max_length; char data[]; }` | Flexible-array-member: one allocation instead of today's two (`Value.max_length` + separately-malloc'd `s_val`). Straightforward deep-copy-on-write semantics (strings have no dynamic/static distinction to preserve). |
-| `TYPE_SET` | `SetObj { ObjHeader; int set_size; long long set_values[]; }` | Same treatment as string; `makeCopyOfValue`'s current `memcpy` of `set_values` (`core/utils.c:3506-3521`) becomes a decision at the refcount choke point, not a change to the copy technique itself. |
+| `TYPE_STRING`/`TYPE_UNICODE_STRING` | `StringObj { ObjHeader; int max_length; char *buffer; }` | **Revised during 4c's implementation, not at design time:** originally sketched as a flexible-array-member (`char data[]`, one allocation). Abandoned once an audit of real call sites found ~15 places (`vm.c`/`builtin.c`/`symbol.c`/exsh's `shell_builtins.inc`) doing `AS_STRING(v) = new_buffer;` — whole-buffer reassignment for string growth/mutation, which a flexible array member cannot support. `buffer` is instead a plain owned pointer (two allocations, matching today's shape), preserving every one of those call sites' actual logic unchanged; see §5.10.4's 4c writeup for the construction-order fix (`pscalStringEnsureObj`) this still required. Straightforward deep-copy semantics (strings have no dynamic/static distinction to preserve). |
+| `TYPE_SET` | `SetObj { ObjHeader; int set_size; int capacity; long long *set_values; }` | Same plain-pointer revision as `StringObj`, for the same reason (`vm.c`'s `vmAddOrdinalToSet` and `core/utils.c`'s set-operation helpers all reassign `set_values` wholesale on growth). `capacity` is a new field: pre-4c, set growth capacity was tracked by *borrowing* `Value.max_length` (via the `STRING_MAX_LENGTH` macro) — found only by reading `vmAddOrdinalToSet`'s actual body, not assumed — which breaks the moment `STRING_MAX_LENGTH` means "look inside `StringObj`" instead of "a plain field on `Value`"; sets now get their own field via a new `SET_CAPACITY` macro. `makeCopyOfValue`'s current `memcpy` of `set_values` (`core/utils.c:3506-3521`) becomes a decision at the refcount choke point, not a change to the copy technique itself. |
 | `TYPE_RECORD` | `RecordObj { ObjHeader; FieldValue *fields; }` | Thin wrapper only. `FieldValue` itself (`types.h:243-252`) is **unchanged** — still a linked list, still supports the `owns_storage`/aliased-`storage` trick OOP field-address-taking depends on (`vm.c:7337-7371`, `core/utils.c:743-789`). Each embedded `struct ValueStruct value` shrinks automatically because `Value` shrinks; no `FieldValue`-level code changes needed beyond the outer wrapper. (Opportunistic, *not required*, idea: `FieldValue` already carries `slot_index`; flattening the linked list into a slot-indexed array would improve cache locality, but that is a separable enhancement outside Stage A's critical path — don't bundle it in.) |
 | `TYPE_ARRAY` | `ArrayObj { ObjHeader; VarType element_type; AST *element_type_def; bool is_packed; bool is_dynamic; uint8_t dimensions; int *lower_bounds; int *upper_bounds; union { uint8_t *raw; Value *elements; }; }` | **Highest-risk single item in Stage A.** `is_dynamic` moves from a storage-strategy flag to a **semantic** flag `valueEnsureUnique()` must branch on (§5.10.6) — it is not merely inherited for compatibility, it encodes real Pascal-level reference-vs-value semantics that must not be collapsed into one CoW policy. The jagged case (element_type==TYPE_ARRAY) needs no new machinery: each outer slot is already an independent Value (now an independent boxed word), refcounted exactly like any other shared read. The flat multi-dim slice-view case (`makeDynamicArraySliceValue`, finding 4 above) **cannot** be re-expressed as raw pointer-into-the-middle-of-another-object's-buffer once arrays are opaque pointers — it needs an explicit `ArraySliceView { ObjHeader; ArrayObj *backing; size_t consumed_dims; ptrdiff_t element_offset; }` variant (or an offset field folded into `ArrayObj` itself, distinguishing "owns its buffer" from "views a backing object's buffer") that holds a *retained* reference to the backing `ArrayObj` rather than a bare interior pointer. This is new design surface the original sketch did not anticipate at all; recommend splitting it into its own sub-phase (4f below) specifically so a regression bisects to one of {static/dynamic conversion, slice-view redesign}, not both at once. |
 | `TYPE_FILE` | `FileObj { ObjHeader; FILE *f; char *filename; int record_size; bool record_size_explicit; }` | **Exempt from Stage B's CoW/uniqueness path entirely** — a file's OS handle has identity that must never be cloned, matching the Phase 6 finding that `assign`/`reset`/`rewrite`/`close` already pass file variables *by address* specifically because the real handler mutates the live handle in place (§6.3's `TYPE_FILE has no PSB3 encoding` / non-substitutable-journal finding is the same identity property surfacing in a different phase). Destructor must preserve today's `pscalRuntimeVmIsSharedFileStream` check (`core/utils.c:2400`) distinguishing runtime-owned stdio wrappers from real owned handles. |
@@ -1549,6 +1549,93 @@ with the plan's existing Phase 1/2 convention of lettered sub-phases):
 - **4c — Strings and sets.** `StringObj`/`SetObj`, single-allocation
   flexible-array-member shapes, straightforward deep-copy semantics
   preserved exactly.
+  **Done (2026-07-06), with a significant design revision found during
+  implementation, not before it:** the flexible-array-member design was
+  abandoned for `StringObj` (and likewise `SetObj`) the moment a real audit
+  of external call sites (not just a design-time assumption) found a
+  widespread, load-bearing idiom this codebase uses for string growth/
+  mutation/concatenation: `AS_STRING(v) = new_buffer;`, reassigning the
+  *whole* backing buffer in place, at ~15 sites across `vm.c`, `builtin.c`,
+  `symbol.c`, and exsh's `shell_builtins.inc`. A flexible array member
+  cannot be reassigned as a whole (only indexed into), so `StringObj`/
+  `SetObj` instead carry a plain owned pointer (`char *buffer` /
+  `long long *set_values`) — one extra allocation+indirection versus the
+  single-allocation design originally sketched here, in exchange for
+  every one of those ~15 sites needing no logic changes to their actual
+  growth/mutation algorithms, only construction-order fixes (below). This
+  is the same shape of finding 4b already had for closures/interfaces
+  (an assumption that held for the *previous* sub-phase's types didn't
+  automatically hold for this one) — each type family genuinely needs its
+  own audit, not a template applied blindly.
+  - **The chicken-and-egg construction problem, and its fix.** Once
+    `s_val`/`set_val` are heap pointers instead of inline fields, `AS_STRING
+    (v) = X` (or `STRING_MAX_LENGTH(v) = X`) crashes with a NULL dereference
+    if nothing has yet allocated `v`'s wrapper -- and this codebase has a
+    real, common idiom of `memset(&v, 0, sizeof(Value)); SET_VALUE_TYPE(&v,
+    TYPE_STRING); AS_STRING(v) = data;` (building a string Value's payload
+    field by field rather than through `makeString`), plus several `freeValue
+    (target); ...; AS_STRING(*target) = X;` sequences where `freeValue` itself
+    now nulls the wrapper it just released. Fixed with `pscalStringEnsureObj
+    (Value*)` (`core/utils.h`/`.c`): a no-op if the wrapper already exists,
+    otherwise lazily allocates one. Every one of the ~15 sites was read in
+    full surrounding context (not just the line matching the grep) and
+    either confirmed already-safe (operates on a Value whose wrapper is
+    already known to exist -- e.g. an earlier line in the same function
+    already dereferenced it, or an earlier `if (VALUE_TYPE(*dst)==TYPE_NIL)`
+    branch already called `pscalStringEnsureObj`) or given an explicit
+    `pscalStringEnsureObj` call at the right point. `SetObj` needed no
+    equivalent: every `TYPE_SET` construction path goes through
+    `makeValueForType` first (confirmed by reading `vmBuildSetFromOrdinal`/
+    `vmBuildSetFromRange`), so no from-scratch-field-assignment idiom exists
+    for sets the way it does for strings.
+  - **The "steal buffer from a temporary" optimization** (`vm.c`, dynamic
+    string assignment from a stack temporary) was redesigned to steal the
+    whole `StringObj` pointer rather than just the buffer -- simpler than
+    allocating a fresh wrapper at the destination and copying the buffer
+    pointer into it, and sidesteps the construction-order problem for that
+    site entirely rather than needing `pscalStringEnsureObj` there too.
+  - **A genuine dual-use field, found only by reading actual call sites:**
+    `Value.max_length` (via the `STRING_MAX_LENGTH` macro) was already being
+    borrowed by `vmAddOrdinalToSet` (`vm.c`) and this plan's own `setUnion`/
+    `setDifference`/`setIntersection`/`addOrdinalToResultSetUtil` helpers
+    (`core/utils.c`) as generic growth-capacity storage for **sets**, entirely
+    unrelated to strings. Moving `max_length` into `StringObj` would silently
+    break this the moment `STRING_MAX_LENGTH` stopped meaning "a plain `int`
+    field on `Value`". Fixed by giving `SetObj` its own `capacity` field and
+    a new `SET_CAPACITY` macro, and converting both call sites (the `vm.c`
+    one and the three `utils.c` set-operation helpers) to use it instead.
+  - **One real bug shipped past static review and was only caught by
+    actually running Pascal programs, not by the compiler or by re-reading
+    the diff:** `updateSymbolInternal` (`symbol.c`) frees the target
+    symbol's old value (nulling its `StringObj` wrapper, correctly, for a
+    *dynamic* string) and then, a few lines later in the same function's
+    `switch (sym->type)`, the `TYPE_STRING`/`TYPE_UNICODE_STRING` case
+    immediately re-reads `STRING_MAX_LENGTH(*sym->value)` -- dereferencing
+    the wrapper `freeValue` had just set to NULL two lines above. Static
+    review of the `TYPE_STRING` case in isolation looked safe (its very
+    first statement is a read that would already have crashed if the
+    wrapper were missing) -- the bug was in a *different*, earlier part of
+    the *same function* freeing the wrapper the case then assumed still
+    existed, which only a fresh read of the whole function (prompted by a
+    live crash, not a hypothesis) surfaced. `s1 := 'Hello';` for a freshly
+    declared dynamic `string` variable was enough to trigger it every time.
+    Fixed by calling `pscalStringEnsureObj` immediately after the `freeValue`
+    call, gated on `isPascalStringType(sym->type)`. **This is the concrete
+    argument for why this sub-phase's verification needed actual program
+    execution, not just a clean compile** — every one of these sites
+    compiles perfectly either way; the macro redefinition doesn't
+    distinguish "safe" from "NULL-deref" at compile time, only at runtime.
+  - **Verified:** full `Tests/run_all_suites.py` green (core/library/scope,
+    all five rebuilt frontends); the Phase 3 growth-stress corpus
+    byte-exact; hand-written string and set regression programs (dynamic
+    string growth/concatenation, fixed-length string truncation/padding,
+    CHAR-to-string assignment, `Str`, indexing and index-assignment,
+    VAR-parameter aliasing, `Copy`/`Pos`, set literals/union/intersection/
+    difference, empty-set/empty-string edge cases) under both the plain and
+    `build-asan` trees. `Include`/`Exclude`/`Delete`/`Insert` are not
+    implemented by this Pascal frontend at all (confirmed by grep, not
+    assumed) — a pre-existing language-support gap the initial test drafts
+    ran into, unrelated to this phase.
 - **4d — Records.** `RecordObj` thin wrapper; `FieldValue` list body
   unchanged.
 - **4e — Arrays, static case.** `ArrayObj` for `array_is_dynamic == false`
@@ -2103,6 +2190,8 @@ flow per phase is the standard multi-repo bump (component push, aether
 | exsh dynamic globals fight slot addressing | 2b | dual-path design is explicit from the start; exsh keeps the dynamic opcodes |
 | iOS build (static libs, no dlopen culture) vs plugin ABI | 7 | plugins are a desktop/server feature; iOS keeps static registration (already special-cased in `register.c`) |
 | Long double serialization change alters numeric output | 1b | Pascal suite has numeric-format baselines; acceptable-diff list reviewed explicitly |
+| Whole-buffer reassignment idioms (`AS_STRING(v) = new_buf;`) break under a flexible-array-member heap shape | 4c | **Confirmed real, not hypothetical** — found ~15 sites across `vm.c`/`builtin.c`/`symbol.c`/exsh's `shell_builtins.inc`; `StringObj`/`SetObj` use a plain owned pointer field instead of a flexible array member specifically to preserve these sites unchanged. Any future sub-phase considering a flexible-array-member shape must run the same "does anything reassign this buffer wholesale" audit first, not assume it's safe by analogy. |
+| A boxed type's construction can leave the wrapper NULL between `memset`/`freeValue` and the accessor write that assumes it exists | 4c/4g/4h | `pscalStringEnsureObj`-style lazy-init helper, called at every identified construction site; **this class of bug compiles clean either way and was only caught by running real programs** (`updateSymbolInternal` in `symbol.c` freed a string's wrapper then immediately re-read `STRING_MAX_LENGTH` on it a few lines later, in a code path static review of the read site alone did not surface) — every future sub-phase boxing a type needs actual program-execution verification for this reason, a clean compile and a re-read of the diff are not sufficient evidence. |
 
 ## 10. Effort Shape (relative, in PR-sized units)
 
