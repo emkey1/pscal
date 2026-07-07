@@ -2010,13 +2010,79 @@ with the plan's existing Phase 1/2 convention of lettered sub-phases):
     4g re-run unchanged, all 10 previously-fixed rea/OOP tests, the Phase
     3 growth-stress corpus, and the exsh function-cache round-trip above
     -- all clean under both plain and ASan builds.
-  - **Checkpoint 2 (accessor macro rewrite, pending):** rewrite every
-    accessor macro's body to decode/encode through the 4h tagged-word
-    functions, while keeping `Value`'s physical layout oversized (so a
-    mistake surfaces as a wrong value, not a crash).
-  - **Checkpoint 3 (the physical collapse, pending):** shrink
-    `ValueStruct` to `{ uint64_t bits; }`, delete every now-dead field,
-    full differential + suite verification.
+  - **Checkpoint 2 (tagged-word bits mirror + verification, done
+    2026-07-06):** **Scope narrowed from the original "rewrite every
+    accessor macro" framing, deliberately** -- once actually underway, it
+    became clear that cutting production macros over to `bits` as the
+    source of truth requires the WHOLE representation layer (every
+    constructor, `freeValue`, `makeCopyOfValue`, `printValueToStream`,
+    `cache.c`'s serialize/deserialize) to move in lockstep, which is
+    essentially checkpoint 3's work done early and without checkpoint 3's
+    "nothing left to compare against" safety property. Narrowed instead
+    to: add a `uint64_t bits` field (oversizing `Value`, exactly as
+    planned), and for every inline-scalar kind that needs **no heap
+    allocation** to tag (`VOID`/`NIL`/`BOOLEAN`/`CHAR`/`WIDECHAR`/`BYTE`/
+    `WORD`/`INT8-32`/`UINT8-32`/`FLOAT`/`DOUBLE`), keep `bits` as a live
+    MIRROR of the legacy discrete fields -- computed by every constructor
+    and by `SET_INT_VALUE`/`SET_REAL_VALUE`/`SET_CHAR_VALUE`/
+    `SET_VALUE_TYPE` (which every external call site already funnels
+    through, so extending these four macros' bodies covered the entire
+    codebase via the coexistence trick with zero external call-site
+    changes) -- and cross-check it against the legacy fields via a new
+    `pscalValueBitsConsistent()`, called unconditionally (not `#ifdef
+    DEBUG`-gated, so the real test suite actually exercises it) from
+    `freeValue`, aborting on mismatch. `TYPE_INT64`/`TYPE_UINT64`/
+    `TYPE_LONG_DOUBLE` (need `Int64Box`/`LongDoubleBox`, built in 4h but
+    not wired in) and every heap-pointer type stay deferred to checkpoint
+    3 alongside the actual macro cutover -- `pscalValueBitsConsistent`
+    returns `true` vacuously for them.
+    **Three real bugs found, all only by running the full suite (a clean
+    compile proved nothing, same lesson as every prior sub-phase):**
+    (1) Two `vmBuiltinCreateThread`/`ThreadLookup`-style sites built a
+    `Value` via `makeInt()` then retyped it to `TYPE_THREAD` via
+    `SET_VALUE_TYPE` -- which (correctly) resets `bits` to a zero
+    placeholder for the new type, discarding the real thread ID that
+    `SET_VALUE_TYPE` has no way to know about. Fixed by re-tagging with
+    `SET_INT_VALUE` after the retype (a `makeX()`-then-`SET_VALUE_TYPE`
+    audit across the whole tree found no other instances of this shape).
+    (2) A genuinely dangerous one: `compiler.c`'s compile-time unary-minus
+    evaluator called `SET_INT_VALUE(&v, -VAL_INT(v))` -- a
+    self-referential argument reading back through the same destination
+    the macro writes into. Since `SET_INT_VALUE`'s expansion referenced
+    its `val` parameter three times (`i_val`, `u_val`, and the new bits
+    dispatch), and C macro arguments are substituted literally, each of
+    the three substitutions re-evaluated `-VAL_INT(v)` fresh -- but the
+    first substitution's write already flipped `v`'s sign, so the second
+    and third substitutions negated the WRONG (already-negated) value,
+    corrupting `u_val` and `bits` while `i_val` alone stayed correct (a
+    22-year-old-shaped C macro pitfall, not new to this phase -- the
+    *identical* hazard existed pre-checkpoint-2 with only two
+    substitutions, just silently, since nothing compared `u_val` against
+    `i_val` before). Fixed at the macro level, not the call site: 
+    `SET_INT_VALUE`/`SET_CHAR_VALUE` now capture `val` into a
+    block-scoped local exactly once before using it multiple times,
+    making every self-referential call site safe by construction rather
+    than by caller discipline. A follow-up audit found 16 pre-existing
+    call sites with this exact self-referential shape (mostly
+    `SET_INT_VALUE(x, AS_CHAR(*x))`-style char-to-int sync); the
+    macro-level fix already neutralizes all of them, confirmed by
+    re-running the full suite with zero further call-site changes needed.
+    (3) `core/cache.c`'s `readValue` (bytecode-cache deserialization) had
+    a `case TYPE_NIL: break;` that never touched `bits`, leaving it at
+    the `memset`-zero the function starts from -- caught by exsh's own
+    cache-reuse test loading a cached `nil`-adjacent constant back in.
+    Fixed to set `pscalTagNil()`. Verified: full `Tests/run_all_suites.py`
+    clean on both plain and `build-asan` trees, the 4g/4i-checkpoint-1
+    regression programs, the exsh function-cache and clike bytecode-cache
+    round-trips, all 10 previously-fixed rea/OOP tests, and the Phase 3
+    growth-stress corpus.
+  - **Checkpoint 3 (the physical collapse, pending):** move the deferred
+    types (heap-pointer types, `TYPE_INT64`/`TYPE_UINT64`/
+    `TYPE_LONG_DOUBLE`) into `bits` too, cut every accessor macro over to
+    decode from `bits` as the sole source of truth, delete
+    `pscalValueBitsConsistent` (nothing left to compare against once the
+    legacy fields are gone), shrink `ValueStruct` to `{ uint64_t bits; }`,
+    delete every now-dead field, full differential + suite verification.
 - **4j — Stage B: ownership rationalization.** `DUP`/`CONSTANT`/`push`
   become word copies + `pscalObjRetain`; `freeValue` becomes
   `pscalObjRelease`; `valueEnsureUnique()` becomes the single choke point
