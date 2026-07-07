@@ -9,8 +9,12 @@ shipped 2026-07-05.
 Phase 4's Stage A (§5.10.4 sub-phases 4a-4g: ObjHeader foundation;
 closures/interfaces/mstreams; strings/sets; records; arrays; files/pointers/
 enums) shipped 2026-07-06, followed same-day by 4h (numeric/scalar
-tagged-word encoding, standalone/not yet wired into Value). 4i onward, and
-Phase 5 and 7, remain proposal.
+tagged-word encoding, standalone/not yet wired into Value). 4i (the `Value`
+flag day) is split into checkpoints 1-3, checkpoint 3 further split into
+3a-3d; checkpoints 1, 2, 3a, 3b, 3c, and 3d all shipped (3a-3d 2026-07-07).
+**Checkpoint 3d is the physical collapse itself** -- `Value` is now
+`{ VarType type; uint64_t bits; }`, 16 bytes (was 176). 4j, Phase 5, and
+Phase 7 remain proposal.
 Companion to the
 [VM Technical Manual](pscal_vm_manual/pscal_vm_manual.md), which documents
 the 1.x engine this plan modifies.  File/line references are to
@@ -2076,13 +2080,419 @@ with the plan's existing Phase 1/2 convention of lettered sub-phases):
     regression programs, the exsh function-cache and clike bytecode-cache
     round-trips, all 10 previously-fixed rea/OOP tests, and the Phase 3
     growth-stress corpus.
-  - **Checkpoint 3 (the physical collapse, pending):** move the deferred
-    types (heap-pointer types, `TYPE_INT64`/`TYPE_UINT64`/
-    `TYPE_LONG_DOUBLE`) into `bits` too, cut every accessor macro over to
-    decode from `bits` as the sole source of truth, delete
+  - **Checkpoint 3 (the physical collapse) -- split into four sub-steps
+    once two parallel research passes quantified scope** (73 raw
+    heap-pointer union-write sites concentrated in `core/utils.c`, ~62 of
+    them across the 8 already-single-pointer heap types plus ~11 for
+    closures/interfaces; separately, `TYPE_INT64`/`UINT64`/`LONG_DOUBLE`
+    have only ~41 construction sites and no hot-loop pattern worth
+    mutate-in-place, so copy-on-construct into the 4h `Int64Box`/
+    `LongDoubleBox` matches the `PointerObj` precedent instead): **3a**
+    box `TYPE_CLOSURE`/`TYPE_INTERFACE` into real wrapper structs (done,
+    below); **3b** extend the `bits` mirror to the 8 already-single-pointer
+    heap types (`STRING`/`ARRAY`/`RECORD`/`FILE`/`ENUM`/`POINTER`/`SET`/
+    `MEMORYSTREAM`, done, below); **3c** box `TYPE_INT64`/`TYPE_UINT64`/
+    `TYPE_LONG_DOUBLE` into `Int64Box`/`LongDoubleBox`, copy-on-construct
+    (done, below); **3d** the actual physical collapse -- cut every accessor macro over
+    to decode from `bits` as the sole source of truth, delete
     `pscalValueBitsConsistent` (nothing left to compare against once the
     legacy fields are gone), shrink `ValueStruct` to `{ uint64_t bits; }`,
-    delete every now-dead field, full differential + suite verification.
+    delete every now-dead field, full differential + suite verification
+    (including the standalone aether build).
+    - **Checkpoint 3a (box `TYPE_CLOSURE`/`TYPE_INTERFACE`, done
+      2026-07-07):** added plain `ClosureObj { uint32_t entry_offset;
+      Symbol *symbol; ClosureEnvPayload *env; }` and `InterfaceObj {
+      AST *type_def; ClosureEnvPayload *payload; }` structs, changed the
+      `closure`/`interface` union members from inline multi-field structs
+      to pointers to these, and redefined `AS_CLOSURE`/`AS_INTERFACE` to
+      dereference the pointer -- every external `AS_CLOSURE(v).field`
+      call site in `vm.c`/`bytecode.c` kept compiling unchanged via the
+      coexistence trick. **Deliberately NOT `ObjHeader`-based, unlike
+      every prior 4b-4g wrapper**, discovered mid-implementation to be a
+      real architectural constraint rather than a style choice: giving
+      `ClosureObj`/`InterfaceObj` their own `ObjHeader` tagged
+      `TYPE_CLOSURE`/`TYPE_INTERFACE` collides with `ClosureEnvPayload`
+      (4b), which already registers exactly those two tags as its own
+      destructor keys via `createClosureEnv(slot_count, owner_type)` --
+      `pscalObjRegisterDestructor` dispatches by `VarType` alone, one
+      slot per type globally, and aborted on the double-registration
+      (confirmed via `lldb` backtrace). `ClosureEnvPayload`'s reuse of
+      these tags is an internal flavor marker, not a "this IS a
+      Value-level wrapper" signal -- a distinction with no precedent in
+      4a-4h worth remembering before assuming any future ObjHeader tag is
+      free. Resolved by making `ClosureObj`/`InterfaceObj` plain,
+      non-refcounted, singly-owned heap structs with copy-on-construct
+      semantics: `makeCopyOfValue` allocates a fresh wrapper per copy and
+      copies `entry_offset`/`symbol`/`type_def` by value, retaining only
+      the genuinely shared `env`/`payload` (already independently
+      refcounted via `retainClosureEnv`/`releaseClosureEnv`); `freeValue`
+      releases env/payload then `free()`s the wrapper directly (no
+      `pscalObjRelease`). **Second bug found after the redesign:**
+      `vm.c`'s `copyValueForStack` had a dedicated `TYPE_CLOSURE`
+      fast-path (`Value alias = *src; retainClosureEnv(...); return
+      alias;`) that was safe when `.closure` was inline data but became a
+      raw-pointer-alias double-free once `.closure` became a boxed
+      `ClosureObj*` -- two Values ended up sharing the SAME wrapper
+      pointer, each independently `free()`-ing it (confirmed via `lldb`
+      heap-corruption backtrace, reproduced by capturing a closure,
+      storing it, and invoking it twice). Fixed by deleting the fast-path
+      entirely, falling through to the corrected `makeCopyOfValue`.
+      Verified: full `Tests/run_all_suites.py` clean on both plain and
+      `build-asan` trees, the two hand-written 4g/4i-checkpoint-1/2
+      regression programs, all 10 previously-fixed rea/OOP tests, and the
+      Phase 3 growth-stress corpus (closures/deep-recursion/var-param) --
+      all matching expected output with zero ASan diagnostics.
+    - **Checkpoint 3b (extend the bits mirror to the 8 already-boxed
+      heap-pointer types, done 2026-07-07):** unlike the scalar mirror
+      (checkpoint 2, one bit-packing scheme per kind), tagging a heap
+      pointer is IDENTICAL for all 8 types -- `pscalTagPointer`/
+      `pscalUntagPointer` from 4a's NaN-box infrastructure just pack/
+      unpack the wrapper address itself, no per-type encoding needed. A
+      single new `pscalValueSetHeapPtrBits(dest, ptr)` helper (core/
+      types.h) covers `STRING`/`UNICODE_STRING`/`ARRAY`/`RECORD`/`FILE`/
+      `ENUM`/`POINTER`/`SET`/`MEMORYSTREAM` uniformly; `pscalValueBitsConsistent`
+      re-derives which union member to compare against from `dest->type`,
+      matching the scalar precedent, and now actually verifies these 8
+      types instead of returning `true` vacuously. `pscalValueResetBitsForType`
+      also gained cases for all 8 -- a retype now leaves a real
+      `pscalTagPointer(NULL)` placeholder, not bare `0`, closing the same
+      "stale kind tag" hazard checkpoint 2 fixed for scalars.
+      **Two independent research agents audited every direct write to
+      the 8 union members first** (73 sites found in the earlier
+      checkpoint-3 scoping pass, refined to 58 legitimate sites here --
+      4 of them rea `semantic.c` sites turned out to be raw
+      `ClassInfo*`/`AST*` reinterpretations through `ptr_val` on
+      `TYPE_VOID`-tagged Values, never real `PointerObj`s, correctly
+      left untouched). Fixing those sites (constructors, `freeValue`
+      NULL-outs, `makeCopyOfValue` fresh-allocate-or-retain branches,
+      `cache.c` deserialization) was mechanical and uneventful --
+      **every real bug this checkpoint found came from three hazard
+      classes the site audit didn't anticipate, all surfaced only by
+      running programs, never by the audit or by compilation:**
+      1. **`SET_VALUE_TYPE`-after-populate stomps a valid tag.**
+         `SET_VALUE_TYPE` unconditionally resets `.bits` to the nil-pointer
+         placeholder for whatever type it's setting -- safe when the
+         union member is populated AFTER the retype (the common,
+         audited-safe shape: retype, then `pscalXEnsureObj`), but wrong
+         when a Value is retyped to a heap type it (or an
+         identically-tagged sibling, e.g. `TYPE_STRING`/`TYPE_UNICODE_STRING`)
+         already was, with the union member already holding a live
+         wrapper from EARLIER in the same code path. Found by grepping
+         every `SET_VALUE_TYPE` call site in the tree (not just the ones
+         touching a union member directly) and checking ordering by
+         hand -- ~9 real instances, all fixed by adding an explicit
+         `pscalValueSetHeapPtrBits` re-tag immediately after: 4 identical
+         `temp_wrapper` array-view sites in `vm.c` (the wrapper's
+         `array_val` was already set by `vmInitArrayIndexWrapper`'s
+         `pscalArrayEnsureObj` before the retype), a string-assignment
+         and a fixed-length-string-init site in `vm.c` (already
+         `pscalStringEnsureObj`'d before the retype), the string-concat
+         opcode macro in `vm.c` (expanded twice, `makeOwnedString` already
+         tagged it before the redundant retype), `symbol.c`'s dynamic-string
+         assignment case (mutates the existing wrapper's buffer, then
+         redundantly retypes to the same type), and two `builtin.c` sites
+         (`new()`'s pointer-variable reuse -- a `nil` pointer variable
+         already has a real, non-NULL `PointerObj` from `makeValueForType`,
+         so `pscalPointerEnsureObj` is a no-op there, the common case not
+         the exception -- and `Readln`'s string-variable retype). **The
+         general rule this establishes:** `SET_VALUE_TYPE` is only safe
+         unconditionally when the union member is populated strictly
+         AFTER it runs; any retype that happens AFTER (or between) a
+         union-member write needs an explicit re-tag call, and this
+         needs to be checked by ORDERING, not by what the call site
+         "looks like" it's doing.
+      2. **Steal-and-detach aliasing forgets to re-tag the detached
+         source.** Two existing "optimization" patterns in `vm.c`
+         transfer a heap wrapper from a transient popped Value into a
+         persistent slot, then null out the transient's own union member
+         to prevent a double-free when it's `freeValue`'d moments later
+         (a string-assignment fast path and an `MSTREAM`-assignment fast
+         path). Both nulled the member but left `.bits` holding the OLD
+         (now-transferred, soon segfault-adjacent-if-dereferenced) tag --
+         `freeValue`'s consistency check then correctly aborts on the
+         mismatch. Found the `MSTREAM` instance via an actual SIGABRT in
+         `pascal_ApiSendReceiveTest` (an HTTP fixture whose `ms :=
+         apiSend(...)` assignment exercises exactly this path) --
+         confirmed with `lldb`, `frame variable` showing `v->mstream ==
+         NULL` but `v->bits` decoding to the stale, now-dangling MStream
+         pointer. Fixed both by adding `pscalValueSetHeapPtrBits(&value,
+         NULL)` right after the detach.
+      3. **A negative audit claim was wrong.** One research agent
+         explicitly grepped for `AS_MSTREAM(v) = X` (the one macro among
+         `AS_STRING`/`AS_RECORD`/`AS_ARRAY`/`AS_FILE`/`AS_ENUM`/
+         `AS_POINTER`/`AS_SET`/`AS_MSTREAM` that returns the raw union
+         member itself rather than a field inside the wrapper, so
+         assigning through it DOES rebind the pointer) and reported "zero
+         occurrences anywhere." A real one existed in
+         `vmBuiltinMstreamfree` (`backend_ast/builtin.c`) -- missed by
+         the agent's search, caught only when `clike`'s deterministic
+         `MStreamWords`/`MStreamNilComparison`/`MStreamWords` fixtures
+         started aborting on the exact same mismatch shape (mstream
+         NULL, bits stale) with no network involved at all. **Lesson:**
+         a research agent's "confirmed zero occurrences of pattern X"
+         is a claim to spot-check with an independent grep before
+         trusting it as a complete site count, especially for a
+         macro-as-lvalue pattern that's rare enough that a single missed
+         file changes the total.
+      4. **A raw `.type =` bypass of `SET_VALUE_TYPE` entirely.**
+         `core/utils.c`'s array-"view" constructor (the lightweight
+         `ArrayObj` that aliases a parent array's buffers via pointer
+         arithmetic, from 4e/4f) did `*out = makeNil(); out->type =
+         TYPE_ARRAY;` -- a raw field assignment, not `SET_VALUE_TYPE` --
+         before assigning the real `ArrayObj*`. `.bits` was left holding
+         `makeNil()`'s `PSCAL_TAG_NIL` immediate the whole time, never
+         reset at all. Found by code inspection while fixing the
+         `SET_VALUE_TYPE` hazard class above (not by a crash), since it's
+         the same underlying mistake wearing a different disguise --
+         fixed by tagging explicitly once `view` is assigned.
+      Verified: full `Tests/run_all_suites.py` clean on both plain and
+      `build-asan` trees (with the bits-consistency check now actually
+      exercising all 8 types, not vacuously passing), the two hand-written
+      4g/4i-checkpoint-1/2 regression programs, all 10 previously-fixed
+      rea/OOP tests, the Phase 3 growth-stress corpus, and the two live
+      regressions that found bugs 2 and 3 above
+      (`pascal_ApiSendReceiveTest`, `clike`'s `MStreamWords`) re-run
+      directly under both plain and ASan builds.
+    - **Checkpoint 3c (box `TYPE_INT64`/`TYPE_UINT64`/`TYPE_LONG_DOUBLE`
+      into `Int64Box`/`LongDoubleBox`, done 2026-07-07):** unlike
+      checkpoint 3b's 8 types (already heap-boxed since 4b-4g, `bits`
+      the only thing missing), these three were never boxed at all --
+      `i_val`/`u_val`/`real.r_val` (shared with every other numeric kind)
+      remain the PRIMARY storage this checkpoint, exactly mirroring
+      checkpoint 2's own scope: the box exists solely to give `bits`
+      something real to decode to, so `pscalValueBitsConsistent` can
+      verify these three types too. The box becomes the actual sole
+      representation only at the 3d flag day. A single pair of dispatch
+      cases in `pscalValueSetIntBits`/`pscalValueSetRealBits` (core/
+      types.h) covers construction: **release-then-allocate**, not
+      allocate-only -- release whatever `int64_box`/`long_double_box`
+      is already there (safe by construction: `dest->type` is already
+      one of these three by the time these run, so any existing box is
+      guaranteed to be a real, matching one, never a stale union member
+      from some other type, matching every other boxed type's "callers
+      free before retyping" contract), then allocate fresh and re-tag.
+      This is what makes copy-on-construct safe for in-place mutation
+      with ZERO call-site changes to the mutation sites themselves,
+      exactly the "extend the shared macro, not every caller" lesson
+      checkpoint 2 established for the double-evaluation bug.
+      **Two dedicated research passes were run before writing any code**
+      specifically to answer one question: does anything mutate an
+      already-`TYPE_INT64`/`UINT64`/`LONG_DOUBLE` `Value` in place
+      (as opposed to constructing fresh), since a naive
+      always-allocate-fresh dispatch would leak the OLD box on every
+      such call? The answer was yes -- confirmed, not theoretical --
+      concentrated in exactly the hot paths that would make a leak
+      serious: `Inc`/`Dec` builtins, `INC_LOCAL`/`DEC_LOCAL` (backing
+      `for`-loop counters), and the `SET_LOCAL`/`SET_UPVALUE`/
+      `SET_INDIRECT` same-type assignment path (ordinary `x := expr`
+      when `x`'s type doesn't change). Release-then-allocate converts
+      every one of these into a safe pattern automatically. One
+      genuinely separate gap survived that fix: `setTypeValue`
+      (core/types.c), used only by ~11 real/int parameter-coercion call
+      sites in `vm.c`, does a bare `val->type = type;` with no relation
+      to the "free before retype" contract every other retype path
+      observes (unlike `SET_VALUE_TYPE`, whose callers were long since
+      audited to free first) -- fixed by making `setTypeValue` itself
+      release an old box before crossing the family boundary, a single
+      narrow fix covering all 11 call sites at once.
+      **The one real bug found only by running programs (as ever):**
+      `vm/vm.c`'s `copyValueForStack` -- the function `GET_LOCAL`/
+      `GET_UPVALUE`/`GET_GSLOT`/`DUP` all funnel through to push a
+      variable's value onto the stack -- had `TYPE_INT64`/`TYPE_UINT64`/
+      `TYPE_LONG_DOUBLE` grouped in its bare-bitwise-copy fast path
+      alongside genuinely-inline types like `TYPE_INT32`/`TYPE_DOUBLE`.
+      Correct before this checkpoint (no heap ownership to worry about);
+      wrong the instant these three own a box, since a bitwise `Value
+      copy = *src;` aliases the SAME box with no retain -- the exact
+      `TYPE_CLOSURE` bug shape from checkpoint 3a, in the same function,
+      confirmed the same way: an actual heap-use-after-free under ASan
+      (a trivial scope-shadowing test printing an `int` three times;
+      `printf`'s stack-pushed argument copy destroyed the live local
+      variable's own box on its first use, corrupting the variable for
+      every later read). Fixed by removing the three types from the
+      fast-path group, falling through to the already-correct
+      `makeCopyOfValue` case. Also fixed one pre-existing, independent
+      correctness gap found during the same pass: `vm.c`'s
+      `assignRealToIntChecked` had a `TYPE_UINT64` branch that wrote
+      `VAL_UINT`/`VAL_INT` directly (bypassing `SET_INT_VALUE` on
+      purpose, since its clamping semantics for `i_val` legitimately
+      differ from `SET_INT_VALUE`'s bit-reinterpret-only behavior) --
+      left `bits`/the box permanently stale after any real-to-uint64
+      coercion through this path. Fixed by calling
+      `pscalValueSetIntBits` explicitly afterward, without touching the
+      existing clamping logic.
+      Verified: full `Tests/run_all_suites.py` clean on both plain and
+      `build-asan` trees; the two hand-written 4g/4i-checkpoint-1/2
+      regression programs; all 10 rea/OOP tests; the Phase 3
+      growth-stress corpus; a dedicated int64/uint64/long-double stress
+      program exercising every hazard class this checkpoint's audit
+      found (`for`-loop counters, `Inc`/`Dec`, plain reassignment, real
+      <-> int coercion, copy-independence); a practical leak check (20M
+      -iteration `int64` vs `int32` loops showing near-identical peak
+      RSS, ruling out the release-then-allocate design leaking one box
+      per iteration -- `LeakSanitizer` itself is unavailable on this
+      macOS toolchain); and a sweep of all 168 non-SDL example programs
+      across `rea`/`pascal`/`clike`/`aether`'s `examples/base` directories
+      under both plain and ASan builds (a broader real-program corpus
+      than `Tests/`, per user guidance), zero crashes.
+    - **Checkpoint 3d (the physical collapse, done 2026-07-07):** every
+      legacy scalar/pointer field is deleted; `ValueStruct` becomes:
+      ```c
+      typedef struct ValueStruct {
+          VarType type;
+          uint64_t bits;
+      } Value;
+      ```
+      16 bytes, down from 176 (confirmed both before and after via a
+      standalone `sizeof(Value)` probe). **Deviation from the plan's
+      literal single-word sketch:** `Value` keeps an explicit `.type`
+      field rather than being purely `{ uint64_t bits }`. Reason:
+      `ClosureObj`/`InterfaceObj` (checkpoint 3a) are deliberately NOT
+      `ObjHeader`-based, so unlike every other boxed type they can't
+      self-describe their type by dereferencing into an `ObjHeader` --
+      recovering the type from `bits` alone would mean retrofitting a
+      discriminant onto those two structs and paying a pointer-dereference
+      on the VM's hottest-read property (every `VALUE_TYPE()` call). An
+      explicit tag field avoids both at the cost of not literally hitting
+      "8 bytes", a considered tradeoff, not an oversight.
+      **The new primitive:** `PSCAL_VALUE_PTR(v, T)` --
+      `((T *)pscalUntagPointer(bits))` -- decodes any heap-pointer payload
+      as a `T*`. Every existing pointer-payload accessor macro
+      (`AS_RECORD`/`AS_ARRAY`/`AS_FILE`/`AS_POINTER`/`AS_ENUM`/
+      `AS_CLOSURE`/`AS_INTERFACE`/`AS_SET`/the array/file/string/enum
+      metadata accessors) was redefined in terms of it, zero call-site
+      changes, the same "coexistence trick" every prior sub-phase used --
+      except this time there is nothing left to coexist WITH; the macro
+      layer had to be completely correct before the fields could be
+      deleted. `VAL_INT`/`VAL_UINT`/`VAL_REAL32`/`VAL_REAL64`/
+      `VAL_REAL_LD` became read-only dispatch functions (decode from
+      `.bits` per `.type`) since there is no longer a separate lvalue to
+      write through; the two live raw-lvalue-write call sites this broke
+      were simplified to plain `SET_INT_VALUE` calls. `AS_MSTREAM` lost
+      its one special-cased lvalue-capable form (it used to return the
+      raw union member itself, not a sub-field) for the same reason; its
+      two real write sites became `pscalValueSetHeapPtrBits` calls.
+      **Verification methodology -- the compiler as an exhaustive audit
+      tool:** once the fields were deleted, every remaining raw access
+      became a guaranteed compile error, a strictly more reliable audit
+      than any grep-based sweep (it cannot miss a call site the way text
+      search might: macro-expanded access, unusual formatting, etc. all
+      still fail to compile). `compile_commands.json`-driven
+      `-fsyntax-only -ferror-limit=0` gave complete per-file error lists;
+      four disjoint file sets were fixed via parallel agents each handed
+      the same exhaustive transformation-rules prompt, independently
+      confirming zero errors in their scope; the highest-context files
+      (`types.h`, `types.c`, `utils.c`) were done by hand.
+      **One high-impact self-inflicted bug found mid-sweep:** `AS_STRING`
+      is defined in `core/utils.h`, not `types.h` -- it was missed during
+      the systematic `types.h` macro rewrite and was still
+      `PSCAL_VALUE_FIELD(value, s_val)->buffer`, referencing the just
+      -deleted field. This produced the overwhelming majority of
+      "remaining errors" every parallel agent reported (traced back to
+      one macro-expansion origin, not independent bugs) until fixed with
+      a one-line change. Lesson: a systematic per-file macro pass does
+      not guarantee every macro for a given abstraction lives in the file
+      you're sweeping.
+      **Runtime bugs found only by running programs, all four
+      pre-existing and merely EXPOSED by this checkpoint (not introduced
+      by it) -- the same "dual representation was silently masking a real
+      bug" shape as every earlier sub-phase, but concentrated here because
+      this is the checkpoint that finally makes `bits` the sole source of
+      truth everywhere at once:**
+      1. `pscalValueDecodeInt`'s `TYPE_CHAR` case returned
+         `pscalUntagChar(bits)` -- a plain (often signed) `char` --
+         sign-extending byte values >= 128 into negative `long long`s
+         (`Ord(High(char))` returned -1, not 255; `Chr(219)` fed through
+         any codepoint-consuming path corrupted UTF-8 output). Fixed by
+         casting through `unsigned char` first, matching the pattern the
+         unsigned decode path already used.
+      2. `compiler.c`'s `addIntConstant` (used by every `AST_NUMBER`
+         literal not compile-time-folded) always called `makeInt()`,
+         which always tags `TYPE_INT32` -- a literal like `5000000000`
+         silently wrapped to `705032704`. Fixed by widening to
+         `makeInt64()` when the literal falls outside `INT32_MIN`/`MAX`.
+      3. **The largest-blast-radius bug:** the VM's generic (non-int32
+         -fast-path) integer opcode branches -- `BINARY_OP`'s
+         ADD/SUBTRACT/MULTIPLY/MOD arm, `NEGATE`, `AND`/`OR`/`XOR`,
+         `INT_DIV`, `MOD`, `SHL`/`SHR` -- all unconditionally wrapped
+         their `long long` result in `makeInt()` regardless of operand
+         width, so ANY arithmetic on an `int64`/`uint64` value that
+         didn't hit the int32 fast path silently truncated to 32 bits.
+         Before this checkpoint the tagged `bits` word was a mirror, not
+         authoritative, so this was invisible. Two new helpers,
+         `pscalIntResultLike1(a, result)`/`pscalIntResultLike2(a, b,
+         result)` (`core/utils.h`, usable from any file that includes
+         it), pick a result type as wide as the widest operand; every
+         site above, plus `compiler.c`'s compile-time constant-folding
+         arm (same bug, `const` expressions) and a dozen `builtin.c`/
+         `ext_builtins` functions found by a follow-up audit (`Sqr`,
+         `Succ`, `Abs`, `Round`, `Max`, `Min`, `Clamp`, `Floor`, `Ceil`,
+         `Trunc`, `Ord`, `Power`, `GetEnvInt`, `Fibonacci`, `Factorial`)
+         were switched to use them.
+      4. **The subtlest bug, and the one that actually broke the
+         reference stress test:** `SET_INDIRECT`'s dispatch chain has
+         explicit coercion branches for STRING/POINTER/REAL<->REAL/
+         REAL<->INT/BYTE<-INTEGER/WORD<-INTEGER/INTEGER<-BYTE-WORD
+         -BOOLEAN/INTEGER<-CHAR/CHAR/WIDECHAR -- but no branch at all for
+         `TYPE_INT64`/`TYPE_UINT64` targets receiving a narrower int-like
+         value. Every such assignment fell through to the generic
+         "replace the whole cell" catch-all, which blindly copies
+         `value_to_set`'s OWN type onto the target -- so `sum := 0` on a
+         declared `int64 sum` silently downgraded its runtime type to
+         `TYPE_INT32` on the very first assignment. Subsequent
+         accumulation (`sum := sum + i`) then routed through the int32
+         -truncating path every iteration, reproducing as an exact
+         `mod 2**32` of the true sum -- deceptively "clean" corruption
+         that looked like a single missed spot rather than a
+         per-iteration truncation, and was only caught by a 20M
+         -iteration stress program (small-N tests never accumulated past
+         `INT32_MAX` and passed by accident). Fixed by adding an explicit
+         `isIntlikeType(target) && isIntlikeType(value) && types differ`
+         branch that calls `SET_INT_VALUE` (preserves the target's actual
+         declared width) instead of falling through. This exact clobber
+         -bug was ALSO why `Inc(generation, step)` (a `LongInt` target,
+         `SmallInt` delta) happened to work before this checkpoint:
+         `step := 3` had silently upgraded `step` from `TYPE_INT16` to
+         `TYPE_INTEGER`, which `builtin.c`'s `coerceDeltaToI64` handles
+         explicitly, dodging its own separate, genuine gap (no case for
+         `TYPE_INT16`/`TYPE_INT8`/`TYPE_UINT16`/etc., silently returning a
+         0 delta) -- fixing bug 4 exposed this SEPARATE latent bug, fixed
+         by rewriting `coerceDeltaToI64` to dispatch generically via
+         `AS_INTEGER` for any `isIntlikeType`.
+      **One golden-output correction, not a bug fix:** CLike's
+      `PointerTorture.cl` asserted `float_field == 3.14` (a double
+      literal) after assigning `3.14` to a `float`-typed record field.
+      `TYPE_FLOAT` now has a genuine, narrow IEEE-754 single-precision
+      32-bit tagged payload (`pscalTagFloat`/`pscalUntagFloat`, built in
+      4h) -- previously the coexisting legacy field held full double
+      precision underneath the `TYPE_FLOAT` label, so this comparison
+      "worked" by accident. `(double)(float)3.14 != 3.14` is correct,
+      standard IEEE-754 behavior (the classic C/Java/C# float-precision
+      gotcha), confirmed against Pascal's own `Integer` overflow
+      semantics for consistency (`i := 5000000000` on a declared 32-bit
+      `Integer` already truncated the same way pre-existing, independent
+      of this checkpoint) before updating the golden `.out` file rather
+      than "fixing" the comparison logic. The same reasoning applied to
+      CLike's `Int64.cl` (`int i; i = 5000000000;`, expected the untruncated
+      value) -- fixing bug 4 above removed the SET_INDIRECT clobber that
+      had been accidentally auto-widening `i` past its declared 32-bit
+      type; the corrected golden output now expects the truncated value,
+      matching Pascal's `Integer` behavior exactly. `long.cl`/
+      `UnsignedTypes.cl` (explicitly `long`/`uint64`-typed) were
+      unaffected -- those targets are legitimately 64-bit, so bug 4's fix
+      makes them MORE correct, not different.
+      Verified: full `Tests/run_all_suites.py` clean on both plain and
+      `build-asan` trees (all frontend binaries -- `aether`/`rea`/
+      `pascal`/`clike`/`exsh` -- built and re-tested after each fix
+      round); the opt-in `vm-verify-corpus` (17-case) and `vm-fx-policy`
+      suites; a fresh sweep of all 168 non-SDL `examples/base` programs
+      across all four language frontends under both plain and ASan, zero
+      crashes/sanitizer findings; a dedicated 20M-iteration int64/uint64
+      accumulation stress program (the one that caught bug 4); a leak
+      check (peak RSS near-identical between 20M-iteration `int64` vs
+      `int32` loops, ruling out a per-iteration box leak --
+      `LeakSanitizer` itself is unavailable on this macOS toolchain); and
+      a fresh `sizeof(Value)` confirmation (16 bytes).
 - **4j — Stage B: ownership rationalization.** `DUP`/`CONSTANT`/`push`
   become word copies + `pscalObjRetain`; `freeValue` becomes
   `pscalObjRelease`; `valueEnsureUnique()` becomes the single choke point
