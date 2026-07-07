@@ -917,8 +917,9 @@ static int parseShellFunctionPointerPayload(const char *asm_text, Value *value_o
     unlink(tmp_path);
 
     value_out->type = TYPE_POINTER;
-    value_out->ptr_val = (Value *)compiled;
-    value_out->base_type_node = SHELL_FUNCTION_PTR_SENTINEL;
+    pscalPointerEnsureObj(value_out);
+    AS_POINTER(*value_out) = (Value *)compiled;
+    PTR_BASE_TYPE_NODE(*value_out) = SHELL_FUNCTION_PTR_SENTINEL;
     return 1;
 }
 
@@ -973,12 +974,12 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
         }
 
         Value arr = makeEmptyArray(elem_type, NULL);
-        arr.dimensions = dims;
-        arr.lower_bounds = lower_bounds;
-        arr.upper_bounds = upper_bounds;
-        arr.lower_bound = lower_bounds[0];
-        arr.upper_bound = upper_bounds[0];
-        arr.array_is_packed = isPackedByteElementType(elem_type);
+        ARRAY_DIMENSIONS(arr) = dims;
+        ARRAY_LOWER_BOUNDS(arr) = lower_bounds;
+        ARRAY_UPPER_BOUNDS(arr) = upper_bounds;
+        ARRAY_LOWER_BOUND(arr) = lower_bounds[0];
+        ARRAY_UPPER_BOUND(arr) = upper_bounds[0];
+        ARRAY_IS_PACKED(arr) = isPackedByteElementType(elem_type);
 
         int total = calculateArrayTotalSize(&arr);
         if (total < 0 || declared_total_ll != total) {
@@ -987,9 +988,9 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
         }
 
         if (total > 0) {
-            if (arr.array_is_packed) {
-                arr.array_raw = (uint8_t *)calloc((size_t)total, sizeof(uint8_t));
-                if (!arr.array_raw) {
+            if (ARRAY_IS_PACKED(arr)) {
+                AS_ARRAY_RAW(arr) = (uint8_t *)calloc((size_t)total, sizeof(uint8_t));
+                if (!AS_ARRAY_RAW(arr)) {
                     freeValue(&arr);
                     return 0;
                 }
@@ -999,11 +1000,11 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                         freeValue(&arr);
                         return 0;
                     }
-                    arr.array_raw[i] = (uint8_t)n;
+                    AS_ARRAY_RAW(arr)[i] = (uint8_t)n;
                 }
             } else {
-                arr.array_val = (Value *)calloc((size_t)total, sizeof(Value));
-                if (!arr.array_val) {
+                AS_ARRAY(arr) = (Value *)calloc((size_t)total, sizeof(Value));
+                if (!AS_ARRAY(arr)) {
                     freeValue(&arr);
                     return 0;
                 }
@@ -1035,8 +1036,10 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                                 freeValue(&arr);
                                 return 0;
                             }
-                            elem.u_val = (unsigned long long)n;
-                            elem.i_val = (long long)elem.u_val;
+                            // SET_INT_VALUE stores the exact 64-bit pattern
+                            // (VAL_UINT reinterprets it), same as cache.c's
+                            // readValue for the same type family.
+                            SET_INT_VALUE(&elem, n);
                             break;
                         }
                         case TYPE_FLOAT:
@@ -1056,7 +1059,9 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                                 freeValue(&arr);
                                 return 0;
                             }
-                            elem.s_val = text;
+                            StringObj *elem_str_obj = pscalStringObjCreate(-1, TYPE_STRING);
+                            pscalValueSetHeapPtrBits(&elem, elem_str_obj);
+                            elem_str_obj->buffer = text;
                             break;
                         }
                         case TYPE_CHAR: {
@@ -1065,8 +1070,7 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                                 freeValue(&arr);
                                 return 0;
                             }
-                            elem.c_val = (int)n;
-                            SET_INT_VALUE(&elem, elem.c_val);
+                            SET_INT_VALUE(&elem, n);
                             break;
                         }
                         case TYPE_NIL: {
@@ -1083,7 +1087,7 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                             freeValue(&arr);
                             return 0;
                     }
-                    arr.array_val[i] = elem;
+                    AS_ARRAY(arr)[i] = elem;
                 }
             }
         }
@@ -1115,8 +1119,7 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
             if (!parseLongLongToken(cursor, &n) || n < 0) {
                 return 0;
             }
-            v.u_val = (unsigned long long)n;
-            v.i_val = (long long)v.u_val;
+            SET_INT_VALUE(&v, n);
             break;
         }
         case TYPE_FLOAT:
@@ -1134,7 +1137,9 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
             if (!parseQuotedStringToken(cursor, &text)) {
                 return 0;
             }
-            v.s_val = text;
+            StringObj *str_obj = pscalStringObjCreate(-1, TYPE_STRING);
+            pscalValueSetHeapPtrBits(&v, str_obj);
+            str_obj->buffer = text;
             break;
         }
         case TYPE_CHAR: {
@@ -1142,8 +1147,7 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
             if (!parseLongLongToken(cursor, &n) || n < 0 || n > 255) {
                 return 0;
             }
-            v.c_val = (int)n;
-            SET_INT_VALUE(&v, v.c_val);
+            SET_INT_VALUE(&v, n);
             break;
         }
         case TYPE_NIL:
@@ -1167,18 +1171,20 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                 set_size < 0 || set_size > INT32_MAX) {
                 return 0;
             }
-            v.set_val.set_size = (int)set_size;
-            if (v.set_val.set_size > 0) {
-                v.set_val.set_values =
-                    (long long *)calloc((size_t)v.set_val.set_size, sizeof(long long));
-                if (!v.set_val.set_values) {
+            SetObj *set_obj = pscalSetObjCreate();
+            pscalValueSetHeapPtrBits(&v, set_obj);
+            set_obj->set_size = (int)set_size;
+            if (set_obj->set_size > 0) {
+                set_obj->set_values =
+                    (long long *)calloc((size_t)set_obj->set_size, sizeof(long long));
+                if (!set_obj->set_values) {
                     return 0;
                 }
-                for (int i = 0; i < v.set_val.set_size; ++i) {
-                    if (!parseLongLongToken(cursor, &v.set_val.set_values[i])) {
-                        free(v.set_val.set_values);
-                        v.set_val.set_values = NULL;
-                        v.set_val.set_size = 0;
+                for (int i = 0; i < set_obj->set_size; ++i) {
+                    if (!parseLongLongToken(cursor, &set_obj->set_values[i])) {
+                        free(set_obj->set_values);
+                        set_obj->set_values = NULL;
+                        set_obj->set_size = 0;
                         return 0;
                     }
                 }
@@ -1191,8 +1197,7 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                 return 0;
             }
             if (strcmp(keyword, "null") == 0) {
-                v.ptr_val = NULL;
-                v.base_type_node = NULL;
+                pscalValueSetHeapPtrBits(&v, NULL);
                 break;
             }
             if (strcmp(keyword, "shellfn_asm") == 0) {
@@ -1212,8 +1217,9 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                 if (!parseQuotedStringToken(cursor, &text)) {
                     return 0;
                 }
-                v.ptr_val = (Value *)text;
-                v.base_type_node = SERIALIZED_CHAR_PTR_SENTINEL;
+                pscalPointerEnsureObj(&v);
+                AS_POINTER(v) = (Value *)text;
+                PTR_BASE_TYPE_NODE(v) = SERIALIZED_CHAR_PTR_SENTINEL;
                 break;
             }
             if (strcmp(keyword, "opaque_addr") == 0) {
@@ -1227,8 +1233,9 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                 if (errno != 0 || end == addr_token || *end != '\0') {
                     return 0;
                 }
-                v.ptr_val = (Value *)(uintptr_t)addr;
-                v.base_type_node = OPAQUE_POINTER_SENTINEL;
+                pscalPointerEnsureObj(&v);
+                AS_POINTER(v) = (Value *)(uintptr_t)addr;
+                PTR_BASE_TYPE_NODE(v) = OPAQUE_POINTER_SENTINEL;
                 break;
             }
             return 0;

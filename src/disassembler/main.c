@@ -275,13 +275,13 @@ static int emitAsmV2ValuePayload(FILE *out, const Value *value) {
         case TYPE_INT8:
         case TYPE_INT16:
         case TYPE_INT64:
-            fprintf(out, " %lld", value->i_val);
+            fprintf(out, " %lld", VAL_INT(*value));
             break;
         case TYPE_UINT8:
         case TYPE_UINT16:
         case TYPE_UINT32:
         case TYPE_UINT64:
-            fprintf(out, " %llu", value->u_val);
+            fprintf(out, " %llu", VAL_UINT(*value));
             break;
         case TYPE_FLOAT:
         case TYPE_DOUBLE:
@@ -290,37 +290,45 @@ static int emitAsmV2ValuePayload(FILE *out, const Value *value) {
             break;
         case TYPE_STRING:
             fputc(' ', out);
-            printEscapedQuoted(out, value->s_val);
+            printEscapedQuoted(out, AS_STRING(*value));
             break;
         case TYPE_CHAR:
-            fprintf(out, " %d", value->c_val);
+            fprintf(out, " %d", AS_CHAR(*value));
             break;
         case TYPE_NIL:
             break;
-        case TYPE_ENUM:
+        case TYPE_ENUM: {
+            EnumObj *enum_obj = PSCAL_VALUE_PTR(*value, EnumObj);
+            const char *name = enum_obj ? enum_obj->enum_name : NULL;
+            int ordinal = enum_obj ? enum_obj->ordinal : 0;
             fputc(' ', out);
-            printEscapedQuoted(out, value->enum_val.enum_name ? value->enum_val.enum_name : "");
-            fprintf(out, " %d", value->enum_val.ordinal);
+            printEscapedQuoted(out, name ? name : "");
+            fprintf(out, " %d", ordinal);
             break;
-        case TYPE_SET:
-            fprintf(out, " %d", value->set_val.set_size);
-            for (int i = 0; i < value->set_val.set_size; ++i) {
-                fprintf(out, " %lld", value->set_val.set_values ? value->set_val.set_values[i] : 0LL);
+        }
+        case TYPE_SET: {
+            SetObj *set_obj = PSCAL_VALUE_PTR(*value, SetObj);
+            int set_size = set_obj ? set_obj->set_size : 0;
+            fprintf(out, " %d", set_size);
+            for (int i = 0; i < set_size; ++i) {
+                fprintf(out, " %lld", (set_obj && set_obj->set_values) ? set_obj->set_values[i] : 0LL);
             }
             break;
-        case TYPE_POINTER:
-            if (value->ptr_val == NULL) {
+        }
+        case TYPE_POINTER: {
+            if (!PSCAL_VALUE_PTR(*value, PointerObj)) {
                 fprintf(out, " null");
                 break;
             }
-            if (value->base_type_node == STRING_CHAR_PTR_SENTINEL ||
-                value->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL) {
+            AST *base = PTR_BASE_TYPE_NODE(*value);
+            void *address = (void *)AS_POINTER(*value);
+            if (base == STRING_CHAR_PTR_SENTINEL || base == SERIALIZED_CHAR_PTR_SENTINEL) {
                 fprintf(out, " charptr ");
-                printEscapedQuoted(out, (const char *)value->ptr_val);
+                printEscapedQuoted(out, (const char *)address);
                 break;
             }
-            if (value->base_type_node == SHELL_FUNCTION_PTR_SENTINEL) {
-                ShellCompiledFunction *compiled = (ShellCompiledFunction *)value->ptr_val;
+            if (base == SHELL_FUNCTION_PTR_SENTINEL) {
+                ShellCompiledFunction *compiled = (ShellCompiledFunction *)address;
                 if (!compiled || compiled->magic != SHELL_COMPILED_FUNCTION_MAGIC) {
                     fprintf(stderr, "pscald: unsupported pointer constant payload in --emit-asm.\n");
                     return 0;
@@ -336,11 +344,15 @@ static int emitAsmV2ValuePayload(FILE *out, const Value *value) {
                 break;
             }
             fprintf(out, " opaque_addr %llu",
-                    (unsigned long long)(uintptr_t)value->ptr_val);
+                    (unsigned long long)(uintptr_t)address);
             break;
+        }
         case TYPE_ARRAY: {
-            int dims = value->dimensions;
-            if (dims <= 0 || !value->lower_bounds || !value->upper_bounds) {
+            int dims = ARRAY_DIMENSIONS(*value);
+            int *lower_bounds = ARRAY_LOWER_BOUNDS(*value);
+            int *upper_bounds = ARRAY_UPPER_BOUNDS(*value);
+            VarType elem_type = ARRAY_ELEMENT_TYPE(*value);
+            if (dims <= 0 || !lower_bounds || !upper_bounds) {
                 fprintf(stderr, "pscald: invalid array constant shape in --emit-asm.\n");
                 return 0;
             }
@@ -350,29 +362,31 @@ static int emitAsmV2ValuePayload(FILE *out, const Value *value) {
                 return 0;
             }
 
-            fprintf(out, " dims %d elem %d bounds", dims, (int)value->element_type);
+            fprintf(out, " dims %d elem %d bounds", dims, (int)elem_type);
             for (int i = 0; i < dims; ++i) {
-                fprintf(out, " %d %d", value->lower_bounds[i], value->upper_bounds[i]);
+                fprintf(out, " %d %d", lower_bounds[i], upper_bounds[i]);
             }
             fprintf(out, " values %d", total);
 
             if (total > 0) {
                 if (arrayUsesPackedBytes(value)) {
-                    if (!value->array_raw) {
+                    uint8_t *raw = AS_ARRAY_RAW(*value);
+                    if (!raw) {
                         fprintf(stderr, "pscald: packed array constant missing raw bytes.\n");
                         return 0;
                     }
                     for (int i = 0; i < total; ++i) {
-                        fprintf(out, " %u", (unsigned)value->array_raw[i]);
+                        fprintf(out, " %u", (unsigned)raw[i]);
                     }
                 } else {
-                    if (!value->array_val) {
+                    Value *elements = AS_ARRAY(*value);
+                    if (!elements) {
                         fprintf(stderr, "pscald: array constant missing elements.\n");
                         return 0;
                     }
                     for (int i = 0; i < total; ++i) {
-                        const Value *elem = &value->array_val[i];
-                        switch (value->element_type) {
+                        const Value *elem = &elements[i];
+                        switch (elem_type) {
                             case TYPE_INT32:
                             case TYPE_WORD:
                             case TYPE_BYTE:
@@ -380,13 +394,13 @@ static int emitAsmV2ValuePayload(FILE *out, const Value *value) {
                             case TYPE_INT8:
                             case TYPE_INT16:
                             case TYPE_INT64:
-                                fprintf(out, " %lld", elem->i_val);
+                                fprintf(out, " %lld", VAL_INT(*elem));
                                 break;
                             case TYPE_UINT8:
                             case TYPE_UINT16:
                             case TYPE_UINT32:
                             case TYPE_UINT64:
-                                fprintf(out, " %llu", elem->u_val);
+                                fprintf(out, " %llu", VAL_UINT(*elem));
                                 break;
                             case TYPE_FLOAT:
                             case TYPE_DOUBLE:
@@ -395,10 +409,10 @@ static int emitAsmV2ValuePayload(FILE *out, const Value *value) {
                                 break;
                             case TYPE_STRING:
                                 fputc(' ', out);
-                                printEscapedQuoted(out, elem->s_val);
+                                printEscapedQuoted(out, AS_STRING(*elem));
                                 break;
                             case TYPE_CHAR:
-                                fprintf(out, " %d", elem->c_val);
+                                fprintf(out, " %d", AS_CHAR(*elem));
                                 break;
                             case TYPE_NIL:
                                 fprintf(out, " nil");
@@ -406,7 +420,7 @@ static int emitAsmV2ValuePayload(FILE *out, const Value *value) {
                             default:
                                 fprintf(stderr,
                                         "pscald: unsupported array element type %s in --emit-asm.\n",
-                                        varTypeToString(value->element_type));
+                                        varTypeToString(elem_type));
                                 return 0;
                         }
                     }

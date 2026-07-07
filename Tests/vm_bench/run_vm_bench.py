@@ -36,7 +36,19 @@ RUN_TIMEOUT_S = 600  # generous; a hung VM should not hang the runner forever
 
 # name -> (source file, expected deterministic check value)
 BENCHES = {
-    "arith":   ("arith.p",   "820389702"),
+    # VM 2.0 Phase 4i checkpoint 3d (plan §5.10) fixed a real pre-existing
+    # bug: "blanket truncation across every generic (non-int32-fast-path)
+    # integer VM opcode" -- arith.p's acc accumulator exceeds 32-bit range
+    # well before its periodic `mod`, so it's exactly the shape that bug
+    # affected. The old expected value (820389702, set in the original
+    # Phase 0 commit that added this suite, long before the fix existed)
+    # was silently computed under that bug. Independently re-derived via a
+    # from-scratch Python re-simulation of Kernel() using explicit 32-bit
+    # signed wraparound arithmetic throughout (matching this VM's
+    # confirmed, correct `integer` semantics) -- reproduces 820389738
+    # exactly, with zero fudging, confirming this is the mathematically
+    # correct result and 820389702 was the bug's output, not a regression.
+    "arith":   ("arith.p",   "820389738"),
     "calls":   ("calls.p",   "19641820"),
     "strings": ("strings.p", "9766500"),
     "globals": ("globals.p", "3547984"),
