@@ -40,3 +40,36 @@ TSan was not set up for this repo as of this writing (no CMake toggle
 exists yet); the ASan-repeated-run approach above is the documented
 fallback per the phase's own rigor bar. If a TSan build ever gets added,
 point it at the same fixture.
+
+## `dynamic_array_setlength_race.pas`
+
+A stop-ship-if-it-regresses fixture for a real, pre-existing bug (found
+during VM 2.0 Phase 4j verification, unrelated to Phase 4j itself): one
+thread calling `SetLength()` on a shared global dynamic array while another
+concurrently reads it (`Length()`, or an indexed element read) corrupted
+memory 100% reproducibly within 1-3 runs before the fix (see the file's own
+header comment for the root cause and the two fix sites:
+`backend_ast/builtin.c`'s `resizeDynamicArrayValue`/`resolveFirstDimBounds`
+and `vm.c`'s `LOAD_ELEMENT_VALUE`/`LOAD_ELEMENT_VALUE_CONST`).
+
+```sh
+# Plain build: repeat many times, a pre-fix run reliably fails within a
+# handful of iterations (crash, or prints FAIL/garbage instead of PASS).
+for i in $(seq 1 100); do
+  build/bin/pascal --no-cache Tests/vm_thread_stress/dynamic_array_setlength_race.pas \
+    | grep -q "^PASS" || echo "FAILED run $i"
+done
+
+# ASan+UBSan and ThreadSanitizer (build-tsan/, this repo does have a TSan
+# toggle unlike the globals_concurrency fixture above) both applicable too.
+build-asan/bin/pascal --no-cache Tests/vm_thread_stress/dynamic_array_setlength_race.pas
+build-tsan/bin/pascal --no-cache Tests/vm_thread_stress/dynamic_array_setlength_race.pas
+```
+
+Verified (2026-07-07): 100/100 clean on plain `build/`, 10/10 clean under
+`build-asan` (ASan+UBSan), and clean (prints `PASS`, zero races attributed
+to the array/`SetLength` code) under `build-tsan` (`-fsanitize=thread`) --
+the only TSan findings on this fixture are the pre-existing, already
+out-of-scope thread-teardown races documented in
+`Docs/pscal_vm2_plan.md` §5.10.4 (`joinThreadInternal`/
+`vmFreeRuntimeVTables`/`vmFreeShellBuiltinProfiles`).
