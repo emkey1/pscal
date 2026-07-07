@@ -73,3 +73,65 @@ the only TSan findings on this fixture are the pre-existing, already
 out-of-scope thread-teardown races documented in
 `Docs/pscal_vm2_plan.md` §5.10.4 (`joinThreadInternal`/
 `vmFreeRuntimeVTables`/`vmFreeShellBuiltinProfiles`).
+
+## `get_element_address_race.pas`, `record_field_dynamic_array_race.pas`, `setlength_concurrent_writers_race.pas`
+
+Three narrower follow-up fixtures for gaps `dynamic_array_setlength_race.pas`'s
+own fix (pscal-core f65432e) explicitly left out of scope, found and fixed in
+a follow-up pass:
+
+- **`get_element_address_race.pas`**: `GET_ELEMENT_ADDRESS`/
+  `GET_ELEMENT_ADDRESS_CONST` (vm.c) hand out a live address into a dynamic
+  array's own storage for in-place mutation (`sharedDyn[0] := i` compiles to
+  `GET_ELEMENT_ADDRESS` + `SET_INDIRECT`) -- unlike the read opcodes
+  f65432e fixed, this one can't just return a detached copy. Fixed by
+  having it take its own retained snapshot (same
+  `copyDynamicArraySnapshotValue()` f65432e already uses for reads) and
+  transferring that retained reference into the returned pointer
+  (`PointerObj.retained_array`, core/types.h) instead of releasing it
+  before the opcode returns, so the buffer outlives a concurrent
+  `SetLength()` for exactly as long as the pointer does.
+- **`record_field_dynamic_array_race.pas`**: `pushFieldValueByName` (vm.c,
+  backs `LOAD_FIELD_VALUE_BY_NAME`/`16`, i.e. reading `rec.dynField`) had
+  the exact "peek `ARRAY_IS_DYNAMIC` before any lock" shape f65432e fixed
+  for plain globals, just for a record field. Same fix: call
+  `copyDynamicArraySnapshotValue()` unconditionally first.
+- **`setlength_concurrent_writers_race.pas`**: two threads calling
+  `SetLength()` on the SAME array concurrently (no reader needed) --
+  `resizeDynamicArrayValue`'s own initial, unlocked read of the array's
+  current `ArrayObj` (backend_ast/builtin.c) could be freed out from under
+  it by the OTHER thread's publish step. Fixed with a defensive retain at
+  entry, released independently of the publish step's own release (which
+  now re-reads the cell's current content under lock rather than assuming
+  it's still what this call started with). A second, sibling gap surfaced
+  by this fixture under ASan: `vmBuiltinSetlength`'s element-type back-fill
+  check read/mutated the array's `ArrayObj` fields in place before ever
+  calling `resizeDynamicArrayValue`, with the same lack of protection --
+  fixed the same way. A third, TSan-only gap (a plain unprotected read of
+  `array_value`'s pointer bits in the function's very first validity
+  guard, racing the other thread's publish write to the same field) was
+  fixed by deferring that check to the already-locked retain fetch just
+  below it.
+
+```sh
+for i in $(seq 1 100); do
+  build/bin/pascal --no-cache Tests/vm_thread_stress/get_element_address_race.pas \
+    | grep -q "^PASS" || echo "FAILED run $i"
+done
+# ...same loop for the other two fixtures.
+
+build-asan/bin/pascal --no-cache Tests/vm_thread_stress/get_element_address_race.pas
+build-tsan/bin/pascal --no-cache Tests/vm_thread_stress/get_element_address_race.pas
+# ...same for record_field_dynamic_array_race.pas and setlength_concurrent_writers_race.pas
+```
+
+Verified (2026-07-07): 100/100 clean on plain `build/` for all three, 10/10
+clean under `build-asan` (ASan+UBSan) for all four fixtures in this
+directory (including a re-check of `dynamic_array_setlength_race.pas`), and
+clean under `build-tsan` -- zero races attributable to array/`SetLength`/
+`GET_ELEMENT_ADDRESS`/record-field code across repeated runs of all four
+fixtures. The occasional extra `freeVM`/`thread leak` TSan finding seen on
+some runs is the same pre-existing, generic thread-teardown flakiness as
+the already-documented `joinThreadInternal` et al noise above (reproduced
+on `dynamic_array_setlength_race.pas` too across enough runs) -- unrelated
+to array code, not something this pass fixes.
