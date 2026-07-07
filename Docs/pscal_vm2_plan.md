@@ -1951,6 +1951,72 @@ with the plan's existing Phase 1/2 convention of lettered sub-phases):
   differential harness + full suites (including the standalone aether
   build, per the plan's standing per-phase checklist) are the gate, not new
   design decisions.
+  **Split into three checkpoints given the size and irreversibility of the
+  physical collapse (unlike 4a-4h, there is no partial-rollback story once
+  `Value`'s layout actually changes) -- checkpoint 1 done (2026-07-06),
+  checkpoints 2/3 remain:**
+  - **Checkpoint 1 (additive prep, done):** resolved the one real design
+    gap 4g left open. A dedicated research pass (two parallel audits: one
+    tracing every `PTR_BASE_TYPE_NODE` call site, one auditing every
+    remaining raw scalar field) found 4g's "TYPE-AGNOSTIC, can't box it"
+    conclusion about `base_type_node` was broader than the evidence
+    supported: `TYPE_RECORD` was a red herring (zero actual construction
+    site anywhere populates a record's `base_type_node`; the one call
+    site that reads it, `CALL_METHOD`'s className lookup, does so on a
+    dereferenced record and gets NULL today regardless), and only
+    `TYPE_POINTER` and `TYPE_ENUM` are real users. Reversed 4g's decision:
+    `base_type_node` now lives in `PointerObj.base_type_node` (the
+    original pre-4g plan, restored) and a new `EnumObj.enum_type_def`
+    field (distinct from `enum_meta` -- that's non-owned member-name
+    metadata, this is the enum's own `AST_ENUM_TYPE` definition node used
+    for type-compatibility checks). `PTR_BASE_TYPE_NODE` now requires
+    `VALUE_TYPE(v) == TYPE_POINTER`, exactly like every other
+    `PSCAL_VALUE_FIELD`-based accessor's contract; a new `ENUM_TYPE_DEF`
+    macro covers the enum case. Every "generic assignment-preservation"
+    call site the original 4g audit flagged (`vm.c`'s
+    `replaceValueCell`/`vmStoreThreadMyself`/`SET_INDIRECT`'s fallback
+    path, `resolveRecordTypeFromBaseValue`, `CALL_METHOD`'s className
+    lookup, two `DEBUG_PRINT`s in `symbol.c`) turned out to call
+    `PTR_BASE_TYPE_NODE` on a value of UNKNOWN type -- each now guards
+    with an explicit `VALUE_TYPE(v) == TYPE_POINTER` check first, since a
+    call on a non-pointer value now dereferences the wrong union member
+    (a real bug, not the latent-but-harmless no-op it was pre-4i). The
+    ~16 raw (non-macro) scalar-field accesses the second audit found
+    (`.type`/`.i_val`/`.c_val`/`.real.*`, mostly in `rea/semantic.c`'s and
+    `rea/parser.c`'s/`pascal/parser.c`'s/`aether/ast_parser.c`'s
+    compile-time-constant folding, plus 4 in pscal-core's own
+    `compiler.c`/`bytecode.c`/`vm_fx_policy.c`) were all mechanical macro
+    substitutions -- confirmed via the audit that every remaining raw hit
+    outside those call sites is inside the representation layer itself
+    (`core/utils.c`/`core/utils.h`/`core/cache.c`), which is expected and
+    consistent with every prior sub-phase's convention. **One real,
+    independent, pre-existing bug found and fixed along the way**: `core/
+    cache.c`'s `writePointerValue`/`readPointerValue`/`hashValue` read
+    and wrote `v->ptr_val` directly as if it were the raw pointee address
+    -- correct pre-4g (when `ptr_val` *was* the address) but wrong since
+    4g introduced the `PointerObj` wrapper (the address moved to
+    `AS_POINTER(*v)`/`v->ptr_val->address`). Latent because the only live
+    caller in practice is exsh's `SHELL_FUNCTION_PTR_SENTINEL` path (any
+    shell script defining a function embeds that function as a bytecode
+    constant, `compileFunction` in `codegen.c`), and nothing in the full
+    suite happened to force a cache round-trip of one. Confirmed via a
+    hand-written exsh script defining a function, run twice (first
+    compiles + caches, second loads from cache and re-executes the
+    function correctly) -- would have failed the `compiled->magic`
+    sanity check pre-fix. Verified: full `Tests/run_all_suites.py` clean
+    on both plain and `build-asan` trees (representation-prep only, no
+    live construction site changed yet -- zero suite impact expected and
+    observed), the pointer/enum/file hand-written regression program from
+    4g re-run unchanged, all 10 previously-fixed rea/OOP tests, the Phase
+    3 growth-stress corpus, and the exsh function-cache round-trip above
+    -- all clean under both plain and ASan builds.
+  - **Checkpoint 2 (accessor macro rewrite, pending):** rewrite every
+    accessor macro's body to decode/encode through the 4h tagged-word
+    functions, while keeping `Value`'s physical layout oversized (so a
+    mistake surfaces as a wrong value, not a crash).
+  - **Checkpoint 3 (the physical collapse, pending):** shrink
+    `ValueStruct` to `{ uint64_t bits; }`, delete every now-dead field,
+    full differential + suite verification.
 - **4j — Stage B: ownership rationalization.** `DUP`/`CONSTANT`/`push`
   become word copies + `pscalObjRetain`; `freeValue` becomes
   `pscalObjRelease`; `valueEnsureUnique()` becomes the single choke point
