@@ -8,7 +8,9 @@ record/replay -- concurrency-track-independent, done out of sequence) all
 shipped 2026-07-05.
 Phase 4's Stage A (§5.10.4 sub-phases 4a-4g: ObjHeader foundation;
 closures/interfaces/mstreams; strings/sets; records; arrays; files/pointers/
-enums) shipped 2026-07-06. 4h onward, and Phase 5 and 7, remain proposal.
+enums) shipped 2026-07-06, followed same-day by 4h (numeric/scalar
+tagged-word encoding, standalone/not yet wired into Value). 4i onward, and
+Phase 5 and 7, remain proposal.
 Companion to the
 [VM Technical Manual](pscal_vm_manual/pscal_vm_manual.md), which documents
 the 1.x engine this plan modifies.  File/line references are to
@@ -1111,9 +1113,10 @@ embedded shell-closure coverage, and a concrete ceiling/overflow story).
 
 ### 5.10 Phase 4: Value re-representation
 
-**Status: Stage A sub-phases 4a-4g shipped (2026-07-06, through pscal-core
-commit 46c6e34 plus this section's own array work, files/pointers/enums);
-4h onward remain proposal.** Everything below was verified against the actual source as of
+**Status: Stage A sub-phases 4a-4h shipped (2026-07-06, through pscal-core
+commit 46c6e34 plus this section's own array work, files/pointers/enums,
+and the standalone tagged-word encoding); 4i onward remain proposal.**
+Everything below was verified against the actual source as of
 `pscal-core` commit 19b36af (post-Phase-6) at design time, not against the
 plan's original one-paragraph sketch — the original sketch undersold the
 problem: it described Value as if it were already close to a tagged union
@@ -1899,6 +1902,46 @@ with the plan's existing Phase 1/2 convention of lettered sub-phases):
   this point — this sub-phase validates the encoding/decoding logic itself
   (round-trip tests, the canary, NaN canonicalization) without yet
   committing to the layout change.
+  **Done (2026-07-06):** shipped exactly to this scope, and true to plan
+  in a way 4b-4g weren't — nothing here touches `ValueStruct`, `utils.c`,
+  or any live construction/accessor site, so there was no chicken-and-egg
+  bug class to find this time (that bug class needs an existing
+  construction site to retrofit; 4h has none yet). All new code lives in
+  `core/obj_header.{h,c}` alongside 4a's NaN-box/canary, not
+  `core/types.h`/`core/utils.c` where 4b-4g's shapes live — deliberately,
+  so the whole sub-phase stays standalone-buildable against just those
+  two files (`cc -Icomponents/pscal-core/src test_tagged_word.c
+  obj_header.c`), the same isolation 4a's own unit-test harness
+  established. `Int64Box`/`LongDoubleBox` are real, fully-functional
+  `ObjHeader`-based heap types (create + lazily-registered destructor,
+  same shape every prior sub-phase's wrapper type has) but are not yet
+  referenced by `ValueStruct`'s union or any accessor macro -- that wiring
+  is 4i's job once `Value`'s physical layout actually collapses; expect
+  the two struct definitions to move from `obj_header.h` to `core/types.h`
+  at that point, alongside every other `ObjHeader`-based shape, once
+  something outside this file references them. One implementation
+  deviation from a first draft: `pscalInt64BoxCreate`/
+  `pscalLongDoubleBoxCreate`'s destructor registration originally used
+  `pthread_once` (matching `EnumObj`/`FileObj`/`PointerObj`'s established
+  pattern in `utils.c`) but was switched to an `atomic_bool`
+  claim-once guard instead, matching the pointer-width canary's own idiom
+  already in this file — `obj_header.c` has zero other pthread dependency,
+  and introducing one just for this would be inconsistent with the file's
+  existing self-contained style. Verified: a new standalone test binary
+  (`Tests/vm2_phase4/test_tagged_word.c`, run by the same
+  `Tests/run_vm2_phase4_tests.sh` that already builds 4a's tests)
+  round-trips every one of the 14 immediate kinds at their type's exact
+  boundary values (signed min/max, unsigned max, float NaN/Infinity),
+  confirms pointer words and immediate words never collide, confirms the
+  45-bit payload mask doesn't leak into the kind field or reserved
+  header even at all-ones, and exercises `Int64Box`/`LongDoubleBox`
+  create/retain/release including the `TYPE_UINT64` bit-reinterpretation
+  case. Clean under both a plain build and `-fsanitize=address,undefined`.
+  `Tests/run_all_suites.py` also re-run in full (unaffected, as expected
+  — nothing in the live VM references this code yet) to confirm the
+  additions to `obj_header.{h,c}` (part of the real `pscal_core_static`
+  build already, unused code notwithstanding) didn't break anything by
+  simply existing.
 - **4i — The flag day.** Physically collapse `struct ValueStruct` to
   `{ uint64_t bits; }`. Delete every now-dead field. Finalize every
   accessor macro's body to do real bit-packing instead of struct-field

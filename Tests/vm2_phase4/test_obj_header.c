@@ -69,6 +69,28 @@ static void test_retain_release_lifecycle(void) {
     printf("test_retain_release_lifecycle: PASS\n");
 }
 
+static void test_release_already_zero_refcount_is_safe(void) {
+    // Simulates a double-release without actually double-freeing: force
+    // the header's refcount to 0 directly (bypassing the normal release
+    // path, which would already have run the destructor), then call
+    // pscalObjRelease on it. It must not run the destructor a second time
+    // (that would be a use-after-free layered on the original bug) and
+    // must not leave the refcount corrupted (wrapped to UINT32_MAX).
+    int destroyed = 0;
+    FakeObj *obj = malloc(sizeof(FakeObj));
+    assert(obj);
+    obj->destroyed_flag = &destroyed;
+    pscalObjHeaderInit(&obj->header, FAKE_OBJ_TYPE);
+    atomic_store(&obj->header.refcount, 0u);
+
+    pscalObjRelease(&obj->header);
+    assert(destroyed == 0); // destructor must not have run
+    assert(atomic_load(&obj->header.refcount) == 0); // restored, not left at UINT32_MAX
+
+    free(obj); // this test owns obj's lifecycle directly, not via refcounting
+    printf("test_release_already_zero_refcount_is_safe: PASS\n");
+}
+
 static void test_retain_release_null_safe(void) {
     ObjHeader *retained = pscalObjRetain(NULL);
     assert(retained == NULL);
@@ -189,6 +211,14 @@ static void test_canary_passes_under_normal_conditions(void) {
 // doesn't take the whole test binary down with it ----
 
 static int run_in_child_and_get_exit_status(void (*fn)(void)) {
+    // Flush before forking: stdout is fully buffered (not line-buffered)
+    // when this test's output is piped/captured rather than going to a
+    // real TTY, so without this the child inherits whatever PASS lines
+    // are still sitting unflushed in the parent's buffer and re-emits
+    // them on its own exit path -- harmless to correctness (every
+    // assertion still runs and is checked independently) but confusing
+    // to read.
+    fflush(stdout);
     pid_t pid = fork();
     if (pid == 0) {
         // Child: silence the expected diagnostic so the test's own
@@ -230,6 +260,7 @@ static void test_abort_on_release_with_no_destructor(void) {
 
 int main(void) {
     test_retain_release_lifecycle();
+    test_release_already_zero_refcount_is_safe();
     test_retain_release_null_safe();
     test_nanbox_ordinary_doubles();
     test_nanbox_canonicalizes_colliding_nan();
