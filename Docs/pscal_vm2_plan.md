@@ -13,8 +13,10 @@ tagged-word encoding, standalone/not yet wired into Value). 4i (the `Value`
 flag day) is split into checkpoints 1-3, checkpoint 3 further split into
 3a-3d; checkpoints 1, 2, 3a, 3b, 3c, and 3d all shipped (3a-3d 2026-07-07).
 **Checkpoint 3d is the physical collapse itself** -- `Value` is now
-`{ VarType type; uint64_t bits; }`, 16 bytes (was 176). 4j, Phase 5, and
-Phase 7 remain proposal.
+`{ VarType type; uint64_t bits; }`, 16 bytes (was 176). 4j (Stage B:
+ownership rationalization -- cheap retain-share copies plus
+`valueEnsureUnique()`'s write-time clone-on-share) shipped 2026-07-07,
+completing Phase 4 in full. Phase 5 and Phase 7 remain proposal.
 Companion to the
 [VM Technical Manual](pscal_vm_manual/pscal_vm_manual.md), which documents
 the 1.x engine this plan modifies.  File/line references are to
@@ -2493,16 +2495,147 @@ with the plan's existing Phase 1/2 convention of lettered sub-phases):
       `int32` loops, ruling out a per-iteration box leak --
       `LeakSanitizer` itself is unavailable on this macOS toolchain); and
       a fresh `sizeof(Value)` confirmation (16 bytes).
-- **4j — Stage B: ownership rationalization.** `DUP`/`CONSTANT`/`push`
-  become word copies + `pscalObjRetain`; `freeValue` becomes
-  `pscalObjRelease`; `valueEnsureUnique()` becomes the single choke point
-  address-based mutation paths (`SET_INDIRECT`, field writes) funnel
-  through, **with the dynamic-array-alias and file-identity exemptions from
-  §5.10.6 baked in as explicit branches, not an afterthought**. Existing
-  Risk Register entry ("CoW semantics subtly change Pascal record aliasing
-  behavior... differential corpus must include the Rea OOP and VAR-param
-  suites") applies unchanged and is now joined by the array-semantics and
-  file-identity risks this design surfaced.
+- **4j — Stage B: ownership rationalization (done 2026-07-07):** shipped,
+  with two deviations from this section's original sketch, both discovered
+  during design/verification rather than assumed away.
+  **Deviation 1 -- the atomic-refcount and mutex-retirement split.**
+  `ObjHeader.refcount` was already `_Atomic uint32_t` with lock-free
+  `pscalObjRetain`/`pscalObjRelease` since 4a -- that half of §5.10.5's
+  "atomic refcounts, no mutex" decision needed no new work. The OTHER
+  half -- retiring `value_cell_mutex`/`dynamic_array_refcount_mutex`
+  because "`Value` becomes a naturally-atomic 64-bit word" -- rests on a
+  premise checkpoint 3d's own design broke: `Value` is `{ VarType type;
+  uint64_t bits; }`, two 8-byte fields at offsets 0 and 8, not one
+  machine word (confirmed via `offsetof`). A whole-struct `*target =
+  replacement` is not atomic on x86_64/ARM64 without 128-bit CAS support.
+  Rather than chase fragile lock-free 128-bit atomics across macOS/Linux/
+  iOS, **both mutexes are kept** -- a considered, documented deviation,
+  not an oversight. `replaceValueCell`/`copyDynamicArraySnapshotValue`'s
+  existing pairing is unchanged.
+  **The actual ownership-model work:** `copyValueForStack` (`vm.c`, backs
+  `DUP`/`CONSTANT`/`GET_LOCAL`/`GET_UPVALUE`/`GET_GSLOT`/array-element
+  reads) gained cheap alias-plus-`pscalObjRetain` fast paths for
+  `TYPE_STRING`/`TYPE_UNICODE_STRING`/`TYPE_SET`/`TYPE_RECORD`/
+  `TYPE_ENUM`/`TYPE_ARRAY` (both static and dynamic -- retain-sharing on
+  COPY is correct and desired for both; only the write-time CoW-vs-share
+  decision differs by `is_dynamic`), replacing what had been an
+  unconditional `makeCopyOfValue` deep clone on every read of a variable
+  holding one of these since 4i shipped. `TYPE_INT64`/`TYPE_UINT64`/
+  `TYPE_LONG_DOUBLE` needed no change -- checkpoint 3c's release-then-
+  allocate mutation design (never mutate a box's field in place; always
+  construct fresh and release the old reference) is already CoW-safe by
+  construction. `TYPE_CLOSURE`/`TYPE_INTERFACE`/`TYPE_MEMORYSTREAM` were
+  reference types with working retain/release before 4j and needed no
+  change either.
+  **`valueEnsureUnique(Value *target)`** (`core/utils.c`) is the write-time
+  choke point: if `target`'s boxed object is shared (`ObjHeader.refcount >
+  1`), clones it via the existing `makeCopyOfValue` (reusing every boxed
+  type's deep-copy logic, not reimplementing it) before the caller
+  mutates; a no-op otherwise. `TYPE_ARRAY` with `is_dynamic == true` and
+  `TYPE_FILE` are permanent exemptions exactly as §5.10.5 specified
+  (dynamic arrays keep real reference semantics via the pre-existing
+  `copyDynamicArraySnapshotValue` retain-share; files are identity-
+  bearing and were already excluded from any copy tracking, see below).
+  **The key design insight that simplified wiring far below the original
+  estimate:** read-only value loads (`LOAD_ELEMENT_VALUE`, `LOAD_FIELD_VALUE*`)
+  never take an address into a boxed object's payload at all -- they
+  decode and push a value copy directly. Only the address-TAKING opcodes
+  (`GET_ELEMENT_ADDRESS`, `GET_ELEMENT_ADDRESS_CONST`, `GET_FIELD_ADDRESS`/
+  `16`/`_KEEP`/`_KEEP16`, `GET_CHAR_ADDRESS`, and the inline string-char-
+  address branch inside `GET_ELEMENT_ADDRESS`) can ever be used for a
+  mutation (`SET_INDIRECT`, VAR-parameter aliasing, or a read-modify-write
+  builtin like `Inc`) -- and calling `valueEnsureUnique()` unconditionally
+  at every one of these, regardless of whether THIS particular call turns
+  out to be a write or a VAR-param alias, is not an approximation but the
+  semantically CORRECT rule: VAR-param aliasing of a shared static
+  array/record must ALSO force uniqueness first, or a mutation through
+  the alias would leak into every other Value still sharing the pre-CoW
+  object. This meant **zero compiler/opcode changes** were needed --
+  contrary to an initial (wrong) concern raised during design that
+  distinguishing "read" from "write" address-taking would require new
+  opcodes or compile-time lvalue classification.
+  **Four real bugs found only by running programs, all four pre-existing
+  design assumptions that 4j's retain-sharing broke (matching every prior
+  sub-phase's pattern: a masked assumption surfaces the instant the
+  representation stops accidentally protecting it):**
+  1. `BINARY_OP`'s string-concatenation fast path (`vm.c`) did an in-place
+     `realloc()` on the LEFT operand's buffer whenever it looked like a
+     "spare" `TYPE_STRING`, assuming exclusive ownership -- always true
+     pre-4j (every string was deep-copied on every use), false the
+     instant a string literal constant became retain-shared: reallocating/
+     nulling the buffer corrupted every other alias, INCLUDING the
+     bytecode constant pool's own permanent copy of a literal used in
+     more than one concatenation (`'prefix' + 'a'` then later
+     `'prefix' + 'b'` silently lost "prefix" on the second use). Fixed
+     by gating the fast path on `refcount == 1`, falling through to the
+     always-safe fresh-`malloc` path otherwise.
+  2. `SET_INDIRECT`'s "steal the whole StringObj from the temporary"
+     optimization was re-examined and found NOT to be a bug (a valid
+     ownership-transfer/move, not a duplicate reference) -- worth noting
+     as the "looked suspicious, verified correct" counterpart to bug 1,
+     since both are shaped like "reuse a popped Value's payload
+     directly" and only one was actually broken.
+  3. `coerceDeltaToI64`'s missing `TYPE_INT16`/`INT8`/`UINT16`/etc. cases
+     (a pre-existing gap, found while chasing an apparently-unrelated
+     `Inc(generation, step)` test failure during checkpoint 3d, not 4j)
+     is unrelated to Stage B directly but is noted here because 4j's
+     `SET_INDIRECT` fix in 3d exposed it -- see checkpoint 3d's gotcha
+     file.
+  4. **The one that actually crashed under stress:** `valueEnsureUnique`'s
+     "check refcount, then clone" sequence was NOT originally serialized
+     against anything, so two threads racing a write-time clone against
+     the SAME shared object (or a clone racing `copyValueForStack`'s
+     cheap retain-share) could each independently observe `refcount > 1`,
+     each decide to clone, then stomp on each other's install/release --
+     a confirmed real heap-corruption crash (macOS malloc zone integrity
+     trap) under a dedicated multithreaded stress test within a handful
+     of runs at 20k iterations/thread. Fixed by serializing
+     `valueEnsureUnique`'s entire body on `value_cell_mutex` -- the SAME
+     mutex `copyValueForStack` already holds during its own retain-share
+     copy, extending its scope rather than inventing a new lock (`vm.c`'s
+     file-scope `static` was removed and an `extern` declaration added to
+     `core/utils.h`, matching the existing `dynamic_array_refcount_mutex`
+     precedent). Verified fixed under `ThreadSanitizer` (a new
+     `build-tsan` configuration, `-fsanitize=thread`) with zero races
+     attributable to `valueEnsureUnique`/`copyValueForStack`/`copyRecord`
+     across the stress test.
+  **`Swap` builtin cleanup:** its raw three-way `Value` struct swap
+  (`ext_builtins/system/swap.c`) was confirmed harmless under the new
+  ownership model (a swap conserves whatever references each cell
+  already holds -- no clone or retain/release needed either side) and
+  converted to a named `pscalValueSwap()` helper in `core/utils.c` purely
+  so no whole-struct `Value` copy exists outside the representation
+  layer, per this section's own note.
+  **One confirmed pre-existing, out-of-scope bug found during
+  multithreaded verification, NOT fixed here (filed separately):**
+  `vmBuiltinSetlength`'s array-resize logic (`backend_ast/builtin.c`) has
+  zero locking of any kind -- confirmed present, unchanged, in a
+  pre-Phase-4 commit (`git show a940b43~1:...`). Concurrent `SetLength()`
+  calls (or a `SetLength` racing a concurrent element read) against a
+  SHARED GLOBAL dynamic array corrupt memory reliably within a few runs.
+  This predates the entire VM 2.0 Value re-representation project and is
+  unrelated to Stage B (dynamic arrays are exempt from `valueEnsureUnique`
+  entirely, and 4j never touches `SetLength`) -- filed as a follow-up
+  task, not a stop-ship item for this phase. A second, unrelated class of
+  `ThreadSanitizer` findings (races in `joinThreadInternal`/
+  `vmFreeRuntimeVTables`/`vmFreeShellBuiltinProfiles`, all in per-thread
+  teardown/cleanup bookkeeping) was confirmed to reproduce identically on
+  a completely unrelated pre-existing thread test
+  (`ThreadPoolConcurrentWavesTest`, no shared Values at all) -- also
+  pre-existing, also out of scope.
+  Verified: full `Tests/run_all_suites.py` clean on both plain and
+  `build-asan` trees across all 5 frontend binaries; the opt-in
+  `vm-verify-corpus`/`vm-fx-policy` suites; a 168-example sweep across all
+  four frontends' `examples/base` under both builds, zero crashes; three
+  dedicated CoW-correctness programs (static array/record/string mutation
+  independence after a cheap copy; dynamic-array/VAR-param/`Inc`-through-
+  address exemption preservation; VAR-param aliasing through a static
+  array/record still correctly mutates the caller's own cell while an
+  unrelated alias stays independent); a new `mt_static_cow_race.pas`
+  regression (`Tests/vm_stack_growth_stress/`) exercising the exact race
+  that crashed pre-fix, clean 10/10 on plain, 5/5 under ASan, and zero
+  attributable races under a new `build-tsan` ThreadSanitizer
+  configuration.
 
 Total: 10 sub-phases against the plan's existing "6-10 PRs" estimate for
 Phase 4 — consistent if 4a/4h (both mechanical/infrastructure-heavy) or
