@@ -19,12 +19,13 @@ ownership rationalization -- cheap retain-share copies plus
 completing Phase 4 in full. Phase 5a (Concurrency Track, §6.1) is split into
 checkpoints 5a-i/5a-ii/5a-iii; **5a-i (`TYPE_TASK` core --
 `TaskSpawn`/`TaskAwait`/`TaskDone`/`TaskCancel` over the existing thread
-pool) shipped 2026-07-07**, preceded by a prerequisite fix for three
-TSan-confirmed pre-existing races in the thread-pool result-handoff path
-(pscal-core `43b4077`). 5a-ii (growable thread/mutex registries,
-`THREAD_CREATE`/`THREAD_JOIN` lowering onto tasks) and 5a-iii (HTTP async
-migration) are scoped but not started. Phase 5b, Phase 6.3's remaining
-items, and Phase 7 remain proposal.
+pool) and 5a-ii (mmap-reservation growable `threads[]`/`mutexes[]`,
+default ceilings 4096/65536, both env-overridable) shipped 2026-07-07**,
+preceded by a prerequisite fix for three TSan-confirmed pre-existing races
+in the thread-pool result-handoff path (pscal-core `43b4077`). 5a-iii
+(HTTP async migration onto tasks, retiring the 32-slot job pool) is
+scoped but not started. Phase 5b, Phase 6.3's remaining items, and Phase 7
+remain proposal.
 Companion to the
 [VM Technical Manual](pscal_vm_manual/pscal_vm_manual.md), which documents
 the 1.x engine this plan modifies.  File/line references are to
@@ -3084,14 +3085,90 @@ now split into checkpoints so each lands and is tested independently:
   thread/mutex registries.** `VM_MAX_THREADS`/`VM_MAX_MUTEXES` are
   inline-embedded fixed arrays (`Thread threads[16]`, `Mutex mutexes[64]`)
   directly inside `struct VM_s`, indexed at ~35 call sites across `vm.c`/
-  `builtin.c`/`path_truncate.c` — unlike Phase 3's stack/frame growth,
-  nothing here takes a long-lived pointer across a VM's lifetime the way
-  `GET_LOCAL_ADDRESS` does into the operand stack, but a realloc-based
-  growth design (Phase 3's `frames[]` precedent) still requires auditing
-  every site that stashes a `Thread*`/`Mutex*` across a call that could
-  itself trigger a grow (e.g. spawning a task while already holding a
-  `Thread*` from a prior lookup) before it's safe — not yet done. Not
-  started.
+  `builtin.c`/`path_truncate.c`.
+  **Done (2026-07-07), with the original sketch's own risk assessment
+  reversed by a dedicated audit, not confirmed:** the original text above
+  guessed "nothing here takes a long-lived pointer... but a realloc-based
+  growth design still requires auditing" — a general-purpose-agent audit
+  (read-only, over `vm.c`/`vm.h`/`builtin.c`/`path_truncate.c`) found the
+  opposite and ruled out realloc-based growth (Phase 3's `frames[]`
+  precedent) outright: `lockMutex`/`unlockMutex` take a raw `Mutex*`,
+  release `mutexRegistryLock`, and then block on
+  `pthread_mutex_lock`/`unlock` for an arbitrary duration;
+  `joinThreadInternal`/`vmThreadTakeResult` do the same with a raw
+  `Thread*` across a `resultCond` wait loop; and `VM_s.owningThread`
+  (`vmThreadPrepareWorkerVm`) plus `threadStart`'s own persistent `Thread*`
+  parameter both outlive any single call scope for a pooled worker's
+  entire lifetime. A realloc that relocated either array under any of
+  these would dangle a live pointer. Implemented instead with the operand
+  stack's own technique (Phase 3, plan §5.9): `threads`/`mutexes` are each
+  a single `mmap(PROT_NONE)` reservation sized to a *ceiling* (default
+  4096 / 65536, overridable via `PSCAL_VM_MAX_THREADS`/
+  `PSCAL_VM_MAX_MUTEXES`), with only a growing prefix `mprotect`'d
+  accessible — the base address never moves, so every one of the pointer
+  holds above stays valid regardless of growth. Initial committed count
+  (16 / 64) matches this codebase's exact pre-5a-ii behavior byte-for-byte
+  for a VM that never needs to grow. `createThreadJob`'s slot-scan and
+  `createMutex`'s slot-allocator both grow the committed prefix on demand
+  (doubling, like the stack) only when every already-committed slot is
+  occupied but the ceiling still allows more — the common case (a free
+  slot already exists) is unchanged in cost. All ~35 call sites converted
+  from the `VM_MAX_THREADS`/`VM_MAX_MUTEXES` compile-time bound to each
+  VM's own `threadsCommittedCount`/`mutexesCommittedCount` (the only
+  memory-safe bound, since indices at or beyond it are `PROT_NONE`);
+  `parseThreadIdValue` and two other VM-less plausibility checks use the
+  ceiling instead, since they have no specific VM's committed count to
+  check against and the real memory-safety check happens downstream at
+  the actual array-indexing site. One additional stack-overflow-shaped bug
+  found and fixed along the way: `path_truncate.c`'s debug-dump tooling
+  had `VMProcWorkerSnapshot workers[VM_MAX_THREADS]` as a *stack-allocated*
+  local array — harmless at the old fixed 16, but a real risk once
+  `VM_MAX_THREADS` became a 4096-default ceiling; changed to a heap
+  allocation with its own fixed, generous cap (1024), decoupled from the
+  VM's actual (env-overridable) ceiling, matching this debug tool's
+  already-best-effort "representative snapshot" contract. Two more bare
+  (non-atomic) `thread->inPool` reads inside boolean-OR expressions were
+  found and fixed while touching this code (`vm.c`'s
+  `vmSnapshotProcWorkers` and `vmResetExecutionState`-adjacent teardown) —
+  missed by 5a-i's own `inPool` conversion because they weren't `if
+  (thread->inPool)`-shaped, the pattern that session's grep searched for.
+  **"Lower `THREAD_CREATE`/`THREAD_JOIN` onto tasks" turned out to be
+  already substantially true, confirmed not assumed:** both opcodes
+  already route through `createThreadWithArgs`/`createThreadJob` — the
+  exact same pool, job queue, and result-handoff machinery `TaskSpawn`
+  uses via `vmHostCreateTaskEntry` — they simply push a raw `TYPE_THREAD`
+  int rather than wrapping the same `threadId`+owner pair in a `TaskObj`.
+  No further internal refactor was found to add enough value to pursue
+  as its own step; if a future need arises (e.g. `THREAD_JOIN` gaining a
+  real result value the way `TaskAwait` did in 5a-i), it is a small,
+  targeted change at that point, not a prerequisite blocking anything here.
+  **Verified but NOT a bug, worth documenting for future callers:**
+  spawning more concurrent tasks than the pool's currently-available
+  worker slots (`ceiling - 1`) *before* awaiting any of them blocks the
+  spawning call until a worker frees up (the job queue's normal
+  backpressure) rather than failing outright — confirmed to be identical,
+  pre-existing behavior for plain `spawn`/`join` too (reproduced with
+  `PSCAL_VM_MAX_THREADS=3` and a spawn-10-then-join-10 program, blocking
+  the same way), not something this checkpoint's growable-registry change
+  introduced. `TaskSpawn` returning `nil` with "Task limit exceeded" is
+  reserved for the rarer case where growth itself fails (the mmap
+  reservation's hard ceiling is reached, or `mprotect` fails) — a job
+  queue that is merely momentarily saturated queues and blocks instead.
+  Verified: `Tests/vm_thread_stress/*.pas` (all eight fixtures, the four
+  pre-existing plus `globals_concurrency.pas` plus the three from 5a-i)
+  clean under `build-asan` and `build-tsan` — no new races beyond the same
+  three pre-existing, already-deferred ones from 5a-i (confirming the
+  mmap-reservation design introduced nothing new); two new smoke programs
+  exercising growth past the *old* fixed ceilings (50 concurrent
+  `TaskSpawn`s past the old 16-thread limit, 100 `mutex()` calls past the
+  old 64-mutex limit) both correct under plain, ASan, and TSan builds; a
+  small-ceiling program (`PSCAL_VM_MAX_THREADS=3`, sequential
+  await-before-next-spawn) also correct. Full `Tests/run_all_suites.py`
+  (including `--include-vm-verify-corpus`/`--include-vm-fx-policy`) green;
+  whole-repo `cmake --build build` clean; `Tests/vm_bench` recorded on
+  `build-release`, all check values passing, no measurable regression
+  (the growable-storage path is off the hot loop entirely for any program
+  that never exceeds the old fixed defaults).
 - **5a-iii — HTTP async migrates onto tasks; retire the 32-slot job pool.**
   Add `vmTaskCreateNative(work_fn, cancel_fn, progress_fn)` so any future
   builtin needing awaitable async work can return a `TYPE_TASK` without a

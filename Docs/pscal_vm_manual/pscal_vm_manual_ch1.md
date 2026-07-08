@@ -176,8 +176,8 @@ typedef struct VM_s {
     size_t frameCapacity;
     int frameCount;
     ...
-    Thread threads[VM_MAX_THREADS];       // VM_MAX_THREADS == 16
-    Mutex mutexes[VM_MAX_MUTEXES];        // VM_MAX_MUTEXES == 64
+    Thread* threads;      // mmap-reserved, growable (VM 2.0 Phase 5a ckpt 5a-ii, see §1.4)
+    Mutex* mutexes;        // same technique
     ...
 } VM;
 ```
@@ -408,11 +408,13 @@ effectful builtin call, with zero cost when neither is configured.
 ### 1.4 Multithreading
 
 Multithreading is real, OS-level, and mutex/condvar-backed — not a
-cooperative green-thread illusion. Each `VM` owns a fixed pool of thread
-slots:
+cooperative green-thread illusion. Each `VM` owns a growable pool of thread
+slots (VM 2.0 Phase 5a checkpoint 5a-ii, Docs/pscal_vm2_plan.md §6.1):
 
 ```c
-Thread threads[VM_MAX_THREADS];   // VM_MAX_THREADS == 16
+Thread* threads;             // mmap-reserved, growable -- see below
+size_t threadsReservedCount; // hard ceiling (default 4096, PSCAL_VM_MAX_THREADS)
+size_t threadsCommittedCount; // currently accessible prefix, grows on demand
 int threadCount;
 struct VM_s* threadOwner;
 
@@ -422,6 +424,25 @@ int workerCount;
 int availableWorkers;
 atomic_bool shuttingDownWorkers;
 ```
+
+`threads` (and `mutexes`, below) use the operand stack's own technique
+(§1.2, Phase 3): a single `mmap(PROT_NONE)` reservation sized to the
+ceiling, with only a growing prefix `mprotect`'d accessible, so the base
+address never moves. This was found to be required, not merely a stylistic
+choice matching the stack: a dedicated audit found several places that take
+a raw `Thread*`/`Mutex*` pointer and hold it live across a call that can
+block for an arbitrary duration after releasing the owning registry lock
+(`lockMutex`/`unlockMutex`, `joinThreadInternal`/`vmThreadTakeResult`), plus
+one long-lived struct field (`VM_s.owningThread`) — a realloc-based design
+(like `frames[]` below) would dangle every one of those pointers the moment
+a grow relocated the array. Growth is on-demand and amortized (doubling,
+capped at the ceiling): `createThreadJob`'s slot-scan and `createMutex`'s
+allocator both grow the committed prefix only when every already-committed
+slot is occupied. The initial committed count (16 threads, 64 mutexes)
+matches this codebase's exact pre-5a-ii behavior for any program that never
+needs to grow — zero behavioral or measurable performance difference.
+`PSCAL_VM_MAX_MUTEXES` overrides the mutex ceiling (default 65536) the same
+way `PSCAL_VM_MAX_THREADS` overrides the thread one.
 
 Each `Thread` slot wraps a real `pthread_t` plus its own result hand-off
 synchronization and cooperative-scheduling flags (abridged — the full struct
@@ -499,10 +520,10 @@ are implemented via the `atomic_bool` flags on `Thread`, checked by the
 interpreter loop at safe points, not via signal-based preemption.
 
 Mutual exclusion is a first-class VM resource, not just a builtin-library
-wrapper: `mutexes[VM_MAX_MUTEXES]` (64 max) backs `MUTEX_CREATE` /
-`RCMUTEX_CREATE` (recursive variant) / `MUTEX_LOCK` / `MUTEX_UNLOCK` /
-`MUTEX_DESTROY`, each a real `pthread_mutex_t` wrapped in a `Mutex{ handle,
-active }` slot.
+wrapper: `mutexes[]` (growable, default ceiling 65536, `PSCAL_VM_MAX_MUTEXES`
+overridable) backs `MUTEX_CREATE` / `RCMUTEX_CREATE` (recursive variant) /
+`MUTEX_LOCK` / `MUTEX_UNLOCK` / `MUTEX_DESTROY`, each a real
+`pthread_mutex_t` wrapped in a `Mutex{ handle, active }` slot.
 
 ```
 THREAD_CREATE <entry:u32>   ( -- thread_id )   ; spawns worker VM at bytecode offset
@@ -554,10 +575,10 @@ the value to actually exist for functions, so this checkpoint added the
 capture. A `spawn`ed function's result is now also retrievable via
 `ThreadGetResult`, a bug fix rather than a behavior change worth gating on.
 
-Not yet done (scoped in `Docs/pscal_vm2_plan.md` §6.1 as checkpoints
-5a-ii/5a-iii): `VM_MAX_THREADS`/`VM_MAX_MUTEXES` are still fixed-size
-arrays (16/64), and HTTP async (§4.1 below) still runs its own separate
-32-slot job pool rather than returning `TYPE_TASK` values.
+`threads[]`/`mutexes[]` are now growable (checkpoint 5a-ii, §1.4 above).
+Not yet done (scoped in `Docs/pscal_vm2_plan.md` §6.1 as checkpoint
+5a-iii): HTTP async (§4.1 below) still runs its own separate 32-slot job
+pool rather than returning `TYPE_TASK` values.
 
 ### Diagram: Thread Pool, Shared State, and the Native/Builtin Layer
 
@@ -569,7 +590,7 @@ graph TD
         MIP["ip / lastInstruction"]
     end
 
-    subgraph WorkerPool["Thread Pool (threads[VM_MAX_THREADS], max 16)"]
+    subgraph WorkerPool["Thread Pool (threads[], growable, default ceiling 4096)"]
         T1["Thread slot 1\n(own VM_s: own stack + frames)\npthread_t handle"]
         T2["Thread slot 2\n(own VM_s: own stack + frames)"]
         T3["Thread slot N\n(idle, in pool, awaiting job)"]
@@ -579,7 +600,7 @@ graph TD
         GG["vmGlobalSymbols\n(mutable, locked)"]
         GC["vmConstGlobalSymbols\n(read-only, lock-free)"]
         PT["procedureTable / procedureByAddress"]
-        MX["mutexes[VM_MAX_MUTEXES]\n(pthread_mutex_t, max 64)"]
+        MX["mutexes[]\n(pthread_mutex_t, growable, default ceiling 65536)"]
     end
 
     subgraph Native["Native / Builtin Layer"]
