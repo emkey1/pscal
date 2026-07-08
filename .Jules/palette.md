@@ -28,3 +28,6 @@
 ## 2025-03-20 - Redundant Visual Values and Slider Accessibility
 **Learning:** SwiftUI Sliders often rely on separate text views (e.g., in an HStack) to display their current value. Screen readers will read the slider and then redundantly read the visual text label as a separate element, causing confusion.
 **Action:** When implementing Sliders with visual value labels, always add `.accessibilityValue(...)` to the Slider itself, and add `.accessibilityHidden(true)` to the redundant text element so it is hidden from VoiceOver.
+## 2026-07-08 - Transient Copy Feedback
+**Learning:** Silent transient actions in the iOS UI (like copying text or properties) need a combination of visual updates, VoiceOver announcements (`UIAccessibility.post`), and haptic feedback (`UINotificationFeedbackGenerator`) to provide proper confirmation.
+**Action:** Apply this pattern when implementing any copy action to ensure both sighted and VoiceOver users receive confirmation.
