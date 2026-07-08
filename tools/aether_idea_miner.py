@@ -356,7 +356,8 @@ def generate(prompt: str, destination: adb.Destination) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Compile + run (reuse adb.compile_and_run via a synthetic, oracle-free Task)
 # --------------------------------------------------------------------------- #
-def compile_program(source_code: str, aether_bin: pathlib.Path, timeout_seconds: int) -> dict[str, Any]:
+def compile_program(source_code: str, aether_bin: pathlib.Path, timeout_seconds: int,
+                     sandbox_deny: str = "net,proc") -> dict[str, Any]:
     task = adb.Task(
         task_id="idea",
         title="generative",
@@ -366,7 +367,7 @@ def compile_program(source_code: str, aether_bin: pathlib.Path, timeout_seconds:
         cwd=None,
         files=None,
     )
-    ns = argparse.Namespace(aether_bin=aether_bin)
+    ns = argparse.Namespace(aether_bin=aether_bin, sandbox_deny=sandbox_deny)
     return adb.compile_and_run(task, source_code, ns)
 
 
@@ -539,7 +540,7 @@ def process_program(
         "attempts": [],
     }
 
-    run = compile_program(source, args.aether_bin, args.timeout_seconds)
+    run = compile_program(source, args.aether_bin, args.timeout_seconds, args.sandbox_deny)
     initial_failure = analyze_failure(source, run)
     record["attempts"].append({
         "kind": "initial",
@@ -593,7 +594,7 @@ def process_program(
                 record["attempts"].append(attempt)
                 break
 
-            new_run = compile_program(new_source, args.aether_bin, args.timeout_seconds)
+            new_run = compile_program(new_source, args.aether_bin, args.timeout_seconds, args.sandbox_deny)
             attempt["source_code"] = new_source
             attempt["run"] = run_brief(new_run)
             attempt["failure"] = analyze_failure(new_source, new_run)
@@ -1160,6 +1161,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--repair-feedback-limit", type=int, default=1200,
                    help="max chars of source/stdout/stderr in a repair prompt section")
     p.add_argument("--timeout-seconds", type=int, default=20, help="per-program compile+run timeout")
+    p.add_argument(
+        "--sandbox-deny",
+        default="net,proc",
+        help="VM 2.0 Phase 6 --deny classes applied to every generated program run; this harness is "
+        "the no-oracle, generative, model-code-execution case, so denying net,proc by default is the "
+        "conservative choice. Pass an empty string to disable.",
+    )
     p.add_argument("--max-parallel-systems", type=int, default=8,
                    help="run up to N systems (distinct base_url hosts) concurrently; "
                         "models on the same host stay sequential (default: 8)")

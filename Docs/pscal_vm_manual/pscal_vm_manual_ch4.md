@@ -89,7 +89,31 @@ passes one explicitly; the ~500-entry core dispatch table (§4.0's static
 `vmBuiltinDispatchTable[]`) is classified by name instead, against the same
 130-name table `pscalBuiltinNameIsEffectful()` already used for the Aether
 FX-001 gate — so that predicate's behavior didn't change, only its backing
-data type (bool → mask). `getVmBuiltinEffectMaskById(id)` is the one lookup
+data type (bool → mask).
+
+**`pscalBuiltinNameIsEffectful()`/`pscalBuiltinNameEffectMask()` are
+static-table-only — use `pscalBuiltinNameEffectMaskLive()` for a name-based
+check that must be correct for *every* registered builtin.** The static
+~130-name table can't know about a builtin an `ext_builtins` category, or —
+since VM 2.0 Phase 7 — a `dlopen` plugin registers at runtime with its own
+explicit mask. Aether's FX-001/ANN-001 gate (`aetherIsEffectfulBuiltin`,
+`semantic.c`) and the `--dump-ext-builtins`/`builtins_json` introspection
+JSON (`ext_builtins/query_builtin.c`) both used to call the static-only
+predicate, which meant a `--ext`-loaded plugin's effectful builtin was
+silently treated as pure by both — confirmed empirically (a `@pure` Aether
+function calling a plugin-registered `FX_NET` builtin compiled clean, no
+FX-001/ANN-001 diagnostic) before being fixed the same day Phase 7 shipped.
+`pscalBuiltinNameEffectMaskLive(name)` resolves `name` to its registry id
+(`getVmBuiltinID()`, which covers core dispatch-table AND
+`extra_vm_builtins`/plugin ids alike) and returns
+`getVmBuiltinEffectMaskById()` for it, falling back to the static
+classification only for a name that isn't registered at all yet. Both
+call sites above now use it. Not safe to use from inside
+`getVmBuiltinEffectMaskById()`'s own core-table cache-population loop,
+which must keep calling the static-only predicate directly to avoid
+recursion.
+
+`getVmBuiltinEffectMaskById(id)` is the one lookup
 that matters at runtime: O(1) after the first call (core-table masks are
 computed once and cached; extension masks are stored directly at
 registration time in a sparse per-id override array).

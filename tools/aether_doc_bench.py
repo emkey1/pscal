@@ -1521,7 +1521,8 @@ def compile_and_run(task: Task, source_code: str, args: argparse.Namespace) -> d
         materialize_task_files(task, tmp_dir)
         program_path.write_text(source_code, encoding="utf-8")
 
-        cmd = [str(args.aether_bin), "--no-cache", str(program_path)]
+        sandbox_flags = ["--deny", args.sandbox_deny] if getattr(args, "sandbox_deny", "") else []
+        cmd = [str(args.aether_bin), *sandbox_flags, "--no-cache", str(program_path)]
         started = time.time()
         proc = subprocess.run(
             cmd,
@@ -1539,7 +1540,7 @@ def compile_and_run(task: Task, source_code: str, args: argparse.Namespace) -> d
         diagnostics = None
 
         if proc.returncode != 0:
-            diag_cmd = [str(args.aether_bin), "--diagnostics-json", "--no-cache", str(program_path)]
+            diag_cmd = [str(args.aether_bin), *sandbox_flags, "--diagnostics-json", "--no-cache", str(program_path)]
             diag_proc = subprocess.run(
                 diag_cmd,
                 cwd=str(work_dir),
@@ -2345,6 +2346,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="max characters of stdout/stderr/source included in a repair prompt section",
     )
     parser.add_argument("--aether-bin", type=pathlib.Path, default=DEFAULT_AETHER_BIN, help="path to local aether binary")
+    parser.add_argument(
+        "--sandbox-deny",
+        default="net,proc",
+        help="VM 2.0 Phase 6 --deny classes applied to every generated program run (compile_and_run); "
+        "this harness runs model-generated code unattended and every task in Tests/aether_doc_bench "
+        "is a pure-compute/deterministic-stdout task (no task legitimately needs network or process "
+        "spawning), so denying net,proc by default costs nothing and closes a real unattended-execution "
+        "risk. Pass an empty string to disable.",
+    )
     parser.add_argument(
         "--python-baseline",
         action="store_true",
