@@ -28,37 +28,29 @@ begin
 end;
 
 function Consume(c: channel): integer;
-{ Uses ChannelTryReceive's integer status in a poll loop, NOT blocking
-  ChannelReceive plus a "= nil"/"<> nil" termination check -- deliberately,
-  not by preference. Comparing a function-local integer variable against
-  nil with either "=" or "<>" throws "Operands not comparable" here once
-  the variable has ever held a real integer value in the same scope
-  (confirmed via an isolated single-threaded, zero-concurrency,
-  zero-channel probe: a top-level program var comparing cleanly against
-  nil is fine, but the identical comparison inside a function's local
-  scope is not). Blocking ChannelReceive's own nil-return path is already
-  covered by channel_basic_smoke.pas (single-threaded, a top-level var) and
-  channel_close_wakes_all.pas ("got = nil", also top-level) -- this fixture
-  exists to stress multi-producer/multi-consumer contention on the shared
-  ring buffer, not to re-prove nil-return works, so routing around this
-  separate, pre-existing, Channel-unrelated bug here is in scope; filed as
-  a follow-up rather than fixed inline. }
-var v, localSum, localCount, status: integer;
+{ Blocking ChannelReceive plus a "<> nil" loop-termination check -- the
+  natural idiom for draining a channel until it's closed and empty. An
+  earlier version of this fixture routed around a real VM bug via
+  ChannelTryReceive's integer status codes instead: comparing an ordinary
+  ordinal value (e.g. a ChannelReceive result held in an `integer` var)
+  against `nil` with "=" or "<>" unconditionally threw "Operands not
+  comparable", because the comparison-opcode dispatcher in vm.c had no
+  branch for "ordinal vs NIL" -- only pointer/interface/closure/nil-vs-nil
+  were handled. Fixed in vm.c's EQUAL/NOT_EQUAL/etc. dispatcher: any
+  concrete non-nil value now compares as simply "not nil" against a nil
+  literal, matching ChannelReceive/TaskAwait's documented nil-return
+  convention. Verified fixed here under real MPMC contention (5/5 clean
+  runs) after the fix landed. }
+var v, localSum, localCount: integer;
 begin
   localSum := 0;
   localCount := 0;
-  status := 0;
-  ChannelTryReceive(c, status, v);
-  while status <> -1 do
+  v := ChannelReceive(c);
+  while v <> nil do
   begin
-    if status = 1 then
-    begin
-      localSum := localSum + v;
-      localCount := localCount + 1;
-    end
-    else
-      Delay(1); { status = 0: buffer momentarily empty, channel still open -- brief yield before retrying }
-    ChannelTryReceive(c, status, v);
+    localSum := localSum + v;
+    localCount := localCount + 1;
+    v := ChannelReceive(c);
   end;
   lock(sumMutex);
   totalSum := totalSum + localSum;
