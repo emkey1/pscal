@@ -3519,24 +3519,33 @@ type claiming it.
   inside `ChannelReceive`'s wait loop, not just assumed from reading
   `vmChannelOperationInterrupted`'s code).
 
-  **A real, general, Channel-unrelated pre-existing bug was found and
-  routed around while writing `channel_mpmc_stress.pas`, not fixed here
-  (filed as a follow-up).** Comparing a *function-local* `integer`-declared
-  variable against the `nil` literal with either `=` or `<>` always throws
-  "Operands not comparable" — even in the most trivial case (assign a
-  literal, compare immediately, zero concurrency involved) — while the
-  identical comparison on a *top-level program* variable works fine
-  (confirmed via isolated single-threaded probes with no channels/tasks at
-  all). This directly undermines the nil-return convention `TaskAwait`/
-  `ChannelReceive` both rely on, the moment the check happens inside a
-  function instead of the main program body — exactly where
-  `channel_mpmc_stress.pas`'s `Consume` helper needed to make it. Routed
-  around it there by using `ChannelTryReceive`'s integer status codes
-  instead of `ChannelReceive`'s nil-return inside that function;
-  `channel_task_cancel_wakes_receive.pas` avoids the trap a different way
-  (its nil check happens in the main program body, not a function, so it
-  hits the *working* code path — see that fixture's own comment for why
-  this was a deliberate choice, not an oversight).
+  **Two real, general, Channel-unrelated pre-existing bugs were found while
+  writing `channel_mpmc_stress.pas` — routed around initially, then fixed
+  same-day, not left as follow-ups.** First: the VM's `EQUAL`/`NOT_EQUAL`
+  comparison dispatcher (`vm.c`) only had branches for pointer/interface/
+  closure/nil-vs-nil — comparing any *other* concrete value (e.g. an
+  ordinary `integer` holding a `ChannelReceive`/`TaskAwait` result) against
+  the `nil` literal with `=` or `<>` unconditionally threw "Operands not
+  comparable," silently killing the `TaskSpawn`'ed worker mid-comparison.
+  Second, and why the first one was so confusing to isolate: that crash
+  (`INTERPRET_RUNTIME_ERROR`) fell through `THREAD_JOB_BYTECODE`'s result-
+  storage path, which only handled the `INTERPRET_OK` case — the generic
+  fallback then stored `success=true` regardless, so a crashed task looked
+  *identical* to one that legitimately returned nil, turning a visible
+  comparison error into a silent hang under real MPMC concurrency (the
+  crash still happened, but nothing ever woke the `TaskAwait` waiting on a
+  result that would now never arrive cleanly). Fixed as pscal-core
+  `32799f4` (ordinal-vs-nil comparison now allowed; ordering operators
+  against nil still correctly rejected) and `a51b9e4` (mirrors
+  `THREAD_JOB_BUILTIN`'s already-correct `success = !workerVm->
+  abort_requested` pattern; also surfaces the failure via `runtimeWarning`
+  where `TaskAwait` previously captured but never read its own `status`
+  out-param). `channel_mpmc_stress.pas` was written with a `ChannelTryReceive`-
+  based workaround first (to make forward progress before the root cause
+  was understood), then reverted back to the natural `ChannelReceive` +
+  `<> nil` idiom once both fixes landed and were verified (5/5 clean runs
+  under real 4-producer/4-consumer contention, plus the full `vm_thread_
+  stress` suite clean under both TSan and ASan+UBSan afterward).
 
   Formal TSan verification of the *complete* existing `Tests/
   vm_thread_stress/*.pas` regression suite (all 15 fixtures, not just this
