@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # VM 2.0 Phase 7 (Docs/pscal_vm2_plan.md §7.1) regression suite: the
 # dlopen plugin ABI (backend_ast/pscal_ext_api.h, ext_builtins/
-# plugin_loader.c) and the sqlite-as-plugin proof (components/pscal-core/
-# plugins/sqlite/sqlite_ext_plugin.c). Requires build/bin/pascal and
-# build/sqlite_ext_plugin.{dylib,so} to already be built (the latter is
-# skipped, not failed, if sqlite support wasn't compiled in).
+# plugin_loader.c), the two --deny ext / PSCAL_ENABLE_EXT_PLUGINS gates,
+# Docs/pscal_ext_plugin_guide.md's hello_plugin.c example (built fresh with
+# a bare cc command, no sqlite dependency), and the sqlite-as-plugin proof
+# (components/pscal-core/plugins/sqlite/sqlite_ext_plugin.c). Requires
+# build/bin/pascal to already be built; the sqlite-dependent cases are
+# skipped, not failed, if sqlite support wasn't compiled in.
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
@@ -23,15 +25,49 @@ case "$(uname -s)" in
     *) PLUGIN_SUFFIX=".so" ;;
 esac
 
-SQLITE_PLUGIN="$ROOT_DIR/build/sqlite_ext_plugin${PLUGIN_SUFFIX}"
-if [ ! -f "$SQLITE_PLUGIN" ]; then
-    echo "sqlite_ext_plugin${PLUGIN_SUFFIX} not found at $SQLITE_PLUGIN -- sqlite support (ENABLE_EXT_BUILTIN_SQLITE) likely not built; skipping vm_ext_plugin suite." >&2
-    exit 0
-fi
-
 CC="${CC:-cc}"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
+
+# --- Case 0: the hello_plugin.c example from Docs/pscal_ext_plugin_guide.md
+# builds with the exact bare `cc -shared -fPIC` command the guide shows
+# (no CMake, no sqlite dependency) and both its builtins work when loaded
+# via --ext. Proves the guide's copy-pasted instructions are actually
+# correct, not just prose that could drift out of sync with the ABI. ---
+hello_src="$ROOT_DIR/components/pscal-core/plugins/examples/hello_plugin.c"
+hello_lib="$WORK_DIR/hello_plugin${PLUGIN_SUFFIX}"
+"$CC" -shared -fPIC -I "$ROOT_DIR/components/pscal-core/src" -o "$hello_lib" "$hello_src" 2>"$WORK_DIR/hello_cc.log"
+if [ ! -f "$hello_lib" ]; then
+    harness_report FAIL "ext_plugin_hello_example_builds" "the guide's hello_plugin.c builds with a bare cc command" \
+        "$(cat "$WORK_DIR/hello_cc.log")"
+else
+    hello_pas="$WORK_DIR/hello_test.pas"
+    cat > "$hello_pas" <<'EOF'
+program HelloPluginTest;
+begin
+  writeln(PluginPing());
+  writeln(PluginGreet('Aether'));
+end.
+EOF
+    hello_out="$WORK_DIR/hello_test.out"
+    "$PASCAL_BIN" --ext "$hello_lib" --no-cache "$hello_pas" > "$hello_out" 2>&1
+    hello_status=$?
+    expected_hello=$'42\nHello, Aether!'
+    if [ "$hello_status" -ne 0 ] || [ "$(cat "$hello_out")" != "$expected_hello" ]; then
+        harness_report FAIL "ext_plugin_hello_example_works" "the guide's hello_plugin.c works when loaded via --ext" \
+            "exit=$hello_status\n$(cat "$hello_out")"
+    else
+        harness_report PASS "ext_plugin_hello_example_works" "the guide's hello_plugin.c works when loaded via --ext"
+    fi
+fi
+
+SQLITE_PLUGIN="$ROOT_DIR/build/sqlite_ext_plugin${PLUGIN_SUFFIX}"
+if [ ! -f "$SQLITE_PLUGIN" ]; then
+    echo "sqlite_ext_plugin${PLUGIN_SUFFIX} not found at $SQLITE_PLUGIN -- sqlite support (ENABLE_EXT_BUILTIN_SQLITE) likely not built; skipping the remaining sqlite-dependent vm_ext_plugin cases." >&2
+    harness_summary "vm_ext_plugin"
+    harness_exit_code
+    exit $?
+fi
 
 # --- Case 1: sqlite-as-plugin parity with the static in-tree category ---
 static_out="$WORK_DIR/static.out"
