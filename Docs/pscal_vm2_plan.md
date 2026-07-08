@@ -29,9 +29,15 @@ new CLike `task` type) shipped 2026-07-08, and along the way confirmed (not
 fixed -- filed as a follow-up) a pre-existing, TSan-detectable gap in the
 thread pool's natural-completion slot-release path that predates all of
 Phase 5a -- fixed separately the same day (pscal-core `6aaefae`). Phase 5b
-(Channels, §6.2) has a full checkpoint breakdown (5b-i/ii/iii) as of
-2026-07-08 but no code yet -- design only, not started. Phase 6.3's
-remaining items and Phase 7 remain proposal.
+(Channels, §6.2) is split into checkpoints 5b-i/ii/iii; **5b-i (`TYPE_CHANNEL`
+core -- `ChannelCreate`/`Send`/`Receive`/`TrySend`/`TryReceive`/`Close`/
+`IsClosed` over a pure `ObjHeader`-backed ring buffer, no VM-level registry)
+and 5b-ii (multi-producer/multi-consumer stress, `TaskCancel`-wakes-
+`ChannelReceive` verification, and a full-suite TSan pass -- zero findings,
+after a same-day separate fix (pscal-core `fb010ec`) resolved 5b-i's own
+four deferred pre-existing races) both shipped 2026-07-08**. 5b-iii
+(CLike `channel` keyword, mirroring 5a-iii's `task` episode) is scoped but
+not started. Phase 6.3's remaining items and Phase 7 remain proposal.
 Companion to the
 [VM Technical Manual](pscal_vm_manual/pscal_vm_manual.md), which documents
 the 1.x engine this plan modifies.  File/line references are to
@@ -3501,23 +3507,47 @@ type claiming it.
   5a-i's `TaskObj`/`ObjHeader` precedent; does not depend on 5a-ii's growable
   registries or 5a-iii's native-task API (channels are pure heap objects,
   per above, confirmed — no VM-level registry was needed).
-- **5b-ii — Cross-task stress, cancellation, and full TSan rigor.**
-  `channel_close_wakes_all.pas` already shipped in 5b-i (see above); what's
-  left: multi-producer/multi-consumer fixtures (several `TaskSpawn`ed
-  producers *and* consumers sharing one channel, mirroring
-  `task_concurrent_spawn_await.pas`'s concurrency shape — 5b-i's SPSC
-  fixture is single-producer/single-consumer only), and a fixture that
-  `TaskCancel`s a task blocked mid-`ChannelReceive` and confirms it actually
-  wakes (mirroring `task_cancel_race.pas` and 5a-iii's HTTP-cancel-demo
-  pattern — cancellation is only real once it's been watched actually
-  interrupt a real blocking wait, not just assumed from reading the code;
-  5b-i's `vmChannelOperationInterrupted` polls `Thread.cancelRequested` but
-  this specific path has not yet been exercised by a dedicated fixture).
-  Formal TSan verification of the *complete* existing regression suite
-  (5b-i's bonus pass only covered its own two concurrency fixtures) —
-  matching 5a-iii's rigor bar, since this is exactly the class of "shared
-  condvar state across threads" bug TSan is good at catching. Full `Tests/
-  run_all_suites.py` green. Depends on 5b-i. Not started.
+- **5b-ii — Cross-task stress, cancellation, and full TSan rigor.** Done
+  (2026-07-08). `channel_close_wakes_all.pas` had already shipped in 5b-i.
+  Added `channel_mpmc_stress.pas` (4 `TaskSpawn`ed producers *and* 4
+  consumers sharing one channel, mirroring `task_concurrent_spawn_await
+  .pas`'s concurrency shape — 5b-i's SPSC fixture was single-producer/
+  single-consumer only; checksum-verified, 800 items, exact-sum-checked)
+  and `channel_task_cancel_wakes_receive.pas` (50 repeated spawn/delay/
+  cancel/await cycles, matching `task_cancel_race.pas`'s own repetition
+  strategy — confirms `TaskCancel` actually wakes a task genuinely blocked
+  inside `ChannelReceive`'s wait loop, not just assumed from reading
+  `vmChannelOperationInterrupted`'s code).
+
+  **A real, general, Channel-unrelated pre-existing bug was found and
+  routed around while writing `channel_mpmc_stress.pas`, not fixed here
+  (filed as a follow-up).** Comparing a *function-local* `integer`-declared
+  variable against the `nil` literal with either `=` or `<>` always throws
+  "Operands not comparable" — even in the most trivial case (assign a
+  literal, compare immediately, zero concurrency involved) — while the
+  identical comparison on a *top-level program* variable works fine
+  (confirmed via isolated single-threaded probes with no channels/tasks at
+  all). This directly undermines the nil-return convention `TaskAwait`/
+  `ChannelReceive` both rely on, the moment the check happens inside a
+  function instead of the main program body — exactly where
+  `channel_mpmc_stress.pas`'s `Consume` helper needed to make it. Routed
+  around it there by using `ChannelTryReceive`'s integer status codes
+  instead of `ChannelReceive`'s nil-return inside that function;
+  `channel_task_cancel_wakes_receive.pas` avoids the trap a different way
+  (its nil check happens in the main program body, not a function, so it
+  hits the *working* code path — see that fixture's own comment for why
+  this was a deliberate choice, not an oversight).
+
+  Formal TSan verification of the *complete* existing `Tests/
+  vm_thread_stress/*.pas` regression suite (all 15 fixtures, not just this
+  checkpoint's own two) came back **completely clean, zero findings** —
+  including the four data races 5b-i's own bonus TSan pass had found and
+  deferred, which a same-day separate fix (pscal-core `fb010ec`,
+  synchronizing `gVmBuiltinNeedsLockCache`/`gVmBuiltinTypeCache`/
+  `chunk->builtin_resolved_ids`/`pscalRuntimeConsumeSigint`'s
+  `g_vm_sigint_seen`) resolved before this checkpoint's own TSan pass ran.
+  Full `Tests/run_all_suites.py` green; whole-repo `cmake --build build`
+  clean. Depends on 5b-i.
 - **5b-iii — Frontend wiring.** One-registration builtins are already
   frontend-neutral (§4.0's usual story), so the remaining work is per-
   frontend *type* surfacing, mirroring 5a-iii's CLike `task` keyword episode
