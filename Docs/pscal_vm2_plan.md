@@ -17,15 +17,19 @@ flag day) is split into checkpoints 1-3, checkpoint 3 further split into
 ownership rationalization -- cheap retain-share copies plus
 `valueEnsureUnique()`'s write-time clone-on-share) shipped 2026-07-07,
 completing Phase 4 in full. Phase 5a (Concurrency Track, §6.1) is split into
-checkpoints 5a-i/5a-ii/5a-iii; **5a-i (`TYPE_TASK` core --
-`TaskSpawn`/`TaskAwait`/`TaskDone`/`TaskCancel` over the existing thread
-pool) and 5a-ii (mmap-reservation growable `threads[]`/`mutexes[]`,
-default ceilings 4096/65536, both env-overridable) shipped 2026-07-07**,
-preceded by a prerequisite fix for three TSan-confirmed pre-existing races
-in the thread-pool result-handoff path (pscal-core `43b4077`). 5a-iii
-(HTTP async migration onto tasks, retiring the 32-slot job pool) is
-scoped but not started. Phase 5b, Phase 6.3's remaining items, and Phase 7
-remain proposal.
+checkpoints 5a-i/5a-ii/5a-iii, **all three now shipped 2026-07-08**: 5a-i
+(`TYPE_TASK` core -- `TaskSpawn`/`TaskAwait`/`TaskDone`/`TaskCancel` over the
+existing thread pool) and 5a-ii (mmap-reservation growable
+`threads[]`/`mutexes[]`, default ceilings 4096/65536, both env-overridable)
+shipped 2026-07-07, preceded by a prerequisite fix for three TSan-confirmed
+pre-existing races in the thread-pool result-handoff path (pscal-core
+`43b4077`); 5a-iii (HTTP async migrates onto tasks via a new
+`vmTaskCreateNative`, retiring the 32-slot `g_http_async[]` job pool, plus a
+new CLike `task` type) shipped 2026-07-08, and along the way confirmed (not
+fixed -- filed as a follow-up) a pre-existing, TSan-detectable gap in the
+thread pool's natural-completion slot-release path that predates all of
+Phase 5a. Phase 5b, Phase 6.3's remaining items, and Phase 7 remain
+proposal.
 Companion to the
 [VM Technical Manual](pscal_vm_manual/pscal_vm_manual.md), which documents
 the 1.x engine this plan modifies.  File/line references are to
@@ -3170,16 +3174,141 @@ now split into checkpoints so each lands and is tested independently:
   (the growable-storage path is off the hot loop entirely for any program
   that never exceeds the old fixed defaults).
 - **5a-iii — HTTP async migrates onto tasks; retire the 32-slot job pool.**
-  Add `vmTaskCreateNative(work_fn, cancel_fn, progress_fn)` so any future
-  builtin needing awaitable async work can return a `TYPE_TASK` without a
-  new ad hoc pool; rewrite `HttpRequestAsync`/`HttpRequestAsyncToFile`/
-  `HttpAwait`/`HttpTryAwait`/`HttpIsDone`/`HttpCancel`/
-  `HttpGetAsyncProgress`/`HttpGetAsyncTotal` (`builtin_network_api.c`) to
-  return/consume `TYPE_TASK` values, delete `g_http_async[]`/
-  `MAX_HTTP_ASYNC` outright (no deprecation wrapper, matching this
-  codebase's established retirement convention), retarget in-tree callers
-  (tests, examples, doc-bench tooling) in the same change. Depends on 5a-i's
-  task API; does not depend on 5a-ii. Not started.
+  Done. Added `vmTaskCreateNative(VM* vm, VMThreadCallback work_fn, void*
+  user_data, VMThreadCleanup cleanup)` (`vm.c`/`vm.h`, wraps
+  `vmSpawnCallbackThread` and returns a `TYPE_TASK` id), plus
+  `vmTaskReportProgress(VM* threadVm, long long now, long long total)` /
+  `vmTaskGetProgress(VM* owner, int threadId, long long* outNow, long long*
+  outTotal)` (new `Thread.nativeProgressNow`/`nativeProgressTotal`
+  `atomic_llong` fields). **Deviation from the original sketch:**
+  `vmTaskCreateNative` ships with no `cancel_fn` parameter. An earlier draft
+  added one (a per-slot `Thread.nativeCancelFn` set by the spawning thread
+  right after `vmTaskCreateNative` returns, invoked from `vmThreadCancel`)
+  but it raced against the *same worker's own* `threadStart` job-pickup code
+  resetting the slot on its first loop iteration -- confirmed via an actual
+  failing run of `HttpAsyncProgressCancelDemo` (cancel reported success but
+  the transfer completed anyway with status 200, not the expected -1), not
+  just theorized. Fix: removed the hook entirely. Native work has no
+  interpreter safe points to cooperatively observe `Thread.cancelRequested`
+  at (unlike bytecode, which the interpreter loop already polls), but it can
+  poll the flag directly at its own natural safe points with zero new
+  plumbing, since every native `work_fn` already has its own `Thread*` via
+  `VM.owningThread`. `builtin_network_api.c`'s curl progress callbacks
+  (`xferInfoCallback`/`progressCallback`) and the `file://` fast-path's own
+  loop now call a local `httpJobCancelRequested(HttpAsyncJob*)` helper that
+  does exactly this instead of reading a job-local flag.
+
+  Rewrote `HttpRequestAsync`/`HttpRequestAsyncToFile`/`HttpAwait`/
+  `HttpTryAwait`/`HttpIsDone`/`HttpCancel`/`HttpGetAsyncProgress`/
+  `HttpGetAsyncTotal` (`builtin_network_api.c`) to return/consume `TYPE_TASK`
+  values via `vmTaskCreateNative`/`vmThreadTakeResult`/`vmTaskIsDone`/
+  `vmThreadCancel`/`vmTaskGetProgress`; deleted `g_http_async[]`/
+  `g_http_async_mutex`/`MAX_HTTP_ASYNC`/`httpAllocAsync` outright (no
+  deprecation wrapper, matching this codebase's established retirement
+  convention). `httpAsyncThread`'s 413-line pthread worker became
+  `httpAsyncWork(VM* threadVm, void* user_data)` (a `VMThreadCallback`); its
+  15 early-return sites (each previously `job->done = 1; return NULL;`) now
+  call a new `httpAsyncFinish(VM*, HttpAsyncJob*)` that propagates
+  status/headers/error onto the `HttpSession`, builds a `{status, body}`
+  record via a local `httpAppendRecordField` helper (mirrors `builtin.c`'s
+  `appendThreadField`, duplicated locally since the original is `static`),
+  and calls `vmThreadStoreResult`. A new `httpAsyncJobFree` unifies job
+  cleanup (as `vmTaskCreateNative`'s `cleanup`, guaranteed to run exactly
+  once regardless of failure mode) -- this also fixed a pre-existing
+  asymmetry where `HttpTryAwait`'s old path was missing several `free()`
+  calls that `HttpAwait`'s had.
+
+  A second real bug found via testing, independent of the cancel race:
+  progress was always 0 for `file://` transfers. `vmTaskReportProgress` was
+  only wired into curl's `xferInfoCallback`/`progressCallback`, but the
+  `file://` fast-path updates `job->dl_now`/`dl_total` directly without
+  going through those callbacks (curl never runs for a local-file read).
+  Fixed by adding a `vmTaskReportProgress` call at the `file://` loop's
+  progress-update site and the `data:` URL success path.
+
+  **CLike static-typing fallout (found by testing, not anticipated by the
+  original sketch):** CLike is statically typed and had no way to hold a
+  `TYPE_TASK` value -- `int id = httprequestasync(...)` crashed at runtime
+  (`updateSymbolInternal`'s type-compatibility check truncated the TASK's
+  heap pointer bits down to a bogus integer via `asI64`, since unlike
+  `TYPE_THREAD` -- a raw integer stored directly in `Value.bits`, safely
+  `isIntlikeType` -- `TYPE_TASK` is an `ObjHeader`-tagged pointer to a heap
+  `TaskObj` with no numeric interpretation). Tried making `TYPE_TASK`
+  `isIntlikeType`-compatible first; reverted immediately once this
+  corruption was confirmed empirically -- it is fundamentally unsafe for a
+  pointer-backed type. Fixed properly instead: added `task` as a first-class
+  CLike keyword/type (mirrors `mstream`'s plumbing exactly -- lexer token,
+  `parser.c`'s `clikeTokenTypeToVarType`/`clikeTokenTypeToTypeName`/
+  `isTypeToken`, plus `core/utils.c`'s shared `lookupBuiltinPascalTypeName`
+  so Pascal can also declare `var t: task;` even though no in-tree Pascal
+  fixture needs to yet), updated CLike's `semantics.c` compile-time checks
+  for `httprequestasync`/`httprequestasynctofile` (now infer `TYPE_TASK`,
+  not `TYPE_INT32`) and `httpisdone`/`httptryawait` (now require a `TYPE_TASK`
+  first argument); `httpawait`/`httpcancel`/`httpgetasyncprogress`/
+  `httpgetasynctotal` had no compile-time arg-type checks to begin with and
+  needed no changes. Also filled a real gap this exposed:
+  `core/utils.c`'s `makeValueForType` had no `TYPE_TASK` case (fell through
+  to its `default:` warning branch, "unhandled type... (TASK)"), used when a
+  `task`-declared variable is default-initialized before its first
+  assignment; added one that sets a NULL heap pointer (the same
+  "nil-until-assigned" convention `freeValue`/`makeCopyOfValue`'s existing
+  `TYPE_TASK` cases already treat as the valid empty state -- verified both
+  are NULL-safe before relying on this).
+
+  Left `ast.c`'s shared `getBuiltinReturnType` reporting
+  `httprequestasync`/`httprequestasynctofile` as `TYPE_INTEGER`, NOT
+  `TYPE_TASK`, deliberately -- this is a second real deviation found by
+  testing, not a leftover mistake. Pascal's existing `id: integer :=
+  HttpRequestAsyncToFile(...)` fixtures (`HttpAsyncFileURL`, `HttpAsyncDemo`,
+  `HttpAsyncProgressCancelDemo`, all predating this checkpoint, all left
+  un-migrated on purpose since Pascal has no `task` keyword in play for
+  them) rely on Pascal's plain `:=` assignment codegen NOT detecting a
+  compile-time type mismatch between the declared `integer` and the
+  builtin's inferred type; when this function was changed to report
+  `TYPE_TASK` experimentally, the mismatch made the compiler emit a
+  different (lossy) store path that truncated the real `TYPE_TASK` runtime
+  value down to integer `0`, corrupting every one of those three fixtures
+  identically to the CLike failure above -- confirmed by re-running all
+  three and watching them break, then reverting. CLike's own
+  `semantics.c` keeps its *own*, function-name-hardcoded `TYPE_TASK`
+  inference for these two builtins (see above), independent of `ast.c`'s
+  shared value, which is why CLike gets a real, statically-checked `task`
+  type while Pascal's un-migrated `integer`-declared call sites keep working
+  unchanged. A future Pascal fixture that wants compile-time task-type
+  safety can declare `id: task` explicitly (the type now exists via
+  `lookupBuiltinPascalTypeName`) without needing `ast.c` to change.
+
+  New stress fixture `Tests/vm_thread_stress/http_async_task_stress.pas`:
+  15 rounds of 8 concurrent `file://` async transfers each, half canceled
+  immediately (racing completion), half left to run, reusing 8 sessions
+  across rounds (`MAX_HTTP_SESSIONS` is a fixed 32-slot pool -- creating a
+  fresh session per request per round would exhaust it well before 15
+  rounds). Verified clean under plain, ASan+UBSan, and TSan builds, alongside
+  the pre-existing `HttpAsyncDemo` (Pascal and CLike)/
+  `HttpAsyncProgressCancelDemo`/`HttpAsyncFileURL` fixtures and 5a-i's
+  `task_concurrent_spawn_await.pas`/`task_nested_spawn.pas`/
+  `task_cancel_race.pas`. TSan surfaced one finding across *all* of these,
+  including the pre-existing 5a-i fixtures untouched by this checkpoint:
+  "thread leak" warnings for every naturally-completed worker pthread (no
+  actual data race -- confirmed by rerunning with `halt_on_error=0`, only
+  ever the one leak-class finding). Bisected via `git stash` back to the
+  5a-ii tip (`117ebf6`): reproduces identically there, and independently via
+  `components/exsh/tests/tests/thread_worker_reuse.exsh` (18 sequential
+  spawn/wait/consume cycles produce 18 unique thread IDs instead of reusing
+  one slot) at the same pre-5a-iii baseline. Confirmed pre-existing, not
+  caused by this checkpoint, and out of scope here (it's in the natural-
+  completion slot-release path shared by every thread-pool caller, not
+  anything specific to HTTP or tasks); filed as a follow-up rather than
+  fixed inline.
+
+  Full `Tests/run_all_suites.py` green except that one pre-existing,
+  independently-confirmed failure; whole-repo `cmake --build build` clean
+  (including `pscald`/`pscalasm`); `Tests/vm_bench` recorded on
+  `build-release` (label `phase5a-iii-http-async-tasks`), all check values
+  passing, the ~5-15% uniform increase across *every* benchmark (including
+  ones with zero relationship to HTTP or tasks, e.g. `arith`/`calls`)
+  attributed to concurrent system load from the ASan/TSan builds and test
+  suite runs happening in parallel, not a targeted regression.
 
 ### 6.2 Phase 5b: Channels
 

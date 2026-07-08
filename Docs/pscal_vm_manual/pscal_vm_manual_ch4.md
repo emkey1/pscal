@@ -200,11 +200,11 @@ stateDiagram-v2
     Allocated --> Configured : HttpSetOption / HttpSetHeader (repeatable)
     Configured --> Configured : more options / headers
     Configured --> InFlight : HttpRequest / HttpRequestToFile (sync, blocks thread)
-    Configured --> AsyncPending : HttpRequestAsync -> job id
+    Configured --> AsyncPending : HttpRequestAsync -> task
     InFlight --> Completed : status stored in last_status,\nheaders in last_headers
     Completed --> Configured : session reusable, options persist
-    AsyncPending --> Completed : HttpAwait(job, out) / HttpTryAwait
-    AsyncPending --> Cancelled : HttpCancel(job)
+    AsyncPending --> Completed : HttpAwait(task, out) / HttpTryAwait
+    AsyncPending --> Cancelled : HttpCancel(task)
     Completed --> [*] : HttpClose(id) -> curl_easy_cleanup, slot freed
 ```
 
@@ -219,13 +219,16 @@ thread. Post-request, the program inspects `HttpGetLastHeaders`,
 
 #### The async layer
 
-Async requests get their own OS thread per job, from a second 32-slot pool
-(`MAX_HTTP_ASYNC`, `g_http_async[]`):
+**VM 2.0 Phase 5a checkpoint 5a-iii** retired the async layer's own 32-slot
+job pool (`MAX_HTTP_ASYNC`/`g_http_async[]`/`g_http_async_mutex`/
+`httpAllocAsync` — deleted outright, no deprecation wrapper) in favor of
+riding the VM's general-purpose task machinery (§1.4a/§1.4b): every async
+request is now a `TYPE_TASK` value, heap-allocating its own `HttpAsyncJob`
+and spawning through `vmTaskCreateNative` instead of a raw `pthread_create`
+into a fixed-size array:
 
 ```c
 typedef struct HttpAsyncJob_s {
-    int active;
-    pthread_t th;
     int session;                 // originating session id
     char *method, *url, *body;  size_t body_len;
     MStream* result;             // allocated by the job thread
@@ -233,31 +236,49 @@ typedef struct HttpAsyncJob_s {
     /* ...a full mirror copy of every session option at submission time:
        TLS block, proxy block, retries, rate limits, cookie jars,
        plus deep-copied curl_slist headers/resolve entries... */
-    volatile int cancel_requested;      // polled by curl progress callback
-    long long dl_now, dl_total;         // live progress counters
-    int done;
+    long long dl_now, dl_total;  // live progress counters, published via
+                                  // vmTaskReportProgress/vmTaskGetProgress
+    VM* threadVm;                 // set at httpAsyncWork's entry so curl's
+                                   // progress callbacks (which only receive
+                                   // this job as clientp) can still reach
+                                   // vmTaskReportProgress and the owning
+                                   // Thread's cancelRequested flag
 } HttpAsyncJob;
 ```
 
-The **mirror copy is the design point**: `HttpRequestAsync` snapshots the
-session's entire configuration into the job before the worker starts, so the
-program can immediately reconfigure or reuse the session — even fire another
-async request from it — without racing the in-flight job. Session and job
-share nothing after submission except the session id used to write back
-`last_status`/`last_headers` on await.
+The **mirror copy is still the design point**: `HttpRequestAsync` snapshots
+the session's entire configuration into the job before the worker starts, so
+the program can immediately reconfigure or reuse the session — even fire
+another async request from it — without racing the in-flight job. Session
+and job share nothing after submission except the session id used to write
+back `last_status`/`last_headers` on completion (now done inside a single
+`httpAsyncFinish` helper called from every one of the worker's exit paths,
+success or failure, rather than scattered across `HttpAwait`'s old
+post-`pthread_join` code).
 
-The waiting API is a small state machine over that job slot:
+The waiting API is the same small state machine as before, just over a task
+handle instead of a bare job-array index:
 
-- `HttpIsDone(id)` — non-blocking poll of `job->done`.
-- `HttpTryAwait(id, out)` — non-blocking claim: returns the result only if
-  finished.
-- `HttpAwait(id, out)` — `pthread_join(job->th)`, then copies the job's
-  result buffer into the caller-supplied `MStream`, propagates
-  status/headers/error back onto the session, and frees the slot.
-- `HttpCancel(id)` — sets `cancel_requested`; the job's curl progress
-  callback observes it and aborts the transfer.
-- `HttpGetAsyncProgress`/`HttpGetAsyncTotal` — read `dl_now`/`dl_total` for
-  progress bars.
+- `HttpIsDone(task)` — non-blocking poll, `vmTaskIsDone`.
+- `HttpTryAwait(task, out)` — non-blocking claim: returns the result only if
+  finished, via `vmThreadTakeResult`.
+- `HttpAwait(task, out)` — blocks until done (`vmThreadTakeResult`), then
+  copies the job's result buffer into the caller-supplied `MStream`.
+- `HttpCancel(task)` — `vmThreadCancel` sets the owning `Thread`'s
+  `cancelRequested` atomic; the job's curl progress callbacks and its
+  `file://` fast-path loop poll it directly at their own natural safe
+  points (no job-local cancel flag — see §1.4b for why an earlier draft's
+  per-job hook was removed after a confirmed race).
+- `HttpGetAsyncProgress`/`HttpGetAsyncTotal` — `vmTaskGetProgress`, backed by
+  the owning `Thread`'s `nativeProgressNow`/`nativeProgressTotal`.
+
+CLike callers declare the handle with the language's new `task` type
+(`task id = HttpRequestAsync(...)`); Pascal's existing `id: integer`-declared
+call sites are unaffected (`ast.c`'s shared builtin-return-type inference for
+these two builtins deliberately still reports `TYPE_INTEGER`, so Pascal's
+loose assignment codegen keeps passing the real `TYPE_TASK` runtime value
+through untouched — see `Docs/pscal_vm2_plan.md` §6.1's 5a-iii writeup for
+why forcing `TYPE_TASK` there instead broke those fixtures).
 
 #### Sequence: a thread dispatching an async TLS request
 
@@ -266,7 +287,8 @@ sequenceDiagram
     participant BC as Interpreter thread<br/>(bytecode)
     participant REG as Builtin registry
     participant SES as HttpSession[i]<br/>(slot pool)
-    participant JOB as HttpAsyncJob[j]<br/>(+ its pthread)
+    participant POOL as VM thread pool<br/>(threads[], §1.4/§1.4b)
+    participant JOB as HttpAsyncJob<br/>(heap-allocated)
     participant NET as libcurl / TLS / network
 
     BC->>REG: CALL_BUILTIN 'httpsession'
@@ -274,25 +296,30 @@ sequenceDiagram
     SES-->>BC: push session id i
     BC->>SES: CALL_BUILTIN 'httpsetoption'(i,'tls_min','13'), 'httpsetheader'(...)
     BC->>REG: CALL_BUILTIN 'httprequestasync'(i,'GET',url)
-    REG->>JOB: alloc job j, MIRROR-COPY all session options,<br/>deep-copy header slists
-    JOB->>JOB: pthread_create(httpAsyncThread)
-    JOB-->>BC: push job id j (returns immediately)
-    par worker thread
+    REG->>JOB: calloc HttpAsyncJob, MIRROR-COPY all session options,<br/>deep-copy header slists
+    REG->>POOL: vmTaskCreateNative(httpAsyncWork, job, httpAsyncJobFree)
+    POOL-->>BC: push TYPE_TASK value (returns immediately)
+    par worker thread (a pool slot, not a dedicated job thread)
         JOB->>NET: curl_easy_perform — TLS handshake per mirrored options<br/>(CAINFO, VERIFYPEER, TLSVERSION, pinned key)
-        NET-->>JOB: chunks -> result MStream, headers -> last_headers,<br/>progress -> dl_now/dl_total
-        JOB->>JOB: done = 1
+        NET-->>JOB: chunks -> result MStream, headers -> last_headers,<br/>progress -> vmTaskReportProgress
+        JOB->>POOL: httpAsyncFinish -> vmThreadStoreResult({status, body})
     and interpreter thread continues
-        BC->>BC: ...other bytecode; optionally CALL_BUILTIN 'httpisdone'(j)
+        BC->>BC: ...other bytecode; optionally CALL_BUILTIN 'httpisdone'(task)
     end
-    BC->>JOB: CALL_BUILTIN 'httpawait'(j, out_mstream)
-    JOB->>BC: pthread_join; copy result -> out;<br/>write status/headers back to session i; free slot j
+    BC->>POOL: CALL_BUILTIN 'httpawait'(task, out_mstream)
+    POOL->>BC: vmThreadTakeResult; extract status/body into out;<br/>write status/headers back to session i; httpAsyncJobFree runs
     BC->>SES: CALL_BUILTIN 'httpclose'(i)
 ```
 
-Note the concurrency layering: these job threads are *native* threads owned
-by the network engine, entirely separate from the VM's own `THREAD_CREATE`
-worker pool (§1.4). A PSCAL program can therefore have 16 VM threads each
-juggling up to 32 async transfers without any interpreter-level blocking.
+Note the concurrency layering: since checkpoint 5a-iii, async HTTP work runs
+on the *same* growable pool `THREAD_CREATE`/`TaskSpawn` use (§1.4/§1.4b), not
+a dedicated per-job pthread pool — a native `VMThreadCallback` (`httpAsyncWork`
+here) occupies a pool slot for the duration of the transfer exactly like a
+bytecode task does. A PSCAL program can have up to `VM_MAX_THREADS`
+(env-overridable, default ceiling 4096 as of 5a-ii) tasks in flight across
+*all* kinds of work — VM threads, `TaskSpawn`, and HTTP async alike — sharing
+one pool, one ceiling, and one growth path, without any interpreter-level
+blocking.
 
 #### Sockets and DNS
 

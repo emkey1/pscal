@@ -576,9 +576,58 @@ capture. A `spawn`ed function's result is now also retrievable via
 `ThreadGetResult`, a bug fix rather than a behavior change worth gating on.
 
 `threads[]`/`mutexes[]` are now growable (checkpoint 5a-ii, §1.4 above).
-Not yet done (scoped in `Docs/pscal_vm2_plan.md` §6.1 as checkpoint
-5a-iii): HTTP async (§4.1 below) still runs its own separate 32-slot job
-pool rather than returning `TYPE_TASK` values.
+
+### 1.4b Native tasks (VM 2.0 Phase 5a checkpoint 5a-iii)
+
+Not every awaitable unit of work is Pascal/CLike/Rea bytecode — HTTP async
+(§4.1 below) runs a native C worker function per request. Checkpoint 5a-iii
+generalized `TYPE_TASK` to cover this case too, via a new API alongside
+`TaskSpawn`'s bytecode path:
+
+```c
+typedef void (*VMThreadCallback)(VM* threadVm, void* user_data);
+typedef void (*VMThreadCleanup)(void* user_data);
+
+int  vmTaskCreateNative(VM* vm, VMThreadCallback work_fn, void* user_data,
+                         VMThreadCleanup cleanup);
+void vmTaskReportProgress(VM* threadVm, long long now, long long total);
+bool vmTaskGetProgress(VM* owner, int threadId, long long* outNow,
+                        long long* outTotal);
+```
+
+`vmTaskCreateNative` wraps the pre-existing `vmSpawnCallbackThread`
+(previously used only by a fire-and-forget Sierpinski demo) and returns a
+`TYPE_TASK` value exactly like `TaskSpawn` does, so callers use the same
+`TaskAwait`/`TaskDone`/`TaskCancel` (or the type-specific
+`vmThreadTakeResult`/`vmTaskIsDone`/`vmThreadCancel` a builtin implementation
+calls directly) regardless of whether the task is running bytecode or native
+code. `cleanup` is guaranteed to run exactly once no matter how the task
+ends — spawn failure, natural completion, or cancellation — a stronger
+contract than `vmSpawnCallbackThread`'s original `!vm || !callback`-only
+cleanup guarantee.
+
+**Cancellation has no separate native hook.** An earlier draft added a
+per-slot `Thread.nativeCancelFn`, set by `vmTaskCreateNative` right after
+spawning and invoked by `vmThreadCancel`. It raced against the *same
+worker's own* `threadStart` job-pickup code resetting the slot on its first
+loop iteration — two unsynchronized writes on different threads with no
+ordering between them, confirmed by an actual failing cancel-demo run (the
+cancel call reported success, but the transfer completed anyway). Native
+work has no interpreter safe points to cooperatively observe
+`Thread.cancelRequested` at the way the bytecode interpreter loop already
+does, but a native `work_fn` can poll the flag directly at its own natural
+safe points with zero new plumbing — every native worker already has its own
+`Thread*` via `VM.owningThread`. HTTP async's curl progress callbacks and its
+`file://` fast-path loop do exactly this.
+
+**Progress reporting** is symmetric: `vmTaskReportProgress` (called by
+`work_fn` from inside the worker) and `vmTaskGetProgress` (called by a query
+builtin from any thread) share two new `Thread` fields,
+`nativeProgressNow`/`nativeProgressTotal` (`atomic_llong`, zero total meaning
+"unknown" — the same convention HTTP's own `dl_total` already used). This
+avoids the unsafe alternative of a query builtin reaching into a
+heap-allocated job struct that the owning worker's `cleanup` may have already
+freed.
 
 ### Diagram: Thread Pool, Shared State, and the Native/Builtin Layer
 
