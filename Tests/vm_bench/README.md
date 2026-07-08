@@ -18,6 +18,7 @@ semantics changed and the timing is not comparable.
 | `globals.p` | 8 globals read+written per iteration: GET_GLOBAL/SET_GLOBAL (Phase 2b baseline) |
 | `json.p` | repeated yyjson parse + full walk: ext-builtin dispatch + handle layer |
 | `io_http.p` | text-file write/read rounds + HttpRequest over `file://` (loopback, no network) |
+| `records.p` | fixed-array-of-records value copy + by-value calls, read-mostly then copy-then-mutate: settles whether Phase 4j's win extends to genuinely value-typed data (it doesn't — see plan.md §11) |
 
 Each benchmark targets roughly 1 s on an M4 MacBook Pro so run-to-run noise
 stays small relative to the signal.

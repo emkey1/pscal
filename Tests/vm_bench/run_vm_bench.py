@@ -54,6 +54,18 @@ BENCHES = {
     "globals": ("globals.p", "3547984"),
     "json":    ("json.p",    "8011500"),
     "io_http": ("io_http.p", "2205120"),
+    # Record/array-copy-heavy workload added to actually validate (rather
+    # than leave unvalidated) Phase 4's original informal "4-8x" framing
+    # for this specific workload shape (plan §5.10, §11). Blends a
+    # read-mostly copy phase (COW's best case: whole-array assignment and
+    # by-value calls should cost a pointer-bump, not a memcpy) with a
+    # copy-then-mutate phase (COW's worst case: valueEnsureUnique() clones
+    # on first write, cost should land near VM 1.x's unconditional copy).
+    # Expected value independently re-derived via a from-scratch Python
+    # re-simulation of Kernel()'s arithmetic (dict-of-lists standing in
+    # for the record/array copy semantics) -- matches the VM's printed
+    # check= exactly, no fudging.
+    "records": ("records.p", "948447"),
     # VM 2.0 Phase 3 (plan §5.9): recursion depth impossible before the
     # growable stack (deep_recursion.p's countdown(50000) would have hit
     # the old fixed VM_CALL_STACK_MAX=4096 within a couple thousand frames).

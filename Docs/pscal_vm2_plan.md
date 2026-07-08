@@ -4021,6 +4021,7 @@ final VM 2.0 (Phase 7 complete) Release binary, same host, same conditions.
 | `json` | 0.281s | 0.246s | **1.14x** |
 | `io_http` | 0.372s | 0.373s | ~parity (network/TLS-bound, not VM-bound) |
 | `deep_recursion` | *(cannot run)* | 0.230s | **new capability, not just speed** |
+| `records` | 0.924s | 0.914s | ~parity (**1.01x**, noise-level — see below) |
 
 **Read this against the Phase 4 sketch's original framing, honestly.**
 §5.10's design text predicted Phase 4 alone (the `Value` collapse) would
@@ -4031,13 +4032,40 @@ dedicated validating benchmark (§5.10.4's post-4h/4i tracking is about
 and the real, measured, whole-effort number — every phase combined, a
 genuine isolated-worktree A/B, not an estimate — is **1.14x-1.62x**
 depending on workload. That is a real, worthwhile win, not a rounding
-error, but it is not 4-8x, and no benchmark in this suite specifically
-stresses the allocation-churn-heavy workload (many copies of large
-records/arrays) the original claim was reasoning about in the abstract —
-so the honest conclusion is "the 4-8x claim is unvalidated and likely
-overstated for general-purpose code," not "confirmed" and not "refuted for
-every workload shape." A dedicated record/array-copy-heavy benchmark would
-be needed to settle that narrower question; none has been written yet.
+error, but it is not 4-8x.
+
+**`records.p` (added 2026-07-08 to settle this directly) is a dedicated
+record/array-copy-heavy benchmark: an `array[1..180] of TRecord` (each
+record an int + a string + an `array[1..8] of integer`), copied whole via
+`copyA := base` and passed by value into functions, split into a
+read-mostly phase (750 rounds) and a copy-then-mutate phase (300 rounds).
+Result: **1.01x, i.e. no measurable win** — well within run-to-run noise
+(VM 1.x 0.911s-0.937s, VM 2.0 0.882s-0.953s, fully overlapping ranges).
+
+The reason is architectural, not a measurement fluke, and it means the
+4-8x claim doesn't describe this workload at all, in either direction.
+Phase 4j's copy-on-write elision (§5.10, `valueEnsureUnique()`) only
+applies to **dynamic arrays** (`array of T`), which are reference-counted,
+alias-on-assign types in this language — matching Delphi/FPC dynamic-array
+semantics, confirmed by writing a minimal repro and running it unchanged
+against both the VM 1.x and VM 2.0 binaries: a dynamic array passed by
+value and mutated through the parameter visibly mutates the caller's copy
+on *both* engines, identically, long-standing by-design behavior, not
+something Phase 4j changed. **Fixed-bounds arrays** (`array[1..N] of T`,
+what `records.p` uses, and the only array shape with true
+independent-copy value semantics) get none of that treatment — they are
+deep-copied element-by-element on every assignment in both VM generations
+(`src/core/utils.c`'s `makeCopyOfValue`), so Phase 4's `Value`-struct
+shrink (176 bytes to 16) doesn't help here either: the array's element
+data is a packed inline byte blob, not a buffer of individually-boxed
+`Value`s, so there's no per-element `Value` overhead for the shrink to
+remove. The other benchmarks' 1.14x-1.62x comes from cheaper dispatch and
+smaller `Value`-sized traffic elsewhere in the VM, and none of that
+carries over to a workload whose cost is dominated by a fixed-size
+struct-array memcpy loop. Honest conclusion: **the 4-8x claim is
+unvalidated for general-purpose code and actively wrong for genuinely
+value-typed record/array-copy-heavy code**, where VM 2.0 provides no
+measurable speedup at all.
 
 **`deep_recursion` is not a speed comparison at all** — VM 1.x exits
 cleanly with `"VM Error: Stack overflow"` at the fixed `VM_CALL_STACK_MAX

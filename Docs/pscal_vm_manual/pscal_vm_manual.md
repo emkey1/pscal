@@ -125,6 +125,10 @@ standalone `dlopen` plugin as of Phase 7; `pscaljson2bc` **does** exist —
 its sources live in the umbrella repo (`src/tools/`), not in pscal-core;
 and the real, measured end-to-end VM 1.x → VM 2.0 speedup (all seven
 phases combined, a true isolated-worktree comparison, not a per-phase
-estimate) is **1.14x-1.62x depending on workload**, not the much larger
-number an early, since-superseded Phase 4 design sketch once floated — see
-`Docs/pscal_vm2_plan.md` §11 for the full comparison.
+estimate) is **1.14x-1.62x for dispatch/scalar-traffic-bound code, and
+~1.0x (no measurable win) for genuinely value-typed record/array-copy-heavy
+code** — Phase 4j's copy-on-write elision applies only to dynamic arrays
+(reference-typed by design in this language, matching Delphi/FPC), not to
+the fixed-bounds arrays that actually get deep-copied on assignment; not
+the much larger number an early, since-superseded Phase 4 design sketch
+once floated — see `Docs/pscal_vm2_plan.md` §11 for the full comparison.
