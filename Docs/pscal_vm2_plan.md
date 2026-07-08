@@ -28,8 +28,10 @@ pre-existing races in the thread-pool result-handoff path (pscal-core
 new CLike `task` type) shipped 2026-07-08, and along the way confirmed (not
 fixed -- filed as a follow-up) a pre-existing, TSan-detectable gap in the
 thread pool's natural-completion slot-release path that predates all of
-Phase 5a. Phase 5b, Phase 6.3's remaining items, and Phase 7 remain
-proposal.
+Phase 5a -- fixed separately the same day (pscal-core `6aaefae`). Phase 5b
+(Channels, §6.2) has a full checkpoint breakdown (5b-i/ii/iii) as of
+2026-07-08 but no code yet -- design only, not started. Phase 6.3's
+remaining items and Phase 7 remain proposal.
 Companion to the
 [VM Technical Manual](pscal_vm_manual/pscal_vm_manual.md), which documents
 the 1.x engine this plan modifies.  File/line references are to
@@ -3312,15 +3314,170 @@ now split into checkpoints so each lands and is tested independently:
 
 ### 6.2 Phase 5b: Channels
 
-- `TYPE_CHANNEL`: bounded MPMC queue of Values (mutex + two condvars;
-  refcounted via ObjHeader so send/receive across tasks is safe).
-- `ChannelCreate(capacity)`, `ChannelSend`, `ChannelReceive`,
-  `ChannelClose`, `ChannelTrySend/TryReceive`; `select` over channels is
-  explicitly deferred until a frontend needs it.
-- Positioning: channels + tasks become the recommended concurrency
-  idiom; mutexes + shared globals remain supported.  This is the item with
-  the most Rea-evolution leverage (agentic Rea wants structured
-  concurrency, per rea_evolution_ideas).
+Design verified against current architecture 2026-07-08, immediately after
+Phase 5a (checkpoints 5a-i/5a-ii/5a-iii) shipped in full. Not started —
+checkpoint breakdown and key decisions below, matching this plan's
+established precedent (Phase 1's 1a-1e, Phase 4's 4a-4j, Phase 5a's own
+5a-i/ii/iii) of landing each independently-testable piece as its own
+checkpoint rather than one large PR.
+
+**`TYPE_CHANNEL` tag safety, confirmed not assumed:** `VarType`
+(`core/var_type.h`) is a small, append-only enum; `TYPE_TASK` is currently
+its last member, added at the very end for exactly this reason (opcode/
+VarType numbering has no backward-compatibility promise post-PSB3 — `.bc`
+recompiles, it doesn't need to stay binary-stable across a VarType
+addition). `TYPE_CHANNEL` must likewise append at the end, never insert
+mid-enum. `core/obj_header.c`'s destructor table is
+`#define PSCAL_OBJ_DESTRUCTOR_TABLE_SIZE ((size_t)TYPE_TASK + 1)` — this
+exact macro was the site of a real off-by-one caught only by an actual
+`TaskSpawn` smoke test in 5a-i (sized off the *previous* last member,
+`TYPE_UNICODE_STRING`, one short of `TYPE_TASK`'s real value); 5b-i must
+update it to `((size_t)TYPE_CHANNEL + 1)` and — per that same lesson —
+re-verify with an actual `ChannelCreate` smoke test before trusting the
+table is sized correctly, not just visual inspection. No collision risk the
+way Phase 4i checkpoint 3a found for `TYPE_CLOSURE`/`TYPE_INTERFACE`
+(`ClosureEnvPayload` double-claiming both tags via its own embedded
+`header.type`) — `TYPE_CHANNEL` is a brand-new tag with no existing payload
+type claiming it.
+
+**Design decisions locked in:**
+
+- **Pure heap object, no VM-level registry.** Unlike `TaskObj`
+  (`core/types.h`: `{ ObjHeader header; int threadId; VM* owner; }`,
+  addressed via `(VM* owner, int threadId)` because a task's identity *is*
+  a specific `threads[]` slot in a specific VM), a channel has no natural
+  "home" slot — it's meant to be created once and shared by value (via
+  `ObjHeader` retain-and-share, matching `TaskObj`'s copy semantics for the
+  same reason: a channel's whole identity is the shared buffer, not
+  something Pascal-style copy-on-construct should duplicate) across
+  however many tasks/threads hold a reference, potentially outliving the
+  task that created it. No `channels[]` array, no ceiling, no env var, no
+  mmap-reservation growth machinery (that pattern exists in `vm.c`'s
+  `vmAllocThreadStorage`/`vmGrowThreadStorage`/`vmAllocMutexStorage`/
+  `vmGrowMutexStorage` for `threads[]`/`mutexes[]` specifically because
+  those arrays hold long-lived pointers taken *while a lock is held across
+  a blocking wait* — `ChannelObj` has no equivalent "array of slots
+  referenced by index" problem to solve, so pulling in that machinery here
+  would be solving a problem this design doesn't have).
+- **Backing structure.** `ChannelObj { ObjHeader header; pthread_mutex_t
+  lock; pthread_cond_t notEmpty; pthread_cond_t notFull; Value* buf; size_t
+  capacity; size_t count; size_t head; bool closed; }` — a ring buffer, not
+  a linked list. Existing precedent for "ring buffer, mutex + a wake
+  condvar" is the `Mutex` struct itself (`vm.h`: `{ pthread_mutex_t handle;
+  bool active; }`, lazily `pthread_mutex_init`'d in `createMutex`); the
+  existing `ThreadJobQueue` (single mutex, single cond, unbounded singly-
+  linked list, used for job dispatch) is architecturally close but purpose-
+  built for one-shot work items, not reusable as-is — model the *shape*
+  (mutex-guarded loop, cancellation-aware timed wait), not the struct.
+- **Blocking-wait pattern reuses `vmThreadTakeResult`'s, not a new one.**
+  `vmThreadTakeResult` (`vm.c`) already solves "block on a condvar but wake
+  early on cancellation": a loop around `pthread_cond_timedwait` with a
+  100ms deadline, rechecking `vmConsumeInterruptRequest(vm)` (the general
+  "user hit Ctrl-C" hook, meaningful from *any* calling thread, main or
+  worker) and the caller's own cancellation state each time the deadline
+  fires rather than a single unbounded `pthread_cond_wait`. `ChannelSend`/
+  `ChannelReceive` must follow this exact shape: a full/empty buffer blocks
+  by looping `pthread_cond_timedwait(&notFull/&notEmpty, &lock, +100ms)`,
+  checking `vmConsumeInterruptRequest(vm)` and — when running inside a
+  worker — `Thread.cancelRequested` (via `VM.owningThread`, the same
+  pattern 5a-iii's native HTTP tasks use to poll cancellation with zero new
+  plumbing) on every wake, not just blocking forever. This makes
+  `TaskCancel`-ing a task blocked on `ChannelReceive` actually work, the
+  same way 5a-iii had to fix HTTP async's cancellation to be a poll rather
+  than a callback after the callback approach was tried and reverted for
+  racing the worker's own startup path.
+- **Close semantics (needs to be nailed down in 5b-i, not left implicit):**
+  `ChannelClose` sets `closed = true` and broadcasts both condvars so every
+  blocked sender/receiver wakes. A receive on a closed-but-nonempty channel
+  still drains remaining buffered values first (matching Go's convention,
+  the most familiar precedent for whoever picks this checkpoint up); a
+  receive on a closed-and-empty channel returns immediately with a
+  distinguishable "channel closed" result rather than blocking forever — the
+  exact return convention (a sentinel Value? a second out-param bool, the
+  way `HttpTryAwait`'s non-blocking claim already returns a status code
+  alongside its result?) is an open call for 5b-i to make explicitly in the
+  plan doc, not decide implicitly in code. A send on a closed channel is a
+  runtime error (matching Go; silently dropping the value would hide bugs).
+- **Value ownership on send/receive.** `ChannelSend(ch, v)` receives `v`
+  already owned by the builtin call per the VM's existing calling
+  convention (the same way `TaskSpawn(fn, args...)` already receives its
+  `args` by value with no extra copy step) — that owned Value moves
+  directly into the ring buffer slot, no `makeCopyOfValue` needed.
+  `ChannelReceive` transfers ownership back out the same way, leaving the
+  vacated slot's `Value` zeroed (not freed — ownership left with the
+  caller, exactly `TaskAwait`'s existing contract for handing back a task's
+  result).
+- **`select` over multiple channels stays explicitly deferred** (per the
+  original one-line sketch) until a concrete frontend need justifies it —
+  it's a materially bigger and riskier addition (would need every blocked
+  channel op above to also register/deregister itself against a
+  temporary wait-set) than the core Send/Receive/Close primitives.
+
+**Checkpoint breakdown:**
+
+- **5b-i — `TYPE_CHANNEL` core: `ChannelObj`, blocking Send/Receive/Close,
+  non-blocking TrySend/TryReceive.** `ChannelCreate(capacity) -> channel`,
+  `ChannelSend(channel, value)`, `ChannelReceive(channel) -> value`,
+  `ChannelTrySend`/`ChannelTryReceive` (non-blocking, mirroring
+  `HttpTryAwait`'s "claim only if ready" shape), `ChannelClose(channel)`,
+  `ChannelIsClosed(channel) -> bool`. Lock in the close-semantics and
+  value-ownership decisions above in code, not just prose. `PSCAL_OBJ_
+  DESTRUCTOR_TABLE_SIZE` bump plus an actual `ChannelCreate` smoke test
+  (the exact gap that caused 5a-i's off-by-one). New stress fixtures
+  mirroring `Tests/vm_thread_stress/task_*.pas`'s pattern: single-producer/
+  single-consumer over a small capacity (forces both the full-blocks-send
+  and empty-blocks-receive paths under real backpressure), plus a same-
+  thread send-then-receive-immediately smoke test for the trivial case.
+  Verified under plain and ASan+UBSan builds. Depends on 5a-i's `TaskObj`/
+  `ObjHeader` precedent; does not depend on 5a-ii's growable registries or
+  5a-iii's native-task API (channels are pure heap objects, per above).
+  Not started.
+- **5b-ii — Cross-task stress, cancellation, and TSan.** Multi-producer/
+  multi-consumer fixtures (several `TaskSpawn`ed producers and consumers
+  sharing one channel, mirroring `task_concurrent_spawn_await.pas`'s
+  concurrency shape), a fixture that `TaskCancel`s a task blocked mid-
+  `ChannelReceive` and confirms it actually wakes (mirroring `task_cancel_
+  race.pas` and 5a-iii's HTTP-cancel-demo pattern — cancellation is only
+  real once it's been watched actually interrupt a real blocking wait, not
+  just assumed from reading the code), and a fixture confirming `ChannelClose`
+  wakes *every* blocked waiter, not just one (the broadcast-not-signal
+  distinction actually matters here and is easy to get wrong silently).
+  Verified under plain, ASan+UBSan, and TSan builds — matching 5a-iii's
+  rigor bar, since this is exactly the class of "shared condvar state
+  across threads" bug TSan is good at catching and 5a-iii's own TSan pass
+  found a real pre-existing bug in adjacent code. Full `Tests/
+  run_all_suites.py` green. Depends on 5b-i. Not started.
+- **5b-iii — Frontend wiring.** One-registration builtins are already
+  frontend-neutral (§4.0's usual story), so the remaining work is per-
+  frontend *type* surfacing, mirroring 5a-iii's CLike `task` keyword episode
+  (§6.1 above) as the concrete precedent for what "retarget in-tree
+  callers" actually costs when a new heap-typed value needs a first-class
+  spelling in a statically-typed frontend: CLike needs a `channel` keyword
+  (same plumbing shape as `task`/`mstream` — lexer token, `parser.c`'s
+  `clikeTokenTypeToVarType`/`isTypeToken`, `semantics.c`'s compile-time
+  arg-type checks for `channelsend`/`channelreceive`), Pascal gets
+  `lookupBuiltinPascalTypeName("channel")` for free the same way `task` did
+  (used only if/when a Pascal fixture wants static channel-type safety;
+  Pascal's untyped-at-the-VM-level `:=` assignment path works without it,
+  per 5a-iii's finding that forcing a builtin's inferred return type to
+  a new boxed VarType breaks *un-migrated* `integer`-declared Pascal call
+  sites — there are none to break here since this is a brand-new builtin
+  family, so this constraint is actually *easier* to satisfy than
+  `httprequestasync`'s was). **Rea sugar is explicitly out of scope for
+  5b-iii** — `rea_evolution_ideas.md`'s `par`-style structured-parallelism
+  idea (lowering `par { f(); g(); }` to spawn/join, potentially wired
+  through channels for rendezvous later) is real Rea-evolution leverage
+  this phase sets up, but it's a language-design decision for Rea's own
+  roadmap to make deliberately, not something to bundle into the plumbing
+  checkpoint that makes the primitives exist. Depends on 5b-i (does not
+  need 5b-ii's stress coverage to start, though should not ship ahead of
+  it). Not started.
+
+Positioning, carried over from the original sketch and still accurate:
+channels + tasks become the recommended concurrency idiom once this ships;
+mutexes + shared globals remain supported, not deprecated (existing
+programs using them keep working unchanged — this plan's Sec 2
+compatibility strategy applies here same as everywhere else).
 
 ### 6.3 Phase 6: Effect classes, sandbox, record/replay
 
