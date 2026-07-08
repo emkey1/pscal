@@ -706,6 +706,19 @@ verified by a dedicated stress fixture
 on one empty channel, a single `Close` must wake all 8 — a broadcast/signal
 mixup here hangs the fixture rather than failing an assertion).
 
+**Frontend availability (checkpoint 5b-iii):** the seven builtins above are
+frontend-neutral (§4.0's usual one-registration story). CLike additionally
+gets a `channel` keyword (`task ch = ChannelCreate(...)` becomes
+`channel ch = channelcreate(...)`) for static channel-type declarations,
+identical plumbing to `task`/`mstream`. `ChannelTryReceive`'s `var`-parameter
+call shape works unmodified in CLike — the mechanism lives in the shared
+`compiler.c` (§4.1's `Val`/`Str` precedent), not anywhere Pascal-specific —
+confirmed by testing, not assumed. Pascal call sites can declare
+`var ch: channel;` too (`lookupBuiltinPascalTypeName` recognizes it), though
+no in-tree Pascal fixture needs to: Pascal's dynamically-typed `:=`
+assignment already carries a `TYPE_CHANNEL` result through an
+`integer`-declared variable untouched.
+
 ### Diagram: Thread Pool, Shared State, and the Native/Builtin Layer
 
 ```mermaid

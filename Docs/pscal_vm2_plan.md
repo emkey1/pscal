@@ -28,16 +28,20 @@ pre-existing races in the thread-pool result-handoff path (pscal-core
 new CLike `task` type) shipped 2026-07-08, and along the way confirmed (not
 fixed -- filed as a follow-up) a pre-existing, TSan-detectable gap in the
 thread pool's natural-completion slot-release path that predates all of
-Phase 5a -- fixed separately the same day (pscal-core `6aaefae`). Phase 5b
-(Channels, §6.2) is split into checkpoints 5b-i/ii/iii; **5b-i (`TYPE_CHANNEL`
-core -- `ChannelCreate`/`Send`/`Receive`/`TrySend`/`TryReceive`/`Close`/
-`IsClosed` over a pure `ObjHeader`-backed ring buffer, no VM-level registry)
-and 5b-ii (multi-producer/multi-consumer stress, `TaskCancel`-wakes-
-`ChannelReceive` verification, and a full-suite TSan pass -- zero findings,
-after a same-day separate fix (pscal-core `fb010ec`) resolved 5b-i's own
-four deferred pre-existing races) both shipped 2026-07-08**. 5b-iii
-(CLike `channel` keyword, mirroring 5a-iii's `task` episode) is scoped but
-not started. Phase 6.3's remaining items and Phase 7 remain proposal.
+Phase 5a -- fixed separately the same day (pscal-core `6aaefae`). **Phase 5b
+(Channels, §6.2) is complete in full, all three checkpoints shipped
+2026-07-08**: 5b-i (`TYPE_CHANNEL` core -- `ChannelCreate`/`Send`/`Receive`/
+`TrySend`/`TryReceive`/`Close`/`IsClosed` over a pure `ObjHeader`-backed ring
+buffer, no VM-level registry), 5b-ii (multi-producer/multi-consumer stress,
+`TaskCancel`-wakes-`ChannelReceive` verification, and a full-suite TSan pass
+-- zero findings, after same-day separate fixes (pscal-core `fb010ec`,
+`32799f4`, `a51b9e4`) resolved 5b-i's own four deferred pre-existing races
+plus two more found along the way, an ordinal-vs-nil comparison gap and a
+swallowed-task-abort bug), and 5b-iii (CLike `channel` keyword, mirroring
+5a-iii's `task` episode -- `ChannelTryReceive`'s `var`-parameter mechanism
+confirmed working in CLike with zero CLike-specific compiler changes, since
+it's backed by the shared `compiler.c`, not Pascal-specific). Phase 6.3's
+remaining items and Phase 7 remain proposal.
 Companion to the
 [VM Technical Manual](pscal_vm_manual/pscal_vm_manual.md), which documents
 the 1.x engine this plan modifies.  File/line references are to
@@ -3557,31 +3561,51 @@ type claiming it.
   `g_vm_sigint_seen`) resolved before this checkpoint's own TSan pass ran.
   Full `Tests/run_all_suites.py` green; whole-repo `cmake --build build`
   clean. Depends on 5b-i.
-- **5b-iii — Frontend wiring.** One-registration builtins are already
-  frontend-neutral (§4.0's usual story), so the remaining work is per-
-  frontend *type* surfacing, mirroring 5a-iii's CLike `task` keyword episode
-  (§6.1 above) as the concrete precedent for what "retarget in-tree
-  callers" actually costs when a new heap-typed value needs a first-class
-  spelling in a statically-typed frontend: CLike needs a `channel` keyword
-  (same plumbing shape as `task`/`mstream` — lexer token, `parser.c`'s
-  `clikeTokenTypeToVarType`/`isTypeToken`, `semantics.c`'s compile-time
-  arg-type checks for `channelsend`/`channelreceive`), Pascal gets
-  `lookupBuiltinPascalTypeName("channel")` for free the same way `task` did
-  (used only if/when a Pascal fixture wants static channel-type safety;
-  Pascal's untyped-at-the-VM-level `:=` assignment path works without it,
-  per 5a-iii's finding that forcing a builtin's inferred return type to
-  a new boxed VarType breaks *un-migrated* `integer`-declared Pascal call
-  sites — there are none to break here since this is a brand-new builtin
-  family, so this constraint is actually *easier* to satisfy than
-  `httprequestasync`'s was). **Rea sugar is explicitly out of scope for
-  5b-iii** — `rea_evolution_ideas.md`'s `par`-style structured-parallelism
+- **5b-iii — Frontend wiring.** Done (2026-07-08). CLike gets a `channel`
+  keyword (identical plumbing shape as `task`/`mstream` — lexer token,
+  `parser.c`'s `clikeTokenTypeToVarType`/`isTypeToken`, plus
+  `semantics.c`'s `channelcreate` → `TYPE_CHANNEL` special-case and
+  `channelisclosed` added to the `booleanFuncs` classification list); no
+  compile-time arg-type checks were needed for `channelsend`/
+  `channelreceive`/`channeltrysend`/`channelclose` (matching `TaskSpawn`/
+  `TaskAwait`'s own precedent of needing zero CLike-specific validation —
+  only builtins whose *return type* the generic fallback would infer
+  wrong, or whose args needed a stricter check than the generic path
+  already gives, ever needed one). Verified empirically end to end,
+  including `ChannelTryReceive`'s `var`-parameter mechanism — confirmed
+  working in CLike without any CLike-specific compiler changes, since
+  `compiler.c`'s per-builtin-name param-index table (§6.1's 5b-i writeup)
+  is shared across every frontend, not Pascal-specific; CLike's own parser
+  already produces the plain-variable-reference argument shape that table
+  expects. New example `components/clike/examples/base/ChannelDemo`:
+  a `spawn`/`join`-based producer/consumer over a global `channel`
+  variable (avoiding a real but unrelated pre-existing CLike quirk —
+  `spawn someFn(args)` type-checks arguments as ignored with a warning,
+  though they're still passed through correctly at runtime; sidestepped
+  here by using a global channel instead of a spawn argument, not
+  investigated further as out of scope), plus `ChannelTrySend`/
+  `ChannelTryReceive`/`ChannelClose`/`ChannelIsClosed`. Pascal gets
+  `lookupBuiltinPascalTypeName("channel")` for free the same way `task`
+  did (already shipped in 5b-i, not new here) — used only if/when a Pascal
+  fixture wants static channel-type safety; Pascal's untyped-at-the-VM-level
+  `:=` assignment path works without it, per 5a-iii's finding that forcing
+  a builtin's inferred return type to a new boxed VarType breaks
+  *un-migrated* `integer`-declared Pascal call sites (there are none to
+  break here, a brand-new builtin family — `ast.c`'s shared
+  `getBuiltinReturnType` was correspondingly left untouched for
+  `channelcreate`/etc., matching `TaskSpawn`'s own precedent of never
+  needing an entry there either). **Rea sugar remains explicitly out of
+  scope** — `rea_evolution_ideas.md`'s `par`-style structured-parallelism
   idea (lowering `par { f(); g(); }` to spawn/join, potentially wired
   through channels for rendezvous later) is real Rea-evolution leverage
   this phase sets up, but it's a language-design decision for Rea's own
   roadmap to make deliberately, not something to bundle into the plumbing
-  checkpoint that makes the primitives exist. Depends on 5b-i (does not
-  need 5b-ii's stress coverage to start, though should not ship ahead of
-  it). Not started.
+  checkpoint that makes the primitives exist. Full `Tests/run_all_suites.py`
+  green; whole-repo `cmake --build build` clean; `ChannelDemo` verified
+  under plain and ASan+UBSan. Depends on 5b-i.
+
+**Phase 5b (Channels) is now complete in full — 5b-i/ii/iii all shipped
+2026-07-08.**
 
 Positioning, carried over from the original sketch and still accurate:
 channels + tasks become the recommended concurrency idiom once this ships;
