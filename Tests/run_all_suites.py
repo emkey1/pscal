@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
 BASE_SUITE_KEYS = ["core", "library", "scope"]
-OPTIONAL_SUITE_KEYS = ["ios", "smallclue-git", "smallclue-git-mutation", "smallclue-git-path-truncate", "smallclue-git-remote", "vm-verify-corpus", "vm-fx-policy"]
+OPTIONAL_SUITE_KEYS = ["ios", "smallclue-git", "smallclue-git-mutation", "smallclue-git-path-truncate", "smallclue-git-remote", "vm-verify-corpus", "vm-fx-policy", "vm-thread-stress"]
 SUITE_KEYS = BASE_SUITE_KEYS + OPTIONAL_SUITE_KEYS
 
 
@@ -163,6 +163,12 @@ def main(argv: Sequence[str]) -> int:
         help="Run the Phase 6 --deny/--fx-record/--fx-replay regression suite (opt-in, off by "
         "default; needs build/bin/pascal already built).",
     )
+    parser.add_argument(
+        "--include-vm-thread-stress",
+        action="store_true",
+        help="Run the Phase 5a/5b task/channel concurrency regression suite (opt-in, off by "
+        "default; needs build/bin/pascal and build/bin/clike already built).",
+    )
     args = parser.parse_args(argv)
 
     skip = set(args.skip or [])
@@ -181,6 +187,8 @@ def main(argv: Sequence[str]) -> int:
         selected.append("vm-verify-corpus")
     if args.include_vm_fx_policy and "vm-fx-policy" not in skip:
         selected.append("vm-fx-policy")
+    if args.include_vm_thread_stress and "vm-thread-stress" not in skip:
+        selected.append("vm-thread-stress")
 
     if not selected:
         print("No suites selected. Use --skip judiciously or omit it altogether.")
@@ -246,6 +254,10 @@ def main(argv: Sequence[str]) -> int:
     if "vm-fx-policy" in selected:
         vm_fx_script = tests_root / "vm_fx_policy" / "run.sh"
         commands["vm-fx-policy"] = (["bash", str(vm_fx_script)], repo_root, False)
+
+    if "vm-thread-stress" in selected:
+        vm_thread_stress_script = tests_root / "vm_thread_stress" / "run.sh"
+        commands["vm-thread-stress"] = (["bash", str(vm_thread_stress_script)], repo_root, False)
 
     summary: List[Tuple[str, int]] = []
     for key in selected:
