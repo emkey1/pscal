@@ -149,6 +149,130 @@ if the on-disk fixture backing a `file://` loopback request changed between
 the record and replay runs. `Tests/vm_fx_policy/replay_http_file.p` is the
 regression test for exactly this.
 
+### 4.0b `dlopen` plugins: the same seam, out-of-process (VM 2.0 Phase 7)
+
+> Source of truth: `backend_ast/pscal_ext_api.h` (the ABI), `backend_ast/
+> pscal_ext_api.c` (the host-side vtable implementation), `ext_builtins/
+> plugin_loader.{h,c}` (the loader and CLI/env wiring), and
+> `components/pscal-core/plugins/sqlite/sqlite_ext_plugin.c` (the proof).
+> Docs/pscal_vm2_plan.md §7.1 has the full design history, including the
+> fork/recursive-mutex hazard this feature's own adversarial testing found.
+
+§4.0 covers builtins registered *inside* the host binary at compile/link
+time. Phase 7 adds a second path to the same seam: a builtin category
+compiled as a separate shared library (`.dylib`/`.so`) and loaded at
+runtime via `dlopen`, registering through exactly the same
+`registerVmBuiltin` mechanism underneath -- once loaded, a plugin's
+builtins are indistinguishable from an in-tree category's to every
+frontend's compiler (same `CALL_BUILTIN`/`CALL_BUILTIN_PROC` opcodes, same
+compile-time declaration synthesis). What's different is the ABI boundary:
+a plugin's translation unit does not, and must not, include any pscal-core
+internal header. It includes exactly one:
+
+```c
+#include "backend_ast/pscal_ext_api.h"
+```
+
+That header defines `PscalExtHostApi`, a vtable of function pointers the
+host hands to the plugin's single entry point:
+
+```c
+int pscal_ext_register(const PscalExtHostApi* host, uint32_t host_abi);
+```
+
+The vtable covers registration (`register_builtin`, mirroring
+`registerVmBuiltin`'s real `EffectMask`-carrying signature, plus the
+`extBuiltinRegister*` introspection-catalog calls so a plugin's functions
+show up in `--dump-ext-builtins`), diagnostics (`runtime_error`), a curated
+set of Value constructors/accessors (`make_int`/`make_string`/`as_int64`/
+`as_cstring`/etc., plus `is_string_type`/`is_intlike_type`/`is_real_type`
+predicates over `VarType`), and a generic, reusable handle table
+(`PscalExtHandleTable`) -- a realloc-growable, mutex-guarded tagged-slot
+array, the same shape `sqlite_builtins.c` and `yyjson_builtins.c` each
+hand-roll privately today (neither was touched; the generic helper is for
+plugins). `Value`/`VarType` are the only pscal-core types a plugin ever
+sees, and only by value/opaque discriminant -- the `AS_*`/`PSCAL_VALUE_PTR`
+macros that dereference boxed heap wrappers (§1.2, Chapter 3) are
+deliberately absent from the plugin-facing surface; a plugin reads a
+`Value`'s scalar payload only through the vtable's accessor functions.
+
+**Loading.** `--ext <path>` (validated eagerly -- the file must exist and
+be readable -- matching `--fx-record`/`--fx-replay`'s own early-open-failure
+convention, §4.0a) and the `PSCAL_EXT_DIR` environment variable (scanned
+for platform shared libraries, each treated as if passed via `--ext`) are
+recognized by all five frontends' CLI parsing (pascal/rea/clike/exsh
+directly; aether for free, since its executable compiles rea's `main.c`
+under a different `PSCAL_FRONTEND_MAIN_NAME`), via the same
+`pscalFxIsCliFlag`-style shared-parsing pattern §4.0a's `--deny`/
+`--fx-record`/`--fx-replay` already established
+(`pscalExtIsCliFlag`/`pscalExtHandleCliFlag`, `ext_builtins/
+plugin_loader.h`). The actual `dlopen` happens later, from
+`pscalExtLoadRegisteredPlugins()`, called at the end of
+`registerExtendedBuiltinsOnce()` -- the same `pthread_once`-guarded,
+exactly-once seam §4.0's static in-tree categories register from, and
+necessarily *after* `initSymbolSystem()` has run (a plugin's compile-time
+declaration synthesis needs the global symbol/procedure hash tables to
+already exist).
+
+**A malformed or hostile plugin must never crash the host.** Every load
+goes through a two-phase sequence: first, a crash-isolated dry-run probe in
+a `fork()`ed child (dlopen, dlsym, call the entry point against a host API
+whose registration-related entries are inert no-op stubs -- see the
+callout below for why); only if the child reports success (exit code 0,
+not killed by a signal) does the parent perform the real, in-process
+`dlopen` + entry-point call that actually registers the plugin's builtins.
+An ABI major-version mismatch is the plugin's own responsibility to detect
+(`PSCAL_EXT_ABI_MAJOR_OF(host_abi)` against the major it was built against)
+and reject by returning nonzero -- the loader has no way to know a
+plugin's expected version ahead of the call, so it treats "entry point
+returned nonzero" uniformly, whether the cause was an ABI mismatch or any
+other plugin-detected startup failure.
+
+> **Why the probe host stubs out registration but not everything else.**
+> `pscalExtLoadRegisteredPlugins()` runs nested inside
+> `populateBuiltinRegistry()`'s already-held recursive `builtin_registry_mutex`
+> (`backend_ast/builtin.c`). Forking while holding a recursive mutex is
+> unsafe: the mutex's owner bookkeeping is thread/process-identity based
+> and doesn't survive `fork()`, so a child that re-enters it (as
+> `register_builtin -> registerVmBuiltin -> registerBuiltinFunction` does)
+> deadlocks forever on a lock whose recorded owner no longer resolves in
+> the child process -- found empirically via a hung smoke test, not by
+> inspection (`sample` showed the child stuck in
+> `_pthread_mutex_firstfit_lock_wait`). The fix gives the probe child a
+> *mixed* host API: `register_builtin`/`register_category`/
+> `register_group`/`register_function_entry`/`runtime_error` are no-op
+> stubs (the only five that touch that shared, lock-protected state);
+> every other vtable entry -- Value construction/accessors/predicates, the
+> handle-table family -- is the real implementation, since those touch no
+> shared global state and are safe to exercise for real even inside a
+> forked, throwaway child. This isn't just belt-and-suspenders: an earlier,
+> all-stub probe host made `handle_table_create()` always return `NULL`,
+> which made a well-behaved plugin that checks that return value (as the
+> sqlite-as-plugin proof does) spuriously fail the probe on every load,
+> even though the real, unforked load would have succeeded.
+
+**Static categories keep static registration.** No in-tree category
+(`ext_builtins/*`) was migrated to a plugin, and none is expected to be --
+`dlopen` is an additional loading mechanism for out-of-tree/embedder
+extensions, not a replacement for what already ships. The one exception
+proving the mechanism is a *second*, separately-built copy of the sqlite
+category (`components/pscal-core/plugins/sqlite/sqlite_ext_plugin.c`),
+implemented using only `pscal_ext_api.h`, compiled to
+`sqlite_ext_plugin.{dylib,so}`, and loadable via `--ext` -- it registers
+the identical 20 `sqlite*` builtins the static category does and produces
+byte-identical output (`Tests/vm_ext_plugin/sqlite_plugin_smoke.pas`,
+wired into `Tests/run_all_suites.py --include-vm-ext-plugin`); the static
+`ext_builtins/sqlite/sqlite_builtins.c` is untouched and is what ships by
+default.
+
+**iOS.** No `dlopen` culture, static linking only. `plugin_loader.c`'s real
+loading path is compiled out entirely under `PSCAL_TARGET_IOS` (mirroring
+`ext_builtins/register.c`'s existing `registerShellFrontendBuiltins()`
+special-casing); `--ext`/`PSCAL_EXT_DIR` are still recognized there so a
+shared script doesn't hit "unknown option", but produce an immediate,
+clear "not supported on this platform" error rather than silently
+compiling in a nonfunctional path.
+
 ### 4.1 The Network Operations Engine
 
 #### Session model

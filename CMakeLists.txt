@@ -1205,6 +1205,7 @@ set(PSCAL_CORE_SOURCES
     components/pscal-core/src/core/diagmap.c
     components/pscal-core/src/vm/vm.c
     components/pscal-core/src/vm/vm_fx_policy.c
+    components/pscal-core/src/backend_ast/pscal_ext_api.c
     components/pscal-core/lib/noise/noise.c
     components/pscal-core/src/runtime/terrain/terrain_generator.c
     components/pscal-core/src/runtime/shaders/shader_common.c
@@ -2536,6 +2537,37 @@ if(NOT PSCAL_PLATFORM_IOS)
         list(REMOVE_DUPLICATES AETHER_SDL_LIBS)
         target_link_libraries(aether PRIVATE ${AETHER_SDL_LIBS})
         target_compile_definitions(aether PRIVATE SDL)
+    endif()
+endif()
+
+# ---- VM 2.0 Phase 7 (Docs/pscal_vm2_plan.md §7.1): sqlite-as-plugin proof ----
+# A standalone .dylib/.so build of the sqlite category, loadable via --ext,
+# proving the pscal_ext_api.h ABI end-to-end. Desktop/server only (no dlopen
+# culture on iOS, matching plugin_loader.c's own PSCAL_TARGET_IOS gate); the
+# in-tree static sqlite category (src/ext_builtins/sqlite/sqlite_builtins.c)
+# is untouched and still ships by default -- this is a proof of mechanism,
+# not a replacement.
+if(NOT PSCAL_PLATFORM_IOS AND ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_INCLUDE_DIRS)
+    add_library(sqlite_ext_plugin MODULE
+        components/pscal-core/plugins/sqlite/sqlite_ext_plugin.c)
+    set_target_properties(sqlite_ext_plugin PROPERTIES
+        PREFIX ""
+        OUTPUT_NAME "sqlite_ext_plugin")
+    if(APPLE)
+        # Match plugin_loader.c's PSCAL_EXT_DIR directory-scan suffix
+        # (".dylib" on Apple) -- CMake's default MODULE suffix is ".so" even
+        # on macOS, which dlopen() itself doesn't care about but the scan
+        # filter does.
+        set_target_properties(sqlite_ext_plugin PROPERTIES SUFFIX ".dylib")
+    endif()
+    if(CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
+        target_compile_options(sqlite_ext_plugin PRIVATE -Wno-nullability-completeness)
+    endif()
+    target_include_directories(sqlite_ext_plugin PRIVATE
+        components/pscal-core/src
+        ${PSCAL_SQLITE_INCLUDE_DIRS})
+    if(PSCAL_SQLITE_LIBS)
+        target_link_libraries(sqlite_ext_plugin PRIVATE ${PSCAL_SQLITE_LIBS})
     endif()
 endif()
 

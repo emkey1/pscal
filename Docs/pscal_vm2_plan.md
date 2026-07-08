@@ -40,8 +40,31 @@ plus two more found along the way, an ordinal-vs-nil comparison gap and a
 swallowed-task-abort bug), and 5b-iii (CLike `channel` keyword, mirroring
 5a-iii's `task` episode -- `ChannelTryReceive`'s `var`-parameter mechanism
 confirmed working in CLike with zero CLike-specific compiler changes, since
-it's backed by the shared `compiler.c`, not Pascal-specific). Phase 6.3's
-remaining items and Phase 7 remain proposal.
+it's backed by the shared `compiler.c`, not Pascal-specific). **Phase 7
+(Plugin ABI, §7.1) shipped in full 2026-07-08**, split into three
+checkpoints once real complexity turned up mid-implementation (the pattern
+every prior phase in this plan hit): 7a (the frozen `PscalExtHostApi` vtable
+in a new `backend_ast/pscal_ext_api.h`, plus a generic reusable handle-table
+helper -- justified by sqlite_builtins.c and yyjson_builtins.c independently
+hand-rolling the identical realloc/mutex/free-slot-scan pattern, neither
+touched), 7b (the `dlopen` loader, `--ext <path>`/`PSCAL_EXT_DIR` CLI/env
+wiring into all 5 frontend `main()`s via the same `pscalFxIsCliFlag`-style
+shared-CLI-wiring pattern Phase 6 established, and a clean iOS exclusion),
+and 7c (the sqlite-as-plugin proof, adversarial malformed-plugin tests, and
+doc updates). The one genuine surprise: `pscalExtLoadRegisteredPlugins()`
+necessarily runs nested inside `populateBuiltinRegistry()`'s already-held
+recursive `builtin_registry_mutex` (`backend_ast/builtin.c`) -- forking from
+inside that call (the original crash-isolation design) deadlocks the child
+forever, since a recursive mutex's owner bookkeeping doesn't survive `fork()`
+across a process-identity change. Found empirically via a hung smoke test,
+not by inspection. Fixed by giving the forked probe child a host API whose
+five registry-touching entry points (`register_builtin`/`register_category`/
+`register_group`/`register_function_entry`/`runtime_error`) are inert stubs,
+while the value-construction/accessor/handle-table entries -- which touch no
+shared global state -- are the real implementations, so a well-behaved
+plugin's own internal checks (e.g. "did handle_table_create succeed?") don't
+spuriously fail the safety probe. See §7.1 for the full design and §9's
+Phase 7 risk-register row for the fork/mutex hazard specifically.
 Companion to the
 [VM Technical Manual](pscal_vm_manual/pscal_vm_manual.md), which documents
 the 1.x engine this plan modifies.  File/line references are to
@@ -3762,26 +3785,141 @@ registration helper rather than auditing every entry individually.
 
 ## 7. Extension Track
 
-### 7.1 Phase 7: Plugin ABI
+### 7.1 Phase 7: Plugin ABI -- SHIPPED 2026-07-08 (checkpoints 7a/7b/7c)
 
-- Frozen, versioned C ABI in a new `pscal_ext_api.h`: a
-  `PscalExtHostApi` struct of function pointers
-  (`register_builtin` (with effect mask), `runtime_error`, Value
-  accessors/constructors, handle-table helpers) passed to the plugin's
-  single entry point:
+Depended on Phase 4's accessor discipline (plugins must never see raw
+`Value` internals) and Phase 6's `EffectMask`-carrying `registerVmBuiltin()`
+signature, both already in place by the time this phase started. Split into
+three checkpoints once real complexity turned up mid-implementation, the
+same pattern every prior phase in this plan hit at least once.
 
-  ```c
-  int pscal_ext_register(const PscalExtHostApi* host, uint32_t host_abi);
-  ```
+**7a -- the frozen ABI header.** `backend_ast/pscal_ext_api.h` defines
+`PscalExtHostApi`, a vtable of function pointers passed to the plugin's one
+entry point:
 
-- `dlopen` loading from a configured extension directory plus an explicit
-  `--ext <path>` flag; ABI major mismatch rejects the plugin cleanly.
-- Existing in-tree categories keep static registration; one category
-  (sqlite is the best shape: self-contained, handle-based) is additionally
-  built as a plugin to prove the ABI before it is declared stable.
-- Note: this depends on Phase 4's accessor discipline (plugins must never
-  see raw `Value` internals) which is why it sequences after Phase 1 at the
-  earliest and ideally after Phase 4.
+```c
+int pscal_ext_register(const PscalExtHostApi* host, uint32_t host_abi);
+```
+
+`Value` and `VarType` (the latter from the already-minimal, dependency-free
+`core/var_type.h`) are mirrored byte-for-bit in the header rather than
+included from `core/types.h`, so a plugin including only this one header
+never drags in `ArrayObj`/`RecordObj`/`StringObj`/etc.; a shared
+`PSCAL_VALUE_TYPE_DEFINED` guard (added to `core/types.h` right after its own
+`Value` typedef) lets both headers coexist in one translation unit without a
+redefinition error, for the one first-party consumer that needs both (see
+7c). The vtable covers registration (`register_builtin`, matching
+`registerVmBuiltin`'s real 5-argument `EffectMask` signature, plus
+`register_category`/`register_group`/`register_function_entry` so a loaded
+plugin's functions show up in `--dump-ext-builtins` like any in-tree
+category's do), diagnostics (`runtime_error`), the `makeInt`/`AS_STRING`-
+family Value constructors/accessors (thin wrapper functions around the real
+ones, since the real `AS_*` macros dereference boxed heap wrappers a plugin
+must never see), three `VarType` predicates
+(`is_string_type`/`is_intlike_type`/`is_real_type`, mirroring
+`isPascalStringType`/`isIntlikeType`/`isRealType`), and a **generic
+handle-table helper** (`PscalExtHandleTable`, a realloc-growable
+mutex-guarded tagged-slot array). The handle table was added as a new,
+separate implementation rather than refactored out of the two existing
+in-tree hand-rolled copies (`sqlite_builtins.c`, `yyjson_builtins.c` --
+confirmed structurally identical by inspection: same free-slot-scan,
+same doubling growth, same reset-on-free idiom) -- both stay untouched, per
+this section's own "existing in-tree categories keep static registration"
+requirement; the new helper exists for plugins (and is what the 7c proof
+uses) to prove the mechanism without risking already-shipped code.
+ABI versioning is `(major << 16) | minor`; a plugin checks
+`PSCAL_EXT_ABI_MAJOR_OF(host_abi)` itself and returns nonzero to reject an
+incompatible host, rather than the loader trying to pre-validate a version
+it has no way to know ahead of the call.
+
+**7b -- the `dlopen` loader and CLI wiring.** `ext_builtins/plugin_loader.c`
+implements `--ext <path>` (validated eagerly at CLI-parse time -- the file
+must exist and be readable, matching `--fx-record`/`--fx-replay`'s own
+early-open-failure behavior) and a `PSCAL_EXT_DIR` environment variable
+(scanned for `*.dylib`/`*.so` at load time, exactly as if each match had
+been passed via `--ext`). CLI wiring follows Phase 6's
+`pscalFxIsCliFlag`/`pscalFxHandleCliFlag` shared-parsing pattern exactly
+(`pscalExtIsCliFlag`/`pscalExtHandleCliFlag`), added to all four frontend
+`main()`s that hand-roll their own argv loops (pascal, rea, clike, exsh;
+aether inherits for free since its executable target compiles rea's
+`main.c` under `PSCAL_FRONTEND_MAIN_NAME=aether_main`) plus `vm_main.c`
+(`pscalvm`, the raw-bytecode runner). The actual load happens from
+`pscalExtLoadRegisteredPlugins()`, called at the end of
+`registerExtendedBuiltinsOnce()` (`ext_builtins/register.c`) -- the same
+`pthread_once`-guarded, exactly-once seam the static in-tree categories
+already register from, which is also why it must run *after*
+`initSymbolSystem()` (`registerVmBuiltin`'s compile-time half touches the
+global symbol/procedure hash tables, which don't exist yet during CLI
+parsing).
+
+A malformed plugin must fail cleanly -- never crash or hang the host --
+which turned out to need a fork-based crash-isolation probe, and that probe
+turned up this checkpoint's one real bug (found empirically, not by
+inspection): `pscalExtLoadRegisteredPlugins()` runs *nested inside*
+`populateBuiltinRegistry()`'s already-held recursive `builtin_registry_mutex`
+(`backend_ast/builtin.c`). Forking while holding a recursive mutex is unsafe
+-- the mutex's owner bookkeeping is thread/process-identity based, so a
+forked child that tries to re-enter it (as `register_builtin ->
+registerVmBuiltin -> registerBuiltinFunction` does) deadlocks forever on a
+lock whose recorded owner no longer resolves in the child process. A smoke
+test (`pascal --ext goodplugin.dylib ...`) hung; `sample` showed the child
+stuck in `_pthread_mutex_firstfit_lock_wait` inside `registerBuiltinFunction`.
+Fixed by giving the forked probe child a **mixed** host API: the five
+entry points that touch that shared, lock-protected global state
+(`register_builtin`/`register_category`/`register_group`/
+`register_function_entry`/`runtime_error`) are inert no-op stubs, while
+everything else (Value constructors/accessors/predicates, the handle-table
+family) is the *real* implementation, copied from the real vtable and
+individually overridden -- those don't touch any shared state (handle
+tables are self-contained per-instance with a freshly-initialized mutex,
+never inherited pre-locked from the parent). This matters for correctness,
+not just safety: an earlier all-stub probe host made `handle_table_create()`
+always return NULL, which made the 7c sqlite-as-plugin proof (which checks
+that return value) fail the probe on every run even though the real,
+unforked load would have succeeded -- a false negative, not a safety margin.
+The probe (fork, dlopen, dlsym, call with the mixed host, `_exit()` with a
+result code, parent `waitpid()`s and interprets `WIFSIGNALED` plus the exit
+code) only decides whether to proceed; the actual registration that plugin
+builtins depend on is a second, real, unforked `dlopen` + entry-point call
+in the parent, run only after the probe reports success. `PSCAL_TARGET_IOS`
+gates the real `dlopen` path out entirely (an inline `#if`, mirroring
+`ext_builtins/register.c`'s existing iOS special-casing) -- `--ext`/
+`PSCAL_EXT_DIR` are still recognized there so a shared script doesn't hit
+"unknown option", but produce an immediate, clear "not supported on this
+platform" instead of silently compiling in a nonfunctional path.
+
+**7c -- the sqlite-as-plugin proof.** `components/pscal-core/plugins/sqlite/
+sqlite_ext_plugin.c` re-implements all 20 `sqlite*` builtins using *only*
+`backend_ast/pscal_ext_api.h` -- no `core/types.h`, no `backend_ast/
+builtin.h`, no other pscal-core internal header -- built as a separate
+`sqlite_ext_plugin.{dylib,so}` CMake target (`MODULE` library, `.dylib`
+suffix forced on Apple since CMake's default `MODULE` suffix is `.so` even
+there) loadable via `--ext`. The static in-tree category
+(`ext_builtins/sqlite/sqlite_builtins.c`) is untouched; both coexist and
+produce byte-identical output on the same program
+(`Tests/vm_ext_plugin/sqlite_plugin_smoke.pas`). One deliberate behavioral
+difference: since the generic handle table has no "enumerate all handles of
+a kind" operation (by design -- see 7a), `SqliteClose`'s cascade-finalize of
+still-open statements belonging to the closing db is implemented with a
+small plugin-local side table instead of scanning the host's handle table
+directly, the way the static category's own private table does it.
+
+**ASan.** Both `build-asan/bin/pascal` and `build-asan/sqlite_ext_plugin.dylib`
+build clean, and dlopen'd ASan-instrumented code works with zero
+`ASAN_OPTIONS` adjustment on macOS -- verified rather than assumed, per this
+phase's own rigor bar. `detect_leaks=1` prints "not supported on this
+platform" (a general macOS ASan limitation, unrelated to dlopen). One real,
+ASan-specific behavior difference worth knowing: the `crash_segv.c`
+adversarial fixture's SIGSEGV is intercepted by ASan's own signal handler,
+which prints a full crash report and re-raises as `SIGABRT` (signal 6)
+instead of the plain `SIGSEGV` (signal 11) a non-ASan build sees -- the
+loader's diagnostic text and exit code are unaffected (it reports whatever
+`WTERMSIG` actually was), and `Tests/vm_ext_plugin/run.sh`'s assertions key
+off the diagnostic substring, not the specific signal number, so the suite
+passes unchanged under both build types.
+
+Full details, adversarial test cases, and the wired-in `vm-ext-plugin` suite
+are in §8 and §9 below.
 
 ## 8. Testing & Verification Strategy (cross-cutting)
 
@@ -3806,7 +3944,8 @@ flow per phase is the standard multi-repo bump (component push, aether
 | Accessor-poison lint cannot see whole-struct `Value` assignment (only bare-identifier field access) | 0/4 | one confirmed instance (`ext_builtins/system/swap.c:25`) found only by a targeted grep sweep, not the lint; run that sweep as an explicit one-time gate before 4a, don't rely on "lint is green" alone |
 | Registry fingerprint too strict (any builtin addition invalidates ids) | 1b | fingerprint = ordered hash of (name,id) pairs actually referenced by the chunk's BMAP, not the whole registry |
 | exsh dynamic globals fight slot addressing | 2b | dual-path design is explicit from the start; exsh keeps the dynamic opcodes |
-| iOS build (static libs, no dlopen culture) vs plugin ABI | 7 | plugins are a desktop/server feature; iOS keeps static registration (already special-cased in `register.c`) |
+| iOS build (static libs, no dlopen culture) vs plugin ABI | 7 | **Resolved as designed** — plugins are a desktop/server feature; `plugin_loader.c`'s real `dlopen` path is compiled out entirely under `PSCAL_TARGET_IOS` (inline `#if`, mirroring `register.c`'s existing `registerShellFrontendBuiltins()` special-casing), with `--ext`/`PSCAL_EXT_DIR` still recognized but rejected with an immediate, clear diagnostic rather than silently compiling in a nonfunctional path |
+| Forking to crash-isolate a malformed plugin's entry point, from inside code that already holds a lock | 7 | **Confirmed real, found empirically not by inspection** — `pscalExtLoadRegisteredPlugins()` necessarily runs nested inside `populateBuiltinRegistry()`'s already-held recursive `builtin_registry_mutex` (`backend_ast/builtin.c`); a forked child that calls the real `register_builtin` (which re-enters that mutex via `registerVmBuiltin -> registerBuiltinFunction`) deadlocks forever, since a recursive mutex's owner bookkeeping is thread/process-identity based and doesn't survive `fork()`. A smoke test hung; `sample` showed the child stuck in `_pthread_mutex_firstfit_lock_wait`. Fixed by giving the forked probe child a host API with only the five registry-touching entries (`register_builtin`/`register_category`/`register_group`/`register_function_entry`/`runtime_error`) stubbed to no-ops; the rest of the vtable (Value ctors/accessors/predicates, the handle-table family) is the real implementation, since those touch no shared global state and a well-behaved plugin's own internal checks (e.g. sqlite-as-plugin's `handle_table_create() != NULL` check) would otherwise spuriously fail the probe against an all-stub host. Any future subprocess/fork-based sandboxing added elsewhere in this codebase must re-check what locks are already held at the fork point, not assume a "probe in a child" pattern is automatically safe. |
 | Long double serialization change alters numeric output | 1b | Pascal suite has numeric-format baselines; acceptable-diff list reviewed explicitly |
 | Whole-buffer reassignment idioms (`AS_STRING(v) = new_buf;`) break under a flexible-array-member heap shape | 4c | **Confirmed real, not hypothetical** — found ~15 sites across `vm.c`/`builtin.c`/`symbol.c`/exsh's `shell_builtins.inc`; `StringObj`/`SetObj` use a plain owned pointer field instead of a flexible array member specifically to preserve these sites unchanged. Any future sub-phase considering a flexible-array-member shape must run the same "does anything reassign this buffer wholesale" audit first, not assume it's safe by analogy. |
 | A boxed type's construction can leave the wrapper NULL between `memset`/`freeValue` and the accessor write that assumes it exists | 4c/4g/4h | `pscalStringEnsureObj`-style lazy-init helper, called at every identified construction site; **this class of bug compiles clean either way and was only caught by running real programs** (`updateSymbolInternal` in `symbol.c` freed a string's wrapper then immediately re-read `STRING_MAX_LENGTH` on it a few lines later, in a code path static review of the read site alone did not surface) — every future sub-phase boxing a type needs actual program-execution verification for this reason, a clean compile and a re-read of the diff are not sufficient evidence. **Recurred in 4g for `TYPE_POINTER` in the exact same function**: the same unconditional `freeValue(sym->value)` in `updateSymbolInternal` (`symbol.c` ~line 1098) drops a pointer's wrapper too, but only the `TYPE_STRING` branch re-ensured its wrapper afterward -- `TYPE_POINTER` had no equivalent, so `AS_POINTER(*sym->value) = ...` a few lines later in the assignment switch dereferenced NULL. Crashed 11 rea/OOP tests identically (`sym->value->ptr_val == NULL`, `base_type_node` valid), all traced to one missing `pscalPointerEnsureObj(sym->value)` call. **The lesson generalizes**: any function with a "free the old value, then branch on `sym->type` to reconstruct" shape needs an ensure-call for *every* boxed type reachable through that switch, not just the one the original author was thinking about when they wrote the string-specific fix — a single-type patch to a shared function is exactly the shape that reintroduces this bug for the next boxed type. |
@@ -3825,7 +3964,7 @@ flow per phase is the standard multi-repo bump (component push, aether
 | 4 | 10 PRs (4a-4j, §5.10.4) | the long pole; each sub-phase independently landable/gated; 4a-4h show flat-to-regressed `vm_bench` by design (Value not yet smaller), the promised win lands at 4i/4j only — don't gate early sub-phases on the benchmark |
 | 5 | 3-4 PRs | tasks, HTTP migration, channels |
 | 6 | 2-3 PRs | masks + enforce, then record/replay |
-| 7 | 2-3 PRs | ABI header, loader, sqlite-as-plugin proof |
+| 7 | 3 PRs (7a-7c, shipped) | 7a: ABI header + generic handle table; 7b: dlopen loader + CLI wiring + iOS exclusion (found the fork/recursive-mutex hazard); 7c: sqlite-as-plugin proof + adversarial suite + docs |
 
 Recommended cut points if the effort is bounded: Phases 0-2 alone deliver
 G1+G2 (portable, verifiable, immutable bytecode) and are worth shipping by
