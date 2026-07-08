@@ -16,7 +16,15 @@ flag day) is split into checkpoints 1-3, checkpoint 3 further split into
 `{ VarType type; uint64_t bits; }`, 16 bytes (was 176). 4j (Stage B:
 ownership rationalization -- cheap retain-share copies plus
 `valueEnsureUnique()`'s write-time clone-on-share) shipped 2026-07-07,
-completing Phase 4 in full. Phase 5 and Phase 7 remain proposal.
+completing Phase 4 in full. Phase 5a (Concurrency Track, §6.1) is split into
+checkpoints 5a-i/5a-ii/5a-iii; **5a-i (`TYPE_TASK` core --
+`TaskSpawn`/`TaskAwait`/`TaskDone`/`TaskCancel` over the existing thread
+pool) shipped 2026-07-07**, preceded by a prerequisite fix for three
+TSan-confirmed pre-existing races in the thread-pool result-handoff path
+(pscal-core `43b4077`). 5a-ii (growable thread/mutex registries,
+`THREAD_CREATE`/`THREAD_JOIN` lowering onto tasks) and 5a-iii (HTTP async
+migration) are scoped but not started. Phase 5b, Phase 6.3's remaining
+items, and Phase 7 remain proposal.
 Companion to the
 [VM Technical Manual](pscal_vm_manual/pscal_vm_manual.md), which documents
 the 1.x engine this plan modifies.  File/line references are to
@@ -2920,23 +2928,181 @@ considered done, not just before Phase 4 as a whole ships:
 
 ### 6.1 Phase 5a: Tasks
 
-- New boxed value type `TYPE_TASK` wrapping today's `Thread`-slot machinery
-  (the result-handoff mutex/cond pattern already implements a future; this
-  formalizes it).  Builtins/opcodes:
-  `TaskSpawn(fn, args...) -> task` (over `ThreadJobQueue`),
-  `TaskAwait(task) -> value`, `TaskDone(task) -> bool`,
-  `TaskCancel(task)` (existing cooperative atomics).
-- `THREAD_CREATE`/`THREAD_JOIN` stay as opcodes (the frontends emit them)
-  but their implementation lowers onto tasks; `VM_MAX_THREADS`/
-  `VM_MAX_MUTEXES` fixed arrays become dynamic registries.
-- The HTTP async pool migrates behind the same interface:
-  `HttpRequestAsync` returns a `TYPE_TASK` whose await produces the
-  response, retiring the parallel 32-slot job-id world outright.  In-tree
-  callers (tests, examples) are retargeted in the same change; no
-  deprecation wrappers.  Native subsystems get a small
-  `vmTaskCreateNative(work_fn, cancel_fn, progress_fn)` API so any future
-  builtin (SQLite busy queries, DNS) can return awaitable tasks without
-  inventing another pool.
+Verified against current architecture 2026-07-07, after Phase 4 (`Value` is
+now `{ VarType type; uint64_t bits; }`, every heap type an `ObjHeader`-tagged
+pointer) shipped in full. `TYPE_THREAD` already exists as a `VarType`, but
+only as an inline tagged-int32 immediate (the plain thread-id handle
+`THREAD_CREATE` pushes today) — it has never been `ObjHeader`-boxed, so
+giving `TYPE_TASK` its own fresh `ObjHeader` destructor tag has none of
+Phase 4i checkpoint 3a's collision risk (no existing payload type
+double-claims this tag the way `ClosureEnvPayload` claimed
+`TYPE_CLOSURE`/`TYPE_INTERFACE`).
+
+**Prerequisite, done before any Task code was written (2026-07-07):**
+`Tests/vm_thread_stress`'s four race fixtures were re-verified clean under
+`build-asan`, then also run under a manual `-fsanitize=thread` build
+(`build-tsan/`, flags already configured, no CMake toggle exists) since this
+phase leans directly on the exact machinery those fixtures cover. TSan
+surfaced three real, pre-existing, previously-undetected cross-mutex races
+in the worker-pool result-handoff/reuse path — not introduced by this
+phase, but squarely in the code `TaskAwait`/`TaskDone` build on, so fixed as
+a prerequisite rather than inherited: `vmThreadResetResult` mutated
+`statusReady`/`resultReady`/`resultConsumed`/`statusFlag`/`statusConsumed`/
+`awaitingReuse` under whatever lock its caller happened to hold
+(`stateMutex`) while `joinThreadInternal`/`vmThreadTakeResult` read the same
+fields under `resultMutex`; the same mismatch applied to the standalone
+`awaitingReuse` toggle in `threadStart`'s reuse-wait loop; `Thread.active`
+was written under `stateMutex` (or unlocked, pre-publish) but read under
+`resultMutex` or unlocked from `freeVM`/`builtin.c`'s thread-introspection
+builtins, fixed by converting it to `atomic_bool` alongside
+`paused`/`cancelRequested`/`killRequested`; and `vmCleanupGlobalCachesIfIdle`
+had a classic peek-before-lock race (`vmProcRegistryIsEmpty()` released the
+registry lock before the caller acted on the answer), the same bug shape as
+the dynamic-array races fixed just before this phase started. Shipped as
+pscal-core `43b4077` / aether `cd2e4ff` / PBuild `04222fa3`, full
+`Tests/run_all_suites.py` green, no regressions. **Two narrower TSan
+findings remain, deliberately not fixed:** `Thread.inPool` is written
+unlocked at a worker's final pool exit (`threadStart`) and read unlocked in
+`freeVM`'s whole-process shutdown loop, and TSan separately reports a
+"thread leak" (pool workers not explicitly `pthread_join`'d at process
+exit). Both are exclusively in the one-shot whole-VM-teardown path — audited
+and confirmed `inPool` never flips during steady-state pool reuse, only at
+construction (safe, unpublished) or final shutdown — not reachable from
+repeated `TaskSpawn`/`TaskAwait` use, so left for a dedicated future pass
+rather than expanding this prerequisite fix further.
+
+This sub-phase bundles three substantial, independently-landable pieces —
+matching the bundling this section originally sketched, but, per this
+plan's own precedent (Phase 1's 1a-1e, Phase 2's 2a-2b, Phase 4's 4a-4j),
+now split into checkpoints so each lands and is tested independently:
+
+- **5a-i — `TYPE_TASK` core on the existing pool.** A new `ObjHeader`-backed
+  `TaskObj { ObjHeader; int threadId; VM* owner; }` wrapping a slot in
+  today's `threads[VM_MAX_THREADS]` pool — no registry growability, no
+  `THREAD_CREATE`/`THREAD_JOIN` lowering, no HTTP changes. `TaskSpawn(fn,
+  args...) -> task` allocates a `TaskObj` over the same
+  `createThreadJob`/`createThreadWithArgs`/`ThreadJobQueue` path
+  `THREAD_CREATE` already uses (not a second pool); `TaskAwait(task) ->
+  value` calls `vmThreadTakeResult` alone (the now-hardened path above);
+  `TaskDone(task) -> bool` polls without blocking (`vmTaskIsDone`, a new
+  small resultMutex-protected accessor so callers never reach into `Thread`
+  fields directly); `TaskCancel(task)` calls the existing `vmThreadCancel`
+  cooperative-atomics path. Lowest-risk checkpoint by construction (mirrors
+  Phase 4b/4i-ckpt3a's "prove the wrapper against already-correct machinery
+  first" pattern).
+  **Done (2026-07-07):** `TYPE_TASK` appended to `VarType` (no collision —
+  unlike Phase 4i-ckpt3a's `TYPE_CLOSURE` surprise, `TYPE_THREAD` was never
+  `ObjHeader`-boxed, so this fresh tag had nothing to collide with). `TaskObj`
+  uses real retain-and-share semantics (`makeCopyOfValue`/`copyValueForStack`
+  both `pscalObjRetain` the SAME wrapper) — deliberately not
+  copy-on-construct like `ClosureObj`: a task has no Pascal-level value
+  semantics to preserve, its whole identity IS the pool slot it names.
+  `TaskSpawn`/`TaskAwait`/`TaskDone`/`TaskCancel` registered as ordinary
+  `FX_PROC`-classified builtins (ids 278-281, appended per the dispatch
+  table's own append-only convention, with a sentinel added). Four real bugs
+  found only by actually running the feature, not by review:
+  (1) `PSCAL_OBJ_DESTRUCTOR_TABLE_SIZE` was sized off `TYPE_UNICODE_STRING`
+  (the previous last `VarType`), so registering `TYPE_TASK`'s destructor
+  aborted as "out of range" the instant `TaskSpawn` ran — fixed by resizing
+  off the new last member, with a comment warning the same trap awaits
+  whatever type is appended after `TYPE_TASK`.
+  (2) `TaskAwait` originally called `vmJoinThreadById` (which does its own
+  separate consume-and-release-to-pool cycle with a discarded NULL result)
+  before a follow-up `vmThreadTakeResult` call — by the time the second call
+  ran, the slot could already be marked `readyForReuse` and reset, losing
+  the result. Fixed by calling `vmThreadTakeResult(..., takeValue=true,
+  takeStatus=true)` alone — its own wait loop already blocks until the job
+  completes, and taking both value and status in one call is what triggers
+  the release-to-pool gate correctly.
+  (3) `THREAD_JOB_BYTECODE` jobs (spawning a bytecode procedure/function by
+  entry offset — what `TaskSpawn`/`spawn` both lower onto) never stored a
+  result at all before this checkpoint: `THREAD_JOIN`'s own doc comment
+  ("consumes and discards") was true only because nothing upstream had ever
+  captured a function's return value in the first place. Fixed by popping
+  the manually-installed top-level frame's result off the worker's own
+  stack (where `returnFromCall`'s halt path already leaves it) once
+  `interpretBytecode` returns, for functions only (`proc_symbol->type !=
+  TYPE_VOID`) — as a side effect, `ThreadGetResult` on a plain `spawn`ed
+  function now also returns its real value instead of silently nothing,
+  which is a bug fix, not a behavior change worth gating.
+  (4) Establishing the TSan baseline for this checkpoint (per the rigor bar
+  below) surfaced a prerequisite lock-discipline bug in the *existing*
+  thread-pool machinery, fixed and shipped separately before any Task code
+  was written (pscal-core `43b4077` — full account in this section's
+  "Prerequisite" paragraph above), plus two more instances of the identical
+  bug shape found only once Task's own stress fixtures exercised
+  rapid spawn/reuse cycling harder than any existing fixture had:
+  `Thread.inPool` was a plain (non-atomic) `bool` read unlocked by
+  `createThreadJob`'s slot-scan and written unlocked by a retiring worker,
+  reachable in ordinary (non-shutdown) operation via the job queue's idle
+  timeout, not just at process exit as first assumed — converted to
+  `atomic_bool` alongside `active`/`paused`/`cancelRequested`/
+  `killRequested`; and even after that conversion, `Thread.currentJob` (a
+  plain pointer) was still published in the wrong order relative to
+  `inPool`'s flag flip (the flag went false *before* `currentJob` was
+  reset, so a spawner reusing the slot on the flag's signal had no
+  guarantee the reset had actually happened yet) — fixed by reordering so
+  `inPool`'s seq\_cst store is always the last write in a retiring worker's
+  teardown, the standard atomic-flag-as-publish-gate idiom. **Three
+  narrower TSan findings remain, deliberately not fixed:** a lazy
+  double-checked-locking cache (`gVmBuiltinNeedsLockCache`/
+  `gVmBuiltinTypeCache`, `vmBuiltinNeedsGlobalLockCached`/
+  `vmBuiltinTypeCached`) and a per-call-site builtin-id resolution cache on
+  the shared `BytecodeChunk` (`chunk->builtin_resolved_ids`) both read a
+  fast-path cache slot unlocked before falling back to a locked
+  compute-and-populate path — a classic missing-atomics double-checked-
+  locking bug, pre-existing and unrelated to Task specifically (reachable
+  by ANY concurrent `THREAD_CREATE`-based program whose threads call a
+  builtin for the first time around the same moment; Task's own stress
+  fixtures just triggered it more reliably than any prior fixture had).
+  Filed for a dedicated fix, not expanded into this checkpoint.
+  Verified: `Tests/vm_thread_stress/*.pas` (the four pre-existing race
+  fixtures plus `globals_concurrency.pas`) clean under `build-asan` and
+  `build-tsan`; three new dedicated fixtures added and clean under both —
+  `task_concurrent_spawn_await.pas` (four worker threads, each running
+  independent TaskSpawn/TaskDone/TaskAwait loops, exact-result-checked),
+  `task_nested_spawn.pas` (a task's own work function spawns further
+  tasks — exercises `createThreadJob`'s per-VM independent-pool design,
+  confirmed by reading the code, not assumed: each worker VM owns its own
+  `threads[]`, there is no shared-root-pool contention to test),
+  `task_cancel_race.pas` (300 sequential spawn/cancel/await cycles racing
+  cancellation against natural completion, confirming clean pool-slot
+  reuse and no hang/crash either way the race resolves). Full
+  `Tests/run_all_suites.py` (including `--include-vm-verify-corpus` and
+  `--include-vm-fx-policy`) green; whole-repo `cmake --build build` (no
+  target filter, catches `pscald`/`pscalasm`) clean — `TYPE_TASK` needs no
+  disassembler/PSB3-constant-pool support since a task is never a
+  compile-time literal in any frontend, confirmed by the same reasoning
+  that already applies to `TYPE_THREAD`/`TYPE_FILE`; `Tests/vm_bench`
+  recorded on `build-release` with all seven benchmarks' check values
+  passing. Not run: `Tests/vm_diff_harness.py` (needs a second build to
+  differentially compare against; this checkpoint is purely additive for
+  every existing opcode/builtin except the `THREAD_JOB_BYTECODE` result-
+  capture fix above, which the full suite's existing thread/spawn coverage
+  already exercises).
+- **5a-ii — Lower `THREAD_CREATE`/`THREAD_JOIN` onto tasks; growable
+  thread/mutex registries.** `VM_MAX_THREADS`/`VM_MAX_MUTEXES` are
+  inline-embedded fixed arrays (`Thread threads[16]`, `Mutex mutexes[64]`)
+  directly inside `struct VM_s`, indexed at ~35 call sites across `vm.c`/
+  `builtin.c`/`path_truncate.c` — unlike Phase 3's stack/frame growth,
+  nothing here takes a long-lived pointer across a VM's lifetime the way
+  `GET_LOCAL_ADDRESS` does into the operand stack, but a realloc-based
+  growth design (Phase 3's `frames[]` precedent) still requires auditing
+  every site that stashes a `Thread*`/`Mutex*` across a call that could
+  itself trigger a grow (e.g. spawning a task while already holding a
+  `Thread*` from a prior lookup) before it's safe — not yet done. Not
+  started.
+- **5a-iii — HTTP async migrates onto tasks; retire the 32-slot job pool.**
+  Add `vmTaskCreateNative(work_fn, cancel_fn, progress_fn)` so any future
+  builtin needing awaitable async work can return a `TYPE_TASK` without a
+  new ad hoc pool; rewrite `HttpRequestAsync`/`HttpRequestAsyncToFile`/
+  `HttpAwait`/`HttpTryAwait`/`HttpIsDone`/`HttpCancel`/
+  `HttpGetAsyncProgress`/`HttpGetAsyncTotal` (`builtin_network_api.c`) to
+  return/consume `TYPE_TASK` values, delete `g_http_async[]`/
+  `MAX_HTTP_ASYNC` outright (no deprecation wrapper, matching this
+  codebase's established retirement convention), retarget in-tree callers
+  (tests, examples, doc-bench tooling) in the same change. Depends on 5a-i's
+  task API; does not depend on 5a-ii. Not started.
 
 ### 6.2 Phase 5b: Channels
 

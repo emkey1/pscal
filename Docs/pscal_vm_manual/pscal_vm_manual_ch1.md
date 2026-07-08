@@ -512,6 +512,53 @@ MUTEX_LOCK                  ( mutex_id -- )
 MUTEX_UNLOCK                ( mutex_id -- )
 ```
 
+### 1.4a Tasks (VM 2.0 Phase 5a checkpoint 5a-i)
+
+`TYPE_TASK` is a boxed, `ObjHeader`-refcounted `Value` type (`TaskObj {
+ObjHeader; int threadId; VM* owner; }`) formalizing a spawned unit of work
+as a first-class value, over the *same* `threads[VM_MAX_THREADS]` pool and
+`createThreadJob`/`ThreadJobQueue` machinery `THREAD_CREATE` already uses —
+not a second pool. `owner` is whichever `VM*` was actually executing
+`TaskSpawn` (a worker's own per-thread VM has its own independent pool,
+exactly like a nested `THREAD_CREATE` call would — confirmed by reading
+`createThreadJob`, which indexes whatever `VM*` it's handed directly, never
+resolving to a shared root), so `TaskAwait`/`TaskDone`/`TaskCancel` are
+unambiguous about which pool a `threadId` belongs to, unlike the
+historical bare-int-handle builtins' `vm->threadOwner`-vs-`vm` fallback
+dance. Unlike most boxed types (which preserve Pascal's by-value copy
+semantics via copy-on-construct), a `TaskObj` is retain-and-shared on every
+`Value` copy: a task has no meaningful value semantics, its whole identity
+*is* the pool slot it names, so every copy must refer to the same slot.
+
+Four builtins, available identically from every frontend (§4.0's usual
+one-registration story):
+
+```
+TaskSpawn(fn, args...) -> task   ; fn: closure, procedure-name string, or raw
+                                  ; entry offset -- same dispatch as THREAD_CREATE
+TaskAwait(task) -> value         ; blocks until done, returns the function's
+                                  ; result (nil for a procedure or a task
+                                  ; canceled before it ever started)
+TaskDone(task) -> bool           ; non-blocking poll, does not consume
+TaskCancel(task) -> bool         ; cooperative, via the existing vmThreadCancel
+                                  ; atomics -- same "checked at safe points,
+                                  ; not preemptive" contract as THREAD_CREATE
+```
+
+`THREAD_JOB_BYTECODE` jobs (what both `spawn`/`THREAD_CREATE` and
+`TaskSpawn` lower onto) now capture a function's return value when the
+worker's manually-installed top-level frame unwinds to empty — previously
+nothing did this, so `THREAD_JOIN`'s "consumes and discards" behavior was
+true only because there was never a result to discard; `TaskAwait` needed
+the value to actually exist for functions, so this checkpoint added the
+capture. A `spawn`ed function's result is now also retrievable via
+`ThreadGetResult`, a bug fix rather than a behavior change worth gating on.
+
+Not yet done (scoped in `Docs/pscal_vm2_plan.md` §6.1 as checkpoints
+5a-ii/5a-iii): `VM_MAX_THREADS`/`VM_MAX_MUTEXES` are still fixed-size
+arrays (16/64), and HTTP async (§4.1 below) still runs its own separate
+32-slot job pool rather than returning `TYPE_TASK` values.
+
 ### Diagram: Thread Pool, Shared State, and the Native/Builtin Layer
 
 ```mermaid
