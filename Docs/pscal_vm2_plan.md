@@ -3921,6 +3921,34 @@ passes unchanged under both build types.
 Full details, adversarial test cases, and the wired-in `vm-ext-plugin` suite
 are in §8 and §9 below.
 
+**Same-day follow-up: Phase 7 exposed a static-vs-live effect-classification
+gap in Aether's FX-001 gate.** Aether's `@pure`/`fx`-block static checker
+(`aetherIsEffectfulBuiltin`, `semantic.c`) and the `--dump-ext-builtins`
+introspection JSON (`query_builtin.c`) both called
+`pscalBuiltinNameIsEffectful()` — a name lookup against the static
+~130-entry table in `builtin.c` (§4.0a of the VM manual). That table
+predates Phase 7 and has no way to know about a builtin a `--ext`-loaded
+plugin registers at runtime with its own explicit `EffectMask`. Confirmed
+empirically: a throwaway plugin registering `CustomNetSend` with `FX_NET`,
+called from an Aether `@pure` function with no `fx` block, compiled and
+ran clean — no FX-001, no ANN-001 — before the fix. Fixed by adding
+`pscalBuiltinNameEffectMaskLive(name)` (`builtin.h`/`.c`): resolves the
+name to its registry id via the already-existing `getVmBuiltinID()`
+(covers core dispatch-table AND `extra_vm_builtins`/plugin ids alike) and
+returns `getVmBuiltinEffectMaskById()` for it, falling back to the static
+table only for a name that isn't registered yet. Both call sites (Aether's
+gate, the introspection JSON) now use it; re-verified with the same
+`CustomNetSend` plugin that FX-001/ANN-001 fire correctly post-fix, and
+that the full Aether example suite still passes (no false positives on
+the ~500 already-known effectful names, since those resolve through the
+live registry to the identical mask the static table would have given).
+Also wired `--deny net,proc` by default into `tools/aether_doc_bench.py`
+and `tools/aether_idea_miner.py` (both `--sandbox-deny`, overridable) --
+both harnesses run model-generated Aether code unattended and every
+doc-bench task is a pure-compute/deterministic-stdout task, so the
+sandbox costs nothing and closes a real unattended-execution risk that
+predates Phase 7 but is newly relevant now that the sandbox exists.
+
 ## 8. Testing & Verification Strategy (cross-cutting)
 
 Per phase, in order: (1) unit tests for the new mechanism; (2) full
@@ -3970,3 +3998,56 @@ Recommended cut points if the effort is bounded: Phases 0-2 alone deliver
 G1+G2 (portable, verifiable, immutable bytecode) and are worth shipping by
 themselves; Phase 6's enforce mode is small and delivers outsized value for
 the model-eval workflows even if the rest of the concurrency track waits.
+
+## 11. VM 1.x vs VM 2.0: Measured Results
+
+Every phase above records its own before/after `vm_bench` numbers, which is
+useful for catching a per-phase regression but useless for answering the
+question this whole effort was justified by: **did VM 2.0, end to end,
+actually get faster?** Recorded 2026-07-08, after Phase 7 shipped and the
+core/concurrency/sandbox/extension tracks were all complete: a **true**
+VM 1.x baseline — pscal-core `501df6e`/pascal `a8a4398`, the exact commit
+right before Phase 0 started, rebuilt Release from scratch in an isolated
+git worktree (not approximated from an early-session number, not a
+different machine) — run against the same `Tests/vm_bench` suite as the
+final VM 2.0 (Phase 7 complete) Release binary, same host, same conditions.
+
+| Benchmark | VM 1.x median | VM 2.0 median | Speedup |
+|---|---:|---:|---:|
+| `arith` | 0.303s | 0.222s | **1.37x** |
+| `calls` | 0.248s | 0.166s | **1.50x** |
+| `strings` | 0.288s | 0.218s | **1.32x** |
+| `globals` | 0.339s | 0.210s | **1.62x** |
+| `json` | 0.281s | 0.246s | **1.14x** |
+| `io_http` | 0.372s | 0.373s | ~parity (network/TLS-bound, not VM-bound) |
+| `deep_recursion` | *(cannot run)* | 0.230s | **new capability, not just speed** |
+
+**Read this against the Phase 4 sketch's original framing, honestly.**
+§5.10's design text predicted Phase 4 alone (the `Value` collapse) would
+be "the largest single performance win in the plan," informally floated at
+4-8x on stack-traffic/allocation-churn grounds. That number never got a
+dedicated validating benchmark (§5.10.4's post-4h/4i tracking is about
+*not regressing* during the transition, not about proving the multiplier),
+and the real, measured, whole-effort number — every phase combined, a
+genuine isolated-worktree A/B, not an estimate — is **1.14x-1.62x**
+depending on workload. That is a real, worthwhile win, not a rounding
+error, but it is not 4-8x, and no benchmark in this suite specifically
+stresses the allocation-churn-heavy workload (many copies of large
+records/arrays) the original claim was reasoning about in the abstract —
+so the honest conclusion is "the 4-8x claim is unvalidated and likely
+overstated for general-purpose code," not "confirmed" and not "refuted for
+every workload shape." A dedicated record/array-copy-heavy benchmark would
+be needed to settle that narrower question; none has been written yet.
+
+**`deep_recursion` is not a speed comparison at all** — VM 1.x exits
+cleanly with `"VM Error: Stack overflow"` at the fixed `VM_CALL_STACK_MAX
+== 4096` depth that predates Phase 3's growable stack; the benchmark exists
+specifically to demonstrate a capability VM 1.x cannot do at any speed, not
+to be timed against it.
+
+**`arith`'s correctness check is not cross-version comparable** (`check_ok:
+false` on the VM 1.x row above) — a long-double serialization/precision
+change from Phase 1b legitimately shifts `arith`'s deterministic output
+between engines. Its *timing* comparison is still valid (both binaries ran
+the identical workload to completion); only the exact numeric check value
+differs, for a known, accepted reason, not a bug.

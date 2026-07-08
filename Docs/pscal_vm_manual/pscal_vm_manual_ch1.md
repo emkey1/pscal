@@ -199,13 +199,118 @@ loops like `for (Value* slot = vm->stack; slot < vm->stackTop; slot++)`)
 keeps working completely unmodified — the growable design is deliberately
 *not* a linked list of fixed-size segments (which would make every one of
 those computations undefined behavior across separate allocations); see
-the plan's §5.9 writeup for the full rationale. `Value` is PSCAL's
-tagged-union runtime value type (numeric variants, strings, pointers,
-records/objects, sets, files, enums); there is no separate typed-stack
-optimization, every push/pop moves a full `Value`. The interpreter's stack
-primitives are `push`/`pop` plus a `peek` and `FAST_POP`/fast-path variants
-used on hot paths (opcodes like `DUP`/`SWAP`/`POP` are thin wrappers over
-stack-top arithmetic).
+the plan's §5.9 writeup for the full rationale. There is no separate
+typed-stack optimization; every push/pop moves a full `Value`. The
+interpreter's stack primitives are `push`/`pop` plus a `peek` and
+`FAST_POP`/fast-path variants used on hot paths (opcodes like
+`DUP`/`SWAP`/`POP` are thin wrappers over stack-top arithmetic) — see
+§1.2a immediately below for what a `Value` actually is, since **that
+representation changed completely in VM 2.0 Phase 4** and this section
+used to describe the old one.
+
+#### 1.2a The `Value` representation (VM 2.0 Phase 4, plan §5.10)
+
+`Value` is no longer a tagged union of every possible payload plus a long
+tail of type-specific metadata fields (array bounds, file handles, set
+storage, ...) living directly on the struct. As of Phase 4i checkpoint 3d
+(the "physical collapse"), it is a NaN-boxed tagged word:
+
+```c
+typedef struct ValueStruct {
+    VarType type;    // kept as an explicit field, not inferred from bits
+    uint64_t bits;    // the SOLE payload storage — everything else decodes from this
+} Value;
+```
+
+`sizeof(Value) == 16` (4-byte `VarType` + 4 bytes padding + 8-byte
+`bits`) — an 11x reduction from the pre-Phase-4 struct's ~176 bytes.
+`type` deliberately stays a separate field rather than being inferred
+structurally from `bits` alone (the plan's original sketch): every
+heap-pointer type's wrapper struct starts with an `ObjHeader` carrying
+its own `.type` *except* `ClosureObj`/`InterfaceObj` (checkpoint 3a —
+giving them one would collide with `ClosureEnvPayload`'s own reuse of
+the `TYPE_CLOSURE`/`TYPE_INTERFACE` destructor-registration tags), so a
+uniform "read `.type` off the pointee" rule doesn't hold universally;
+one explicit 4-byte field beats a pointer dereference on `VALUE_TYPE(v)`,
+the single most frequently-read property of any `Value` in the VM,
+anyway.
+
+**How `bits` decodes**, by category:
+
+- **Small inline immediates** (`TYPE_BOOLEAN`, `TYPE_NIL`, `TYPE_VOID`,
+  `TYPE_CHAR`, `TYPE_WIDECHAR`, `TYPE_BYTE`, `TYPE_WORD`,
+  `TYPE_INT8`/`16`/`32`, `TYPE_UINT8`/`16`/`32`, `TYPE_FLOAT`) pack
+  directly into `bits` — no allocation, no pointer chase. `TYPE_REAL`
+  (double) NaN-boxes the IEEE-754 bit pattern directly: `bits 63-51`
+  matching a reserved sign=0/exponent=all-1s/quiet-NaN pattern
+  (`PSCAL_NANBOX_HEADER`, `core/obj_header.h`) marks the word as *not* a
+  live double. A real Pascal `NaN` (`0.0/0.0`, `Sqrt(-1)`, ...) can
+  collide with that exact bit pattern, so `pscalBoxDouble()`
+  canonicalizes it — forcing the sign bit to 1, which is safe since a
+  NaN's sign bit carries no IEEE-754 meaning — before ever storing a
+  double in a tagged word.
+- **Wide/rare scalars** — `TYPE_INT64`/`TYPE_UINT64` (don't fit the
+  reserved payload budget below) and `TYPE_LONG_DOUBLE` — box into a
+  tiny heap cell (`Int64Box`/`LongDoubleBox { ObjHeader; int64_t/long
+  double value; }`, checkpoint 3c) and store a tagged pointer to it.
+- **Every other type** (`TYPE_STRING`, `TYPE_ARRAY`, `TYPE_RECORD`,
+  `TYPE_SET`, `TYPE_ENUM`, `TYPE_POINTER`, `TYPE_FILE`,
+  `TYPE_MEMORYSTREAM`, `TYPE_TASK` (§1.4a), `TYPE_CHANNEL` (§1.4c), and
+  the non-`ObjHeader` `TYPE_CLOSURE`/`TYPE_INTERFACE` exception above) is
+  a tagged pointer to its own heap-allocated wrapper struct — `StringObj`,
+  `ArrayObj`, `SetObj`, `EnumObj`, `PointerObj`, `FileObj`, `TaskObj`,
+  `ChannelObj`, etc. — each starting with an embedded `ObjHeader`:
+  ```c
+  typedef struct ObjHeader {
+      VarType type;
+      _Atomic uint32_t refcount;
+  } ObjHeader;
+  ```
+  Every field that used to live directly on `Value` (array
+  bounds/dimensions/element type, file handle/filename/record size, set
+  size/values, ...) now lives on the corresponding wrapper struct
+  instead — reachable through it, not through `Value` itself.
+- **Pointer tagging.** A pointer payload gets 50 bits (not the plan
+  sketch's original 46 — revised the moment a startup canary caught a
+  real violation on first deploy: Linux/ARM64, the claw fleet's GB10
+  Sparks, hands out heap/stack addresses using close to the full 48-bit
+  address space, comfortably exceeding a 46-bit budget that had only
+  ever been checked against macOS/ARM64). `pscalObjRunPointerWidthCanary()`
+  aborts cleanly with a diagnostic on any platform where a real pointer
+  doesn't fit, rather than silently truncating and corrupting a
+  reference — an empirical assumption about the target platforms, not a
+  language guarantee, hence the canary.
+
+**Access.** Every read/write goes through accessor macros in
+`core/types.h`/`core/utils.h` (`VALUE_TYPE`, `VAL_INT`/`VAL_UINT`,
+`AS_STRING`, `AS_REAL`, `AS_ARRAY`, `AS_POINTER`, `ARRAY_DIMENSIONS`,
+...), never a raw field — this discipline predates Phase 4 (it was Phase
+0 item 3's accessor-macro sweep, done specifically so this representation
+change wouldn't require touching every call site in the VM, every
+builtin, and every frontend by hand). The one new primitive Phase 4i
+introduced is `PSCAL_VALUE_PTR(v, T)`, which every pointer-shaped
+accessor now expands through:
+```c
+#define PSCAL_VALUE_PTR(v, T) ((T *)pscalUntagPointer(PSCAL_VALUE_FIELD(v, bits)))
+```
+A plugin loaded through the Phase 7 ABI (§4.0b of Chapter 4) never sees
+any of this directly — it only ever gets `Value`s through the same
+accessor functions the host VM uses internally, which is exactly what
+makes a 16-byte-vs-176-byte representation change source-compatible for
+every builtin ever written against the accessor layer, in-tree or
+plugin.
+
+**Ownership (VM 2.0 Phase 4j, Stage B).** Copying a `Value` — `DUP`,
+`CONSTANT`, parameter passing — is now a cheap word copy plus an atomic
+refcount increment on the pointee (`pscalObjRetain`), not a deep
+structural copy. Pascal's value semantics for records/arrays (mutating a
+copy must never affect the original) are preserved by copy-on-write: any
+mutation through an address (`SET_INDIRECT`, field/element writes) first
+calls `valueEnsureUnique()`, which clones the pointee if its refcount is
+greater than 1 before writing, so a shared reference is never mutated
+out from under another owner. `freeValue` is now `pscalObjRelease` — a
+decref that runs the type's registered destructor only when the
+refcount reaches zero.
 
 **Call/frame stack.** `frames` (VM 2.0 Phase 3: a heap array grown via
 ordinary `realloc()`, starting small and doubling up to a configurable
@@ -257,21 +362,29 @@ indirection rather than plain address math:
 case GET_CHAR_ADDRESS: {
     Value index_val = pop(vm);
     Value* string_ptr_val = vm->stackTop - 1;   // peek the base for validation
-    if (string_ptr_val->type != TYPE_POINTER || !string_ptr_val->ptr_val ||
-        !isPascalStringType(((Value*)string_ptr_val->ptr_val)->type)) {
+    if (VALUE_TYPE(*string_ptr_val) != TYPE_POINTER || !AS_POINTER(*string_ptr_val) ||
+        !isPascalStringType(VALUE_TYPE(*(Value*)AS_POINTER(*string_ptr_val)))) {
         runtimeError(vm, "VM Error: Base for character index is not a pointer to a string.");
         ...
     }
     ...
+    Value* string_val = (Value*)AS_POINTER(*string_ptr_val);
+    // VM 2.0 Phase 4j (Stage B): clone-on-write before handing out an
+    // address into this string, so a mutation through it can never be
+    // observed by another owner sharing the same StringObj.
+    valueEnsureUnique(string_val);
     Value popped_string_ptr = pop(vm);          // base IS consumed before the push
     freeValue(&popped_string_ptr);
-    push(vm, makePointer(&string_val->s_val[char_offset], STRING_CHAR_PTR_SENTINEL));
+    push(vm, makePointer(&AS_STRING(*string_val)[char_offset], STRING_CHAR_PTR_SENTINEL));
     break;
 }
 ```
 
 Net stack effect: `( string_ptr index -- char_ptr )` — the base pointer is
 only peeked during validation, then popped before the result is pushed.
+`AS_POINTER`/`AS_STRING`/`VALUE_TYPE` are the Phase 4 accessor macros
+(§1.2a) — this handler no longer touches a raw `.ptr_val`/`.s_val` field
+anywhere.
 Index resolution goes through `vmResolveStringIndex()`, which honors
 `vm->shellIndexing` (0-based for the shell frontend, 1-based for
 Pascal/Rea). `STRING_CHAR_PTR_SENTINEL` marks the resulting pointer as
