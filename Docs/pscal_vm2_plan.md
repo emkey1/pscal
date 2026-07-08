@@ -3949,6 +3949,43 @@ doc-bench task is a pure-compute/deterministic-stdout task, so the
 sandbox costs nothing and closes a real unattended-execution risk that
 predates Phase 7 but is newly relevant now that the sandbox exists.
 
+**Second same-day follow-up: the plugin-loading capability itself is now
+gate-able, two ways.** Prompted directly by discussing the ABI's threat
+model: `--deny`/effect masks govern what a builtin's *declared* effects let
+it do, but nothing stops a plugin's own native code from doing more than
+its declared mask -- a plugin registered `FX_PURE` can still open a
+socket. That means "can this process load native plugins at all" needed
+its own gate, independent of the effect-mask sandbox:
+- **Runtime:** a new `FX_EXT` bit (`core/effect_mask.h`), wired into the
+  existing `--deny`/`PSCAL_VM_DENY` CLI/env parsing (`vm_fx_policy.c`, now
+  recognizes the `ext` token, included in the `all` shorthand).
+  `pscalExtLoadRegisteredPlugins()` checks `pscalFxEffectiveDeniedMask() &
+  FX_EXT` once, before any `dlopen` attempt -- checked at load time, not
+  at `--ext`'s own CLI-parse time, since `--deny` can appear later in
+  `argv` than `--ext` and the effective mask only reflects state once all
+  flags are parsed regardless of order (verified explicitly: `--ext
+  x --deny ext` and `--deny ext --ext x` both deny correctly).
+- **Build-time:** `-DPSCAL_ENABLE_EXT_PLUGINS=OFF` (new CMake option,
+  default `ON`, added to both pscal-core's standalone `CMakeLists.txt` and
+  PBuild's umbrella one) defines `PSCAL_EXT_PLUGINS_DISABLED`, which
+  extends `plugin_loader.c`'s existing `PSCAL_TARGET_IOS` stub guard to
+  `#if defined(PSCAL_TARGET_IOS) || defined(PSCAL_EXT_PLUGINS_DISABLED)`
+  -- the real `dlopen` path is compiled out of the binary entirely, so no
+  runtime flag or environment variable in that build can re-enable it.
+  This is the harder guarantee for a deployment that wants "this binary
+  cannot load native plugins" independent of what the running program or
+  its shell environment does.
+
+Verified both: `--deny ext`/`PSCAL_VM_DENY=ext` reject `--ext` and
+`PSCAL_EXT_DIR` cleanly, `--deny all` also rejects (via `FX_ALL_KNOWN`),
+an unrelated `--deny net` does not over-trigger; a throwaway
+`-DPSCAL_ENABLE_EXT_PLUGINS=OFF` build produces a binary where `--ext`
+fails with a build-time-specific diagnostic while ordinary programs
+(no `--ext` used) are completely unaffected. Four new cases added to
+`Tests/vm_ext_plugin/run.sh` (the runtime gate only -- the build-time gate
+needs a second binary and isn't baked into the opt-in suite, verified
+manually instead).
+
 ## 8. Testing & Verification Strategy (cross-cutting)
 
 Per phase, in order: (1) unit tests for the new mechanism; (2) full

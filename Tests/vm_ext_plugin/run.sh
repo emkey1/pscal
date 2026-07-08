@@ -65,6 +65,50 @@ else
     harness_report PASS "ext_plugin_dir_scan" "PSCAL_EXT_DIR loads a plugin the same way --ext does"
 fi
 
+# --- Case 3: the --deny ext / PSCAL_VM_DENY=ext runtime gate (VM 2.0
+# Phase 7 follow-up) blocks plugin loading cleanly, both via --ext and
+# PSCAL_EXT_DIR, composes with --deny all, and does NOT over-trigger on an
+# unrelated deny class. ---
+deny_ext_out="$WORK_DIR/deny_ext.out"
+"$PASCAL_BIN" --deny ext --ext "$SQLITE_PLUGIN" --no-cache "$SCRIPT_DIR/sqlite_plugin_smoke.pas" > "$deny_ext_out" 2>&1
+deny_ext_status=$?
+if [ "$deny_ext_status" -ne 1 ] || ! grep -qF "denied by --deny/PSCAL_VM_DENY policy (ext)" "$deny_ext_out"; then
+    harness_report FAIL "ext_plugin_deny_ext_flag" "--deny ext blocks --ext cleanly" \
+        "exit=$deny_ext_status\n$(cat "$deny_ext_out")"
+else
+    harness_report PASS "ext_plugin_deny_ext_flag" "--deny ext blocks --ext cleanly"
+fi
+
+deny_ext_dir_out="$WORK_DIR/deny_ext_dir.out"
+PSCAL_EXT_DIR="$ext_dir" "$PASCAL_BIN" --deny ext --no-cache "$SCRIPT_DIR/sqlite_plugin_smoke.pas" > "$deny_ext_dir_out" 2>&1
+deny_ext_dir_status=$?
+if [ "$deny_ext_dir_status" -ne 1 ] || ! grep -qF "denied by --deny/PSCAL_VM_DENY policy (ext)" "$deny_ext_dir_out"; then
+    harness_report FAIL "ext_plugin_deny_ext_env" "--deny ext blocks PSCAL_EXT_DIR cleanly" \
+        "exit=$deny_ext_dir_status\n$(cat "$deny_ext_dir_out")"
+else
+    harness_report PASS "ext_plugin_deny_ext_env" "--deny ext blocks PSCAL_EXT_DIR cleanly"
+fi
+
+deny_all_out="$WORK_DIR/deny_all.out"
+"$PASCAL_BIN" --deny all --ext "$SQLITE_PLUGIN" --no-cache "$SCRIPT_DIR/sqlite_plugin_smoke.pas" > "$deny_all_out" 2>&1
+deny_all_status=$?
+if [ "$deny_all_status" -ne 1 ] || ! grep -qF "denied by --deny/PSCAL_VM_DENY policy (ext)" "$deny_all_out"; then
+    harness_report FAIL "ext_plugin_deny_all_includes_ext" "--deny all also blocks plugin loading" \
+        "exit=$deny_all_status\n$(cat "$deny_all_out")"
+else
+    harness_report PASS "ext_plugin_deny_all_includes_ext" "--deny all also blocks plugin loading"
+fi
+
+deny_net_out="$WORK_DIR/deny_net.out"
+"$PASCAL_BIN" --deny net --ext "$SQLITE_PLUGIN" --no-cache "$SCRIPT_DIR/sqlite_plugin_smoke.pas" > "$deny_net_out" 2>&1
+deny_net_status=$?
+if [ "$deny_net_status" -ne 0 ] || ! diff -q "$static_out" "$deny_net_out" > /dev/null 2>&1; then
+    harness_report FAIL "ext_plugin_deny_net_does_not_block_ext" "an unrelated --deny class does not block plugin loading" \
+        "exit=$deny_net_status\n$(cat "$deny_net_out")"
+else
+    harness_report PASS "ext_plugin_deny_net_does_not_block_ext" "an unrelated --deny class does not block plugin loading"
+fi
+
 # --- Adversarial cases: each must fail cleanly (host exits normally with
 # status 1, never crashes/hangs itself) with a diagnostic naming the
 # actual problem. A trivial pass-through program is enough -- these cases

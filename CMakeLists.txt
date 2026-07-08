@@ -185,6 +185,15 @@ else()
     option(PSCAL_VM_CODE_PROTECT "mprotect(PROT_READ) bytecode CODE after load (debug-only immutability enforcement)" OFF)
 endif()
 
+# VM 2.0 Phase 7 (plan Docs/pscal_vm2_plan.md §7.1): dlopen-based plugin
+# loading (--ext/PSCAL_EXT_DIR). Deployment-level hard gate, independent of
+# the runtime --deny ext / PSCAL_VM_DENY=ext sandbox control -- OFF compiles
+# the real dlopen path out of ext_builtins/plugin_loader.c entirely, so no
+# runtime flag/env var can re-enable it. Default ON; configure with
+# -DPSCAL_ENABLE_EXT_PLUGINS=OFF for a build that should never have this
+# capability at all.
+option(PSCAL_ENABLE_EXT_PLUGINS "Enable dlopen-based plugin loading (--ext/PSCAL_EXT_DIR)" ON)
+
 if(UNIX AND NOT APPLE)
     add_compile_definitions(_GNU_SOURCE _POSIX_C_SOURCE=200809L)
 endif()
@@ -1883,6 +1892,10 @@ endif()
 if(PSCAL_VALUE_ACCESS_LINT)
     target_compile_definitions(pscal_core_static PRIVATE PSCAL_VALUE_ACCESS_LINT)
     message(STATUS "pscal-core: Value access lint ENABLED")
+endif()
+if(NOT PSCAL_ENABLE_EXT_PLUGINS)
+    target_compile_definitions(pscal_core_static PRIVATE PSCAL_EXT_PLUGINS_DISABLED)
+    message(STATUS "pscal-core: dlopen plugin loading DISABLED at build time")
 endif()
 if(NOT PSCAL_PLATFORM_IOS OR PSCAL_USE_HOST_OPENSSL)
     if(OPENSSL_INCLUDE_DIR)

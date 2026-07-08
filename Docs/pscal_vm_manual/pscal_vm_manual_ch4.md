@@ -289,13 +289,50 @@ wired into `Tests/run_all_suites.py --include-vm-ext-plugin`); the static
 `ext_builtins/sqlite/sqlite_builtins.c` is untouched and is what ships by
 default.
 
+**Gating the capability itself.** Loading a plugin means running arbitrary
+native code in-process with full privileges -- the effect-mask system
+above governs what a builtin's *declared* mask lets it do, but nothing
+stops a plugin's own C code from doing more than it declares (a plugin
+that registers itself `FX_PURE` can still open a socket; the mask is the
+plugin's honest self-report, not an enforced sandbox on its native code).
+Given that, plugin loading needs its own gate, independent of and
+composable with the effect-mask sandbox, at two different levels:
+
+- **Runtime, per-invocation: `--deny ext` / `PSCAL_VM_DENY=ext`.** A new
+  `FX_EXT` bit (`core/effect_mask.h`) reuses the exact `--deny` CLI/env
+  parsing and storage `vm_fx_policy.c` already has for `io`/`net`/`proc`/
+  `clock`/`random` -- not because loading a plugin is checked at the same
+  `CALL_BUILTIN` dispatch point (it isn't; `FX_EXT` is never returned by
+  any builtin's classification), but so "no plugins" composes with "no
+  network"/"no process spawn" as one flag and one mental model:
+  `--deny net,proc,ext`. `FX_EXT` is included in the `all` shorthand too --
+  loading arbitrary native code is the largest capability escalation this
+  system has, so `--deny all` denying it is the only sane default.
+  `pscalExtLoadRegisteredPlugins()` checks `pscalFxEffectiveDeniedMask() &
+  FX_EXT` once, before any `dlopen` is attempted (and before even scanning
+  `PSCAL_EXT_DIR`) -- deliberately *not* at `--ext`'s own CLI-parse time,
+  since `--deny` may appear later in `argv` than `--ext` and the effective
+  denied mask only reflects accumulated state once all flags (in either
+  order) have been parsed.
+- **Build-time, deployment-level: `-DPSCAL_ENABLE_EXT_PLUGINS=OFF`.** A
+  CMake option (default `ON`) that, when off, defines
+  `PSCAL_EXT_PLUGINS_DISABLED` and compiles the real `dlopen` path out of
+  `plugin_loader.c` entirely -- no runtime flag or environment variable in
+  that binary can re-enable it, unlike the `--deny ext` gate above, which
+  a process with shell access could simply not pass. This is the harder
+  guarantee for a deployment (e.g. an agent-facing one) that wants "this
+  binary cannot load native plugins, full stop," independent of what the
+  running program or its environment does.
+
 **iOS.** No `dlopen` culture, static linking only. `plugin_loader.c`'s real
 loading path is compiled out entirely under `PSCAL_TARGET_IOS` (mirroring
 `ext_builtins/register.c`'s existing `registerShellFrontendBuiltins()`
-special-casing); `--ext`/`PSCAL_EXT_DIR` are still recognized there so a
-shared script doesn't hit "unknown option", but produce an immediate,
-clear "not supported on this platform" error rather than silently
-compiling in a nonfunctional path.
+special-casing, and sharing the same build-time-disabled code path
+`PSCAL_ENABLE_EXT_PLUGINS=OFF` uses above); `--ext`/`PSCAL_EXT_DIR` are
+still recognized there so a shared script doesn't hit "unknown option",
+but produce an immediate, clear error (naming the actual reason -- iOS, or
+an explicit build-time opt-out) rather than silently compiling in a
+nonfunctional path.
 
 ### 4.1 The Network Operations Engine
 
