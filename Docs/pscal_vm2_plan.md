@@ -3416,36 +3416,107 @@ type claiming it.
 **Checkpoint breakdown:**
 
 - **5b-i — `TYPE_CHANNEL` core: `ChannelObj`, blocking Send/Receive/Close,
-  non-blocking TrySend/TryReceive.** `ChannelCreate(capacity) -> channel`,
-  `ChannelSend(channel, value)`, `ChannelReceive(channel) -> value`,
-  `ChannelTrySend`/`ChannelTryReceive` (non-blocking, mirroring
-  `HttpTryAwait`'s "claim only if ready" shape), `ChannelClose(channel)`,
-  `ChannelIsClosed(channel) -> bool`. Lock in the close-semantics and
-  value-ownership decisions above in code, not just prose. `PSCAL_OBJ_
-  DESTRUCTOR_TABLE_SIZE` bump plus an actual `ChannelCreate` smoke test
-  (the exact gap that caused 5a-i's off-by-one). New stress fixtures
-  mirroring `Tests/vm_thread_stress/task_*.pas`'s pattern: single-producer/
-  single-consumer over a small capacity (forces both the full-blocks-send
-  and empty-blocks-receive paths under real backpressure), plus a same-
-  thread send-then-receive-immediately smoke test for the trivial case.
-  Verified under plain and ASan+UBSan builds. Depends on 5a-i's `TaskObj`/
-  `ObjHeader` precedent; does not depend on 5a-ii's growable registries or
-  5a-iii's native-task API (channels are pure heap objects, per above).
-  Not started.
-- **5b-ii — Cross-task stress, cancellation, and TSan.** Multi-producer/
-  multi-consumer fixtures (several `TaskSpawn`ed producers and consumers
-  sharing one channel, mirroring `task_concurrent_spawn_await.pas`'s
-  concurrency shape), a fixture that `TaskCancel`s a task blocked mid-
-  `ChannelReceive` and confirms it actually wakes (mirroring `task_cancel_
-  race.pas` and 5a-iii's HTTP-cancel-demo pattern — cancellation is only
-  real once it's been watched actually interrupt a real blocking wait, not
-  just assumed from reading the code), and a fixture confirming `ChannelClose`
-  wakes *every* blocked waiter, not just one (the broadcast-not-signal
-  distinction actually matters here and is easy to get wrong silently).
-  Verified under plain, ASan+UBSan, and TSan builds — matching 5a-iii's
-  rigor bar, since this is exactly the class of "shared condvar state
-  across threads" bug TSan is good at catching and 5a-iii's own TSan pass
-  found a real pre-existing bug in adjacent code. Full `Tests/
+  non-blocking TrySend/TryReceive.** Done (2026-07-08). `ChannelCreate
+  (capacity) -> channel`, `ChannelSend(channel, value)`, `ChannelReceive
+  (channel) -> value`, `ChannelTrySend(channel, value) -> integer`,
+  `ChannelClose(channel)`, `ChannelIsClosed(channel) -> bool` all shipped
+  exactly as designed above. `PSCAL_OBJ_DESTRUCTOR_TABLE_SIZE` bumped to
+  `TYPE_CHANNEL + 1`, verified with an actual `ChannelCreate` smoke test
+  (the exact gap 5a-i's off-by-one warns about — re-checked, not just
+  visually inspected).
+
+  **`ChannelTryReceive` shipped with a different shape than designed,
+  found only by testing, not anticipated by the prose above.** The
+  original `ChannelTryReceive(channel) -> record{ok, closed, value}` design
+  doesn't work: Pascal's compiler requires a compile-time-known record
+  shape for `.field` access, and a generic builtin has no way to declare
+  one for its dynamically-typed return (confirmed empirically — `rec.ok`
+  failed to compile with "Unknown field 'ok'", not a runtime issue). A
+  second attempt, `ChannelTryReceive(channel, var outValue) -> integer`
+  (status as the ordinary return value, only the payload as a `var`
+  parameter), also failed: this codebase's `var`-output-parameter
+  mechanism for builtins (`compiler.c`'s per-builtin-name/param-index
+  table, the same one `Val`/`Str` already use to write through a
+  caller-supplied address) only activates when the call compiles as a bare
+  *statement* with its return value discarded — exactly `Val`'s own
+  calling shape — not when the call appears inside an assignment/expression
+  (confirmed by testing both forms directly, including the exact "GET_
+  GSLOT_ADDRESS" vs. by-value bytecode this produces). The shape that
+  actually works, shipped: `ChannelTryReceive(channel, var status: integer,
+  var outValue)`, called as a bare statement
+  (`ChannelTryReceive(ch, status, outVal);`), mirroring `Val`'s own
+  `(input, var-out1, var-out2)` shape exactly — `status` is 1 (got a value,
+  now in `outVal`), 0 (buffer momentarily empty, channel open, try again),
+  or -1 (closed and drained). Registered `AST_PROCEDURE_DECL`, not
+  `AST_FUNCTION_DECL`, to match.
+
+  New stress fixtures in `Tests/vm_thread_stress/`: `channel_basic_smoke.pas`
+  (single-threaded — every operation's return-value contract in isolation:
+  TrySend full/not-full, Receive/TryReceive on open/empty/closed-drained,
+  double-`Close` idempotency), `channel_send_after_close_errors.pas` (a
+  separate fixture, since the whole point is the program is *expected* to
+  abort — `ChannelSend` on a closed channel raises a runtime error, matching
+  Go's "send on closed channel panics" convention, not a silent no-op, since
+  it's a programming error rather than a state worth polling for),
+  `channel_spsc_backpressure.pas` (a `TaskSpawn`ed producer sends 500 items
+  into a capacity-3 channel while the main thread consumes concurrently —
+  capacity deliberately far below the item count so both `vmChannelSend`'s
+  full-blocks-send and `vmChannelReceive`'s empty-blocks-receive wait-loop
+  branches actually execute, not just their fast paths; checksum-verified,
+  matching this codebase's "exact value, no tolerance for a torn/wrong
+  result" convention for concurrency fixtures), and
+  `channel_close_wakes_all.pas` (8 `TaskSpawn`ed consumers all block on the
+  same empty channel; a single `ChannelClose` must wake *every one* via
+  `pthread_cond_broadcast`, not just one via `signal` — a broadcast/signal
+  mixup here would hang the fixture rather than fail an assertion, which is
+  exactly what makes it worth a dedicated fixture rather than trusting code
+  review; pulled forward from its original 5b-ii slot since it was cheap to
+  add alongside the others and gave real confidence in the close-semantics
+  decision while still implementing it).
+
+  Verified clean under plain and ASan+UBSan builds (5b-i's actual scope). A
+  bonus TSan pass (formally 5b-ii's job, run early anyway since the two
+  concurrency fixtures already existed) found `channel_spsc_backpressure.pas`
+  clean but `channel_close_wakes_all.pas` reporting four data races — three
+  are the *exact* three pre-existing, already-deferred lazy-cache races from
+  5a-i's own TSan pass (`vmBuiltinNeedsGlobalLockCached`/`vmBuiltinTypeCached`
+  double-checked locking, `chunk->builtin_resolved_ids`'s unlocked fast-path
+  read — see 5a-i's writeup above), confirmed by file:line match, not
+  assumption. The fourth is new: `pscalRuntimeConsumeSigint`'s
+  `g_vm_sigint_seen` global (`builtin.c`) is read-then-cleared with no
+  atomics — `git log -S` confirms this predates Phase 5 entirely (commit
+  `ac085fd`, long before 5a-i), so it's the same "pre-existing, not
+  Channel-specific, just never surfaced by a fixture with this much
+  simultaneous contention before" story as the other three, not a new bug
+  this checkpoint introduced (`vmChannelReceive`/`vmChannelSend` call the
+  same shared `vmConsumeInterruptRequest` that `vmThreadTakeResult` already
+  did — reusing existing infrastructure rather than inventing a new one is
+  exactly why this checkpoint inherits the exposure rather than causing it).
+  Not fixed here — same "filed for a dedicated fix, not expanded into this
+  checkpoint" call 5a-i made for its three.
+
+  Full `Tests/run_all_suites.py` green (all suites, including `core` — now
+  passing after the separately-shipped thread-pool slot-reuse fix,
+  pscal-core `6aaefae`); whole-repo `cmake --build build` clean. Depends on
+  5a-i's `TaskObj`/`ObjHeader` precedent; does not depend on 5a-ii's growable
+  registries or 5a-iii's native-task API (channels are pure heap objects,
+  per above, confirmed — no VM-level registry was needed).
+- **5b-ii — Cross-task stress, cancellation, and full TSan rigor.**
+  `channel_close_wakes_all.pas` already shipped in 5b-i (see above); what's
+  left: multi-producer/multi-consumer fixtures (several `TaskSpawn`ed
+  producers *and* consumers sharing one channel, mirroring
+  `task_concurrent_spawn_await.pas`'s concurrency shape — 5b-i's SPSC
+  fixture is single-producer/single-consumer only), and a fixture that
+  `TaskCancel`s a task blocked mid-`ChannelReceive` and confirms it actually
+  wakes (mirroring `task_cancel_race.pas` and 5a-iii's HTTP-cancel-demo
+  pattern — cancellation is only real once it's been watched actually
+  interrupt a real blocking wait, not just assumed from reading the code;
+  5b-i's `vmChannelOperationInterrupted` polls `Thread.cancelRequested` but
+  this specific path has not yet been exercised by a dedicated fixture).
+  Formal TSan verification of the *complete* existing regression suite
+  (5b-i's bonus pass only covered its own two concurrency fixtures) —
+  matching 5a-iii's rigor bar, since this is exactly the class of "shared
+  condvar state across threads" bug TSan is good at catching. Full `Tests/
   run_all_suites.py` green. Depends on 5b-i. Not started.
 - **5b-iii — Frontend wiring.** One-registration builtins are already
   frontend-neutral (§4.0's usual story), so the remaining work is per-

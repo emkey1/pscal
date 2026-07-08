@@ -629,6 +629,83 @@ avoids the unsafe alternative of a query builtin reaching into a
 heap-allocated job struct that the owning worker's `cleanup` may have already
 freed.
 
+### 1.4c Channels (VM 2.0 Phase 5b checkpoint 5b-i)
+
+`TYPE_CHANNEL` is a bounded MPMC (multi-producer, multi-consumer) queue of
+`Value`s, `{ ObjHeader header; pthread_mutex_t lock; pthread_cond_t notEmpty;
+pthread_cond_t notFull; Value *buf; size_t capacity, count, head; bool
+closed; }` (`ChannelObj`, `core/types.h`) — a ring buffer, not a linked list.
+Unlike `TaskObj`, a channel carries no owning VM and lives in no VM-level
+registry: it has no natural "slot" the way a task occupies a `threads[]`
+entry, so it's a plain heap object created once and shared by however many
+tasks/threads hold a reference, potentially outliving the task that created
+it. Like `TaskObj`, it's retain-and-shared on every `Value` copy (a channel's
+identity is the shared buffer, not something Pascal-style copy-on-construct
+should duplicate).
+
+```
+ChannelCreate(capacity) -> channel                          ; capacity >= 1
+ChannelSend(channel, value)                                  ; blocking
+ChannelReceive(channel) -> value                              ; blocking
+ChannelTrySend(channel, value) -> integer                    ; non-blocking
+ChannelTryReceive(channel, var status, var outValue)          ; non-blocking
+ChannelClose(channel)                                         ; idempotent
+ChannelIsClosed(channel) -> bool
+```
+
+**Blocking Send/Receive reuse `vmThreadTakeResult`'s wait pattern**, not a
+new one: a loop around `pthread_cond_timedwait` with a 100ms deadline,
+rechecking cancellation/interrupt state on every wake rather than a single
+unbounded wait. Two differences from that pattern: there's no single "the
+thread this operation is about" to call `vmThreadCancel` on the way
+`vmThreadTakeResult`'s own interrupt check does (a channel op blocks the
+*calling* thread itself, not some other thread's job, so on interrupt it
+just unblocks and returns); and it additionally polls the calling thread's
+own `Thread.cancelRequested` (via `vm->owningThread`, `NULL` on the main
+VM) so a task blocked on `ChannelSend`/`ChannelReceive` actually wakes when
+`TaskCancel`'d — the same poll-don't-callback pattern §1.4b's native tasks
+use for HTTP async cancellation, for the identical reason (a callback-based
+hook was tried there and reverted after a confirmed race).
+
+`ChannelSend`/`ChannelReceive` return `VM_CHANNEL_OK`, `VM_CHANNEL_CLOSED`,
+or `VM_CHANNEL_INTERRUPTED` (`vm.h`'s `VmChannelStatus`); the blocking
+builtins surface this as: `ChannelSend` raises a runtime error only on
+`CLOSED` (matching Go's "send on closed channel panics" — a programming
+error, not a state worth tolerating silently) and is otherwise a no-op on
+`INTERRUPTED` (the same soft-outcome tolerance `TaskCancel` racing
+`TaskAwait` already has); `ChannelReceive` returns nil on either `CLOSED`
+or `INTERRUPTED` — the same nil-overload tolerance `TaskAwait` already
+accepts for its own degenerate cases (a procedure task's "no result" and a
+canceled-before-start task are both nil too). A caller needing to
+disambiguate a legitimately-sent nil from "channel closed, nothing more
+will ever arrive" can follow up with `ChannelIsClosed` (race-free, since
+`closed` is monotonic), or use `ChannelTryReceive`'s fully-disambiguated
+three-way status instead.
+
+**`ChannelTryReceive`'s `(channel, var status, var outValue)` shape, not
+`(channel) -> record{ok, closed, value}`, was chosen after two other
+designs failed empirically, not by preference.** A record return doesn't
+work: Pascal's compiler requires a compile-time-known record shape for
+`.field` access, which a generic builtin's dynamically-typed return can't
+provide. A single `var outValue` with status as the ordinary return value
+doesn't work either: this codebase's `var`-output-parameter mechanism for
+builtins (`compiler.c`'s per-builtin-name/param-index table — the same one
+`Val`/`Str` already use to pass the address of a caller's variable instead
+of its value) only activates when the call compiles as a bare *statement*
+with its return value discarded, not inside an assignment/expression. The
+shape that works mirrors `Val`'s own `(input, var-out1, var-out2)` exactly:
+call it as a bare statement, `ChannelTryReceive(ch, status, outVal);` —
+`status` comes back 1 (got a value, now in `outVal`), 0 (buffer momentarily
+empty, channel still open, try again), or -1 (closed and drained).
+
+`ChannelClose` is idempotent (closing an already-closed channel is a
+harmless no-op, not Go's "close of closed channel panics") and broadcasts
+both condvars — every blocked sender *and* receiver wakes, not just one,
+verified by a dedicated stress fixture
+(`Tests/vm_thread_stress/channel_close_wakes_all.pas`: 8 tasks all blocked
+on one empty channel, a single `Close` must wake all 8 — a broadcast/signal
+mixup here hangs the fixture rather than failing an assertion).
+
 ### Diagram: Thread Pool, Shared State, and the Native/Builtin Layer
 
 ```mermaid
