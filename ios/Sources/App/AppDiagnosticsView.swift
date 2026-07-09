@@ -876,22 +876,37 @@ struct AppDiagnosticsView: View {
                     Button("Close") {
                         dismiss()
                     }
+                    .accessibilityLabel("Close diagnostics")
+                    .accessibilityHint("Dismisses the app diagnostics view")
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button(copiedReport ? "Copied" : "Copy Report") {
                         runner.copyReportToPasteboard()
-                        copiedReport = true
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        UIAccessibility.post(notification: .announcement, argument: "Report copied to clipboard")
+                        withAnimation {
+                            copiedReport = true
+                        }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                            copiedReport = false
+                            withAnimation {
+                                copiedReport = false
+                            }
                         }
                     }
                     .disabled(runner.report.isEmpty)
+                    .accessibilityLabel(copiedReport ? "Report copied" : "Copy diagnostic report")
+                    .accessibilityHint(copiedReport ? "" : "Copies the diagnostic report to the clipboard")
 
                     Button(runner.isRunning ? "Running..." : (runner.checks.isEmpty ? "Run Diagnostics" : "Run Again")) {
-                        copiedReport = false
+                        withAnimation {
+                            copiedReport = false
+                        }
                         runner.run()
+                        UIAccessibility.post(notification: .announcement, argument: "Running diagnostics")
                     }
                     .disabled(runner.isRunning)
+                    .accessibilityLabel(runner.isRunning ? "Diagnostics are running" : (runner.checks.isEmpty ? "Run Diagnostics" : "Run Diagnostics Again"))
+                    .accessibilityHint(runner.isRunning ? "" : "Executes the in-app sanity checks")
                 }
             }
         }
