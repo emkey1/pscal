@@ -1234,6 +1234,34 @@ set(SMALLCLUE_SOURCES
     src/smallclue/src/openssh_app.c
     src/smallclue/src/openrsync_app.c
     src/smallclue/src/vproc_test_app.c
+    src/smallclue/src/awk_app.c
+    src/smallclue/src/awk_interp.c
+    src/smallclue/src/awk_lexer.c
+    src/smallclue/src/awk_parser.c
+    src/smallclue/src/awk_value.c
+    src/smallclue/src/base64_app.c
+    src/smallclue/src/checksum_app.c
+    src/smallclue/src/chown_app.c
+    src/smallclue/src/cmp_app.c
+    src/smallclue/src/comm_app.c
+    src/smallclue/src/dd_app.c
+    src/smallclue/src/diff_app.c
+    src/smallclue/src/expr_app.c
+    src/smallclue/src/fmt_app.c
+    src/smallclue/src/fold_app.c
+    src/smallclue/src/gzip_app.c
+    src/smallclue/src/nl_app.c
+    src/smallclue/src/nohup_app.c
+    src/smallclue/src/od_app.c
+    src/smallclue/src/paste_app.c
+    src/smallclue/src/patch_app.c
+    src/smallclue/src/printf_app.c
+    src/smallclue/src/readlink_app.c
+    src/smallclue/src/rev_app.c
+    src/smallclue/src/seq_app.c
+    src/smallclue/src/split_app.c
+    src/smallclue/src/tac_app.c
+    src/smallclue/src/tar_app.c
 )
 
 if(PSCAL_PLATFORM_IOS OR APPLE)
@@ -1504,6 +1532,7 @@ set(PSCAL_OPENRSYNC_SOURCES
     ${PSCAL_OPENRSYNC_ROOT}/socket.c
     ${PSCAL_OPENRSYNC_ROOT}/symlinks.c
     ${PSCAL_OPENRSYNC_ROOT}/uploader.c
+    ${PSCAL_OPENRSYNC_ROOT}/zcompress.c
 )
 
 if(PSCAL_PLATFORM_IOS OR APPLE)
