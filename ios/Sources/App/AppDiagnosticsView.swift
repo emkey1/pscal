@@ -87,6 +87,8 @@ private final class AppDiagnosticsRunner: ObservableObject {
     func copyReportToPasteboard() {
         guard !report.isEmpty else { return }
         UIPasteboard.general.string = report
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        UIAccessibility.post(notification: .announcement, argument: "Copied report")
     }
 
     private static func performRun() async -> AppDiagnosticsRunResult {
@@ -880,11 +882,17 @@ struct AppDiagnosticsView: View {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button(copiedReport ? "Copied" : "Copy Report") {
                         runner.copyReportToPasteboard()
-                        copiedReport = true
+                        withAnimation {
+                            copiedReport = true
+                        }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                            copiedReport = false
+                            withAnimation {
+                                copiedReport = false
+                            }
                         }
                     }
+                    .accessibilityLabel(copiedReport ? "Copied report" : "Copy report")
+                    .accessibilityHint("Copies the diagnostic report to the clipboard")
                     .disabled(runner.report.isEmpty)
 
                     Button(runner.isRunning ? "Running..." : (runner.checks.isEmpty ? "Run Diagnostics" : "Run Again")) {
