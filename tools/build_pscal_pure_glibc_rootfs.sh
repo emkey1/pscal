@@ -70,6 +70,7 @@ RFS="$OUT_DIR/rootfs"
 rm -rf "$RFS"
 mkdir -p "$RFS/usr/bin" "$RFS/usr/local/pscal/bin" "$RFS/usr/local/pscal/pascal/lib" \
          "$RFS/usr/local/pscal/clike/lib" "$RFS/usr/local/lib/rea" "$RFS/etc/ssh" \
+         "$RFS/etc/service/sshd" \
          "$RFS/tmp" "$RFS/var/empty" "$RFS/run" "$RFS/home/username" "$RFS/dev/shm" "$RFS/dev/pts" \
          "$RFS/proc" "$RFS/sys" "$RFS/root/.ssh"
 chmod 1777 "$RFS/tmp"
@@ -136,12 +137,31 @@ cat > "$RFS/etc/passwd" <<'EOF'
 root:x:0:0:root:/root:/usr/bin/exsh
 username:x:1000:1000:User Name,,,:/home/username:/usr/bin/exsh
 sshd:x:100:100:sshd privilege separation:/var/empty:/usr/bin/false
+nobody:x:65534:65534:nobody:/nonexistent:/usr/bin/false
 EOF
 cat > "$RFS/etc/group" <<'EOF'
 root:x:0:
 username:x:1000:
 sshd:x:100:
+nogroup:x:65534:
 EOF
+# /etc/shadow: POSIX only specifies the FILE FORMAT, not which accounts must
+# exist -- that's a distro convention (LSB/Debian's base-passwd). A full
+# Debian-style base account list (daemon/bin/sys/mail/news/uucp/...) would
+# just be clutter here (no init system, no mail, no printing); nobody/
+# nogroup (65534) is the one genuinely universal least-privilege account
+# worth adding regardless. Every account is LOCKED (`*`) by default --
+# matches sshd_config's PasswordAuthentication no below; smallclue's own
+# `passwd` applet (getspnam/crypt against this same file) is how the user
+# sets a real password locally if they ever want one. No password-aging
+# fields set (blank = disabled), matching common minimal-image convention.
+cat > "$RFS/etc/shadow" <<'EOF'
+root:*:::::::
+username:*:::::::
+sshd:*:::::::
+nobody:*:::::::
+EOF
+chmod 600 "$RFS/etc/shadow"
 cat > "$RFS/etc/hosts" <<'EOF'
 127.0.0.1   localhost
 ::1         localhost ip6-localhost ip6-loopback
@@ -177,6 +197,29 @@ AuthorizedKeysFile /root/.ssh/authorized_keys
 Subsystem sftp internal-sftp
 EOF
 
+# /etc/service/sshd/run: the runit convention smallclue's own `runit` applet
+# expects (NOT SysV's /etc/init.d -- this rootfs has no runlevels, no
+# update-rc.d, just a single /etc/rc). Host-key generation and the
+# sshd.disable opt-out both live HERE, not in /etc/rc, so a future second
+# service just drops its own /etc/service/<name>/run in -- no /etc/rc edits.
+# sshd runs with -D (stay in foreground) because runit's own reap loop
+# expects to own the child directly, matching daemontools/runit convention
+# (services are supervised in the foreground, not self-daemonizing) even
+# though our minimal runit doesn't actually restart a crashed service yet.
+cat > "$RFS/etc/service/sshd/run" <<'EOF'
+#!/usr/bin/sh
+if [ -f /etc/ssh/sshd.disable ]; then
+    exit 0
+fi
+if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
+    ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -N "" -q
+    ssh-keygen -t ecdsa -f /etc/ssh/ssh_host_ecdsa_key -N "" -q
+    ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N "" -q
+fi
+exec /usr/bin/sshd -D
+EOF
+chmod +x "$RFS/etc/service/sshd/run"
+
 cat > "$RFS/etc/rc" <<'EOF'
 #!/usr/bin/sh
 export PATH=/usr/bin
@@ -187,15 +230,12 @@ mount -t devpts devpts /dev/pts 2>/dev/null
 
 hostname pscal-ish 2>/dev/null
 
-# Touch /etc/ssh/sshd.disable to skip starting sshd on boot.
-if [ ! -f /etc/ssh/sshd.disable ]; then
-    if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
-        ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -N "" -q
-        ssh-keygen -t ecdsa -f /etc/ssh/ssh_host_ecdsa_key -N "" -q
-        ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N "" -q
-    fi
-    /usr/bin/sshd
-fi
+# runit's own reap loop blocks forever (by design, matching daemontools),
+# so it must be backgrounded here. It's forked as its own process before
+# rc execs into exsh below, so when that exec happens runit is simply
+# reparented to init -- init's own waitpid(-1) reap loop already handles
+# orphans like this correctly.
+runit &
 
 export PS1='\u@\h:\w\$ '
 exec /usr/bin/exsh
