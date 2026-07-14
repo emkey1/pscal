@@ -37,26 +37,49 @@ for repo in $FRONTENDS; do
 done
 
 echo "=== building smallclue (native aarch64 glibc via setup_posix_env.sh) ==="
-git clone --branch main --depth 1 https://github.com/emkey1/smallclue.git /work/smallclue \
+# Pinned to a known-good commit rather than floating `main` -- main is
+# actively developed concurrently (by the user, in parallel sessions) and
+# has broken in between builds before (e.g. commit 12a084d "Add chroot
+# applet" landed a table entry with no linked implementation). Bump this
+# deliberately, not implicitly.
+SMALLCLUE_PIN=d1c6666
+git clone https://github.com/emkey1/smallclue.git /work/smallclue \
   >/tmp/clone-smallclue.log 2>&1 || (tail -80 /tmp/clone-smallclue.log; exit 1)
+( cd /work/smallclue && git checkout -q "$SMALLCLUE_PIN" ) \
+  || { echo "FATAL: could not check out smallclue pin $SMALLCLUE_PIN"; exit 1; }
 ( cd /work/smallclue && AUTO_INSTALL_DEPS=1 bash setup_posix_env.sh >/tmp/setup-posix.log 2>&1 \
     || (echo "SETUP_POSIX_ENV FAIL"; tail -200 /tmp/setup-posix.log; exit 1) )
 cp /work/smallclue/smallclue "$OUT_DIR/bin/smallclue"
 
-for f in $FRONTENDS smallclue; do
+# setup_posix_env.sh's OpenSSH build step also runs `make sshd` (real, full
+# server-side OpenSSH, not a stub) but never installs or applet-wires the
+# result -- it's just left sitting in the OpenSSH build tree. Grab it.
+if [ ! -f /work/smallclue/third-party/openssh/sshd ]; then
+  echo "FATAL: sshd was not built by setup_posix_env.sh"; exit 1
+fi
+cp /work/smallclue/third-party/openssh/sshd "$OUT_DIR/bin/sshd"
+
+for f in $FRONTENDS smallclue sshd; do
   file "$OUT_DIR/bin/$f" | grep -q "statically linked" || { echo "FATAL: $f not statically linked"; file "$OUT_DIR/bin/$f"; exit 1; }
   file "$OUT_DIR/bin/$f" | grep -qi "aarch64" || { echo "FATAL: $f not aarch64"; file "$OUT_DIR/bin/$f"; exit 1; }
 done
-echo "All 6 binaries built, statically linked, aarch64 glibc."
+echo "All 7 binaries built, statically linked, aarch64 glibc."
 
 echo "== Step 2/3: assemble pure PSCAL/SmallCLUE rootfs (merged-usr, no Alpine, no login wrapper) =="
 RFS="$OUT_DIR/rootfs"
 rm -rf "$RFS"
 mkdir -p "$RFS/usr/bin" "$RFS/usr/local/pscal/bin" "$RFS/usr/local/pscal/pascal/lib" \
-         "$RFS/usr/local/pscal/clike/lib" "$RFS/usr/local/lib/rea" "$RFS/etc" \
-         "$RFS/tmp" "$RFS/var" "$RFS/home/username" "$RFS/dev/shm" "$RFS/dev/pts" \
-         "$RFS/proc" "$RFS/sys" "$RFS/root"
+         "$RFS/usr/local/pscal/clike/lib" "$RFS/usr/local/lib/rea" "$RFS/etc/ssh" \
+         "$RFS/tmp" "$RFS/var/empty" "$RFS/run" "$RFS/home/username" "$RFS/dev/shm" "$RFS/dev/pts" \
+         "$RFS/proc" "$RFS/sys" "$RFS/root/.ssh"
 chmod 1777 "$RFS/tmp"
+chmod 700 "$RFS/root/.ssh"
+# sshd's privsep chroot target: must be root-owned, not group/world-writable
+# (sshd refuses to start otherwise -- "must be owned by root and not group
+# or world-writable"). Root-owned is automatic since this build runs as
+# root inside the container; chmod defensively regardless of base-image
+# umask defaults.
+chmod 0711 "$RFS/var/empty"
 ln -s usr/bin "$RFS/bin"
 ln -s usr/bin "$RFS/sbin"
 ln -s bin "$RFS/usr/sbin"
@@ -100,6 +123,11 @@ for f in $FRONTENDS; do
   ln -sf /usr/local/pscal/bin/$f "$RFS/usr/bin/$f"
 done
 
+# sshd: real binary, not a smallclue applet symlink (it's built by OpenSSH's
+# own Makefile, not smallclue's multicall dispatch).
+cp "$OUT_DIR/bin/sshd" "$RFS/usr/bin/sshd"
+chmod +x "$RFS/usr/bin/sshd"
+
 cp /pbuild-lib/pascal/*.pl "$RFS/usr/local/pscal/pascal/lib/" 2>/dev/null || true
 cp /pbuild-lib/clike/*.cl "$RFS/usr/local/pscal/clike/lib/" 2>/dev/null || true
 find /pbuild-lib/rea -maxdepth 1 -type f ! -iname "README.md" -exec cp {} "$RFS/usr/local/lib/rea/" \; 2>/dev/null || true
@@ -107,20 +135,47 @@ find /pbuild-lib/rea -maxdepth 1 -type f ! -iname "README.md" -exec cp {} "$RFS/
 cat > "$RFS/etc/passwd" <<'EOF'
 root:x:0:0:root:/root:/usr/bin/exsh
 username:x:1000:1000:User Name,,,:/home/username:/usr/bin/exsh
+sshd:x:100:100:sshd privilege separation:/var/empty:/usr/bin/false
 EOF
 cat > "$RFS/etc/group" <<'EOF'
 root:x:0:
 username:x:1000:
+sshd:x:100:
 EOF
 cat > "$RFS/etc/hosts" <<'EOF'
 127.0.0.1   localhost
 ::1         localhost ip6-localhost ip6-loopback
 EOF
+cat > "$RFS/etc/hostname" <<'EOF'
+pscal-ish
+EOF
+
 cat > "$RFS/etc/profile" <<'EOF'
 export PATH=/usr/bin
 export PSCAL_INSTALL_ROOT=/usr/local/pscal
+export PS1='\u@\h:\w\$ '
 EOF
 chmod 644 "$RFS/etc/profile"
+
+# sshd_config: key-only auth by default. There is no /etc/shadow in this
+# rootfs at all, so password auth has nothing real to check against anyway
+# -- PermitRootLogin prohibit-password + PasswordAuthentication no means
+# sshd starts on boot but nobody gets in until the user drops a public key
+# into /root/.ssh/authorized_keys themselves (never an accidentally-open
+# passwordless root login). No UsePAM directive at all -- this static
+# OpenSSH build has no PAM support compiled in, so the option is flatly
+# UNRECOGNIZED (not just a no-op) and sshd refuses to start with it present.
+cat > "$RFS/etc/ssh/sshd_config" <<'EOF'
+Port 22
+PermitRootLogin prohibit-password
+PasswordAuthentication no
+PermitEmptyPasswords no
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+AuthorizedKeysFile /root/.ssh/authorized_keys
+Subsystem sftp internal-sftp
+EOF
 
 cat > "$RFS/etc/rc" <<'EOF'
 #!/usr/bin/sh
@@ -129,6 +184,20 @@ export PSCAL_INSTALL_ROOT=/usr/local/pscal
 mount -t proc proc /proc 2>/dev/null
 mount -t sysfs sys /sys 2>/dev/null
 mount -t devpts devpts /dev/pts 2>/dev/null
+
+hostname pscal-ish 2>/dev/null
+
+# Touch /etc/ssh/sshd.disable to skip starting sshd on boot.
+if [ ! -f /etc/ssh/sshd.disable ]; then
+    if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
+        ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -N "" -q
+        ssh-keygen -t ecdsa -f /etc/ssh/ssh_host_ecdsa_key -N "" -q
+        ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N "" -q
+    fi
+    /usr/bin/sshd
+fi
+
+export PS1='\u@\h:\w\$ '
 exec /usr/bin/exsh
 EOF
 chmod +x "$RFS/etc/rc"
