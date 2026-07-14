@@ -7997,7 +7997,7 @@ comparison_error_label:
                         }
                     }
                     else if (target_lvalue_ptr->type == TYPE_STRING && target_lvalue_ptr->max_length > 0) {
-                        if (value_to_set.type == TYPE_STRING && value_to_set.s_val) {
+                        if (isPascalStringType(value_to_set.type) && value_to_set.s_val) {
                             strncpy(target_lvalue_ptr->s_val, value_to_set.s_val, target_lvalue_ptr->max_length);
                             target_lvalue_ptr->s_val[target_lvalue_ptr->max_length] = '\0'; // Ensure null termination
                         } else if (value_to_set.type == TYPE_CHAR) {
