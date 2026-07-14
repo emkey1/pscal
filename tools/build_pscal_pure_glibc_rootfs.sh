@@ -42,7 +42,7 @@ echo "=== building smallclue (native aarch64 glibc via setup_posix_env.sh) ==="
 # has broken in between builds before (e.g. commit 12a084d "Add chroot
 # applet" landed a table entry with no linked implementation). Bump this
 # deliberately, not implicitly.
-SMALLCLUE_PIN=d1c6666
+SMALLCLUE_PIN=5fb94fa
 git clone https://github.com/emkey1/smallclue.git /work/smallclue \
   >/tmp/clone-smallclue.log 2>&1 || (tail -80 /tmp/clone-smallclue.log; exit 1)
 ( cd /work/smallclue && git checkout -q "$SMALLCLUE_PIN" ) \
