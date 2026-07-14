@@ -5836,17 +5836,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         \
         /* String/char concatenation for ADD */ \
         if (current_instruction_code == ADD) { \
-            /* Optimization: Fast path for common integer arithmetic */ \
-            if (a_val_popped.type == TYPE_INT32 && b_val_popped.type == TYPE_INT32) { \
-                 long long iresult; \
-                 if (__builtin_add_overflow(a_val_popped.i_val, b_val_popped.i_val, &iresult)) { \
-                     runtimeError(vm, "Runtime Error: Integer overflow."); \
-                     freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                     return INTERPRET_RUNTIME_ERROR; \
-                 } \
-                 result_val = makeInt(iresult); \
-                 op_is_handled = true; \
-            } else { \
                 /* Optimization: Resolve pointers without deep copying for string/char operands */ \
                 Value* final_a = &a_val_popped; \
                 while (final_a->type == TYPE_POINTER && final_a->ptr_val) { \
@@ -5934,7 +5923,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         b_val_popped = tmp; \
                     } \
                 } \
-            } \
         } \
         \
         /* Char +/- intlike handled as numeric ordinal operations */ \
@@ -6342,9 +6330,42 @@ dispatch_switch:
                 push(vm, makePointer(&frame->slots[slot], NULL));
                 break;
             }
-            case ADD:      BINARY_OP("+", instruction_val); break;
-            case SUBTRACT: BINARY_OP("-", instruction_val); break;
-            case MULTIPLY: BINARY_OP("*", instruction_val); break;
+            case ADD:
+                if (vm->stackTop[-1].type == TYPE_INT32 && vm->stackTop[-2].type == TYPE_INT32) {
+                    int32_t a = (int32_t)vm->stackTop[-2].i_val;
+                    int32_t b = (int32_t)vm->stackTop[-1].i_val;
+                    int32_t iresult;
+                    if (!__builtin_add_overflow(a, b, &iresult)) {
+                        vm->stackTop--;
+                        vm->stackTop[-1].i_val = iresult;
+                        break;
+                    }
+                }
+                BINARY_OP("+", instruction_val); break;
+            case SUBTRACT:
+                if (vm->stackTop[-1].type == TYPE_INT32 && vm->stackTop[-2].type == TYPE_INT32) {
+                    int32_t a = (int32_t)vm->stackTop[-2].i_val;
+                    int32_t b = (int32_t)vm->stackTop[-1].i_val;
+                    int32_t iresult;
+                    if (!__builtin_sub_overflow(a, b, &iresult)) {
+                        vm->stackTop--;
+                        vm->stackTop[-1].i_val = iresult;
+                        break;
+                    }
+                }
+                BINARY_OP("-", instruction_val); break;
+            case MULTIPLY:
+                if (vm->stackTop[-1].type == TYPE_INT32 && vm->stackTop[-2].type == TYPE_INT32) {
+                    int32_t a = (int32_t)vm->stackTop[-2].i_val;
+                    int32_t b = (int32_t)vm->stackTop[-1].i_val;
+                    int32_t iresult;
+                    if (!__builtin_mul_overflow(a, b, &iresult)) {
+                        vm->stackTop--;
+                        vm->stackTop[-1].i_val = iresult;
+                        break;
+                    }
+                }
+                BINARY_OP("*", instruction_val); break;
             case DIVIDE:   BINARY_OP("/", instruction_val); break;
 
             case NEGATE: {
@@ -6456,22 +6477,28 @@ dispatch_switch:
                 break;
             }
             case INT_DIV: {
-                Value b_val = pop(vm);
-                Value a_val = pop(vm);
-                if (a_val.type == TYPE_INT32 && b_val.type == TYPE_INT32) {
-                    int32_t ia = (int32_t)a_val.i_val;
-                    int32_t ib = (int32_t)b_val.i_val;
+                if (vm->stackTop[-1].type == TYPE_INT32 && vm->stackTop[-2].type == TYPE_INT32) {
+                    int32_t ia = (int32_t)vm->stackTop[-2].i_val;
+                    int32_t ib = (int32_t)vm->stackTop[-1].i_val;
                     if (ib == 0) {
                         runtimeError(vm, "Runtime Error: Integer division by zero.");
                         return INTERPRET_RUNTIME_ERROR;
                     }
                     if (ia == INT32_MIN && ib == -1) {
                         // Prevent x86 hardware trap and preserve 64-bit promotion semantics
-                        push(vm, makeInt(2147483648LL));
+                        vm->stackTop--;
+                        vm->stackTop[-1].type = TYPE_INT64;
+                        vm->stackTop[-1].i_val = 2147483648LL;
+                        break;
                     } else {
-                        push(vm, makeInt((long long)(ia / ib)));
+                        vm->stackTop--;
+                        vm->stackTop[-1].i_val = ia / ib;
+                        break;
                     }
-                } else if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
+                }
+                Value b_val = pop(vm);
+                Value a_val = pop(vm);
+                if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
                     long long ia = AS_INTEGER(a_val);
                     long long ib = AS_INTEGER(b_val);
                     if (ib == 0) {
@@ -6496,22 +6523,27 @@ dispatch_switch:
                 break;
             }
             case MOD: {
-                Value b_val = pop(vm);
-                Value a_val = pop(vm);
-                if (a_val.type == TYPE_INT32 && b_val.type == TYPE_INT32) {
-                    int32_t ia = (int32_t)a_val.i_val;
-                    int32_t ib = (int32_t)b_val.i_val;
+                if (vm->stackTop[-1].type == TYPE_INT32 && vm->stackTop[-2].type == TYPE_INT32) {
+                    int32_t ia = (int32_t)vm->stackTop[-2].i_val;
+                    int32_t ib = (int32_t)vm->stackTop[-1].i_val;
                     if (ib == 0) {
                         runtimeError(vm, "Runtime Error: Modulo by zero.");
                         return INTERPRET_RUNTIME_ERROR;
                     }
                     if (ia == INT32_MIN && ib == -1) {
                         // For mod, division by -1 is always exactly representable, modulo is 0
-                        push(vm, makeInt(0));
+                        vm->stackTop--;
+                        vm->stackTop[-1].i_val = 0;
+                        break;
                     } else {
-                        push(vm, makeInt((long long)(ia % ib)));
+                        vm->stackTop--;
+                        vm->stackTop[-1].i_val = ia % ib;
+                        break;
                     }
-                } else if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
+                }
+                Value b_val = pop(vm);
+                Value a_val = pop(vm);
+                if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
                     long long ia = AS_INTEGER(a_val);
                     long long ib = AS_INTEGER(b_val);
                     if (ib == 0) {
@@ -7965,7 +7997,7 @@ comparison_error_label:
                         }
                     }
                     else if (target_lvalue_ptr->type == TYPE_STRING && target_lvalue_ptr->max_length > 0) {
-                        if (value_to_set.type == TYPE_STRING && value_to_set.s_val) {
+                        if (isPascalStringType(value_to_set.type) && value_to_set.s_val) {
                             strncpy(target_lvalue_ptr->s_val, value_to_set.s_val, target_lvalue_ptr->max_length);
                             target_lvalue_ptr->s_val[target_lvalue_ptr->max_length] = '\0'; // Ensure null termination
                         } else if (value_to_set.type == TYPE_CHAR) {
