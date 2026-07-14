@@ -6,13 +6,33 @@
 # and the earlier i386 iSH port both use, just with a target glibc actually knows.
 set -euo pipefail
 OUT_DIR="${1:-/out}"
-mkdir -p "$OUT_DIR/bin" "$OUT_DIR/rootfs" "$OUT_DIR/logs"
+# CRITICAL: all build/assembly work happens under a CONTAINER-LOCAL path,
+# never under $OUT_DIR directly. $OUT_DIR is a Docker bind mount back to
+# the macOS host, and Docker Desktop's bind-mount layer does NOT preserve
+# per-container UID/GID -- every file written there, no matter which uid
+# inside the container wrote it, shows up host-side (and to any process
+# that later reads it back through the same mount, including our own
+# `tar` step if we're not careful) owned by the HOST's logged-in user, not
+# root. That silently broke every rootfs built by an earlier version of
+# this script: `/var/empty` (and everything else) shipped owned by uid
+# 501/gid 20 (the macOS dev user) instead of uid 0, which is invisible
+# until something does a real ownership check (sshd's privsep chroot
+# check: "must be owned by root"; getpwuid(stored_uid) in `ls` resolving
+# to "?" instead of a name). Fix: assemble AND package the whole rootfs
+# under $LOCAL_OUT (pure container-local storage, no bind mount involved,
+# so root really is uid 0 all the way through `tar`), and only copy the
+# single FINISHED, already-correctly-owned .tar.xz across the bind mount
+# at the very end -- a compressed file's own host-side ownership doesn't
+# matter, only the per-entry uid/gid bytes already baked into its tar
+# headers do.
+LOCAL_OUT=/build-out
+mkdir -p "$LOCAL_OUT/bin" "$LOCAL_OUT/rootfs" "$OUT_DIR/logs"
 
 echo "== Step 1/3: build 5 PSCAL frontends + SmallCLUE natively (aarch64 glibc, static) =="
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >/tmp/apt.log 2>&1
 apt-get install -y --no-install-recommends \
-    build-essential cmake git ca-certificates pkg-config curl wget python3 patch openssh-client \
+    build-essential cmake git ca-certificates pkg-config curl wget python3 patch openssh-client xz-utils \
     zlib1g-dev libssl-dev libncurses-dev autoconf automake libtool \
     >>/tmp/apt.log 2>&1 || (tail -100 /tmp/apt.log; exit 1)
 echo APT_OK
@@ -32,8 +52,8 @@ for repo in $FRONTENDS; do
       >/tmp/cmake-$repo.log 2>&1 || (echo "CMAKE FAIL $repo"; tail -100 /tmp/cmake-$repo.log; exit 1) )
   ( cd "/work/$repo/build" && cmake --build . -j"$(nproc)" >/tmp/build-$repo.log 2>&1 \
       || (echo "BUILD FAIL $repo"; tail -150 /tmp/build-$repo.log; exit 1) )
-  find "/work/$repo/build" -maxdepth 1 -type f -executable -name "$repo" -exec cp {} "$OUT_DIR/bin/$repo" \;
-  [ -f "$OUT_DIR/bin/$repo" ] || { echo "MISSING BINARY $repo"; exit 1; }
+  find "/work/$repo/build" -maxdepth 1 -type f -executable -name "$repo" -exec cp {} "$LOCAL_OUT/bin/$repo" \;
+  [ -f "$LOCAL_OUT/bin/$repo" ] || { echo "MISSING BINARY $repo"; exit 1; }
 done
 
 echo "=== building smallclue (native aarch64 glibc via setup_posix_env.sh) ==="
@@ -49,7 +69,7 @@ git clone https://github.com/emkey1/smallclue.git /work/smallclue \
   || { echo "FATAL: could not check out smallclue pin $SMALLCLUE_PIN"; exit 1; }
 ( cd /work/smallclue && AUTO_INSTALL_DEPS=1 bash setup_posix_env.sh >/tmp/setup-posix.log 2>&1 \
     || (echo "SETUP_POSIX_ENV FAIL"; tail -200 /tmp/setup-posix.log; exit 1) )
-cp /work/smallclue/smallclue "$OUT_DIR/bin/smallclue"
+cp /work/smallclue/smallclue "$LOCAL_OUT/bin/smallclue"
 
 # setup_posix_env.sh's OpenSSH build step also runs `make sshd` (real, full
 # server-side OpenSSH, not a stub) but never installs or applet-wires the
@@ -57,16 +77,16 @@ cp /work/smallclue/smallclue "$OUT_DIR/bin/smallclue"
 if [ ! -f /work/smallclue/third-party/openssh/sshd ]; then
   echo "FATAL: sshd was not built by setup_posix_env.sh"; exit 1
 fi
-cp /work/smallclue/third-party/openssh/sshd "$OUT_DIR/bin/sshd"
+cp /work/smallclue/third-party/openssh/sshd "$LOCAL_OUT/bin/sshd"
 
 for f in $FRONTENDS smallclue sshd; do
-  file "$OUT_DIR/bin/$f" | grep -q "statically linked" || { echo "FATAL: $f not statically linked"; file "$OUT_DIR/bin/$f"; exit 1; }
-  file "$OUT_DIR/bin/$f" | grep -qi "aarch64" || { echo "FATAL: $f not aarch64"; file "$OUT_DIR/bin/$f"; exit 1; }
+  file "$LOCAL_OUT/bin/$f" | grep -q "statically linked" || { echo "FATAL: $f not statically linked"; file "$LOCAL_OUT/bin/$f"; exit 1; }
+  file "$LOCAL_OUT/bin/$f" | grep -qi "aarch64" || { echo "FATAL: $f not aarch64"; file "$LOCAL_OUT/bin/$f"; exit 1; }
 done
 echo "All 7 binaries built, statically linked, aarch64 glibc."
 
 echo "== Step 2/3: assemble pure PSCAL/SmallCLUE rootfs (merged-usr, no Alpine, no login wrapper) =="
-RFS="$OUT_DIR/rootfs"
+RFS="$LOCAL_OUT/rootfs"
 rm -rf "$RFS"
 mkdir -p "$RFS/usr/bin" "$RFS/usr/local/pscal/bin" "$RFS/usr/local/pscal/pascal/lib" \
          "$RFS/usr/local/pscal/clike/lib" "$RFS/usr/local/lib/rea" "$RFS/etc/ssh" \
@@ -98,7 +118,7 @@ else
   echo "Warning: mknod not permitted, skipping (iSH populates /dev at runtime)."
 fi
 
-cp "$OUT_DIR/bin/smallclue" "$RFS/usr/bin/smallclue"
+cp "$LOCAL_OUT/bin/smallclue" "$RFS/usr/bin/smallclue"
 chmod +x "$RFS/usr/bin/smallclue"
 APPLETS=$(awk '
     /static const SmallclueApplet kSmallclueApplets\[\] = \{/ { in_table = 1; next }
@@ -119,14 +139,14 @@ done
 [ -e "$RFS/usr/bin/init" ] || { echo "Error: no init applet"; exit 1; }
 
 for f in $FRONTENDS; do
-  cp "$OUT_DIR/bin/$f" "$RFS/usr/local/pscal/bin/$f"
+  cp "$LOCAL_OUT/bin/$f" "$RFS/usr/local/pscal/bin/$f"
   chmod +x "$RFS/usr/local/pscal/bin/$f"
   ln -sf /usr/local/pscal/bin/$f "$RFS/usr/bin/$f"
 done
 
 # sshd: real binary, not a smallclue applet symlink (it's built by OpenSSH's
 # own Makefile, not smallclue's multicall dispatch).
-cp "$OUT_DIR/bin/sshd" "$RFS/usr/bin/sshd"
+cp "$LOCAL_OUT/bin/sshd" "$RFS/usr/bin/sshd"
 chmod +x "$RFS/usr/bin/sshd"
 
 cp /pbuild-lib/pascal/*.pl "$RFS/usr/local/pscal/pascal/lib/" 2>/dev/null || true
@@ -242,7 +262,15 @@ exec /usr/bin/exsh
 EOF
 chmod +x "$RFS/etc/rc"
 
-echo "== Step 3/3: package =="
-( cd "$RFS" && tar -czf "$OUT_DIR/pscal-pure-aarch64-rootfs.tar.gz" . )
-echo "Wrote $OUT_DIR/pscal-pure-aarch64-rootfs.tar.gz"
-du -sh "$OUT_DIR/pscal-pure-aarch64-rootfs.tar.gz"
+echo "== Step 3/3: package as .tar.xz, container-local, then copy the finished archive out =="
+# .tar.xz (not .tar.gz + a separate host-side xz repack) specifically so
+# there is NO intermediate extract/recompress step on the macOS host --
+# that would silently reintroduce the exact same host-user-ownership bug
+# this whole restructure exists to avoid (non-root extraction on macOS
+# can't preserve root ownership either, same underlying limitation).
+( cd "$RFS" && XZ_OPT=-9 tar -cJf "$LOCAL_OUT/pscal-pure-aarch64-rootfs.tar.xz" . )
+cp "$LOCAL_OUT/pscal-pure-aarch64-rootfs.tar.xz" "$OUT_DIR/pscal-pure-aarch64-rootfs.tar.xz"
+echo "Wrote $OUT_DIR/pscal-pure-aarch64-rootfs.tar.xz"
+du -sh "$OUT_DIR/pscal-pure-aarch64-rootfs.tar.xz"
+echo "--- ownership sanity check (must show uid=0 gid=0, not the host user) ---"
+tar -tvf --numeric-owner "$LOCAL_OUT/pscal-pure-aarch64-rootfs.tar.xz" 2>/dev/null | grep "var/empty" || true
