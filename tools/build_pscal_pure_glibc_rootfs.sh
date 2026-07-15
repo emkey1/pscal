@@ -257,8 +257,22 @@ hostname pscal-ish 2>/dev/null
 # orphans like this correctly.
 runit &
 
+# NOT `exec /usr/bin/exsh` -- on real device hardware (not reproduced via
+# ish-cli on macOS, which has none of the same memory pressure) the VERY
+# FIRST exsh reached via an in-place exec (replacing this "sh" process
+# image directly, same pid, no new fork) has its interactive prompt
+# formatting fail wholesale (shellFormatPrompt falls back to the raw,
+# unexpanded PS1 string) -- 100% reproducible, every cold boot, but ONLY
+# for this exec-in-place path. Manually re-running `exsh` as an ordinary
+# command from inside that broken shell (a real fork+exec, not an
+# in-place exec) always works correctly. Plain (non-exec) invocation here
+# reproduces the working fork+exec path from the very first launch,
+# avoiding whatever's specific to cold-boot in-place exec (memory
+# pressure from init/mounts/runit/sshd/JIT-warmup all happening
+# concurrently is the leading theory, unconfirmed).
 export PS1='\u@\h:\w\$ '
-exec /usr/bin/exsh
+/usr/bin/exsh
+exit $?
 EOF
 chmod +x "$RFS/etc/rc"
 
