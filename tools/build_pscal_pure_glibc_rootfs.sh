@@ -79,7 +79,23 @@ if [ ! -f /work/smallclue/third-party/openssh/sshd ]; then
 fi
 cp /work/smallclue/third-party/openssh/sshd "$LOCAL_OUT/bin/sshd"
 
-for f in $FRONTENDS smallclue sshd; do
+# Modern OpenSSH (post-9.8ish) splits the per-connection handler out of
+# sshd into a separate re-exec helper binary, sshd-session, at a path
+# hardcoded into sshd itself at compile time via _PATH_SSHD_SESSION
+# (-D_PATH_SSHD_SESSION=\"/usr/local/libexec/sshd-session\" in
+# setup_posix_env.sh's own OPENSSH_CPPFLAGS -- not something sshd_config
+# can override). Without it, sshd's listener starts fine (matching what
+# was tested so far) but every real connection fails immediately with
+# "/usr/local/libexec/sshd-session does not exist or is not executable".
+( cd /work/smallclue/third-party/openssh && make -j4 sshd-session \
+    >/tmp/build-sshd-session.log 2>&1 \
+    || (echo "BUILD FAIL sshd-session"; tail -100 /tmp/build-sshd-session.log; exit 1) )
+if [ ! -f /work/smallclue/third-party/openssh/sshd-session ]; then
+  echo "FATAL: sshd-session was not built"; exit 1
+fi
+cp /work/smallclue/third-party/openssh/sshd-session "$LOCAL_OUT/bin/sshd-session"
+
+for f in $FRONTENDS smallclue sshd sshd-session; do
   file "$LOCAL_OUT/bin/$f" | grep -q "statically linked" || { echo "FATAL: $f not statically linked"; file "$LOCAL_OUT/bin/$f"; exit 1; }
   file "$LOCAL_OUT/bin/$f" | grep -qi "aarch64" || { echo "FATAL: $f not aarch64"; file "$LOCAL_OUT/bin/$f"; exit 1; }
 done
@@ -148,6 +164,13 @@ done
 # own Makefile, not smallclue's multicall dispatch).
 cp "$LOCAL_OUT/bin/sshd" "$RFS/usr/bin/sshd"
 chmod +x "$RFS/usr/bin/sshd"
+
+# sshd-session MUST live at exactly this path -- it's compiled into sshd
+# itself as a fixed string (_PATH_SSHD_SESSION), not configurable via
+# sshd_config.
+mkdir -p "$RFS/usr/local/libexec"
+cp "$LOCAL_OUT/bin/sshd-session" "$RFS/usr/local/libexec/sshd-session"
+chmod +x "$RFS/usr/local/libexec/sshd-session"
 
 cp /pbuild-lib/pascal/*.pl "$RFS/usr/local/pscal/pascal/lib/" 2>/dev/null || true
 cp /pbuild-lib/clike/*.cl "$RFS/usr/local/pscal/clike/lib/" 2>/dev/null || true
@@ -275,6 +298,73 @@ export PS1='\u@\h:\w\$ '
 exit $?
 EOF
 chmod +x "$RFS/etc/rc"
+
+# /usr/bin/login: the REAL canonical entry point, not /etc/rc. Discovered
+# the hard way -- ish-AOK's app has TWO independent shell-launch paths that
+# do NOT converge: AppDelegate.m's boot/console path tries
+# /usr/bin/login|/bin/login -f root FIRST (before ever falling through to
+# the /bin/init candidate our /etc/service+runit design relies on), and
+# TerminalViewController.m's separate interactive-session-shell path
+# (opened by the user's normal terminal view, NOT the boot/console view)
+# ALSO defaults to /bin/login -f root, but execs it with a near-empty
+# environment (just TERM) and, if login is missing, falls through its OWN
+# candidate list (/bin/sh -l, /usr/bin/sh -l, ...) which lands on
+# smallclue's native `sh` applet (NOT exsh) since that's the first
+# candidate that exists on this rootfs. smallclue's own `sh` has ZERO
+# bash-style PS1 escape expansion anywhere in its line-editing code
+# (verified: no \u/\h/\w handling in src/shell/sh_lineedit.c or
+# sh_main.c) -- it prints PS1 completely verbatim, which is EXACTLY why
+# the interactive terminal (not the console) showed the raw
+# `\u@\h:\w\$` text: the user was never running exsh there at all, they
+# were running smallclue's own sh with exsh's PS1 syntax it doesn't
+# understand. Shipping a real /bin/login makes BOTH app paths converge on
+# the exact same environment setup and the exact same exsh session,
+# instead of two different shells with two different (and differently
+# broken) prompt behaviors. /etc/rc + /bin/init are left in place as a
+# secondary path (still fully correct on their own) for any case where
+# login is somehow bypassed, but login is now the primary, always-tried-
+# first entry point for both boot and interactive sessions.
+cat > "$RFS/usr/bin/login" <<'EOF'
+#!/usr/bin/sh
+# `case`, not `[ "$1" = "-f" ]` -- smallclue's own `test`/`[` misparses a
+# leading-dash comparison operand ("-f") as an attempted unary test
+# operator, printing "test: syntax error" (verified directly: `[ "$1" =
+# "-f" ]` alone fails, `[ -n "$2" ]` alone is fine). `case` sidesteps the
+# ambiguity entirely and is the more idiomatic pattern for this anyway.
+case "$1" in
+    -f) TARGET_USER="${2:-root}" ;;
+    *) TARGET_USER="root" ;;
+esac
+export USER="$TARGET_USER"
+export LOGNAME="$TARGET_USER"
+export HOME="/root"
+export PATH=/usr/bin
+export PSCAL_INSTALL_ROOT=/usr/local/pscal
+export PS1='\u@\h:\w\$ '
+export TERM="${TERM:-xterm-256color}"
+
+# Mounts/hostname/runit only need to happen once per boot, not once per
+# interactive session the user opens -- guarded by a flag in /tmp, which
+# is fresh on every real boot.
+if [ ! -f /tmp/.pscal-boot-ran ]; then
+    mount -t proc proc /proc 2>/dev/null
+    mount -t sysfs sys /sys 2>/dev/null
+    mount -t devpts devpts /dev/pts 2>/dev/null
+    hostname pscal-ish 2>/dev/null
+    runit &
+    touch /tmp/.pscal-boot-ran
+fi
+
+cd "$HOME" 2>/dev/null || cd /root
+# Plain invocation, not `exec` -- see the matching note in /etc/rc for why
+# (100%-reproducible raw-prompt bug on real device hardware for an
+# in-place exec into exsh at cold boot, not reproduced via ish-cli/macOS
+# testing; unconfirmed root cause, leading theory is iSH-AOK's iOS
+# memory-headroom guard refusing an allocation at peak boot pressure).
+/usr/bin/exsh
+exit $?
+EOF
+chmod +x "$RFS/usr/bin/login"
 
 echo "== Step 3/3: package as .tar.xz, container-local, then copy the finished archive out =="
 # .tar.xz (not .tar.gz + a separate host-side xz repack) specifically so
