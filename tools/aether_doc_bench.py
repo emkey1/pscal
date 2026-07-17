@@ -79,6 +79,7 @@ class Destination:
     api_key: str | None = None
     api_key_env: str | None = None
     temperature: float = 0.2
+    seed: int | None = None
     max_output_tokens: int = 3000
     command_template: str | None = None
     after_each_command: str | None = None
@@ -407,6 +408,7 @@ def load_destinations(path: pathlib.Path) -> list[Destination]:
                 api_key=item.get("api_key"),
                 api_key_env=item.get("api_key_env"),
                 temperature=float(item.get("temperature", 0.2)),
+                seed=(int(item["seed"]) if item.get("seed") is not None else None),
                 max_output_tokens=int(item.get("max_output_tokens", 3000)),
                 command_template=item.get("command_template"),
                 after_each_command=item.get("after_each_command"),
@@ -1109,6 +1111,8 @@ def invoke_openai_responses(prompt: str, destination: Destination) -> dict[str, 
     }
     if destination.temperature >= 0:
         body["temperature"] = destination.temperature
+    if destination.seed is not None:
+        body["seed"] = destination.seed
 
     payload = http_json_request(
         f"{base_url}/responses",
@@ -1157,6 +1161,8 @@ def invoke_openai_chat_completions(prompt: str, destination: Destination) -> dic
     }
     if destination.temperature >= 0:
         body["temperature"] = destination.temperature
+    if destination.seed is not None:
+        body["seed"] = destination.seed
     if destination.extra_body:
         body.update(destination.extra_body)
     # OpenAI reasoning models (o-series, gpt-5) reject max_tokens; honor
@@ -1348,6 +1354,8 @@ def invoke_openai_completions(prompt: str, destination: Destination) -> dict[str
     }
     if destination.temperature >= 0:
         body["temperature"] = destination.temperature
+    if destination.seed is not None:
+        body["seed"] = destination.seed
 
     payload = http_json_request(
         f"{base_url}/completions",
