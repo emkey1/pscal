@@ -112,15 +112,20 @@ def is_sdl_example(path: Path) -> bool:
 
 def compile_example(binary: Path, script_path: Path, timeout_seconds: float) -> subprocess.CompletedProcess:
     cmd = [str(binary), "--no-cache", "--dump-bytecode-only", str(script_path)]
-    return subprocess.run(
+    res = subprocess.run(
         cmd,
         cwd=script_path.parent,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True,
+        text=False,
         timeout=timeout_seconds,
         check=False,
     )
+    if res.stdout is not None:
+        res.stdout = res.stdout.decode('utf-8', errors='replace')
+    if res.stderr is not None:
+        res.stderr = res.stderr.decode('utf-8', errors='replace')
+    return res
 
 
 def run_compile_sweep(
