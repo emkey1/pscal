@@ -1242,6 +1242,7 @@ set(SMALLCLUE_SOURCES
     src/smallclue/src/base64_app.c
     src/smallclue/src/checksum_app.c
     src/smallclue/src/chown_app.c
+    src/smallclue/src/chroot_app.c
     src/smallclue/src/cmp_app.c
     src/smallclue/src/comm_app.c
     src/smallclue/src/dd_app.c
