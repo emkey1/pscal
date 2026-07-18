@@ -1,3 +1,4 @@
+import UIKit
 import SwiftUI
 
 struct TerminalSettingsView: View {
@@ -154,6 +155,8 @@ struct TerminalSettingsView: View {
 
                     Button {
                         _ = tabManager.copyFirstTabColors(tabId: tabId)
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        UIAccessibility.post(notification: .announcement, argument: "Copied first tab colors")
                         withAnimation {
                             copiedColors = true
                         }
