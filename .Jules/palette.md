@@ -28,3 +28,6 @@
 ## 2025-03-20 - Redundant Visual Values and Slider Accessibility
 **Learning:** SwiftUI Sliders often rely on separate text views (e.g., in an HStack) to display their current value. Screen readers will read the slider and then redundantly read the visual text label as a separate element, causing confusion.
 **Action:** When implementing Sliders with visual value labels, always add `.accessibilityValue(...)` to the Slider itself, and add `.accessibilityHidden(true)` to the redundant text element so it is hidden from VoiceOver.
+## 2025-07-19 - Auditory and Haptic Feedback for Transient Actions in Settings/Diagnostics
+**Learning:** Utilities and diagnostic views often have actions like "Copy Report" that offer little visual feedback when clicked. While `withAnimation` helps soften transient state changes, users rely heavily on multi-sensory feedback to confirm successful completion of utility tasks without leaving their current flow.
+**Action:** Always combine haptic feedback (`UINotificationFeedbackGenerator().notificationOccurred(.success)`) and an explicit VoiceOver announcement (`UIAccessibility.post(notification: .announcement, argument: "...")`) with `withAnimation` visual toggles on utilities like "Copy" buttons to provide comprehensive confirmation.
