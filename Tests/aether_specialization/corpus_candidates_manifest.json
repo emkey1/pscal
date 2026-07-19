@@ -8258,6 +8258,160 @@
           "imported_2026-07-19"
         ]
       }
+    },
+    {
+      "source_path": "/tmp/aether_batch4_examples/01_caesar_cipher.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/01_caesar_cipher.aether",
+      "sha256": "ebe148119b6b018d0cf535f658911da059b9994a7a2d054668abb6e90c5ac235",
+      "stdout": "Original:  Hello World\nEncrypted: Khoor Zruog\nDecrypted: Hello World\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch4_examples/02_rock_paper_scissors.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/02_rock_paper_scissors.aether",
+      "sha256": "d795396361bfbf83c957400a30df4dfccf8a9f5abacd332820780010b16eacb3",
+      "stdout": "Round 1: You=rock CPU=scissors -> You win!\nRound 2: You=paper CPU=rock -> You win!\nRound 3: You=scissors CPU=paper -> You win!\nRound 4: You=rock CPU=scissors -> You win!\nRound 5: You=paper CPU=rock -> You win!\nRound 6: You=scissors CPU=paper -> You win!\nRound 7: You=rock CPU=scissors -> You win!\nRound 8: You=paper CPU=rock -> You win!\nRound 9: You=scissors CPU=paper -> You win!\nRound 10: You=rock CPU=scissors -> You win!\n\nFinal: 10W / 0L / 0D\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch4_examples/03_matrix_multiply.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/03_matrix_multiply.aether",
+      "sha256": "d2fcdebab608858a2f8dddaa58f4decd999720215db1b4a9c82bf0bc32bfed75",
+      "stdout": "A (2x3):\n  1.00 2.00 3.00 \n  4.00 5.00 6.00 \nB (3x2):\n  7.00 8.00 \n  9.00 10.00 \n  11.00 12.00 \nA x B (2x2):\n  58.00 64.00 \n  139.00 154.00 \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch4_examples/04_merge_sort.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/04_merge_sort.aether",
+      "sha256": "70f2cae8998febc9c876b74a0f0a9808061094f6523ad53e2d08eaa6f7f6473c",
+      "stdout": "Before: 38 27 43 3 9 82 10 \nAfter:  3 9 10 27 38 43 82 \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch4_examples/05_collatz_explorer.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/05_collatz_explorer.aether",
+      "sha256": "c97ca37672d75088bbc1a301871319c0af7b5b73ea5e9997169c97d3ace4b9db",
+      "stdout": "Collatz sequences for 1..100:\n  n=1 steps=0\n  n=2 steps=1\n  n=3 steps=7\n  n=4 steps=2\n  n=5 steps=5\n  n=6 steps=8\n  n=7 steps=16\n  n=8 steps=3\n  n=9 steps=19\n  n=10 steps=6\n\nLongest chain: n=97 with 118 steps\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch4_examples/07_binary_search.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07_binary_search.aether",
+      "sha256": "099ed1704ff379698435228c3b86835b3f48bc44143134b44b6c56ea72032c6c",
+      "stdout": "Array: 2 5 8 12 16 23 38 42 56 72 91 \nFound 23 at index 5\n50 not found\nFound 2 at index 0\nFound 91 at index 10\n1 not found\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch4_examples/08_tictactoe.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/08_tictactoe.aether",
+      "sha256": "bc8e6d749b2b055ccfa481d5329a7620c972da13742bd91ade49f53622f64bb9",
+      "stdout": "Tic-Tac-Toe: X goes first\n   |   |  \n-----------\n   |   |  \n-----------\n   |   |  \n X |   |  \n-----------\n   |   |  \n-----------\n   |   |  \n X | O |  \n-----------\n   |   |  \n-----------\n   |   |  \n X | O | X\n-----------\n   |   |  \n-----------\n   |   |  \n X | O | X\n-----------\n O |   |  \n-----------\n   |   |  \n X | O | X\n-----------\n O | X |  \n-----------\n   |   |  \n X | O | X\n-----------\n O | X | O\n-----------\n   |   |  \n X | O | X\n-----------\n O | X | O\n-----------\n X |   |  \nX wins!\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch4_examples/09_linked_list.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/09_linked_list.aether",
+      "sha256": "68eaec693104adb88e504109212bb3bac1e024facfa7bd780b70282d3bd10583",
+      "stdout": "List: [1, 5, 10, 20, 30]\nLength: 5\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch4_examples/10_monte_carlo_pi.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/10_monte_carlo_pi.aether",
+      "sha256": "37e0127a419666f79c881352a5cecc1f3139eaed0c3ff69768abf3936e2d0c63",
+      "stdout": "Monte Carlo Pi Estimation\nSamples: 100000\nHits inside circle: 78496\nEstimated pi: 3.139840\nActual pi:    3.141593\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch4_examples/11_rpn_evaluator.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/11_rpn_evaluator.aether",
+      "sha256": "097aaa5f09a7cb70f730c9826ba7b4e97a1999ba72c7efc54a15669f13f7959c",
+      "stdout": "Expression: 2 3 + 4 * => 20\nExpression: 5 1 2 + 4 * + 3 - => 14\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch4_examples/12_game_of_life.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/12_game_of_life.aether",
+      "sha256": "fdb3d53880974b62ea39c61659cc93c931e935ce311bdddd1fcc637509ea914c",
+      "stdout": "--- Generation 0 ---\n. . . . . . . . . . \n. . # . . . . . . . \n. . . # . . . . . . \n. # # # . . . . . . \n. . . . . . . . . . \n. . . . . . . . . . \n--- Generation 1 ---\n. . . . . . . . . . \n. . . . . . . . . . \n. # . # . . . . . . \n. . # # . . . . . . \n. . # . . . . . . . \n. . . . . . . . . . \n--- Generation 2 ---\n. . . . . . . . . . \n. . . . . . . . . . \n. . . # . . . . . . \n. # . # . . . . . . \n. . # # . . . . . . \n. . . . . . . . . . \n--- Generation 3 ---\n. . . . . . . . . . \n. . . . . . . . . . \n. . # . . . . . . . \n. . . # # . . . . . \n. . # # . . . . . . \n. . . . . . . . . . \n--- Generation 4 ---\n. . . . . . . . . . \n. . . . . . . . . . \n. . . # . . . . . . \n. . . . # . . . . . \n. . # # # . . . . . \n. . . . . . . . . . \n--- Final ---\n. . . . . . . . . . \n. . . . . . . . . . \n. . . . . . . . . . \n. . # . # . . . . . \n. . . # # . . . . . \n. . . # . . . . . . \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
     }
   ]
 }
