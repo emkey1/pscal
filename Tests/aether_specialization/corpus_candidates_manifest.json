@@ -10376,6 +10376,132 @@
           "imported_2026-07-19"
         ]
       }
+    },
+    {
+      "source_path": "/tmp/aether_batch8_examples/25_kv_store_persistence.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/25_kv_store_persistence.aether",
+      "sha256": "d88e5374fcee7dd8c9fc70a6a2267c003eb39713fe31d4514fe36e1a11d75def",
+      "stdout": "Before save: role=superuser\nAfter load: role=superuser\nAfter load: timeout=300\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch8_examples/26_recursive_descent_parser.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/26_recursive_descent_parser.aether",
+      "sha256": "43b35b75e4ff17d97005550d7f809e16643a108599aff2151dc2b2901fdb0cc9",
+      "stdout": "Result: 18\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch8_examples/28_perceptron.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/28_perceptron.aether",
+      "sha256": "7dbb73877520d84869ccd120b743b0c74d07617206a6dc3f1cf53adb26abc3cc",
+      "stdout": "AND gate predictions:\n0,0 -> 0\n0,1 -> 0\n1,0 -> 0\n1,1 -> 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch8_examples/29_n_queens.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/29_n_queens.aether",
+      "sha256": "b34be0f6a7df4068352ee149122d53a5bf04713665594abe8f8bce2e8bdd6c6d",
+      "stdout": "Q . . . . . . . \n. . . . . . Q . \n. . . . Q . . . \n. . . . . . . Q \n. Q . . . . . . \n. . . Q . . . . \n. . . . . Q . . \n. . Q . . . . . \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch8_examples/30_dfa_simulator.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/30_dfa_simulator.aether",
+      "sha256": "f0f78f398688044c0610aecbfee39aec6d8064b6aac0296ae3d285b2802c86b5",
+      "stdout": "Binary strings divisible by 3:\n0 -> true\n11 -> true\n110 -> true\n111 -> false\n1001 -> true\n10101 -> true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch8_examples/31_merge_sort_dc.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/31_merge_sort_dc.aether",
+      "sha256": "7b07256e67e1611066af3ab1f74d11f3b17feb56867678f6f641f7ced7a7c673",
+      "stdout": "Sorted: 3 9 10 27 38 43 82 \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch8_examples/32_matrix_multiply_2d.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/32_matrix_multiply_2d.aether",
+      "sha256": "230a2317694660e3081c02de72b994540c724473390b80080a66a2e411e7729e",
+      "stdout": "Matrix A * B =\n58.00  64.00  \n139.00  154.00  \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch8_examples/33_virtual_filesystem.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/33_virtual_filesystem.aether",
+      "sha256": "4410d8e1a56ebba4f5f34daf941c4de02967abf2b86d976ea096f0ecc4a30e26",
+      "stdout": "File system tree:\n//\n  home/\n    user/\n      readme.txt\n      projects/\n        main.ae\n  etc/\n    config.cfg\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch8_examples/35_text_adventure.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/35_text_adventure.aether",
+      "sha256": "4593fd18ac4987eb542483edd91a527fbb04bed530fe19ab85163ec76d387c17",
+      "stdout": "\n== Entrance Hall ==\nA grand hall with marble floors. Dust hangs in the air.\nExits: north down \n\n== Library ==\nShelves of ancient books stretch to the ceiling. A golden key rests on a table.\nExits: south \nYou picked up: golden key\nInventory:\n  golden key\n\n== Dungeon ==\nCold stone walls. A locked door leads further, but you need a key.\nExits: up north \n\n== Treasure Room ==\nPiles of gold and jewels surround you. You've won!\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
     }
   ]
 }
