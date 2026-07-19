@@ -23,10 +23,12 @@ log() { echo "[sync-aether $(date '+%H:%M:%S')] $*" | tee -a "$LOG" >&2; }
 # This script is launched backgrounded from a git hook right as the triggering
 # commit finishes, so a concurrent `git status`/`log`/etc. in the same
 # checkout (e.g. a human or agent immediately inspecting the result) can
-# transiently collide on .git's index/lock files. Retry a few times with a
-# short backoff before treating any of these steps as a real failure.
+# transiently collide on .git's index/lock files. Retry with exponential
+# backoff before treating any of these steps as a real failure -- observed
+# collisions have outlasted a flat 4x2s (~11s) window twice, so this ramps
+# 2/4/8/16/32/32s (max 7 attempts, ~110s worst case) instead.
 retry_git() {
-    local attempt=1 max=4 delay=2
+    local attempt=1 max=7 delay=2 max_delay=32
     while [ "$attempt" -le "$max" ]; do
         if "$@" >>"$LOG" 2>&1; then
             return 0
@@ -34,6 +36,8 @@ retry_git() {
         if [ "$attempt" -lt "$max" ]; then
             log "transient failure on '$*' (attempt $attempt/$max), retrying in ${delay}s"
             sleep "$delay"
+            delay=$((delay * 2))
+            [ "$delay" -gt "$max_delay" ] && delay="$max_delay"
         fi
         attempt=$((attempt + 1))
     done
