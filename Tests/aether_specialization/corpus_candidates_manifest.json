@@ -8412,6 +8412,106 @@
           "imported_2026-07-19"
         ]
       }
+    },
+    {
+      "source_path": "/tmp/aether_batch5_examples/01_line_counter.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/01_line_counter.aether",
+      "sha256": "cf0d5f927ade6945d457e76ce6716d55b7bc3d5e0894d85008f556ecc3347de0",
+      "stdout": "Lines: 3\nWords: 14\nChars: 70\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch5_examples/02_bank_account.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/02_bank_account.aether",
+      "sha256": "c91df4fc5c39956e3d3a02482b16600af62c0320d72dc8739922980e28abfb70",
+      "stdout": "Account 1 (Alice): 1000.00\nAccount 2 (Bob): 500.00\nAccount 1 (Alice): 900.00\nAccount 2 (Bob): 700.00\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch5_examples/03_date_calculator.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/03_date_calculator.aether",
+      "sha256": "8db47b42c523cfd4dede36adea411c1b8ddcebffcf3c990d862d5caf5940beff",
+      "stdout": "Date: 2024-3-15\nDay of year: 75\n100 days later: 2024-6-23\nIs 2024 leap? true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch5_examples/04_hash_map.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/04_hash_map.aether",
+      "sha256": "19341f3cd1b9ca49e5269732f0241d6c9a0ec15a9a59ce53dcc85ea5e2c221fa",
+      "stdout": "name: Alice\ncity: Wonderland\ncontains 'age'? true\ncontains 'email'? false\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch5_examples/05_binary_tree.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/05_binary_tree.aether",
+      "sha256": "07e48f7e4f5b4e7bfa0eb060d34417650213df10b8114918d9dfaac7f2c500bf",
+      "stdout": "Inorder:   20 30 40 50 60 70 80 \nPreorder:  50 30 20 40 70 60 80 \nPostorder: 20 40 30 60 80 70 50 \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch5_examples/09_http_client.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/09_http_client.aether",
+      "sha256": "49184ff8af1a537901b54f19399c7235b341046530b9baf7e026f0b3a6229d2a",
+      "stdout": "HTTP error: -6\n",
+      "metadata": {
+        "canonical": false,
+        "fixture_required": false,
+        "assumption_bearing": true,
+        "tags": [
+          "imported_2026-07-19",
+          "excluded_network_nondeterministic"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch5_examples/12_dns_lookup.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/12_dns_lookup.aether",
+      "sha256": "e0d80fc4ad0d39d2b4aa99d4b627f5e236de118c905ec707ebf61908cec8fcd3",
+      "stdout": "example.com -> 104.20.23.154\n",
+      "metadata": {
+        "canonical": false,
+        "fixture_required": false,
+        "assumption_bearing": true,
+        "tags": [
+          "imported_2026-07-19",
+          "excluded_network_nondeterministic"
+        ]
+      }
     }
   ]
 }
