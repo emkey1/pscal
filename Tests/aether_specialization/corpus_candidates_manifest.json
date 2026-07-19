@@ -8174,6 +8174,90 @@
           "imported_2026-07-19"
         ]
       }
+    },
+    {
+      "source_path": "/tmp/aether_batch3_examples/03_inventory_tracker.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/03_inventory_tracker.aether",
+      "sha256": "d492bed985bba01ca857cb7a8f68962e745916b05f0c2955aa34a8fc73cc9565",
+      "stdout": "Inventory:\nApple: qty=125 price=0.50 value=62.50\nBanana: qty=50 price=0.30 value=15.00\nOrange: qty=75 price=0.75 value=56.25\nTotal inventory value: $133.75\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch3_examples/05_temperature_converter.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/05_temperature_converter.aether",
+      "sha256": "35ba9b1da3ae5cfb96f93273e78efebb6e1a8ac7534213d31e90797fb35eafde",
+      "stdout": "25.00 C = 77.00 F\n25.00 C = 298.15 K\n98.60 F = 37.00 C\n98.60 F = 310.15 K\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch3_examples/06_prime_checker.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06_prime_checker.aether",
+      "sha256": "c9e36f7f486e0cacd6e4823ac123365476eed342a970e5f46927d1dfaea38615",
+      "stdout": "Prime number checks:\n1 is not prime\n2 is prime\n17 is prime\n18 is not prime\n29 is prime\n100 is not prime\n131 is prime\nPrimes up to 50:\n2 3 5 7 11 13 17 19 23 29 31 37 41 43 47 \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch3_examples/07_word_frequency.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07_word_frequency.aether",
+      "sha256": "354fdf64d502a40b94bad4540dfb2022f09c973d5311cbd55166bb983980ce46",
+      "stdout": "Word frequency analysis:\nTotal words: 13\nUnique words: 9\n\nWord counts:\nthe: 3\nquick: 2\nbrown: 1\nfox: 2\njumps: 1\nover: 1\nlazy: 1\ndog: 1\nwas: 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch3_examples/08_traffic_light.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/08_traffic_light.aether",
+      "sha256": "e0eb8962edf212d10ee26b61561e102abf15d8afbcb97c312d23bdeaa74e92e9",
+      "stdout": "Traffic Light Simulation\n========================\nCycle 1: STOP\nCycle 2: GO\nCycle 3: CAUTION\nCycle 4: STOP\nCycle 5: GO\nCycle 6: CAUTION\nSimulation complete\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch3_examples/09_student_grades.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/09_student_grades.aether",
+      "sha256": "b5fa23802d7cc27611ec57709038d387fa261bd3ae8bbfd340b22babe7b381c7",
+      "stdout": "Grade Report\n============\nAlice: avg=90.5 grade=A\nBob: avg=81.2 grade=B\nCarol: avg=95.2 grade=A\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
     }
   ]
 }
