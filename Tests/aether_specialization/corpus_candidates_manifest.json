@@ -9916,20 +9916,6 @@
       }
     },
     {
-      "source_path": "/tmp/aether_harvest/07-19a_gemini_2_5_flash_lit_02_This_program_demonstrates_pars.aether",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19a_gemini_2_5_flash_lit_02_This_program_demonstrates_pars.aether",
-      "sha256": "c2fb59f9173ff83d6033c13a0113e1ce3075c68990f222ae0d5c083e68a63817",
-      "stdout": "Product: Laptop\nPrice: 1200.50\nIn Stock: true\nQuantity: 0\n",
-      "metadata": {
-        "canonical": true,
-        "fixture_required": false,
-        "assumption_bearing": false,
-        "tags": [
-          "harvested_idea_miner_2026-07-19"
-        ]
-      }
-    },
-    {
       "source_path": "/tmp/aether_harvest/07-19a_gemini_2_5_flash_lit_03_This_program_showcases_the_use.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/07-19a_gemini_2_5_flash_lit_03_This_program_showcases_the_use.aether",
       "sha256": "e116be5bc2f2dc10e23f3721d8fc5f757bc03bb845e75f9c0a830ce18ad884af",
@@ -10598,6 +10584,566 @@
         "assumption_bearing": false,
         "tags": [
           "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5c13_claw3_ornith_1_0_35b_00_A_pure_contract_guarded_prime_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5c13_claw3_ornith_1_0_35b_00_A_pure_contract_guarded_prime_.aether_b5d0ce4f5221",
+      "sha256": "b5d0ce4f5221f9cbb2c6ff47b9c347605d8e4e72d956d3dce2b59cf57c875abf",
+      "stdout": "Primes up to 50: \n2 3 \nCount: 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5c13_claw3_ornith_1_0_35b_01_A_small_typed_inventory_system.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5c13_claw3_ornith_1_0_35b_01_A_small_typed_inventory_system.aether_1b1e361b8f82",
+      "sha256": "1b1e361b8f82f0e599ada6bd32cbd716242205ddfc3548858a68159c82fcf891",
+      "stdout": "Initial inventory:\n Widget A: qty=100 price=9.99 value=999.00\n Widget B: qty=3 price=24.50 value=73.50\n Gadget C: qty=50 price=49.95 value=2497.50\n\nTotal value: 3570.00\nLow stock items: 1\n\nSelling 5 of Widget A...\nWidget A quantity now: 95\nRestocking Widget B with 10...\nWidget B quantity now: 13\n\nFinal inventory:\n Widget A: qty=95 price=9.99 value=949.05\n Widget B: qty=13 price=24.50 value=318.50\n Gadget C: qty=50 price=49.95 value=2497.50\n\nFinal total value: 3765.05\nFinal low stock items: 0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5c13_claw3_ornith_1_0_35b_02_Parsing_a_TOON_JSON_payload_re.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5c13_claw3_ornith_1_0_35b_02_Parsing_a_TOON_JSON_payload_re.aether_74a69fa49188",
+      "sha256": "74a69fa49188741290c1b40786b4dce8ab290f0864b949450588423f9343362e",
+      "stdout": "  Alice (Engineering) -> Tech: $95000\n  Bob (Sales) -> Revenue: $72000\n  Charlie (Engineering) -> Tech: $88000\n  Diana (HR) -> Support: $65000\n  Eve (Sales) -> Revenue: $78000\n\nDepartment Summary:\n  Tech: 2 employees, total $183000 avg $91500.00\n  Revenue: 2 employees, total $150000 avg $75000.00\n  Support: 1 employees, total $65000 avg $65000.00\n\nOverall: 5 employees, total payroll $398000 avg $79600.00\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5c13_claw3_ornith_1_0_35b_04_A_simple_text_based_cipher_tha.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5c13_claw3_ornith_1_0_35b_04_A_simple_text_based_cipher_tha.aether_b188d0baa5f4",
+      "sha256": "b188d0baa5f4338945c6532322b5df5f5ea7099e7a6512f043ab1184f94ee95b",
+      "stdout": "Caesar Cipher Demonstration\n==========================\n\nOriginal:   Hello, World! 123\nShift:      7\nEncrypted:  Olssv, Dvysk! 123\nDecrypted:  Hello, World! 123\n\nRound-trip successful: decryption matches original!\n\nCharacter-by-character transformation:\n  H (72) -> O (79)\n  e (101) -> l (108)\n  l (108) -> s (115)\n  l (108) -> s (115)\n  o (111) -> v (118)\n  , (44) -> , (44)\n    (32) ->   (32)\n  W (87) -> D (68)\n  o (111) -> v (118)\n  r (114) -> y (121)\n  l (108) -> s (115)\n  d (100) -> k (107)\n  ! (33) -> ! (33)\n    (32) ->   (32)\n  1 (49) -> 1 (49)\n  2 (50) -> 2 (50)\n  3 (51) -> 3 (51)\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5gem_gemini_2_5_flash_00_This_program_calculates_the_fa.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5gem_gemini_2_5_flash_00_This_program_calculates_the_fa.aether_19e2fe84858b",
+      "sha256": "19e2fe84858b245fc9a06a281349cf51ef96afd98bf3ed819df9e3e2a1c1242b",
+      "stdout": "Factorial of 5 is 120\nFactorial of 0 is 1\nFactorial of 3 is 6\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5gem_gemini_2_5_flash_lit_01_This_program_defines_a_Counter.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5gem_gemini_2_5_flash_lit_01_This_program_defines_a_Counter.aether_c0ee676b32a2",
+      "sha256": "c0ee676b32a2eb3737ea23a0fcf148f7cd2563f58ff6475d5b2e167041f4588e",
+      "stdout": "Initial value set to: 41\nFirst bump result: 42\nSecond bump result: 43\nFinal counter value: 43\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5gem_gemini_2_5_flash_lit_02_This_program_implements_a_simp.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5gem_gemini_2_5_flash_lit_02_This_program_implements_a_simp.aether_24833dcac481",
+      "sha256": "24833dcac48194a373f1a824c0360e38b8337a45c107d87e9f87bd1fa78a1cd8",
+      "stdout": "Checking primality for numbers: 2 3 4 5 6 7 8 9 10 11 13 17 19 23 \n2 is prime\n3 is prime\n4 is not prime\n5 is prime\n6 is not prime\n7 is prime\n8 is not prime\n9 is not prime\n10 is not prime\n11 is prime\n13 is prime\n17 is prime\n19 is prime\n23 is prime\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5gem_gemini_2_5_flash_lit_03_This_program_simulates_a_simpl.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5gem_gemini_2_5_flash_lit_03_This_program_simulates_a_simpl.aether_9c4ef02385c6",
+      "sha256": "9c4ef02385c65b6f8d77258db9767d0cdfb2ae575fffdff563f550e9881154a6",
+      "stdout": "Spawned task for item 1 with handle 1000\nSpawned task for item 2 with handle 1001\nSpawned task for item 3 with handle 1002\nSpawned task for item 4 with handle 1003\nSpawned task for item 5 with handle 1004\nTask handle 1000 completed with result: 0\nTask handle 1001 completed with result: 2\nTask handle 1002 completed with result: 4\nTask handle 1003 completed with result: 6\nTask handle 1004 completed with result: 8\nAll tasks completed. Final results: ARRAY(dims:1, base_type:INT64, elements_at:0x7f6c08480)\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5gem_gemini_2_5_flash_lit_04_This_program_demonstrates_Aeth.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5gem_gemini_2_5_flash_lit_04_This_program_demonstrates_Aeth.aether_0b1fd8c19301",
+      "sha256": "0b1fd8c19301965d38ca68165013fdfd3abd878ec0f117c8a61817a4e6703fb7",
+      "stdout": "Successfully wrote to my_log.txt\nReading from my_log.txt:\n  Log entry 1: System started.\n  Log entry 2: Processing data...\n  Log entry 3: System shutting down.\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5gem_gemini_3_1_flash_lit_00_This_program_implements_a_recu.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5gem_gemini_3_1_flash_lit_00_This_program_implements_a_recu.aether_0b15fefd2714",
+      "sha256": "0b15fefd2714133c7b1bbbf475a24669e4cb177047239227c924423456574155",
+      "stdout": "Fib(0) = 0\nFib(1) = 1\nFib(2) = 1\nFib(3) = 2\nFib(4) = 3\nFib(5) = 5\nFib(6) = 8\nFib(7) = 13\nFib(8) = 21\nFib(9) = 34\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5gem_gemini_3_1_flash_lit_01_This_program_demonstrates_a_st.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5gem_gemini_3_1_flash_lit_01_This_program_demonstrates_a_st.aether_6dac62078ed8",
+      "sha256": "6dac62078ed8e7893ad18f0704dc599488d3ede10d0cd67c6da895800a463406",
+      "stdout": "Final counter value: 10\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5gem_gemini_3_1_flash_lit_03_This_program_performs_parallel.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5gem_gemini_3_1_flash_lit_03_This_program_performs_parallel.aether_633a4eb57cbb",
+      "sha256": "633a4eb57cbb5119cabda7bce27b518bd6024f857a1aa5b1556561e033c5b3c2",
+      "stdout": "2^10 = 1024, 3^5 = 243\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5gem_gemini_3_1_flash_lit_04_This_program_demonstrates_dyna.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5gem_gemini_3_1_flash_lit_04_This_program_demonstrates_dyna.aether_7a797b854bad",
+      "sha256": "7a797b854badbdcbd1d3c4f96261eb0a24ade4d73d045d88a7d936c0b49bea77",
+      "stdout": "Odd numbers: 1 3 5 7 9 \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5gem_gemini_3_1_pro_previ_00_Parses_a_JSON_array_of_server_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5gem_gemini_3_1_pro_previ_00_Parses_a_JSON_array_of_server_.aether_93c43bbd4284",
+      "sha256": "93c43bbd4284f65d288de4469a94d4037d78750ab30a04528314bed297298115",
+      "stdout": "Active nodes: 2\nTotal connections: 500\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5gem_gemini_3_5_flash_00_unspecified.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5gem_gemini_3_5_flash_00_unspecified.aether_788c7b8c93ff",
+      "sha256": "788c7b8c93ffd1a68a5a9fdf6dc8f03755c2841f31474d428f5e7859e767feff",
+      "stdout": "abs = 5\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_gemma4_12b_00_A_pure_function_calculates_the.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_gemma4_12b_00_A_pure_function_calculates_the.aether_97ccfc35ce99",
+      "sha256": "97ccfc35ce994ff11b590253956f416643bacabe392f545a63ce9965572126ea",
+      "stdout": "Fibonacci of 50 is 12586269025\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_gemma4_12b_01_A_record_type_models_a_simple_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_gemma4_12b_01_A_record_type_models_a_simple_.aether_ee5028b8495e",
+      "sha256": "ee5028b8495e2187bc31cd09833426b274477bd6192fb28031e6a4e87fcbbb1f",
+      "stdout": "Account 101 final balance: 550\nWithdrawal successful: true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_gemma4_12b_02_This_program_parses_a_JSON_str.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_gemma4_12b_02_This_program_parses_a_JSON_str.aether_332c033146fa",
+      "sha256": "332c033146fab9f6acedf1196db381a10fedc26b5c2d8b5c350c0a70d022e56b",
+      "stdout": "Pass: Alice (85)\nPass: Charlie (92)\nTotal students passed: 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_gemma4_12b_03_This_program_demonstrates_desi.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_gemma4_12b_03_This_program_demonstrates_desi.aether_d9be3ca19361",
+      "sha256": "d9be3ca1936153380a88f817e20f392f27ce6bf03e6e401a3042026072ae1253",
+      "stdout": "Performance Score: 85.00%\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_gemma4_12b_04_A_concurrent_program_uses_par_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_gemma4_12b_04_A_concurrent_program_uses_par_.aether_3ad958cfb3cd",
+      "sha256": "3ad958cfb3cdaab895b88ff5fab9d5c8c2c6ba19771df76f953bf547e5ac29c3",
+      "stdout": "Task 1 result: 10\nTask 2 result: 20\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_granite4_tiny_7b_00_A_simple_program_to_demonstrat.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_granite4_tiny_7b_00_A_simple_program_to_demonstrat.aether_8a7607e65977",
+      "sha256": "8a7607e6597706ce4b29372c44bd4ae7e7a1c02a61a9d0e10a95bd6212e7e589",
+      "stdout": "Positive\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_granite4_tiny_7b_01_A_program_to_calculate_the_fac.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_granite4_tiny_7b_01_A_program_to_calculate_the_fac.aether_f3d622126e59",
+      "sha256": "f3d622126e598c01a64bcce2d887dd6e8e9605b15939d16b409db3939627792e",
+      "stdout": "Factorial of 5 is 120\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_granite4_tiny_7b_04_A_program_that_calculates_the_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_granite4_tiny_7b_04_A_program_that_calculates_the_.aether_f96ba496b5a8",
+      "sha256": "f96ba496b5a8a0a9877dfb7233f5c551fa21a3d26bfed40a1b882746f2196a52",
+      "stdout": "Sum of numbers from 1 to 10 is 55\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_granite4_tiny_7b_09_A_program_that_simulates_a_sim.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_granite4_tiny_7b_09_A_program_that_simulates_a_sim.aether_04feb9a86241",
+      "sha256": "04feb9a862412f8a2b65c82f8294fac2349c7c6a42a22276278a1ef851c6085c",
+      "stdout": "Initial balance:100\nBalance after depositing 50:150\nWithdrawal successful. New balance:120\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_granite4_tiny_7b_13_A_program_that_simulates_a_sim.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_granite4_tiny_7b_13_A_program_that_simulates_a_sim.aether_320dd1a47b5d",
+      "sha256": "320dd1a47b5d7e1b4369534e472f3a046e333e0f9e5c8965c7cdb4aacc949cae",
+      "stdout": "State changed toRunning\nState changed toStopped\nState changed toIdle\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_granite4_tiny_7b_14_A_program_that_implements_a_ba.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_granite4_tiny_7b_14_A_program_that_implements_a_ba.aether_ac8134c18218",
+      "sha256": "ac8134c18218bb8153a1eabb6f3ac7a3bec8fb5ddfd26ec49f2e7d150316fd94",
+      "stdout": "Fibonacci(0) =0\nFibonacci(1) =1\nFibonacci(2) =1\nFibonacci(3) =2\nFibonacci(4) =3\nFibonacci(5) =5\nFibonacci(6) =8\nFibonacci(7) =13\nFibonacci(8) =21\nFibonacci(9) =34\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_granite4_tiny_7b_16_A_program_that_demonstrates_th.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_granite4_tiny_7b_16_A_program_that_demonstrates_th.aether_954737c72bb8",
+      "sha256": "954737c72bb819ebebd4827cf2acd96392622bc0daf5d0b078545001832830e7",
+      "stdout": "",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_qwen3_5_9b_00_Bubble_sort_implementation_dem.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_qwen3_5_9b_00_Bubble_sort_implementation_dem.aether_a7dc2116cc4e",
+      "sha256": "a7dc2116cc4ee1042b4807b7200e73bb2b1aadefd3ec795079acf931f6352981",
+      "stdout": "Sorted array: 64 \n34 25 12 22 11 90 \nComparisons: 36\nSwaps: 14\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_qwen3_5_9b_02_TOON_JSON_document_parser_demo.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_qwen3_5_9b_02_TOON_JSON_document_parser_demo.aether_7274c9ff074c",
+      "sha256": "7274c9ff074c22ef51a3b1c7b6019cbc7a311f78701500987c274f2c571020d1",
+      "stdout": "User 0: Alice Score: 85\nUser 1: Bob Score: 92\nUser 2: Charlie Score: 78\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_qwen3_6_35b_a3b_00_Generates_the_first_N_Fibonacc.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_qwen3_6_35b_a3b_00_Generates_the_first_N_Fibonacc.aether_8f51dbb0c226",
+      "sha256": "8f51dbb0c2268f1bcf5c166921a40bff67327a4c307f0c4ea1e9908771492ad6",
+      "stdout": "Fibonacci sequence (20 terms):\n0 1 1 2 3 5 8 13 21 34 55 89 144 233 377 610 987 1597 2584 4181 \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_qwen3_6_35b_a3b_01_Parses_a_literal_JSON_payload_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_qwen3_6_35b_a3b_01_Parses_a_literal_JSON_payload_.aether_245a5bb9431c",
+      "sha256": "245a5bb9431c216f08ed63a4f8aa56acdc083d491a02feb0804c32892e7b44db",
+      "stdout": "ID 101 is OK\nID 103 is OK\nTotal OK: 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_qwen3_6_35b_a3b_02_Defines_a_mutable_Counter_type.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_qwen3_6_35b_a3b_02_Defines_a_mutable_Counter_type.aether_3197170a474a",
+      "sha256": "3197170a474aabcc6c8af41af7c67e7fc2af86a69bd94c5c206b027cda0ca39a",
+      "stdout": "Char 1: A\nChar 2: e\nChar 3: t\nChar 4: h\nChar 5: e\nChar 6: r\nChar 7:  \nChar 8: i\nChar 9: s\nChar 10:  \nChar 11: g\nChar 12: r\nChar 13: e\nChar 14: a\nChar 15: t\nTotal chars: 15\nAfter reset: 0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_qwen3_6_35b_a3b_03_Demonstrates_design_by_contrac.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_qwen3_6_35b_a3b_03_Demonstrates_design_by_contrac.aether_b61499a097d3",
+      "sha256": "b61499a097d3963cd08c4f2654c3eb80e1fffb27034f7cd2517bbedf8b780f31",
+      "stdout": "Base: 10 Height: 5\nArea: 25.00\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_qwen3_6_35b_a3b_04_Splits_a_summation_task_across.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_qwen3_6_35b_a3b_04_Splits_a_summation_task_across.aether_f4364ecffee7",
+      "sha256": "f4364ecffee7444fc42b2becd3fa70fdcb10d831b8519728a59a56a03e2546dc",
+      "stdout": "Sum 1 to 100 = 5050\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_qwen3_coder_30b_00_Demonstrates_a_pure_helper_wit.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_qwen3_coder_30b_00_Demonstrates_a_pure_helper_wit.aether_31945219de4e",
+      "sha256": "31945219de4e9892c92ad75177b5197963a4ec648c92e630514c0f0736c50083",
+      "stdout": "Score 95 gets grade A\nScore 87 gets grade B\nScore 76 gets grade C\nScore 65 gets grade D\nScore 42 gets grade F\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_qwen3_coder_30b_01_Implements_a_simple_state_mach.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_qwen3_coder_30b_01_Implements_a_simple_state_mach.aether_08154c2c3b04",
+      "sha256": "08154c2c3b041f849d606ccbcfe1764c34e1605ba1637ff93efe1d8967c126e3",
+      "stdout": "Light is red\nLight is green\nLight is yellow\nLight is red\nLight is green\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_qwen3_coder_30b_02_Processes_a_literal_TOON_array.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_qwen3_coder_30b_02_Processes_a_literal_TOON_array.aether_86a456b9e8b3",
+      "sha256": "86a456b9e8b38f5dea0dd387539c83e037c91d2556a42e4428a7dbdde861d74d",
+      "stdout": "Alice: 95 -> excellent\nBob: 76 -> good\nCharlie: 42 -> needs work\nSummary: excellent=1, good=1, needs work=1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_qwen3_coder_30b_03_Calculates_Fibonacci_numbers_u.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_qwen3_coder_30b_03_Calculates_Fibonacci_numbers_u.aether_73b5b862248c",
+      "sha256": "73b5b862248cd3c41b635c558939b7dbec3114a23da1c309c4ce946ada363285",
+      "stdout": "Fibonacci numbers:\n0: 0\n1: 1\n2: 1\n3: 2\n4: 3\n5: 5\n6: 8\n7: 13\n8: 21\n9: 34\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_qwen3_coder_30b_04_Demonstrates_text_formatting_w.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_qwen3_coder_30b_04_Demonstrates_text_formatting_w.aether_8ff16bbc7546",
+      "sha256": "8ff16bbc75464ab3122d628fe69faea819e349b44973128420e1a18211b35654",
+      "stdout": "Currency conversion (USD to EUR):\n10.00 USD = 8.50 EUR\n25.50 USD = 21.68 EUR\n99.99 USD = 84.99 EUR\n123.45 USD = 104.93 EUR\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch9_combined.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_batch9_combined.aether_0c7eb15ff89f",
+      "sha256": "0c7eb15ff89ff42fade57aa746d9cd70e71970e94cddd0ad8102751cb91510aa",
+      "stdout": "point manhattan = 7\npolar point = 7, 7\nscore = 0 -> blocked\nstats seen = 3\nstats mean = 39.58\nstats range = 7.25 .. 99.00\nbit grid count = 3\npair total = 252\nfib = 89 odd = true\neven square sum = 120\nset bits = 8\nclamped score ratio = 0.396\nfirst line pieces = alpha\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
         ]
       }
     }
