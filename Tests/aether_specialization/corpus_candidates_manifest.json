@@ -10502,6 +10502,104 @@
           "imported_2026-07-19"
         ]
       }
+    },
+    {
+      "source_path": "/tmp/aether_gemini_harvest/gemini_3_1_flash_lite_00_A_pure_numeric_helper_that_com.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/gemini_3_1_flash_lite_00_A_pure_numeric_helper_that_com.aether",
+      "sha256": "a60a999a4fc4d900977c1e47225c94b3e1e9b99cf5ef5589c5c1b9b435436800",
+      "stdout": "Fibonacci(10) = 55\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_gemini_harvest/gemini_3_1_flash_lite_01_A_record_type_modeling_a_bank_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/gemini_3_1_flash_lite_01_A_record_type_modeling_a_bank_.aether",
+      "sha256": "c26348705d8b0da4ad1e646861bab5b745212270f8133224f95124e801f00375",
+      "stdout": "Success: true | Balance: 60\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_gemini_harvest/gemini_3_1_flash_lite_02_Processes_an_array_of_scores_t.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/gemini_3_1_flash_lite_02_Processes_an_array_of_scores_t.aether",
+      "sha256": "e2683f02260dabab0189204607fa661c8da2ac53efb17293c5f4ba9b10ec0161",
+      "stdout": "Total passing scores: 3\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_gemini_harvest/gemini_3_1_flash_lite_03_Demonstrates_contract_based_pr.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/gemini_3_1_flash_lite_03_Demonstrates_contract_based_pr.aether",
+      "sha256": "92f294913f3c29e3af1986f4a033413912fcbfe7232e32fb1d7778c5e87d8609",
+      "stdout": "Result: 20\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_gemini_harvest/gemini_3_1_flash_lite_04_Parses_a_simple_JSON_string_to.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/gemini_3_1_flash_lite_04_Parses_a_simple_JSON_string_to.aether",
+      "sha256": "c29e9bbc4c76f37b7d078870bbfbff96119c2aebbbd3bdbf0363bb43fa35ad6c",
+      "stdout": "ID: 101 Active: true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_gemini_harvest/gemini_3_1_pro_preview_00_Demonstrates_pure_functions_de.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/gemini_3_1_pro_preview_00_Demonstrates_pure_functions_de.aether",
+      "sha256": "c1bc5b6cc0704582c5343b92884787a26c508689cbe302100797d0c067e3ebd0",
+      "stdout": "Collatz steps for 12: 9\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_gemini_harvest/gemini_3_flash_preview_00_Implementing_the_Sieve_of_Erat.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/gemini_3_flash_preview_00_Implementing_the_Sieve_of_Erat.aether",
+      "sha256": "c1fab3bdd415e6d3418b441d6817c5d367c4afc42ef2ca5ca921e38f01b7c344",
+      "stdout": "Primes up to 50:\n2 3 5 7 11 13 17 19 23 29 31 37 41 43 47 \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
     }
   ]
 }
