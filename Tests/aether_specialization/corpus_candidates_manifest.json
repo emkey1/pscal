@@ -1183,7 +1183,7 @@
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/149_pure_to_fahrenheit",
       "repo_path": "Tests/aether_specialization/corpus_candidates/149_pure_to_fahrenheit",
       "sha256": "e37e7206f0e6f874c49c80621a398e3a3d95a9a5f58c324c5267938b8c11822f",
-      "stdout": "0C=32.000000\n100C=212.000000\n37C=98.600000\n",
+      "stdout": "0C=32\n100C=212\n37C=98\n",
       "metadata": {
         "canonical": true,
         "fixture_required": false,
@@ -1191,7 +1191,11 @@
         "tags": [
           "pure"
         ],
-        "notes": "@pure helper; integer F conversion. Verified with build/bin/aether."
+        "notes": "@pure helper; integer F conversion. Verified with build/bin/aether.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-19-9 (latest tag: untagged)",
+          "date": "2026-07-19"
+        }
       }
     },
     {
@@ -7766,7 +7770,9 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "environment_dependent": true,
+        "notes": "[2026-07-19 corpus audit] marked environment_dependent: prints getcurrentdir(); value is the test-harness cwd (varies per run/tempdir), not compiler behavior."
       }
     },
     {
@@ -7780,7 +7786,9 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "environment_dependent": true,
+        "notes": "[2026-07-19 corpus audit] marked environment_dependent: calls randomize() (time-seeded RNG); step sequence is inherently non-reproducible across runs."
       }
     },
     {
@@ -7822,7 +7830,9 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "environment_dependent": true,
+        "notes": "[2026-07-19 corpus audit] marked environment_dependent: makes a live HTTP request; output depends on remote server availability/response at run time."
       }
     },
     {
@@ -7850,7 +7860,9 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "environment_dependent": true,
+        "notes": "[2026-07-19 corpus audit] marked environment_dependent: prints getcurrentdir()-derived path; varies with the harness's working/temp directory."
       }
     },
     {
@@ -8172,7 +8184,9 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "environment_dependent": true,
+        "notes": "[2026-07-19 corpus audit] marked environment_dependent: prints cwd among other host facts; varies with the harness's working/temp directory."
       }
     },
     {
@@ -8382,7 +8396,9 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "environment_dependent": true,
+        "notes": "[2026-07-19 corpus audit] marked environment_dependent: calls randomize(); sample hits/estimate are inherently non-reproducible across runs."
       }
     },
     {
@@ -8510,7 +8526,9 @@
         "tags": [
           "imported_2026-07-19",
           "excluded_network_nondeterministic"
-        ]
+        ],
+        "environment_dependent": true,
+        "notes": "[2026-07-19 corpus audit] marked environment_dependent: performs a live DNS lookup; resolved IP depends on external DNS/CDN state at run time."
       }
     },
     {
@@ -8594,7 +8612,9 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "environment_dependent": true,
+        "notes": "[2026-07-19 corpus audit] marked environment_dependent: calls randomize(); generated chain is inherently non-reproducible across runs."
       }
     },
     {
@@ -8608,7 +8628,9 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "environment_dependent": true,
+        "notes": "[2026-07-19 corpus audit] marked environment_dependent: uses random(n)/random() for population init and mutation; non-reproducible across runs."
       }
     },
     {
@@ -8651,7 +8673,9 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "environment_dependent": true,
+        "notes": "[2026-07-19 corpus audit] marked environment_dependent: calls randomize() to seed the initial board; non-reproducible across runs."
       }
     },
     {
@@ -8680,7 +8704,9 @@
         "tags": [
           "imported_2026-07-19",
           "excluded_nondeterministic"
-        ]
+        ],
+        "environment_dependent": true,
+        "notes": "[2026-07-19 corpus audit] marked environment_dependent: prints wall-clock time; timestamp varies by run."
       }
     },
     {
@@ -8764,7 +8790,9 @@
         "assumption_bearing": false,
         "tags": [
           "harvested_idea_miner_2026-07-19"
-        ]
+        ],
+        "environment_dependent": true,
+        "notes": "[2026-07-19 corpus audit] marked environment_dependent: default array print includes elements_at:0x... raw pointer; address varies per-process (ASLR)."
       }
     },
     {
@@ -8792,7 +8820,9 @@
         "assumption_bearing": false,
         "tags": [
           "harvested_idea_miner_2026-07-19"
-        ]
+        ],
+        "environment_dependent": true,
+        "notes": "[2026-07-19 corpus audit] marked environment_dependent: default array print includes elements_at:0x... raw pointer; address varies per-process (ASLR)."
       }
     },
     {
@@ -9226,7 +9256,9 @@
         "assumption_bearing": false,
         "tags": [
           "harvested_idea_miner_2026-07-19"
-        ]
+        ],
+        "environment_dependent": true,
+        "notes": "[2026-07-19 corpus audit] marked environment_dependent: calls randomize(); 2D random walk bounding box is inherently non-reproducible across runs."
       }
     },
     {
@@ -9842,7 +9874,9 @@
         "assumption_bearing": false,
         "tags": [
           "harvested_idea_miner_2026-07-19"
-        ]
+        ],
+        "environment_dependent": true,
+        "notes": "[2026-07-19 corpus audit] marked environment_dependent: calls randomize() to shuffle a deck (Fisher-Yates); shuffle order is non-reproducible across runs."
       }
     },
     {
@@ -9870,7 +9904,9 @@
         "assumption_bearing": false,
         "tags": [
           "harvested_idea_miner_2026-07-19"
-        ]
+        ],
+        "environment_dependent": true,
+        "notes": "[2026-07-19 corpus audit] marked environment_dependent: calls randomize() to shuffle a deck (Fisher-Yates); shuffle order is non-reproducible across runs."
       }
     },
     {
@@ -10696,7 +10732,9 @@
         "assumption_bearing": false,
         "tags": [
           "harvested_idea_miner_2026-07-19"
-        ]
+        ],
+        "environment_dependent": true,
+        "notes": "[2026-07-19 corpus audit] marked environment_dependent: default array print includes elements_at:0x... raw pointer; address varies per-process (ASLR)."
       }
     },
     {
