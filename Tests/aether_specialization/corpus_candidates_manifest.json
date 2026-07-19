@@ -8682,6 +8682,1532 @@
           "excluded_nondeterministic"
         ]
       }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_claw1_exaone3_5_32b_01_This_program_parses_a_simple_J.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_claw1_exaone3_5_32b_01_This_program_parses_a_simple_J.aether",
+      "sha256": "50d28c6b136af736afa6c329daa2c48ae09e850ce9390f86008143f8d016af30",
+      "stdout": "Name: Alice, Score: 95\nName: Bob, Score: 72\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_claw1_gpt_oss_120b_00_Sort_a_hard_coded_integer_arra.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_claw1_gpt_oss_120b_00_Sort_a_hard_coded_integer_arra.aether",
+      "sha256": "225361ce5dd0a92577f9976b2bb1969266044c448064ed8e41662c6474f6cc78",
+      "stdout": "Sorted array:\n5\n2\n9\n1\n7\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_claw1_gpt_oss_120b_02_Demonstrate_a_mutable_Counter_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_claw1_gpt_oss_120b_02_Demonstrate_a_mutable_Counter_.aether",
+      "sha256": "9549b64874fac5ec91f18212dde6253fae7678b4c663db132ed6edbe9441d190",
+      "stdout": "After two bumps:2\nAfter reset:0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_claw1_gpt_oss_120b_03_Parse_a_JSON_array_of_tasks_us.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_claw1_gpt_oss_120b_03_Parse_a_JSON_array_of_tasks_us.aether",
+      "sha256": "d2163aaa0666105f530666e9d5d00ed8d827767d31d24021083fc3dba535210a",
+      "stdout": "Task:Task1Done:true\nTask:Task2Done:false\nSummary: total=2 done=1 pending=1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_claw1_gpt_oss_120b_04_Compute_factorial_of_a_non_neg.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_claw1_gpt_oss_120b_04_Compute_factorial_of_a_non_neg.aether",
+      "sha256": "cb61ce8155588e78d1553898f2d604705fbb5876cfa144811cbe7f9f7d378919",
+      "stdout": "Factorial of 5 is 120\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_claw1_mistral_small__00_This_program_sorts_an_array_of.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_claw1_mistral_small__00_This_program_sorts_an_array_of.aether",
+      "sha256": "058bbda5f19d96806ed570302ef47fd2bc4cb0e869352d645478bce6ca81fb66",
+      "stdout": "Original array:ARRAY(dims:1, base_type:INT64, elements_at:0x10357bea0)\nSorted array:ARRAY(dims:1, base_type:INT64, elements_at:0x10357d280)\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_claw1_mistral_small__01_This_program_processes_a_JSON_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_claw1_mistral_small__01_This_program_processes_a_JSON_.aether",
+      "sha256": "c6f10b3c3b088409e49c1284891207e82d23aaf10e5cbcb6ea9b29f2efca8d39",
+      "stdout": "Alice: Excellent\nBob: Average\nCharlie: Below Average\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_claw1_mistral_small__04_This_program_demonstrates_the_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_claw1_mistral_small__04_This_program_demonstrates_the_.aether",
+      "sha256": "51b5feb55820a3f03b0ee9732953b5d8b1d6f376fd4516f04933f9b76ab9372e",
+      "stdout": "Dimensions:ARRAY(dims:1, base_type:REAL, elements_at:0x1039e2020)\nCalculated Area:7.000000\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_claw1_qwen3_32b_00_Calculate_Fibonacci_numbers_up.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_claw1_qwen3_32b_00_Calculate_Fibonacci_numbers_up.aether",
+      "sha256": "022ff8bf1c187fcd04a419ddc5bbb6e2c2fc3a0282bf784838bf2b1975552df8",
+      "stdout": "Fibonacci sequence under 100:\n0\n1\n1\n2\n3\n5\n8\n13\n21\n34\n55\n89\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_claw1_qwen3_32b_01_Parse_TOON_JSON_transactions_a.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_claw1_qwen3_32b_01_Parse_TOON_JSON_transactions_a.aether",
+      "sha256": "ad706ebe253af23d34ef91762b9aa2090680b28249a41aa17017183b0f16d9a7",
+      "stdout": "Error: transactions.json not found.\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_claw1_qwen3_32b_02_Implement_a_counter_object_wit.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_claw1_qwen3_32b_02_Implement_a_counter_object_wit.aether",
+      "sha256": "c75332a13b80ad3ef1e56cb888a5e973a31382de25f1f69d3cb53ed17b0fc0ad",
+      "stdout": "Counter after 3 bumps:3\nCounter after reset:0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_claw1_qwen3_32b_03_Clamp_values_with_design_by_co.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_claw1_qwen3_32b_03_Clamp_values_with_design_by_co.aether",
+      "sha256": "f3c03602414856436082fd2d9d41c23aa94876db42ba6998c62f0aac4fa6ee5b",
+      "stdout": "0\n42\n100\n75\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_claw1_qwen3_32b_04_Simulate_a_traffic_light_state.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_claw1_qwen3_32b_04_Simulate_a_traffic_light_state.aether",
+      "sha256": "ff171a0b28015b4f6352ae9bc23a994173fea1303586bc17bc5721df7dcbcf3e",
+      "stdout": "Traffic light cycle:\ngreen\nyellow\nred\ngreen\nyellow\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_gemini_2_5_flash_00_This_program_parses_a_TOON_arr.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_gemini_2_5_flash_00_This_program_parses_a_TOON_arr.aether",
+      "sha256": "e379109b6adf388e2b161c5beca85b4e95560e0c1287e3fd160f1a804728186f",
+      "stdout": "Processed user: Alice, age: 25\nProcessed user: Bob, age: 45\nProcessed user: Charlie, age: 68\nProcessed user: David, age: 30\n\n--- User Summary ---\nTotal Users: 4\nYoung Users (<30): 1\nAdult Users (30-60): 2\nSenior Users (>60): 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_gemini_2_5_flash_01_This_program_demonstrates_a_pu.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_gemini_2_5_flash_01_This_program_demonstrates_a_pu.aether",
+      "sha256": "18998d497f58d14ecfc2ad5e3d3839cc37cc911089c74da88cb17cc642d1ceb3",
+      "stdout": "Factorial of 5 is 120\nFactorial of 0 is 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_gemini_2_5_flash_02_This_program_retrieves_an_envi.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_gemini_2_5_flash_02_This_program_retrieves_an_envi.aether",
+      "sha256": "1917d6b8741710c9ba0c4859560a859184274fd9db3a26e0a376d6cda5a80592",
+      "stdout": "Original (from env or default): \" No message provided by env \"\nTrimmed message: \"No message provided by env\" (Length: 26)\nFirst 5 chars: \"No me\"\nRemaining part: \"ssage provided by env\"\nConcatenated: \"No message provided by env\"\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_gemini_2_5_flash_03_This_program_filters_a_dynamic.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_gemini_2_5_flash_03_This_program_filters_a_dynamic.aether",
+      "sha256": "4257f6f5bcf129f728e2e62ba57778e3f7ace6577932b6c4c673f7b8a097775c",
+      "stdout": "Original numbers: \n1 2 3 4 5 6 7 8 9 10 \nEven numbers: \n2 4 6 8 10 \nSquared even numbers: \n4 16 36 64 100 \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_gemini_3_1_pro_previ_00_Demonstrates_concurrency_using.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_gemini_3_1_pro_previ_00_Demonstrates_concurrency_using.aether",
+      "sha256": "0a7b6166ae81635054f4044c6e4356608db1604fe08178dd500f27085a4b0cf0",
+      "stdout": "Approximated Pi: 3.141593\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_gemini_3_1_pro_previ_01_Parses_a_nested_JSON_array_of_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_gemini_3_1_pro_previ_01_Parses_a_nested_JSON_array_of_.aether",
+      "sha256": "e4a5c45c9ee694dcaee085f2e32513a6a64e0049e95d8ab2c76210fb4abc3b5e",
+      "stdout": "Active: Alice (85000)\nActive: Charlie (92000)\nTotal Active: 2\nAverage Active Salary: 88500.00\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_gemini_3_1_pro_previ_02_Showcases_design_by_contract_w.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_gemini_3_1_pro_previ_02_Showcases_design_by_contract_w.aether",
+      "sha256": "d6573a5053974d0bba92c2b7cdedef015746543e5ebf45a3ff8b0d73a8b44876",
+      "stdout": "For 48 and 18:\nGCD = 6\nLCM = 144\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_gemini_3_1_pro_previ_03_Implements_a_small_stack_based.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_gemini_3_1_pro_previ_03_Implements_a_small_stack_based.aether",
+      "sha256": "c43cd22229b815c8f5845bd30526d1fcc24705f520b655d71578c426045d55b6",
+      "stdout": "VM Execution Result: 35\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_gemini_3_1_pro_previ_04_Performs_run_length_encoding_o.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_gemini_3_1_pro_previ_04_Performs_run_length_encoding_o.aether",
+      "sha256": "233093ffe8d5a1862ad2088493f21cfc6e6f692781d9c7f6264954e905231774",
+      "stdout": "Original:   AAABBBCCDAA\nCompressed: A3B3C2D1A2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_glm_5_2_00_A_Sieve_of_Eratosthenes_implem.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_glm_5_2_00_A_Sieve_of_Eratosthenes_implem.aether",
+      "sha256": "c61589362c3d4287f854c0b6f7b6b6be89573365a987dbbedbe4233a82a9e796",
+      "stdout": "Primes up to 100:\n2 3 5 7 11 13 17 19 23 29 31 37 41 43 47 53 59 61 67 71 73 79 83 89 97 \nTotal: 25\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_glm_5_2_01_A_small_typed_bank_account_mod.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_glm_5_2_01_A_small_typed_bank_account_mod.aether",
+      "sha256": "13476aaa4f5b53decf1fab7a4929757e54357e9471db824aabc141dfecdaf366",
+      "stdout": "Alice +250.00 => balance: 1250.00\nAlice -100.00 => balance: 1150.00\nAlice insufficient funds for withdrawal of 2000.00\nBob +75.50 => balance: 575.50\nBob -300.00 => balance: 275.50\n--- Alice ---\n  balance:      1150.00\n  transactions: 2\n--- Bob ---\n  balance:      275.50\n  transactions: 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_glm_5_2_02_A_TOON_based_employee_payroll_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_glm_5_2_02_A_TOON_based_employee_payroll_.aether",
+      "sha256": "afbe96415a330409442ce268c8992bdaaaa57ada8e15d1bce98385a9ffbc957e",
+      "stdout": "Alice | Eng | $95000\nBob | Eng | $88000\nCarol | Sales | $72000\nDave | Sales | $68000\nEve | Eng | $102000\n\n=== Department Averages ===\nEng:   count=3  avg=$95000\nSales: count=2  avg=$70000\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_glm_5_2_03_A_binary_search_guarded_by_a_p.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_glm_5_2_03_A_binary_search_guarded_by_a_p.aether",
+      "sha256": "11226dad5aacd43777e50d78dc52b1d2a2f93d79be9d96fbfe797f11759812c9",
+      "stdout": "Sorted array:\n1 2 3 4 5 6 7 8 9 \nFound 7 at index 6\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_glm_5_2_04_A_Collatz_conjecture_explorer_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_glm_5_2_04_A_Collatz_conjecture_explorer_.aether",
+      "sha256": "2921d3dd295a4f6c161e79989409da278824d738454e3ce4e3dc262456e0b41b",
+      "stdout": "Collatz sequence lengths for n = 1..30\n\n1: #\n2: ##\n3: ########\n4: ###\n5: ######\n6: #########\n7: #################\n8: ####\n9: ####################\n10: #######\n11: ###############\n12: ##########\n13: ##########\n14: ##################\n15: ##################\n16: #####\n17: #############\n18: #####################\n19: #####################\n20: ########\n21: ########\n22: ################\n23: ################\n24: ###########\n25: ########################\n26: ###########\n27: ################################################################################################################\n28: ###################\n29: ###################\n30: ###################\n\nLongest sequence: 112 steps\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_glm_5_turbo_00_Computes_all_primes_up_to_100_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_glm_5_turbo_00_Computes_all_primes_up_to_100_.aether",
+      "sha256": "47c8efa1a4a2e4c94e6bd88de163b18582f1fcbf659723eda2ae354028eb561a",
+      "stdout": "Primes up to 100 (25 total):\n2 3 5 7 11 13 17 19 23 29 31 37 41 43 47 53 59 61 67 71 73 79 83 89 97 \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_glm_5_turbo_01_Parses_a_JSON_product_catalog_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_glm_5_turbo_01_Parses_a_JSON_product_catalog_.aether",
+      "sha256": "9f15150a60db6a5d514c928a706bb23f65e9477ed40ddd957dd6af21ac5fee2a",
+      "stdout": "Widget | tools | $12.50 | mid-range\nGadget | tools | $45.00 | mid-range\nSprocket | tools | $8.99 | budget\nDoohickey | electronics | $129.99 | premium\nThingamajig | electronics | $67.50 | premium\nWhatchamacallit | office | $3.25 | budget\n\n=== Category Summary ===\ntools: count=3 avg=$22.16 range=$8.99-$45.00\nelectronics: count=2 avg=$98.75 range=$67.50-$129.99\noffice: count=1 avg=$3.25 range=$3.25-$3.25\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_glm_5_turbo_02_Simulates_a_vending_machine_as.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_glm_5_turbo_02_Simulates_a_vending_machine_as.aether",
+      "sha256": "8fecb6e6fd399b7b9eccecc0a20b79500fa1a67dd8b304d8e3009d2f5e714fbc",
+      "stdout": "=== Vending Machine Simulation ===\nInsert 50 cents...\nSelect Soda (cost 40)...\nOK\nDispense...\nGot: Soda\nChange returned: 10 cents\n\nBuy another item with exact change...\nOK\nGot: Chips\nChange returned: 0 cents\n\nTry selecting without coins...\nERROR: insert coins first\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_glm_5_turbo_03_Computes_Fibonacci_numbers_wit.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_glm_5_turbo_03_Computes_Fibonacci_numbers_wit.aether",
+      "sha256": "f75bc2105619c5f96d49ad83c6d68a3fec348173c3900695fc7c7615567756e5",
+      "stdout": "Fibonacci sequence (first 20 terms):\n0 1 1 2 3 5 8 13 21 34 55 89 144 233 377 610 987 1597 2584 4181 \n\nGolden ratio convergence (fib(n)/fib(n-1)):\nfib(5)/fib(4) = 1.6666666667\nfib(10)/fib(9) = 1.6176470588\nfib(15)/fib(14) = 1.6180371353\nfib(20)/fib(19) = 1.6180339632\nfib(25)/fib(24) = 1.6180339890\n\nTrue phi = 1.6180339887\nError at n=25: 0.000000000208\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29a_glm_5_turbo_04_Splits_a_sentence_into_words_c.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_glm_5_turbo_04_Splits_a_sentence_into_words_c.aether",
+      "sha256": "5bdb43533c6e0fe3dff916b81c916d80189c004dc3756f52eddbe439c4c944d6",
+      "stdout": "Rank | Word       | Count\n-----|------------|------\n1    | the        | 4\n2    | cat        | 2\n3    | sat        | 1\n4    | on         | 1\n5    | mat        | 1\n6    | ate        | 1\n7    | rat        | 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_gemini_2_5_flash_00_This_program_processes_a_TOON_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_gemini_2_5_flash_00_This_program_processes_a_TOON_.aether",
+      "sha256": "e2a5fead2e114b27450cde40b83cbe91d0a5c7fc567c3cce4e58dd9faa47d1a5",
+      "stdout": "User ID: 1, Age: 25 -> Group: Young\nUser ID: 2, Age: 60 -> Group: Senior\nUser ID: 3, Age: 15 -> Group: Young\nUser ID: 4, Age: 40 -> Group: Middle\nUser ID: 5, Age: 75 -> Group: Senior\n\n--- Age Group Summary ---\nTotal Processed Users: 5\nYoung (<30): 2\nMiddle (30-59): 1\nSenior (60+): 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_gemini_2_5_flash_01_This_program_calculates_and_pr.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_gemini_2_5_flash_01_This_program_calculates_and_pr.aether",
+      "sha256": "bf95e2945f96aecd65ca23705c889129098a8ae5679f7f281516192656f1d79e",
+      "stdout": "Fibonacci Sequence up to 10 terms:\n0: 0\n1: 1\n2: 1\n3: 2\n4: 3\n5: 5\n6: 8\n7: 13\n8: 21\n9: 34\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_gemini_2_5_flash_02_This_program_processes_a_comma.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_gemini_2_5_flash_02_This_program_processes_a_comma.aether",
+      "sha256": "5dac41b3f191d1b3f44d696eb968937bccf19a037cd3a2390d3cac108929e9ce",
+      "stdout": "Usage: aether myprogram.aer \" <some text>\"\nNo command-line argument provided.\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_gemini_3_1_pro_previ_00_Simulates_the_Collatz_conjectu.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_gemini_3_1_pro_previ_00_Simulates_the_Collatz_conjectu.aether",
+      "sha256": "f24fb8b28394ae23a138caa4314d3fbd19058c0e1a60a5623a0f94a58316ef9a",
+      "stdout": "Longest Collatz chain under 50 starts at 27 with 111 steps.\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_gemini_3_1_pro_previ_01_Parses_a_JSON_payload_of_senso.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_gemini_3_1_pro_previ_01_Parses_a_JSON_payload_of_senso.aether",
+      "sha256": "1ee670e593db97b486f0e39b40c254462677e570fb6a12d7605dd1151c736d45",
+      "stdout": "Anomaly detected on sensor A2: 89.1C\nAverage temp: 44.20C across 3 sensors.\nTotal anomalies: 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_gemini_3_1_pro_previ_02_Splits_a_string_into_a_dynamic.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_gemini_3_1_pro_previ_02_Splits_a_string_into_a_dynamic.aether",
+      "sha256": "732f341e98e62e87a9ee6baef6fc62a29c17e1acc13a80323f030496316a869c",
+      "stdout": "+-----------+\n| Aether   |\n| is       |\n| a        |\n| compact  |\n| front    |\n| end      |\n+-----------+\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_gemini_3_1_pro_previ_03_Runs_a_small_2D_random_walk_si.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_gemini_3_1_pro_previ_03_Runs_a_small_2D_random_walk_si.aether",
+      "sha256": "e26baea47e3c819cf3fc751990d2c630c70859c1e053fa291168f6df97851ddd",
+      "stdout": "Random walk bounding box after 50 steps:\nX range: [0, 2]\nY range: [-1, 17]\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_glm_5_2_00_Sieve_of_Eratosthenes_with_pri.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_glm_5_2_00_Sieve_of_Eratosthenes_with_pri.aether",
+      "sha256": "cad8d65bf394a5d324aa9a39526f7452298707dcfd6b430611c593619ba064c2",
+      "stdout": "Primes up to 200: 46 found\n60 = 2 * 2 * 3 * 5\n84 = 2 * 2 * 3 * 7\n97 = 97\n360 = 2 * 2 * 2 * 3 * 3 * 5\n1024 = 2 * 2 * 2 * 2 * 2 * 2 * 2 * 2 * 2 * 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_glm_5_2_01_A_typed_bank_account_model_wit.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_glm_5_2_01_A_typed_bank_account_model_wit.aether",
+      "sha256": "00fa4ebafbe4bdb02ba1e8cf4025e77e3ba35b07472ffaa71f7ef6834e69373a",
+      "stdout": "Alice | balance=1500 | txns=4\nwithdraw  200: true\nwithdraw 5000: false\nwithdraw  100: true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_glm_5_2_02_Parse_a_JSON_employee_payroll_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_glm_5_2_02_Parse_a_JSON_employee_payroll_.aether",
+      "sha256": "97770392f737b120eb0db7c0bbf4d79a546314441cef43a00e1159b6257082b2",
+      "stdout": "Alice ($120000) -> senior\nBob ($75000) -> mid\nCarol ($45000) -> junior\nDave ($95000) -> mid\nEve ($60000) -> mid\n---\nTotal employees: 5\nSenior: 1 | Mid: 3 | Junior: 1\nTotal budget: $395000\nAverage salary: $79000.00\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_glm_5_2_03_Design_by_contract_numeric_hel.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_glm_5_2_03_Design_by_contract_numeric_hel.aether",
+      "sha256": "9743d89e953671cbe2d50d51f8da34bbead9b51cf1be29ecf0c8d62f276febc3",
+      "stdout": "Clamp tests (lo=0, hi=5):\n  -5.00 -> 0.00\n  0.50 -> 0.50\n  3.00 -> 3.00\n  10.00 -> 5.00\n\nFibonacci sequence:\n0 1 1 2 3 5 8 13 21 34 55 89 \n\nGolden ratio approximations:\n  fib(5)/fib(4) = 1.66666667\n  fib(6)/fib(5) = 1.60000000\n  fib(7)/fib(6) = 1.62500000\n  fib(8)/fib(7) = 1.61538462\n  fib(9)/fib(8) = 1.61904762\n  fib(10)/fib(9) = 1.61764706\n  fib(11)/fib(10) = 1.61818182\n  fib(12)/fib(11) = 1.61797753\n  fib(13)/fib(12) = 1.61805556\n  fib(14)/fib(13) = 1.61802575\n\nsqrt(2) = 1.41421356\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_sched_claw2_a3b_code_00_Demonstrates_a_pure_helper_usi.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_sched_claw2_a3b_code_00_Demonstrates_a_pure_helper_usi.aether",
+      "sha256": "b51c9e836022c29472bd1f9bf5784c98465efbbd3b81e10934182fcdef814c96",
+      "stdout": "fibonacci(10) = 55, grade = fail\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_sched_claw2_a3b_code_01_Processes_a_fixed_JSON_object_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_sched_claw2_a3b_code_01_Processes_a_fixed_JSON_object_.aether",
+      "sha256": "6b5ef4520f6d1cc9e6a02251c868c27a1e04ca2ad0b14735c038ba72c391dec7",
+      "stdout": "row 0 = A1\nrow 1 = EMPTY\nrow 2 = EMPTY\nmissing = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_sched_claw2_a3b_code_02_Implements_a_simple_mutable_Co.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_sched_claw2_a3b_code_02_Implements_a_simple_mutable_Co.aether",
+      "sha256": "30b565629e10ab7c06212f6519f63939b26f16a28f5cadae8ad99c7b4a2ba1e0",
+      "stdout": "start = 0\nbumped to 1\nbumped to 2\nbumped to 3\nafter reset = 0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_sched_m5_devstral_01_Parse_a_TOON_array_of_user_rec.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_sched_m5_devstral_01_Parse_a_TOON_array_of_user_rec.aether",
+      "sha256": "481dd1647e5f01ab00f297ad5315cf0aaeb43f3e2b958cca70471a4a9328d973",
+      "stdout": "Alice (85) -> medium\nBob (60) -> low\nCAROL (95) -> high\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_sched_m5_devstral_02_A_stateful_counter_with_a_meth.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_sched_m5_devstral_02_A_stateful_counter_with_a_meth.aether",
+      "sha256": "6205f2d5a72afaaba2fe7f597163877d5ad347345156b41f00a87ba0577300d4",
+      "stdout": "Initial value:0\nAfter increment:1\nAfter another increment:2\nAfter reset:0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_sched_m5_devstral_03_A_text_processing_utility_to_s.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_sched_m5_devstral_03_A_text_processing_utility_to_s.aether",
+      "sha256": "9f03d5fd82dcbb03e328e9090ac24c91004faf277716829e07dd6f550b641b37",
+      "stdout": "Sentence:Hello World from Aether\nWord 'Hello':0 vowels\nWord 'World':0 vowels\nWord 'from':0 vowels\nWord 'Aether':0 vowels\nTotal vowels:0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_sched_m5_olmo3_think_00_Demonstrate_a_record_type_with.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_sched_m5_olmo3_think_00_Demonstrate_a_record_type_with.aether",
+      "sha256": "0a8b7bb05b2e8ff09b654506e8b196259239d287047ece1b515cedfc1eca40af",
+      "stdout": "Initial balance: 100.000000\nBalance after depositing $50: 150.000000\nWithdrew $30 successfully\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_sched_m5_olmo3_think_01_Generate_the_first_ten_Fibonac.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_sched_m5_olmo3_think_01_Generate_the_first_ten_Fibonac.aether",
+      "sha256": "7634e610d78250986cfa7c8a856a19145b6575323f7a307b190cf1c54624dfb8",
+      "stdout": "Fibonacci sequence (first 10 numbers):\n0 1 1 2 3 5 8 13 21 34 ",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_sched_m5_qwen3_coder_00_A_sorting_program_that_sorts_a.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_sched_m5_qwen3_coder_00_A_sorting_program_that_sorts_a.aether",
+      "sha256": "5de7f6ea45d30a74477413fc333af7a8b5358807a68669b519681673f190fa2e",
+      "stdout": "Original: [64, 34, 25, 12, 22, 11, 90]\nSorted:   [11, 12, 22, 25, 34, 64, 90]\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/06-29b_sched_m5_qwen3_coder_01_A_TOON_based_JSON_parser_that_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_sched_m5_qwen3_coder_01_A_TOON_based_JSON_parser_that_.aether",
+      "sha256": "2cc7e4306b4459a431602dc53d7f9cf1bf1fe6cfff4da5fccc2a41387afb4d7c",
+      "stdout": "Laptop: Premium\nMouse: Budget\nKeyboard: Standard\n\nTotal products: 3\nExpensive (>50): 2\nCheap (<=50): 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01a_glm_5_2_00_Computes_prime_numbers_up_to_a.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01a_glm_5_2_00_Computes_prime_numbers_up_to_a.aether",
+      "sha256": "ab7c97071ae60bf624544bd727fa0ce837b2798875efa1c5b343141b3e5ffecc",
+      "stdout": "Primes up to 30: 2 3 5 7 11 13 17 19 23 29 \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01a_glm_5_2_01_Parses_a_JSON_payload_of_books.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01a_glm_5_2_01_Parses_a_JSON_payload_of_books.aether",
+      "sha256": "2bbee10bcb2a78465ec099721a18888280e9bd8d2e1123247efa9c66842a4a37",
+      "stdout": "Total books sold: 6\nTotal revenue: 181.50\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01a_glm_5_2_03_Counts_occurrences_of_a_specif.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01a_glm_5_2_03_Counts_occurrences_of_a_specif.aether",
+      "sha256": "c5bf89d142a490e757992d40b9af3197eed2fbdaaa1e628d9fb0ab77b34d24ec",
+      "stdout": "Text: aether is fast and aether is safe\nOccurrences of 'aether': 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01a_glm_5_2_04_Uses_a_par_block_to_run_factor.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01a_glm_5_2_04_Uses_a_par_block_to_run_factor.aether",
+      "sha256": "a0c30ead97a7716f871723b2ad391b14eb5113d7c84dfa2042715220d47f054d",
+      "stdout": "Factorial(10) = 3628800\nFibonacci(10) = 55\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01a_glm_5_turbo_00_Implements_the_Sieve_of_Eratos.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01a_glm_5_turbo_00_Implements_the_Sieve_of_Eratos.aether",
+      "sha256": "740d9ed16386c2f47c935c16b943e1f76b3b31f3896e638010b02b10a6136794",
+      "stdout": "Primes up to 100 (25 found):\n2 3 5 7 11 13 17 19 23 29 31 37 41 43 47 53 59 61 67 71 73 79 83 89 97 \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01a_glm_5_turbo_01_Parses_a_JSON_array_of_financi.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01a_glm_5_turbo_01_Parses_a_JSON_array_of_financi.aether",
+      "sha256": "8b400efaf1e9274b19c933128873275ed447c3333abaf1df2159bc47f63a1832",
+      "stdout": "Category         | Txns | Total\n-----------------|------|----------\nfood | 3    | $43.25\ntransport | 2    | $8.25\nentertainment | 2    | $24.99\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01a_glm_5_turbo_02_Models_a_traffic_light_as_a_re.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01a_glm_5_turbo_02_Models_a_traffic_light_as_a_re.aether",
+      "sha256": "e8a13741556869337147549fc2ff5786661fff5cf71fd60d2389943ff3d57541",
+      "stdout": "Traffic Light Simulation (15 ticks):\n  tick 0 -> [green]\n  tick 1 -> [green]\n  tick 2 -> [green]\n  tick 3 -> [green]\n  tick 4 -> [green]\n  tick 0 -> [yellow]\n  tick 1 -> [yellow]\n  tick 0 -> [red]\n  tick 1 -> [red]\n  tick 2 -> [red]\n  tick 3 -> [red]\n  tick 0 -> [green]\n  tick 1 -> [green]\n  tick 2 -> [green]\n  tick 3 -> [green]\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01a_glm_5_turbo_03_Implements_a_stack_of_integers.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01a_glm_5_turbo_03_Implements_a_stack_of_integers.aether",
+      "sha256": "8794f71b12d548d93956c34f09cd3d8b9a908b6575fae0c29830d551008b011a",
+      "stdout": "Pushed squares: 1 4 9 16 25 36 49\nTop before pop: 49\nPopping all:\n  -> 49\n  -> 36\n  -> 25\n  -> 16\n  -> 9\n  -> 4\n  -> 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01a_glm_5_turbo_04_Simulates_compound_interest_gr.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01a_glm_5_turbo_04_Simulates_compound_interest_gr.aether",
+      "sha256": "66c7a78e127be4826bccf6cffedf1887e13947c3dc82841e3de0ec185beb4525",
+      "stdout": "Compound Growth: $1000.00 at 7.0%\n\n0 | ########## $1000.00\n1 | ########### $1070.00\n2 | ########### $1144.90\n3 | ############ $1225.04\n4 | ############# $1310.80\n5 | ############## $1402.55\n6 | ############### $1500.73\n7 | ################ $1605.78\n8 | ################# $1718.19\n9 | ################### $1838.46\n10 | #################### $1967.15\n11 | ##################### $2104.85\n12 | ####################### $2252.19\n13 | ######################## $2409.85\n14 | ########################## $2578.53\n15 | ############################ $2759.03\n16 | ############################## $2952.16\n17 | ################################ $3158.82\n18 | ################################## $3379.93\n19 | ##################################### $3616.53\n20 | ######################################## $3869.68\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_gemini_3_1_pro_previ_00_Demonstrates_Aether_s_dynamic_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_gemini_3_1_pro_previ_00_Demonstrates_Aether_s_dynamic_.aether",
+      "sha256": "df88aa9be54a870cf7eeb4087970538a422eb5419b1a877008cfd188d258c46f",
+      "stdout": "Factors of 84: 2 2 3 7 \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_gemini_3_1_pro_previ_01_Parses_a_JSON_array_of_objects.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_gemini_3_1_pro_previ_01_Parses_a_JSON_array_of_objects.aether",
+      "sha256": "cbe51bd96bfda45fb246f6251879892170d6053457bd068bcb02d2441ea9d88a",
+      "stdout": "Total Users: 3\nActive Users: 2\nAverage Score: 100.00\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_gemini_3_1_pro_previ_02_Implements_a_small_state_machi.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_gemini_3_1_pro_previ_02_Implements_a_small_state_machi.aether",
+      "sha256": "7950a2932a4d8178a8ec6523c02b591ceee9657f167c6296c3ff64685fa68a36",
+      "stdout": "               *               \n              * *              \n             *   *             \n            * * * *            \n           *       *           \n          * *     * *          \n         *   *   *   *         \n        * * * * * * * *        \n       *               *       \n      * *             * *      \n     *   *           *   *     \n    * * * *         * * * *    \n   *       *       *       *   \n  * *     * *     * *     * *  \n *   *   *   *   *   *   *   * \n* * * * * * * * * * * * * * * *\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_gemini_3_1_pro_previ_03_Models_a_simple_2D_particle_sy.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_gemini_3_1_pro_previ_03_Models_a_simple_2D_particle_sy.aether",
+      "sha256": "378e8a3ef51d9447ece8508bcdf004f7208cf5f81e8b8702e8b281094903a11f",
+      "stdout": "Start: x=0.00 y=10.00\nStep 1: x=0.50 y=7.55 (vy=-4.91)\nStep 2: x=1.50 y=2.64 (vy=-9.81)\nStep 3: x=3.00 y=-4.72 (vy=-14.71)\nStep 4: x=5.00 y=-14.53 (vy=-19.62)\nStep 5: x=7.50 y=-26.79 (vy=-24.53)\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_gemini_3_1_pro_previ_04_Simulates_parallel_workload_pr.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_gemini_3_1_pro_previ_04_Simulates_parallel_workload_pr.aether",
+      "sha256": "4bca05694866f0fb9dbf7b2d4fb3ab96b384b5a72d3cfca9bb8ae8866b400148",
+      "stdout": "Chunk 1 sum: 328350 (done: true)\nChunk 2 sum: 2318350 (done: true)\nChunk 3 sum: 6308350 (done: true)\nTotal sum of squares: 8955050\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_sched_claw2_a3b_code_00_a_pure_helper_that_computes_a_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_claw2_a3b_code_00_a_pure_helper_that_computes_a_.aether",
+      "sha256": "e1e999baa1b9152073c686dd402d5d4bcc3fdf987f149feff268c16c94439fa7",
+      "stdout": "fib(9) = 34\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_sched_claw2_a3b_code_01_a_record_type_with_methods_mod.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_claw2_a3b_code_01_a_record_type_with_methods_mod.aether",
+      "sha256": "b7792f24f383f45fbdc90146d326d46fac57217af6d5ad07a2061c181d423a09",
+      "stdout": "final count = 5\nwithin limits\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_sched_claw2_a3b_code_02_a_pure_helper_that_normalizes_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_claw2_a3b_code_02_a_pure_helper_that_normalizes_.aether",
+      "sha256": "3fef9f453aa0644eda53a6338380ae88b15e63524e6a4be7751e02ff96dfeec9",
+      "stdout": "raw 59 -> grade F\nraw 63 -> grade D\nraw 82 -> grade B\nraw 91 -> grade A\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_sched_claw2_a3b_code_03_parses_TOON_input_and_reports_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_claw2_a3b_code_03_parses_TOON_input_and_reports_.aether",
+      "sha256": "3ed8346959f6f8922c7999dc2bd0bf869240d85e3e1dc1ce6c8157fd04a6906b",
+      "stdout": "job 0: code = A\njob 1: code = EMPTY\njob 2: code = EMPTY\nmissing codes = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_sched_claw2_a3b_code_04_a_pure_helper_that_computes_th.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_claw2_a3b_code_04_a_pure_helper_that_computes_th.aether",
+      "sha256": "0906de149a6c569425a771fdb531cee4ee5f25f9fc4312bb836929797a200987",
+      "stdout": "mean = 83.7\ngood enough\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_sched_m5_devstral_00_A_prime_number_generator_using.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_m5_devstral_00_A_prime_number_generator_using.aether",
+      "sha256": "96d9cb205ac3dbf9ba8ae3c6370f9fcc9aeb93cb7a2290a0d64fd6737acbbc36",
+      "stdout": "Primes up to 100:\n2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_sched_m5_devstral_03_A_text_processing_utility_that.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_m5_devstral_03_A_text_processing_utility_that.aether",
+      "sha256": "b868d8f9447356111bfa7deb865f8a52596829f9d26b0eb1b49442fee5771eee",
+      "stdout": "Analysis of 'Hello World from Aether!':\nLength: 24\nWords: 4\nUppercase letters: 3\nWord density: 16.67%\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_sched_m5_qwen3_coder_01_A_TOON_based_JSON_processor_th.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_m5_qwen3_coder_01_A_TOON_based_JSON_processor_th.aether",
+      "sha256": "db014248d6269b07df712508a9020f11ec6f3e4f60e2bb094553018c006fcbfc",
+      "stdout": "Product Analysis:\n  Pen: $2.50 (budget)\n  Laptop: $1299.99 (premium)\n  Book: $15.00 (budget)\n  Tablet: $499.00 (premium)\n\nSummary:\n  Count: 4\n  Average price: $454.12\n  Min price: $2.50\n  Max price: $1299.99\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_sched_m5_qwen3_coder_02_Implements_a_simple_state_mach.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_m5_qwen3_coder_02_Implements_a_simple_state_mach.aether",
+      "sha256": "be76e2f031a96a37dd80f55912dca3ed15c65bda7b1559f71dfbdb37d4eb1ddd",
+      "stdout": "Traffic Light Simulator\n=======================\n\nState: red (30 ticks)\n..............................",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_sched_m5_qwen3_coder_04_A_file_analysis_tool_that_read.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_m5_qwen3_coder_04_A_file_analysis_tool_that_read.aether",
+      "sha256": "666d7af2df053b269dac7fd069c6dbe164440a6e502f7988844f3699af065519",
+      "stdout": "System Configuration Check\n===========================\n\nHome directory: /Users/mke\n\n[FOUND]  /etc/hosts\n[MISSING] /tmp/test_config.txt\n[MISSING] nonexistent_file.txt\n\nEnvironment variables:\n  PATH = /Users/mke/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/Users/mke/.bin:/Users/mke/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/opt/X11/bin://Applications/Topaz Photo.app/Contents/Resources/bin:/Library/Apple/usr/bin:/Applications/Docker.app/Contents/Resources/bin:/Users/mke/Go/bin:/usr/local/go/bin:/Users/mke/.lmstudio/bin:/Users/mke/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin:/Users/mke/Library/Application Support/Claude/local-agent-mode-sessions/d62eb563-13ed-4215-acd0-f8edfc42b512/a2a958be-f1d1-479c-9768-9f241645bd82/rpm/plugin_01FTLa86dhbVJ3HB1LdHdhN7/bin:/Users/mke/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/a2a958be-f1d1-479c-9768-9f241645bd82/d62eb563-13ed-4215-acd0-f8edfc42b512/bin:/Users/mke/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin\n  HOME = /Users/mke\n  USER = mke\n  SHELL = /bin/zsh\n\nCLI arguments (0):\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_sched_ornith_00_unspecified.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_ornith_00_unspecified.aether",
+      "sha256": "59c676e0a5413547f89f47bcd197204c94198294cb271a9d24dcb78c17daa272",
+      "stdout": "",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_sched_ornith_01_unspecified.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_ornith_01_unspecified.aether",
+      "sha256": "91c0d503800f370980f4b174064793bac42b28260f966246f6692c4b705603ef",
+      "stdout": "primes up to 100 (count: 2)\n2, 3\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_sched_ornith_02_unspecified.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_ornith_02_unspecified.aether",
+      "sha256": "c88903e54d5d052128c136a36fa07063e5b276372aa2aef7dfd3da4109901d3b",
+      "stdout": "Alice scored 95 -> excellent\nBob scored 72 -> good\nCarol scored 48 -> failing\nDan scored 88 -> good\nEve scored 61 -> passing\n----\ntotal: 5\nexcellent: 1\ngood: 2\npassing: 1\nfailing: 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_sched_ornith_03_unspecified.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_ornith_03_unspecified.aether",
+      "sha256": "3082df752ab69c8c63dffae70ee3318d74f38fca078d233c05c48a4532ba7ef0",
+      "stdout": "area1 = 25.00\narea2 = 24.00\narea3 = 24.00\ntri1 = equilateral\ntri2 = isosceles\ntri3 = scalene\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_sched_ornith_04_unspecified.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_ornith_04_unspecified.aether",
+      "sha256": "6fa4f6f1782c12e99e68e23b3200af06ac196c3ef3d25795560f874fcfbd9aaa",
+      "stdout": "Name      | Age | Score\n----------+-----+------\nAlice      | 30 | 95.5\nBob      | 25 | 82.0\nCarol      | 35 | 71.3\nDan      | 28 | 88.9\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_sched_ornith_08_unspecified.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_ornith_08_unspecified.aether",
+      "sha256": "ab47c19e986e54c9609fd50341ec3229057bb657498497a6718d053dff043766",
+      "stdout": "Shuffled deck, first 8 cards:\n7 of \u2665\nJ of \u2660\n3 of \u2663\n4 of \u2660\n8 of \u2660\n10 of \u2660\n9 of \u2666\nJ of \u2665\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_sched_ornith_09_unspecified.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_ornith_09_unspecified.aether",
+      "sha256": "ba33ae61a9936f6aa24e00db98bb4d28a08ad8a5a3cdff29c89bbb196b45c235",
+      "stdout": "Primes up to 100 (found 2):\n2\n3\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-01b_sched_ornith_11_unspecified.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_ornith_11_unspecified.aether",
+      "sha256": "afbfe2ec8bf6fc9466f49ab7d9ed5e8151fc8d482eace5f43fa1fa1f0e86f4c3",
+      "stdout": "Hand A:\n  7 of Hearts\n  J of Spades\n  3 of Clubs\n  4 of Spades\n  8 of Spades\nHand B:\n  10 of Spades\n  9 of Diamonds\n  J of Hearts\n  A of Clubs\n  10 of Diamonds\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19a_gemini_2_5_flash_00_Parses_a_TOON_array_of_tasks_c.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19a_gemini_2_5_flash_00_Parses_a_TOON_array_of_tasks_c.aether",
+      "sha256": "1317413a316122af8890235d32851909e98f2ed742112d6e8fd4b3cc35e8450c",
+      "stdout": "--- Task Summary ---\nTotal Tasks: 3\nActive Tasks: 2\nTotal Active Hours: 13\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19a_gemini_2_5_flash_lit_00_This_program_demonstrates_a_pu.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19a_gemini_2_5_flash_lit_00_This_program_demonstrates_a_pu.aether",
+      "sha256": "c82afddaaa3c2d4c63618509b2f166d839d1bc779df90bedd3f37e796b297fb4",
+      "stdout": "First 10 Fibonacci numbers:\n0\n1\n1\n2\n3\n5\n8\n13\n21\n34\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19a_gemini_2_5_flash_lit_01_This_program_simulates_a_simpl.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19a_gemini_2_5_flash_lit_01_This_program_simulates_a_simpl.aether",
+      "sha256": "381192a3dd9cd8b4591a7ef59ba718ecdd76cbd0e1ba8e864e42b653f2d0d101",
+      "stdout": "Initial stock for Widget: 100\nStock after adding 50: 150\nStock after removing 75: 75\nFailed to remove 100 items (stock: 75).\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19a_gemini_2_5_flash_lit_02_This_program_demonstrates_pars.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19a_gemini_2_5_flash_lit_02_This_program_demonstrates_pars.aether",
+      "sha256": "c2fb59f9173ff83d6033c13a0113e1ce3075c68990f222ae0d5c083e68a63817",
+      "stdout": "Product: Laptop\nPrice: 1200.50\nIn Stock: true\nQuantity: 0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19a_gemini_2_5_flash_lit_03_This_program_showcases_the_use.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19a_gemini_2_5_flash_lit_03_This_program_showcases_the_use.aether",
+      "sha256": "e116be5bc2f2dc10e23f3721d8fc5f757bc03bb845e75f9c0a830ce18ad884af",
+      "stdout": "Factorial of 5 is 120\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19a_gemini_2_5_flash_lit_04_This_program_demonstrates_effe.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19a_gemini_2_5_flash_lit_04_This_program_demonstrates_effe.aether",
+      "sha256": "effc509723cedd820a4cf7b5e4db6381b417a4c0a86b778e9893196cced0a45c",
+      "stdout": "Logged: INFO: System started\nLogged: WARN: High CPU usage detected\nLogged: ERROR: Disk full\nLog written to app_log.txt\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19b_m5t_gemma4_12b_00_This_program_implements_a_prim.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19b_m5t_gemma4_12b_00_This_program_implements_a_prim.aether",
+      "sha256": "da03e3b50ecfbd085b39c0cd3b0a599e0fc11a34696e3b47526cee7ce5d6512c",
+      "stdout": "Primes below 100:\n2\n3\n4\n5\n7\n9\n11\n13\n17\n19\n23\n25\n29\n31\n37\n41\n43\n47\n49\n53\n59\n61\n67\n71\n73\n79\n83\n89\n97\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19b_m5t_gemma4_12b_01_This_program_defines_a_Record_.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19b_m5t_gemma4_12b_01_This_program_defines_a_Record_.aether",
+      "sha256": "f55288d35a7323da82da8f3d9d2964b8db166e151b09fc1883dbb64f347be2e8",
+      "stdout": "Total cost: 165\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19b_m5t_gemma4_12b_02_This_program_parses_a_JSON_str.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19b_m5t_gemma4_12b_02_This_program_parses_a_JSON_str.aether",
+      "sha256": "9ca0a8d06f505c4cb71caa43a67ae923db3aa171583e33447f041fd996b9ee8b",
+      "stdout": "Active users:\n - Alice\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19b_m5t_gemma4_12b_03_This_program_demonstrates_a_de.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19b_m5t_gemma4_12b_03_This_program_demonstrates_a_de.aether",
+      "sha256": "5f2c022c2dc957cceda4a438ac31f97d948eb1df58c25dfc1d13a1bf08c3a14b",
+      "stdout": "Normalized Scores:\nScore 85 -> 85.00\nScore 92 -> 92.00\nScore 40 -> 40.00\nScore 100 -> 100.00\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19b_m5t_qwen3_5_9b_02_Bank_account_record_with_metho.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19b_m5t_qwen3_5_9b_02_Bank_account_record_with_metho.aether",
+      "sha256": "bd6d6fd7c616bf79c69b6f83de29cc74ef5212b88cd13ed27eeb90506fdbb6bf",
+      "stdout": "Bank Account Simulation\nAccount: ACC-12345\nAfter depositing $1000: ACC-12345 = 1000.00\nAfter depositing $500: 1500.000000 balance\nWithdrawal of $300: 1200.000000 remaining\nWithdrawal of $200: 1000.000000 remaining\nFinal balance: 1000.00\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19b_m5t_qwen3_6_35b_a3b_00_Parse_a_JSON_array_of_job_appl.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19b_m5t_qwen3_6_35b_a3b_00_Parse_a_JSON_array_of_job_appl.aether",
+      "sha256": "0da1f7c9b40582f1f7ac61fab4661871e3e7aa3b2c972fce47105cfcdbb83e3b",
+      "stdout": "Applicant Scorecard:\nID: A | Score: 25 | Blocked\nID: B | Score: 13 | Blocked\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19b_m5t_qwen3_6_35b_a3b_01_Find_the_starting_number_under.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19b_m5t_qwen3_6_35b_a3b_01_Find_the_starting_number_under.aether",
+      "sha256": "34953db21c8907b7b5138ba47809983cd0f1d2e888463f609900a02d07cbf752",
+      "stdout": "Longest Collatz under 100 starts at 97 with 118 steps.\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19b_m5t_qwen3_6_35b_a3b_02_Simulate_a_vending_machine_usi.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19b_m5t_qwen3_6_35b_a3b_02_Simulate_a_vending_machine_usi.aether",
+      "sha256": "8cd9999a1b4cfc7e24f0e4d52a25c500a3201d75113284c6df247624bfb7a896",
+      "stdout": "Inserting 200 coins...\nTrying purchase...\nResult: Dispensed\nTrying purchase again...\nResult: Dispensed\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19b_m5t_qwen3_6_35b_a3b_03_Validate_triangle_inequality_a.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19b_m5t_qwen3_6_35b_a3b_03_Validate_triangle_inequality_a.aether",
+      "sha256": "23955903077500142b4aed01304135300a9b902b4a2a1ee9ce8ae9200f994f73",
+      "stdout": "3-4-5 area: 6.00\n1-2-10 area: 0.00\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19b_m5t_qwen3_6_35b_a3b_04_Generate_a_formatted_text_rece.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19b_m5t_qwen3_6_35b_a3b_04_Generate_a_formatted_text_rece.aether",
+      "sha256": "373e5e2f5a2c7ee77608355a38c4ed8ee1c8e7bf6701a934570b5fab063bd29b",
+      "stdout": "--- RECEIPT ---\nItem  Price  Qty  Total\nApple  1.50  3  4.50\nBanana  2.00  2  4.00\nCherry  0.75  1  0.75\n              ---------\nSubtotal:     9.25\nTax (8%):     0.74\nTotal:        9.99\n--- --------- ---\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19b_m5t_qwen3_coder_30b_00_Demonstrates_a_pure_helper_wit.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19b_m5t_qwen3_coder_30b_00_Demonstrates_a_pure_helper_wit.aether",
+      "sha256": "af0a46add0b9976b2cac22c1417855a52807092ea99595cb46bb177b0301163c",
+      "stdout": "Fibonacci(10) = 34\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19b_m5t_qwen3_coder_30b_01_Implements_a_simple_text_based.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19b_m5t_qwen3_coder_30b_01_Implements_a_simple_text_based.aether",
+      "sha256": "1259a6ff65665be776232924707af3081816bbe7be93e42f98d5b95e84062a66",
+      "stdout": "3 + 4 = 7.00\n10 / 2 = 5.00\n5 * 6 = 30.00\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19b_m5t_qwen3_coder_30b_02_Parses_a_JSON_payload_represen.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19b_m5t_qwen3_coder_30b_02_Parses_a_JSON_payload_represen.aether",
+      "sha256": "92536f68c22e0f255156f0d5d5f0903cb912d94f31edf3193170781662d8ecdd",
+      "stdout": "Average age: 37.0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19b_m5t_qwen3_coder_30b_03_Simulates_a_simple_counter_wit.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19b_m5t_qwen3_coder_30b_03_Simulates_a_simple_counter_wit.aether",
+      "sha256": "e06adb094de8fb8f44bd10d7be908960450bf29d01a1a9820684808299551d5b",
+      "stdout": "Initial value: 0\nAfter bump: 1\nAfter bump: 2\nAfter reset: 0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19b_m5t_qwen3_coder_30b_04_Performs_a_simple_word_frequen.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19b_m5t_qwen3_coder_30b_04_Performs_a_simple_word_frequen.aether",
+      "sha256": "3927121ede30232d654a2c5ac62533850ec3373ff5b0d565e3dfa92ac263ed69",
+      "stdout": "Unique words found: 1\nWord 0: \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19c_claw3_ornith_1_0_35b_00_A_pure_by_contract_determinist.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19c_claw3_ornith_1_0_35b_00_A_pure_by_contract_determinist.aether",
+      "sha256": "26005e4504bd8ff0b137448163c99d0ec061fb5afd5751f863b0564feaac3e5e",
+      "stdout": "Park-Miller mean over 10000 samples: 0.502620\nExpected ~= 0.500000\nFinal state: 710614072\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19c_claw3_ornith_1_0_35b_03_A_small_state_machine_simulati.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19c_claw3_ornith_1_0_35b_03_A_small_state_machine_simulati.aether",
+      "sha256": "8ac021027969b4ba0d66ffa8416bfc8d1b27f5a08e02a19d5142d7c239c47919",
+      "stdout": "Initial state: Stock: 5 | Balance: 0 | Sales: 0\nAfter 3 vend (balance=1): Stock: 2 | Balance: 1 | Sales: 3\nAfter failed vend: Stock: 2 | Balance: 1 | Sales: 3\nAfter restock + 5 vends: Stock: 7 | Balance: 1 | Sales: 8\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_harvest/07-19c_claw3_ornith_1_0_35b_04_A_concurrent_prime_sieve_using.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07-19c_claw3_ornith_1_0_35b_04_A_concurrent_prime_sieve_using.aether",
+      "sha256": "c4b34cfe5a91fab0165de4b61990e959536f427494a786f7be859d646252f675",
+      "stdout": "Primes in [2, 10000): \nRange [2, 5000): count=669 last=4999\nRange [5000, 10000): count=560 last=9973\nTotal primes: 1229\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-19"
+        ]
+      }
     }
   ]
 }
