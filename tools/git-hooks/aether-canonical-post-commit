@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Installed as the canonical emkey1/aether standalone clone's post-commit hook
+# (by tools/install_aether_canonical_sync.sh in PBuild). Pushes the commit,
+# then syncs PBuild's components/aether submodule checkout to match -- so the
+# canonical repo and the PBuild submodule copy never silently drift (per user
+# directive, 2026-07-19). Best-effort, non-blocking: never fails the commit
+# itself. Disable with AETHER_CANONICAL_SYNC=0.
+[ "${AETHER_CANONICAL_SYNC:-1}" = "0" ] && exit 0
+SYNC_SCRIPT="__PBUILD_SYNC_SCRIPT__"
+if git push origin HEAD 2>&1; then
+    if [ -x "$SYNC_SCRIPT" ]; then
+        nohup "$SYNC_SCRIPT" > /tmp/aether_canonical_sync_trigger.log 2>&1 &
+        echo "[post-commit] pushed; syncing PBuild submodule in the background (log: /tmp/aether_canonical_sync.log)"
+    else
+        echo "[post-commit] pushed, but sync script not found/executable at $SYNC_SCRIPT -- sync PBuild manually" >&2
+    fi
+else
+    echo "[post-commit] push failed -- PBuild submodule sync skipped. Push manually, then run: $SYNC_SCRIPT" >&2
+fi
+exit 0
