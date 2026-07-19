@@ -11146,6 +11146,20 @@
           "imported_2026-07-19"
         ]
       }
+    },
+    {
+      "source_path": "/tmp/aether_batch10_combined.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_batch10_combined.aether",
+      "sha256": "1b2ea6c9eb6b20130de264dea33e96d2ea5b92f8db7dafb8778d7c25acdb3818",
+      "stdout": "meter name = dataset\ncount = 5\navg = 41.20\nspan = 101.25\nband = bronze\nchosen = alpha / 12.50 / true\nhits = 5\nramp pick = 16\nparity = true\nflags total = 5\ncopy demo = eth\npos demo = 3\nstringofchar demo = *****\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
     }
   ]
 }
