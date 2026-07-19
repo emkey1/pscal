@@ -8512,6 +8512,176 @@
           "excluded_network_nondeterministic"
         ]
       }
+    },
+    {
+      "source_path": "/tmp/aether_batch6_examples/13_prime_generator.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/13_prime_generator.aether_05a1f3c14a4a",
+      "sha256": "05a1f3c14a4a4947e38e2539654af2f722c2fa39d27ffb0206a0dda47924f8d4",
+      "stdout": "Primes up to 50: 2 3 5 7 11 13 17 19 23 29 31 37 41 43 47 \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch6_examples/14_json_parser.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/14_json_parser.aether_37fe2aa06ef2",
+      "sha256": "37fe2aa06ef209a66269d70a4374f3fd9586c3947b0d005baef6bc44b160f90d",
+      "stdout": "Parsed JSON kind: string\nParsed JSON value: Alice\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch6_examples/15_grayscale.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/15_grayscale.aether_487a2344494b",
+      "sha256": "487a2344494b45da022971085f4d7c40636a1f7ff1eb9eb44bd6e5c9e69c023a",
+      "stdout": "pixel 0: r=0 g=0 b=0\npixel 1: r=55 g=55 b=55\npixel 2: r=110 g=110 b=110\npixel 3: r=165 g=165 b=165\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch6_examples/16_key_value_store.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/16_key_value_store.aether_1c267b2b4a2e",
+      "sha256": "1c267b2b4a2e2f739b028ce7eb720ba30935526b513be85d7f1c95ff6fceb5c2",
+      "stdout": "Name: Alice\nAge: 30\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch6_examples/17_vigenere_cipher.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/17_vigenere_cipher.aether_fc1eaad3d705",
+      "sha256": "fc1eaad3d7055a864aeb5cbdcdf7ee3de302fa13742959ebed7d0070c05b194e",
+      "stdout": "Original: hello\nEncrypted: zincs\nDecrypted: hello\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch6_examples/18_markov_chain.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/18_markov_chain.aether_3d7c6056996f",
+      "sha256": "3d7c6056996f1c49280206583d7e71644976408a15cab74f3a8b37ea711d7eb2",
+      "stdout": "Generated: the dog sat on the dog sat on the cat sat\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch6_examples/19_genetic_algorithm.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/19_genetic_algorithm.aether_fde310fc93fd",
+      "sha256": "fde310fc93fd9ea9ef6fe27ff381c080c57bf83d0985ec45a72311d3b789b0a9",
+      "stdout": "Solution: 97 60 53 \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch6_examples/20_web_scraper.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/20_web_scraper.aether_27e2b770eecd",
+      "sha256": "27e2b770eecd9b9342589a0a28ba3c77c9ef323d2bb2cf4f62584c990a15c885",
+      "stdout": "Links found: https://iana.org/domains/example \n",
+      "metadata": {
+        "canonical": false,
+        "fixture_required": false,
+        "assumption_bearing": true,
+        "tags": [
+          "imported_2026-07-19",
+          "excluded_nondeterministic"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch6_examples/21_neural_network.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/21_neural_network.aether_fa477011cdac",
+      "sha256": "fa477011cdacd2c411d8218772e1a1d05cdfb8ac437398711958aca7301d622f",
+      "stdout": "Output: 0.4013 0.8176 \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch6_examples/22_game_of_life_random.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/22_game_of_life_random.aether_9e9d276805e0",
+      "sha256": "9e9d276805e05efea8b10346676d61a1d7b5280049572a7032eea272497efaaf",
+      "stdout": "...........X.XXX..X.\n.....XXX........XX..\nX...XX.XX..X.......X\nXXX.XX....X.X....X.X\n..X.....X.....X.X...\n..X.....X.X..X.X...X\n.XX.X..X.......X.X.X\nXX........X....X..X.\n.XX.......X......XXX\n...X...X.X....X...X.\n...............X....\n......XX......X..XX.\n....XX.XX.......X...\n.X..XXXX............\n..XX.....X........X.\n...X..........XXX...\n..X......X....X.....\nX.X...............X.\n.XX..............XXX\n..................XX\n....................\n.......X.......X....\n.....X.XX........X..\n....XXXX............\n..XXXXX.............\n...X................\n..............X.....\n.X..................\n.XX..............XXX\n..................XX\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch6_examples/24_unit_tests.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/24_unit_tests.aether",
+      "sha256": "f35baa8805edd197c5e712f68d858d5f83b7436a8ea41109602a31d7c30717d5",
+      "stdout": "[PASS] 2 + 2 = 4\n[PASS] 5 > 3\n[PASS] Hello starts with H\nPassed: 3/3\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch6_examples/25_logger.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/25_logger.aether",
+      "sha256": "637970f808d4835128c08950278a534483ab041061159a4e6d183e4c7edf5b9f",
+      "stdout": "12:0:40 [INFO] Application started\n12:0:40 [WARN] Low memory detected\n",
+      "metadata": {
+        "canonical": false,
+        "fixture_required": false,
+        "assumption_bearing": true,
+        "tags": [
+          "imported_2026-07-19",
+          "excluded_nondeterministic"
+        ]
+      }
     }
   ]
 }
