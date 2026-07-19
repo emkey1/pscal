@@ -67,14 +67,18 @@ if ! retry_git git -C "$SUBMODULE_DIR" merge --ff-only origin/main; then
 fi
 AFTER="$(git -C "$SUBMODULE_DIR" rev-parse HEAD 2>/dev/null)"
 
-if [ "$BEFORE" = "$AFTER" ]; then
-    log "already in sync at $AFTER"
-    exit 0
-fi
-
-SUBJECT="$(git -C "$SUBMODULE_DIR" log -1 --format='%s' "$AFTER")"
+# Deliberately NOT short-circuiting on BEFORE == AFTER here: that used to
+# exit immediately with "already in sync", but BEFORE/AFTER only reflect
+# whether *this invocation's* fetch+merge moved the submodule -- if an
+# earlier run already fast-forwarded the submodule but died (e.g. the
+# git-index race below) before committing the gitlink bump in PBuild, the
+# submodule can be fully caught up while PBuild's own tracked pointer is
+# still stale and uncommitted. Falling through to the actual
+# `git status --porcelain components/aether` check below covers both cases
+# correctly: nothing to commit when truly in sync, a pending bump otherwise.
 cd "$PBUILD_ROOT" || exit 0
 if [ -n "$(git status --porcelain components/aether)" ]; then
+    SUBJECT="$(git -C "$SUBMODULE_DIR" log -1 --format='%s' "$AFTER")"
     if git add components/aether \
         && git commit -m "chore: bump aether gitlink -- $SUBJECT" >>"$LOG" 2>&1 \
         && git push >>"$LOG" 2>&1; then
@@ -83,5 +87,5 @@ if [ -n "$(git status --porcelain components/aether)" ]; then
         log "WARNING: submodule fast-forwarded to ${AFTER:0:7} but the PBuild gitlink commit/push failed -- check $LOG and finish manually"
     fi
 else
-    log "submodule moved to ${AFTER:0:7} but PBuild's gitlink already matched (unexpected, no-op)"
+    log "already in sync at $AFTER"
 fi
