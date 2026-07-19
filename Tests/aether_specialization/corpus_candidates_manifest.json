@@ -7684,6 +7684,496 @@
         ],
         "notes": "par block with direct calls and one record per branch (PAR-001/PAR-002 canon); results combined after the block. First par usage in the corpus. Added 2026-07-01, verified with build/bin/aether (2026-07-01-8)."
       }
+    },
+    {
+      "source_path": "/tmp/aether_examples_verify/01_fib_spiral.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/01_fib_spiral.aether",
+      "sha256": "c3def9c64c965b7a13b596b0d63732af9e2f517bfb3cc29f71f0cc40449605a0",
+      "stdout": "Fibonacci Spiral (first 10):\n----------------------------\n          *\n         *\n         *\n         *\n        *\n       *\n     *\n  *\n*\n*\n----------------------------\nDone.\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_examples_verify/02_json_explorer.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/02_json_explorer.aether",
+      "sha256": "7ec0bb8b6ae295ff7a1f5adeecb42b65591f43c11b3ab49eda9a714c0a0916fa",
+      "stdout": "Processing Users:\n  ID: 1 | Status: OK | Detail: A\n  ID: 2 | Status: ERROR | No details\nTotal processed: 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_examples_verify/03_concurrent_tally.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/03_concurrent_tally.aether",
+      "sha256": "2985eb9e0e21f4e84c107679bdd647804c9e078728fd0b3cc3b9317c8353868f",
+      "stdout": "Starting concurrent tasks...\nWorker Alpha finished sum: 4950\nWorker Beta finished sum: 19900\nWorker Gamma finished sum: 44850\nAll tasks complete.\nAlpha total: 4950\nBeta total: 19900\nGamma total: 44850\nGrand Total: 69700\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_examples_verify/04_math_evaluator.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/04_math_evaluator.aether",
+      "sha256": "586be0f71176573c36860bd41214a22a3d686d35b5e07f68d75c01cdd26103ac",
+      "stdout": "Angle | Sin | Cos | Tan\n------------------------\n0 | 0.0000 | 1.0000 | 0.0000\n15 | 0.2588 | 0.9659 | 0.2679\n30 | 0.5000 | 0.8660 | 0.5774\n45 | 0.7071 | 0.7071 | 1.0000\n60 | 0.8660 | 0.5000 | 1.7321\n75 | 0.9659 | 0.2588 | 3.7321\n------------------------\nNatural Log of 2.0: 0.693147\nSquare root of 2.0: 1.414214\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_examples_verify/05_bubble_sort.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/05_bubble_sort.aether",
+      "sha256": "0913e7c832a0b66c603a59c9b03a10e3b662fcc5270516bee9635d2d86dcbd2a",
+      "stdout": "Original: \n64 \n34 \n25 \n12 \n22 \n11 \n90 \n\nSorted:   \n11 \n12 \n22 \n25 \n34 \n64 \n90 \n\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_examples_verify/06_env_inspector.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06_env_inspector.aether",
+      "sha256": "bc7d68e58fe39c3fe242e51058ceab8cabb7e9dafc90146dddb866193d3953b3",
+      "stdout": "=== Environment Inspector ===\nCurrent Dir: /private/tmp\nHOME: /Users/mke\nUser: mke\nArgument count: 0\n=== End ===\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_examples_verify/07_random_walk.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07_random_walk.aether",
+      "sha256": "b0a25d5c61fd632ca5e4d7a5bde814e0238fe9d045b59ec59942a616687c4c6e",
+      "stdout": "Simulating 20 steps of a 1D Random Walk:\nStart at 0\nStep 1: 1 (Max: 1, Min: 0)\nStep 2: 0 (Max: 1, Min: 0)\nStep 3: -1 (Max: 1, Min: -1)\nStep 4: -2 (Max: 1, Min: -2)\nStep 5: -1 (Max: 1, Min: -2)\nStep 6: -2 (Max: 1, Min: -2)\nStep 7: -1 (Max: 1, Min: -2)\nStep 8: -2 (Max: 1, Min: -2)\nStep 9: -3 (Max: 1, Min: -3)\nStep 10: -4 (Max: 1, Min: -4)\nStep 11: -5 (Max: 1, Min: -5)\nStep 12: -4 (Max: 1, Min: -5)\nStep 13: -3 (Max: 1, Min: -5)\nStep 14: -4 (Max: 1, Min: -5)\nStep 15: -3 (Max: 1, Min: -5)\nStep 16: -4 (Max: 1, Min: -5)\nStep 17: -5 (Max: 1, Min: -5)\nStep 18: -4 (Max: 1, Min: -5)\nStep 19: -3 (Max: 1, Min: -5)\nStep 20: -4 (Max: 1, Min: -5)\nFinal Position: -4\nRange: -5 to 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_examples_verify/08_toon_analyzer.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/08_toon_analyzer.aether",
+      "sha256": "b57542045a5c466bff86692d9562bf560c45301cd90000ecf2f439c14dc33cf4",
+      "stdout": "Analyzing JSON structure:\n  Key: name -> Type: TEXT\n  Key: count -> Type: INT\n  Key: active -> Type: BOOL\n  Key: data -> Type: ARRAY\n  Key: empty -> Type: NULL\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_examples_verify/09_string_transformer.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/09_string_transformer.aether",
+      "sha256": "4c450424d5df9213828845f432541f40bbee74a8a8149984b149a681fcbf525e",
+      "stdout": "Log Code Extraction:\nLine 0: A123\nLine 1: B99\nLine 2: C00\nLine 3: NONE\nLine 4: D01\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_examples_verify/10_http_stream.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/10_http_stream.aether",
+      "sha256": "ff708bafe6f111160033caf933410c85e65d933af41c5a264bda4e2386f7da8d",
+      "stdout": "Request failed with status: 503\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_examples_verify/11_factorial_prime.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/11_factorial_prime.aether",
+      "sha256": "280dc359c6d88bb306e90d5dacdab69ed253bdd9779831f8cccf32f5361dd320",
+      "stdout": "Number | Prime | Factorial\n---------------------------\n2 | Yes | 2\n3 | Yes | 6\n4 | No | 24\n5 | Yes | 120\n6 | No | 720\n7 | Yes | 5040\n8 | No | 40320\n9 | No | 362880\n10 | No | 3628800\n11 | Yes | 39916800\n12 | No | 479001600\n13 | Yes | 6227020800\n14 | No | 87178291200\n15 | No | 1307674368000\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_examples_verify/12_filesystem_walker.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/12_filesystem_walker.aether",
+      "sha256": "7bede62e7e868f96941caebc883677731f77adf238f16ee7aaff85c4c7065f1c",
+      "stdout": "System Path Check:\nEXISTS: /etc/hosts\nEXISTS: /etc/passwd\nEXISTS: /tmp\nEXISTS: /var/log\nMISSING: /nonexistent_file_xyz\nEXISTS: /private/tmp\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_dozen_verify/aether_dozen_examples/01_kaprekar_6174.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/01_kaprekar_6174.aether",
+      "sha256": "86ecede8b04943af8ae6ddee5a9ea0bc32c83899288ab7c47a77d84501ef920b",
+      "stdout": "Kaprekar walk from 3524\n3524 -> 3087\n3087 -> 8352\n8352 -> 6174\nReached 6174 in 3 steps.\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_dozen_verify/aether_dozen_examples/02_balanced_ternary_scale.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/02_balanced_ternary_scale.aether",
+      "sha256": "0332f7c664e975144eb58e6cd300e845d11b52d2d2bc13e2526b83bea8f28008",
+      "stdout": "83 in balanced ternary is +00+-\nPlace the object on one pan, then:\n  put weight 1 beside the object\n  put weight 3 on the opposite pan\n  put weight 81 on the opposite pan\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_dozen_verify/aether_dozen_examples/03_look_and_say.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/03_look_and_say.aether",
+      "sha256": "2c57d350b806e3579f6b49e42de0b9aa08619facbb6df790a6446562afc13531",
+      "stdout": "1: 1  length=1\n2: 11  length=2\n3: 21  length=2\n4: 1211  length=4\n5: 111221  length=6\n6: 312211  length=6\n7: 13112221  length=8\n8: 1113213211  length=10\n9: 31131211131221  length=14\n10: 13211311123113112211  length=20\n11: 11131221133112132113212221  length=26\n12: 3113112221232112111312211312113211  length=34\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_dozen_verify/aether_dozen_examples/04_toroidal_life.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/04_toroidal_life.aether",
+      "sha256": "a0b89abef80b051e494f1539c6890b69f69fa22a17607342ae6b642742cbcd77",
+      "stdout": "generation 0\n.#..................\n..#.................\n###.................\n....................\n....................\n....................\n....................\n....................\n....................\n....................\ngeneration 1\n....................\n#.#.................\n.##.................\n.#..................\n....................\n....................\n....................\n....................\n....................\n....................\ngeneration 2\n....................\n..#.................\n#.#.................\n.##.................\n....................\n....................\n....................\n....................\n....................\n....................\ngeneration 3\n....................\n.#..................\n..##................\n.##.................\n....................\n....................\n....................\n....................\n....................\n....................\ngeneration 4\n....................\n..#.................\n...#................\n.###................\n....................\n....................\n....................\n....................\n....................\n....................\ngeneration 5\n....................\n....................\n.#.#................\n..##................\n..#.................\n....................\n....................\n....................\n....................\n....................\ngeneration 6\n....................\n....................\n...#................\n.#.#................\n..##................\n....................\n....................\n....................\n....................\n....................\ngeneration 7\n....................\n....................\n..#.................\n...##...............\n..##................\n....................\n....................\n....................\n....................\n....................\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_dozen_verify/aether_dozen_examples/05_nontransitive_dice.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/05_nontransitive_dice.aether",
+      "sha256": "8592053523cb6b80210d6339211313fe7e0ee771ba3c49255cee23952063df62",
+      "stdout": "A beats B in 24/36 matchups (66.67%)\nB beats C in 24/36 matchups (66.67%)\nC beats D in 24/36 matchups (66.67%)\nD beats A in 24/36 matchups (66.67%)\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_dozen_verify/aether_dozen_examples/06_taxicab_hunter.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06_taxicab_hunter.aether",
+      "sha256": "51f215eab9a7c8b16d18dc66740f6e1f0813236cd5c352cbd0055a763f6f74fa",
+      "stdout": "1729 = 1^3 + 12^3 = 9^3 + 10^3\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_dozen_verify/aether_dozen_examples/07_two_two_four_alphametic.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07_two_two_four_alphametic.aether",
+      "sha256": "a730d52031ffb80bc1c908a5bc87e36c6f36e95c3a8c0e7eae4c3680391b1d0d",
+      "stdout": "734 + 734 = 1468\n765 + 765 = 1530\n836 + 836 = 1672\n846 + 846 = 1692\n867 + 867 = 1734\n928 + 928 = 1856\n938 + 938 = 1876\nsolutions = 7\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_dozen_verify/aether_dozen_examples/08_gregorian_weekday.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/08_gregorian_weekday.aether",
+      "sha256": "d159a961bee8d89fcd9043c9f8fc8795fd738c57457a9ccf771cfad7b08fa7ad",
+      "stdout": "1969-7-20 is a Sunday\n2000-1-1 is a Saturday\n2038-1-19 is a Tuesday\n2400-2-29 is a Tuesday\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_dozen_verify/aether_dozen_examples/09_recaman_sequence.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/09_recaman_sequence.aether",
+      "sha256": "1ad6eda11e0638cf54e44caac466eee6b42f83f581a8b91f5757150415840f95",
+      "stdout": "0 1 3 6 2 7 13 20 12 21\n11 22 10 23 9 24 8 25 43 62\n42 63 41 18 42 17 43 16 44 15\n45 14 46 79 113 78 114 77 39 78\n38 79 37 80 36 81 35 82 34 83\n33 84 32 85 31 86 30 87 29 88\nrepeated terms among the first 60 = 4\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_dozen_verify/aether_dozen_examples/10_dream_anomaly_auditor.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/10_dream_anomaly_auditor.aether",
+      "sha256": "ed4a5db4f2f7ce5f56db0301914fbd58de1b058f90c7f20c862d8f169b0aa371",
+      "stdout": "dream 0: Library of Rain -> anomaly score 11\ndream 1: Bus to Tuesday -> anomaly score 0\ndream 2: The Staircase That Remembered -> anomaly score 5\nhigh-risk dreams = 1/3\naverage anomaly score = 5.33\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_dozen_verify/aether_dozen_examples/11_parallel_perfect_numbers.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/11_parallel_perfect_numbers.aether",
+      "sha256": "bd6082fe0f0b3d0f6b73aa8ad0d7a848f2d9b0e4fa13521bb520886ede4c9ea1",
+      "stdout": "first checked 2499 values in 2..2500\n  perfect number: 6\n  perfect number: 28\n  perfect number: 496\nsecond checked 2500 values in 2501..5000\nthird checked 2500 values in 5001..7500\nfourth checked 2500 values in 7501..10000\n  perfect number: 8128\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_dozen_verify/aether_dozen_examples/12_rover_black_box.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/12_rover_black_box.aether",
+      "sha256": "bee6ea01425cb526e239129ccff56c58ff46274da06544b9922a886e59445889",
+      "stdout": "mission = Asterion-4\nbattery = 21%\ntemperature = -47.5 C\ntilt = 18.2 degrees\nrisk = 9 -> abort and phone home\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_miner_examples/01_collatz.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/01_collatz.aether",
+      "sha256": "d345862eae83e6944577b14fd52a69905a9c8b14348f31962018c79b6126c3a4",
+      "stdout": "longest chain under 100 starts at 97 with 118 steps\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_miner_examples/02_circle_math.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/02_circle_math.aether",
+      "sha256": "3b490bb51904a2f48fb1721ef167434ef4f65fb60d5a833114a771400c8786e1",
+      "stdout": "radius        = 2.50\narea          = 19.6350\ncircumference = 15.7080\n3-4-5 hypotenuse = 5.0\narea as text  = 19.63\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_miner_examples/03_log_parser.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/03_log_parser.aether",
+      "sha256": "b6b6a1c096e281a914e2fae7bf91f5a5946c423441f4c397363d7fc848f57363",
+      "stdout": "[INFO] worker started\n[WARN] queue depth 80%\n[ERROR] disk full\n[UNKNOWN] malformed line\nerror count = 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_miner_examples/04_array_stats.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/04_array_stats.aether",
+      "sha256": "944d3250c8226fe24d14ff09e302d0e093a50d1ef28f572c0d7007bbab6a76cd",
+      "stdout": "count   = 7\nsum     = 511\nmin     = 42\nmax     = 97\nmean    = 73.00\nclamped = 73\nsquares length = 7\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_miner_examples/05_bank_account.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/05_bank_account.aether",
+      "sha256": "a3d8f5d89c88c8b26fb4a3f731897b8db65d34789aa98d36a8622223ce6bdf13",
+      "stdout": "Ada status=premium balance=10500\nfirst withdrawal ok: true | second ok: false\noverdraft attempts: 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_miner_examples/06_contracts.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06_contracts.aether",
+      "sha256": "2c5916c6f1d0583f420d2446f8bf84c7515c97d94e92c32af586e8726615c749",
+      "stdout": "clamp 137 -> 100\ntriangle 10 -> 55\nkept[0] = 7\nkept[1] = 12\nkept[2] = 5\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_miner_examples/07_tuples.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07_tuples.aether",
+      "sha256": "97a1ed2f60628bfbb4ab8b220ff3aca1bad24bcaad2be15e7521ca4b1d0c2166",
+      "stdout": "17 / 5 = 3 remainder 2\nordered(9, 4) = (4, 9)\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_miner_examples/08_toon_sensor_sweep.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/08_toon_sensor_sweep.aether",
+      "sha256": "a3bb85f147d1dc59fce8d59e58c67d487871cdb5e9b7ba0edc341f176cfc0e04",
+      "stdout": "alpha temp=82.5 -> HOT\nbeta temp=4.0 -> COLD\ngamma temp=21.3 -> OK\nsites=3 hot=1 cold=1 ok=1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_miner_examples/09_toon_order_board.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/09_toon_order_board.aether",
+      "sha256": "122cbdef1707f1b314747de0c02ff39005c11628a695710a65a88a511b004892",
+      "stdout": "A1 shipped 49.50 tier=gold\nB2 pending 12.00 tier=standard\nC3 shipped 8.25 tier=standard\nshipped=2 pending=1 revenue=57.75\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_miner_examples/10_par_concurrency.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/10_par_concurrency.aether",
+      "sha256": "eb2db39c7516ef34690ccf54e670dddad59783bee0c343741a5f05b8c60c251d",
+      "stdout": "sum 0..2000        = 1999000\nsquares 0..200     = 2646700\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_miner_examples/12_host_awareness.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/12_host_awareness.aether",
+      "sha256": "47eb6516478883be669f3a8c545ed7c79c7871a90aa477c964c780f0d5b948a3",
+      "stdout": "program: \nargs:    0\nHOME = /Users/mke | WORKERS = 4\ncwd  = /private/tmp\n/etc/hosts is present\ncreated aether_out/\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
     }
   ]
 }

@@ -57,6 +57,12 @@ def infer_support_files(source: str, fixtures_dir: pathlib.Path) -> dict[str, st
     fixture_names.update(re.findall(r'toon_parse_file\("([^"]+)"\)', source))
     fixture_names.update(re.findall(r'fileexists\("([^"]+)"\)', source))
     for fixture_name in sorted(fixture_names):
+        # Absolute paths and traversal are host filesystem probes (e.g. a
+        # host-awareness example checking "/etc/hosts"), not bundled corpus
+        # fixtures — never resolve those against fixtures_dir.
+        candidate = pathlib.PurePosixPath(fixture_name)
+        if candidate.is_absolute() or ".." in candidate.parts:
+            continue
         fixture_path = fixtures_dir / fixture_name
         if fixture_path.exists() and fixture_path.is_file():
             files[fixture_name] = fixture_path.read_text(encoding="utf-8")
@@ -105,6 +111,9 @@ def materialize_files(files: dict[str, str] | None, root: pathlib.Path) -> None:
     if not files:
         return
     for rel_path, content in files.items():
+        candidate = pathlib.PurePosixPath(rel_path)
+        if candidate.is_absolute() or ".." in candidate.parts:
+            raise ValueError(f"refusing to materialize outside sandbox: {rel_path!r}")
         target = root / rel_path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
