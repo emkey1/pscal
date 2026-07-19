@@ -39,11 +39,22 @@ NON_CANONICAL_PATTERNS = [
     r"\bTOON\b",
 ]
 
+_STRING_LITERAL_RE = re.compile(r'"(?:\\.|[^"\\\n])*"')
+
+
+def _mask_string_literals(text: str) -> str:
+    def _mask(match: re.Match[str]) -> str:
+        body = match.group(0)[1:-1]
+        return '"' + "".join("\n" if c == "\n" else " " for c in body) + '"'
+
+    return _STRING_LITERAL_RE.sub(_mask, text)
+
 
 def looks_canonical_for_training(text: str) -> bool:
     filtered = "\n".join(
         line for line in text.splitlines() if not line.lstrip().startswith("//")
     )
+    filtered = _mask_string_literals(filtered)
     for pattern in NON_CANONICAL_PATTERNS:
         if re.search(pattern, filtered, flags=re.MULTILINE):
             return False
