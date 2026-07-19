@@ -10208,6 +10208,174 @@
           "harvested_idea_miner_2026-07-19"
         ]
       }
+    },
+    {
+      "source_path": "/tmp/aether_batch7_examples/13_find_max.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/13_find_max.aether",
+      "sha256": "b08d6721c3d5af60263e3d54f23a3111b58e30bf9d9420f07d8385118f8fc13c",
+      "stdout": "Max value: 12\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch7_examples/14_is_even.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/14_is_even.aether",
+      "sha256": "6884ed9d717ba4ed0b1142d626d0f87465f89126706c747d6a65d60eafbc34d2",
+      "stdout": "10 is even: true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch7_examples/15_chatbot_simple.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/15_chatbot_simple.aether",
+      "sha256": "4c9a1f0bcffd64e5099f4f5b88aa6f3a5e91fc801162e05b4949aa18379651c8",
+      "stdout": "hi\nbye\nI didn't understand that.\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch7_examples/16_rectangle_area.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/16_rectangle_area.aether",
+      "sha256": "d1079fd967bd524a0401d6c36a897b472a9bacabd8e2b6ccbfceec43a887a8fa",
+      "stdout": "Area: 20\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch7_examples/17_find_min.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/17_find_min.aether",
+      "sha256": "f2ff977c3614eedec593a98609c4e2f32152a1a3440c86db611f1c4c0a7e220c",
+      "stdout": "Min value: 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch7_examples/18_celsius_to_fahrenheit.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/18_celsius_to_fahrenheit.aether",
+      "sha256": "d5a5eb2920985d3ab6adba9de9af6633c22b3f71f903ab70d4219bd6b8154335",
+      "stdout": "30.0 C is 86.0 F\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch7_examples/19_simple_dict.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/19_simple_dict.aether",
+      "sha256": "25a456486ceae7a013aa1a2d6d2e5dab60f943824e115c92a2b648259e9fe75a",
+      "stdout": "Aether\n1.0\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch7_examples/20_bubble_sort.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/20_bubble_sort.aether",
+      "sha256": "b52da6796905a5377286641147c92f278cf9277e26b5ee426ade0abde2e60af9",
+      "stdout": "Sorted array: 11 12 22 25 34 64 90 \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch7_examples/21_prime_factors.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/21_prime_factors.aether",
+      "sha256": "edc58532a5f995c7ecf41329e779af2a5c0236686c4398f5b10a7db9b87e09f2",
+      "stdout": "Prime factors of 315: 3 3 5 7 \n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch7_examples/22_armstrong_number.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/22_armstrong_number.aether",
+      "sha256": "e10fdcb4e3edb3794a3c41de6525a3c1c43b3b2eb31650dcfa0db92a616bcc88",
+      "stdout": "153 is armstrong: true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch7_examples/23_find_lcm.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/23_find_lcm.aether",
+      "sha256": "17bce9deba45772526e2f7a598a3848f5fc6414ee80b5357814b16fb510ada8e",
+      "stdout": "LCM of 15 and 20: 60\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_batch7_examples/24_palindrome_check.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/24_palindrome_check.aether",
+      "sha256": "3757925bf2adca195a2342039d5f4890eecb3a354fdd273850bf54104b282a86",
+      "stdout": "radar is palindrome: true\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-19"
+        ]
+      }
     }
   ]
 }
