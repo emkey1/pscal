@@ -20,6 +20,26 @@ LOG=/tmp/aether_canonical_sync.log
 
 log() { echo "[sync-aether $(date '+%H:%M:%S')] $*" | tee -a "$LOG" >&2; }
 
+# This script is launched backgrounded from a git hook right as the triggering
+# commit finishes, so a concurrent `git status`/`log`/etc. in the same
+# checkout (e.g. a human or agent immediately inspecting the result) can
+# transiently collide on .git's index/lock files. Retry a few times with a
+# short backoff before treating any of these steps as a real failure.
+retry_git() {
+    local attempt=1 max=4 delay=2
+    while [ "$attempt" -le "$max" ]; do
+        if "$@" >>"$LOG" 2>&1; then
+            return 0
+        fi
+        if [ "$attempt" -lt "$max" ]; then
+            log "transient failure on '$*' (attempt $attempt/$max), retrying in ${delay}s"
+            sleep "$delay"
+        fi
+        attempt=$((attempt + 1))
+    done
+    return 1
+}
+
 if ! git -C "$SUBMODULE_DIR" rev-parse --git-dir >/dev/null 2>&1; then
     log "$SUBMODULE_DIR is not a git checkout, skipping"
     exit 0
@@ -32,13 +52,13 @@ if [ -n "$(git -C "$SUBMODULE_DIR" status --porcelain)" ]; then
 fi
 
 BEFORE="$(git -C "$SUBMODULE_DIR" rev-parse HEAD 2>/dev/null)"
-if ! git -C "$SUBMODULE_DIR" fetch origin >>"$LOG" 2>&1; then
-    log "fetch failed, skipping sync"
+if ! retry_git git -C "$SUBMODULE_DIR" fetch origin; then
+    log "fetch failed after retries, skipping sync"
     exit 0
 fi
 git -C "$SUBMODULE_DIR" checkout main >/dev/null 2>&1
-if ! git -C "$SUBMODULE_DIR" merge --ff-only origin/main >>"$LOG" 2>&1; then
-    log "WARNING: fast-forward failed (local main diverged from origin) -- resolve manually in $SUBMODULE_DIR"
+if ! retry_git git -C "$SUBMODULE_DIR" merge --ff-only origin/main; then
+    log "WARNING: fast-forward failed after retries (local main diverged from origin?) -- resolve manually in $SUBMODULE_DIR"
     exit 0
 fi
 AFTER="$(git -C "$SUBMODULE_DIR" rev-parse HEAD 2>/dev/null)"
