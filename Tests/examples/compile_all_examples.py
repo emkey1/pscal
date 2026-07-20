@@ -120,6 +120,7 @@ def compile_example(binary: Path, script_path: Path, timeout_seconds: float) -> 
         text=True,
         timeout=timeout_seconds,
         check=False,
+        errors="replace"
     )
 
 
