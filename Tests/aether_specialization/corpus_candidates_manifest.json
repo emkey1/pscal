@@ -11392,6 +11392,74 @@
           "openai"
         ]
       }
+    },
+    {
+      "source_path": "/tmp/aether_claude_unusual/claude_00_array_field_inherits_record_reference_semantics.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_00_array_field_inherits_record_reference_semantics.aether",
+      "sha256": "95cdcdb82842313dd0ac793d71ba64a1ba8c40aab86179b748185d9945573fb1",
+      "stdout": "bag.items[0] after stampFirst = 999\n(a bare Int[] parameter would NOT have shown this change --\n arrays value-copy at a call boundary, but a record does not,\n so an array FIELD inside a record inherits reference semantics\n from its containing record.)\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-20",
+          "claude",
+          "unusual_nonintuitive"
+        ],
+        "notes": "Array field inside a record inherits the record's pointer-backed reference semantics -- mutating rec.arr[i] through a record parameter DOES propagate to the caller, unlike a bare array parameter"
+      }
+    },
+    {
+      "source_path": "/tmp/aether_claude_unusual/claude_01_chained_array_slice.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_01_chained_array_slice.aether",
+      "sha256": "d09430d294b12c1f609ac67b61fd47c29426d644083a929ed0c2a9d2b8dd59ec",
+      "stdout": "chained slice xs[1..6][1..3] has length 2\n  [0]=30 [1]=40\n(slicing lowers to a fresh temp array + copy loop, so the\n result of one slice is just another ordinary array --\n nothing special stops you from slicing it again.)\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-20",
+          "claude",
+          "unusual_nonintuitive"
+        ],
+        "notes": "Chained array slicing xs[a..b][c..d] works -- a slice's result is just an ordinary array, nothing special stops slicing it again"
+      }
+    },
+    {
+      "source_path": "/tmp/aether_claude_unusual/claude_02_tuple_destructure_chained_else_if_expression.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_02_tuple_destructure_chained_else_if_expression.aether",
+      "sha256": "ca01237f5b76062251119c22df285ab765b645e1e26340d46a48341e304d4994",
+      "stdout": "min=12 max=37 -> wide spread\n(the spread classification above is a 3-way chained\n else-if used as an EXPRESSION, not a statement.)\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-20",
+          "claude",
+          "unusual_nonintuitive"
+        ],
+        "notes": "Tuple destructure combined with a chained (3-way) else-if used in expression position"
+      }
+    },
+    {
+      "source_path": "/tmp/aether_claude_unusual/claude_03_post_contract_on_tuple_result_fields.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_03_post_contract_on_tuple_result_fields.aether",
+      "sha256": "2862e964a7ee00d734c95a4b004955fe12e5de47ccf77eaf35313980a939a61f",
+      "stdout": "range10(5) = (5, 15)\n(the @post contract on a TUPLE-returning function reaches\n INSIDE the tuple via result.0 / result.1 -- 'result' isn't\n just for scalar returns.)\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-20",
+          "claude",
+          "unusual_nonintuitive"
+        ],
+        "notes": "@post contract reaches inside a tuple-returning function's result via result.0/result.1, and is genuinely enforced at runtime"
+      }
     }
   ]
 }
