@@ -242,6 +242,15 @@ def export_merged_16bit(model, tokenizer, output_dir: Path) -> Path:
     30B base, so point --merged-output-dir at /storage (NFS), not / (constrained).
     """
     output_dir.mkdir(parents=True, exist_ok=True)
+    # Unsloth's 8-bit loading path (FastBaseModel.from_pretrained) monkeypatches a
+    # get_loading_attributes lambda directly onto the BitsAndBytesConfig instance;
+    # unsloth_zoo's merged_16bit save calls config.save_pretrained() (which JSON-dumps
+    # quantization_config) BEFORE its own _remove_quantization_config cleanup runs, so
+    # that lambda crashes json.dumps with "Object of type function is not JSON
+    # serializable". Strip it before saving; no-op when absent (4-bit/16-bit runs).
+    quant_config = getattr(model.config, "quantization_config", None)
+    if quant_config is not None and "get_loading_attributes" in vars(quant_config):
+        del quant_config.get_loading_attributes
     model.save_pretrained_merged(str(output_dir), tokenizer, save_method="merged_16bit")
     return output_dir
 
