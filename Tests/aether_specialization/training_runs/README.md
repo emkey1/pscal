@@ -48,3 +48,4 @@ A run is not "launched" until both copies exist.
 |---|---|---|---|
 | `mistral24b-cs-aug2-builtins.md` | `mistral24b-cs-aug2-builtins` | Mistral-Small-24B | launched 2026-06-28 (exact command captured) |
 | `q36-aether-RECONSTRUCTED.md` | `q36-sdpa` / q36-aether | Qwen3.6-35B-A3B hybrid MoE | DEFERRED; PARTIAL recipe reconstructed from surviving metadata (exact command lost to pruning) |
+| `cs-aug18-precision-grid.md` | 6 tags, see file | Qwen3-8B + Qwen3.5-9B, x{4bit,8bit,16bit} | launched 2026-07-19 (queue script, exact command captured); live status in `cs-aug18-precision-grid-status.md` |

@@ -269,6 +269,7 @@ def export_only(
     max_seq_length: int,
     dtype: torch.dtype | None,
     load_in_4bit: bool,
+    load_in_8bit: bool,
     local_files_only: bool,
     device_map: str,
     gpu_memory_utilization: float,
@@ -276,10 +277,12 @@ def export_only(
     merged_output_dir: Path | None = None,
 ) -> list[str]:
     model, tokenizer = FastLanguageModel.from_pretrained(
+        attn_implementation="sdpa",
         model_name=str(adapter_dir),
         max_seq_length=max_seq_length,
         dtype=dtype,
         load_in_4bit=load_in_4bit,
+        load_in_8bit=load_in_8bit,
         local_files_only=local_files_only,
         device_map=device_map,
         gpu_memory_utilization=gpu_memory_utilization,
@@ -317,6 +320,8 @@ def main() -> int:
     parser.add_argument("--eval-steps", type=int, default=5)
     parser.add_argument("--save-steps", type=int, default=5)
     parser.add_argument("--early-stopping-patience", type=int, default=2)
+    parser.add_argument("--load-best-model-at-end", action="store_true", default=True)
+    parser.add_argument("--no-load-best-model-at-end", dest="load_best_model_at_end", action="store_false", help="export the final-step checkpoint instead of the best-eval-loss one")
     parser.add_argument("--margin-tokens", type=int, default=64)
     parser.add_argument("--round-multiple", type=int, default=128)
     parser.add_argument("--min-seq-length", type=int, default=1024)
@@ -325,6 +330,9 @@ def main() -> int:
     parser.add_argument("--dtype", default="auto", choices=["auto", "bfloat16", "float16"])
     parser.add_argument("--load-in-4bit", action="store_true", default=True)
     parser.add_argument("--no-load-in-4bit", dest="load_in_4bit", action="store_false")
+    parser.add_argument("--load-in-8bit", action="store_true", default=False,
+                         help="bitsandbytes 8-bit quantization; mutually exclusive with "
+                              "--load-in-4bit (pass --no-load-in-4bit alongside this)")
     parser.add_argument("--local-files-only", action="store_true", default=True)
     parser.add_argument("--allow-network-download", dest="local_files_only", action="store_false")
     parser.add_argument("--device-map", default="cuda:0")
@@ -375,6 +383,9 @@ def main() -> int:
                              "Point at /storage for the 30B (~57 GiB) to avoid filling /.")
     args = parser.parse_args()
 
+    if args.load_in_8bit and args.load_in_4bit:
+        raise SystemExit("--load-in-8bit requires --no-load-in-4bit (both quantizations cannot be active)")
+
     random.seed(args.seed)
     torch.manual_seed(args.seed)
 
@@ -394,6 +405,7 @@ def main() -> int:
             max_seq_length=args.max_seq_length if args.max_seq_length > 0 else args.min_seq_length,
             dtype=dtype,
             load_in_4bit=args.load_in_4bit,
+            load_in_8bit=args.load_in_8bit,
             local_files_only=args.local_files_only,
             device_map=args.device_map,
             gpu_memory_utilization=args.gpu_memory_utilization,
@@ -440,10 +452,12 @@ def main() -> int:
     max_seq_length = args.max_seq_length if args.max_seq_length > 0 else auto_max_seq_length
 
     model, unsloth_tokenizer = FastLanguageModel.from_pretrained(
+        attn_implementation="sdpa",
         model_name=args.model_id,
         max_seq_length=max_seq_length,
         dtype=dtype,
         load_in_4bit=args.load_in_4bit,
+        load_in_8bit=args.load_in_8bit,
         local_files_only=args.local_files_only,
         device_map=args.device_map,
         gpu_memory_utilization=args.gpu_memory_utilization,
@@ -503,7 +517,7 @@ def main() -> int:
             eval_strategy="steps",
             save_strategy="steps",
             save_total_limit=2,
-            load_best_model_at_end=True,
+            load_best_model_at_end=args.load_best_model_at_end,
             metric_for_best_model="eval_loss",
             greater_is_better=False,
             bf16=True,
@@ -556,6 +570,7 @@ def main() -> int:
         "grad_accum": args.grad_accum,
         "learning_rate": args.learning_rate,
         "load_in_4bit": args.load_in_4bit,
+        "load_in_8bit": args.load_in_8bit,
         "local_files_only": args.local_files_only,
         "dtype": args.dtype,
         "device_map": args.device_map,
