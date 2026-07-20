@@ -9,7 +9,7 @@ launched 2026-07-19.
 
 | # | tag | training | benchmarked | notes |
 |---|---|---|---|---|
-| 1 | qwen3-8b-nothink-4bit-cs-aug18 | done | no | merged export OK, 5 shards, ~15min |
+| 1 | qwen3-8b-nothink-4bit-cs-aug18 | done | **yes: 29/35 simple, 4/9 large, 11/19 cs** | merged export OK, 5 shards, ~15min; stopped early at step ~65/255 (epoch 0.77) -- same absolute step count as this model/precision's cs-aug4 stopping point |
 | 2 | qwen3-8b-nothink-8bit-cs-aug18 | done (recovered) | no | training succeeded (eval_loss ~0.122) but queue's auto-export crashed on an Unsloth 8-bit bug (get_loading_attributes lambda not JSON-serializable, see unsloth_qwen_coder_30b_sft.py commit); fixed + re-exported from the saved adapter via --adapter-dir, no retrain needed |
 | 3 | qwen3-8b-nothink-16bit-cs-aug18 | done | no | merged export OK, 5 shards |
 | 4 | qwen35-9b-4bit-cs-aug18 | done (recovered) | no | training succeeded (eval_loss ~0.107) but hit a second export bug: my first get_loading_attributes fix used vars(quant_config), which crashes for 4-bit's dict-typed quantization_config (no __dict__); fixed to hasattr()/delattr(), re-exported from saved adapter, merged_16bit confirmed (4 shards) |
