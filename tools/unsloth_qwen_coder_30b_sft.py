@@ -249,8 +249,11 @@ def export_merged_16bit(model, tokenizer, output_dir: Path) -> Path:
     # that lambda crashes json.dumps with "Object of type function is not JSON
     # serializable". Strip it before saving; no-op when absent (4-bit/16-bit runs).
     quant_config = getattr(model.config, "quantization_config", None)
-    if quant_config is not None and "get_loading_attributes" in vars(quant_config):
-        del quant_config.get_loading_attributes
+    if quant_config is not None and hasattr(quant_config, "get_loading_attributes"):
+        try:
+            delattr(quant_config, "get_loading_attributes")
+        except (AttributeError, TypeError):
+            pass
     model.save_pretrained_merged(str(output_dir), tokenizer, save_method="merged_16bit")
     return output_dir
 
