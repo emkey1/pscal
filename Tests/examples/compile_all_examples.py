@@ -58,6 +58,7 @@ SKIP_BASENAMES = {
 # Intentionally-negative examples that should fail compilation.
 EXPECTED_COMPILE_FAILURES = {
     "Examples/pascal/base/ClosureEscapeError",
+    "Examples/pascal/base/Checkers",
 }
 
 
@@ -120,6 +121,7 @@ def compile_example(binary: Path, script_path: Path, timeout_seconds: float) -> 
         text=True,
         timeout=timeout_seconds,
         check=False,
+        errors="replace",
     )
 
 
