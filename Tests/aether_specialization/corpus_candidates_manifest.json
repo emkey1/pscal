@@ -8618,22 +8618,6 @@
       }
     },
     {
-      "source_path": "/tmp/aether_batch6_examples/19_genetic_algorithm.aether",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/19_genetic_algorithm.aether_fde310fc93fd",
-      "sha256": "fde310fc93fd9ea9ef6fe27ff381c080c57bf83d0985ec45a72311d3b789b0a9",
-      "stdout": "Solution: 97 60 53 \n",
-      "metadata": {
-        "canonical": true,
-        "fixture_required": false,
-        "assumption_bearing": false,
-        "tags": [
-          "imported_2026-07-19"
-        ],
-        "environment_dependent": true,
-        "notes": "[2026-07-19 corpus audit] marked environment_dependent: uses random(n)/random() for population init and mutation; non-reproducible across runs."
-      }
-    },
-    {
       "source_path": "/tmp/aether_batch6_examples/20_web_scraper.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/20_web_scraper.aether_27e2b770eecd",
       "sha256": "27e2b770eecd9b9342589a0a28ba3c77c9ef323d2bb2cf4f62584c990a15c885",
@@ -8726,8 +8710,8 @@
     {
       "source_path": "/tmp/aether_harvest/06-29a_claw1_gpt_oss_120b_00_Sort_a_hard_coded_integer_arra.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_claw1_gpt_oss_120b_00_Sort_a_hard_coded_integer_arra.aether",
-      "sha256": "225361ce5dd0a92577f9976b2bb1969266044c448064ed8e41662c6474f6cc78",
-      "stdout": "Sorted array:\n5\n2\n9\n1\n7\n",
+      "sha256": "9938726f7b767489c104d20c023a54e37edbd106fd290c61c305acafe73b0132",
+      "stdout": "Sorted array:\n1\n2\n5\n7\n9\n",
       "metadata": {
         "canonical": true,
         "fixture_required": false,
@@ -11006,8 +10990,8 @@
     {
       "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_qwen3_5_9b_00_Bubble_sort_implementation_dem.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_qwen3_5_9b_00_Bubble_sort_implementation_dem.aether_a7dc2116cc4e",
-      "sha256": "a7dc2116cc4ee1042b4807b7200e73bb2b1aadefd3ec795079acf931f6352981",
-      "stdout": "Sorted array: 64 \n34 25 12 22 11 90 \nComparisons: 36\nSwaps: 14\n",
+      "sha256": "8aefd92d8b612f8f9261ca387efe5ea4266f77dc0199c4d0468566d93804d8af",
+      "stdout": "Sorted array: 11 \n12 22 25 34 64 90 \nComparisons: 36\nSwaps: 14\n",
       "metadata": {
         "canonical": true,
         "fixture_required": false,
