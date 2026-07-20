@@ -24,10 +24,12 @@ The output is a JSON report with per-run details plus an aggregate summary.
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import multiprocessing
 import os
 import pathlib
+import queue as queue_module
 import re
 import subprocess
 import sys
@@ -1120,6 +1122,19 @@ def invoke_openai_responses(prompt: str, destination: Destination) -> dict[str, 
     )
     output_text = payload.get("output_text", "")
     if not output_text:
+        # The top-level `output_text` convenience field isn't populated by every
+        # model generation (observed empty for gpt-5.4/5.5/5.6-class models even on
+        # a `status: completed` reply with real content) -- fall back to extracting
+        # text directly from the `output` array's message item(s).
+        parts: list[str] = []
+        for item in payload.get("output", []):
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            for chunk in item.get("content", []):
+                if isinstance(chunk, dict) and chunk.get("type") in ("output_text", "text"):
+                    parts.append(str(chunk.get("text", "")))
+        output_text = "".join(parts)
+    if not output_text:
         raise RuntimeError("Responses API reply did not contain output_text")
 
     return {
@@ -1488,16 +1503,20 @@ def run_model_with_deadline(prompt: str, destination: Destination) -> dict[str, 
     queue: Any = ctx.Queue()
     proc = ctx.Process(target=_run_model_worker, args=(prompt, destination, queue))
     proc.start()
-    proc.join(deadline)
-    if proc.is_alive():
+    # queue.get() must happen before proc.join(): a worker payload larger than
+    # the OS pipe buffer (~64KB on macOS) blocks in queue.put() until drained,
+    # so joining first (without reading) can deadlock both sides for up to
+    # the full deadline instead of returning promptly.
+    try:
+        status, payload = queue.get(timeout=deadline)
+    except queue_module.Empty:
         proc.terminate()
         proc.join(5)
         raise ProviderTimeoutError(f"provider request exceeded {deadline} seconds")
-    if proc.exitcode not in (0, None) and queue.empty():
-        raise RuntimeError(f"provider worker exited unexpectedly with code {proc.exitcode}")
-    if queue.empty():
-        raise RuntimeError("provider worker returned no result")
-    status, payload = queue.get()
+    proc.join(5)
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(5)
     if status == "ok":
         return payload
     raise RuntimeError(payload)
@@ -1659,7 +1678,42 @@ def truncate_for_prompt(text: str, limit: int) -> str:
     return text[:limit] + "\n...[truncated]..."
 
 
-def derive_failure_summary(generated_ok: bool, run: dict[str, Any], generation_error: str | None = None) -> str:
+def describe_stdout_mismatch(expected_stdout: str, observed_stdout: str) -> str:
+    expected = expected_stdout.rstrip("\n")
+    observed = observed_stdout.rstrip("\n")
+    exp_tokens = re.split(r"[,\s]+", expected.strip())
+    got_tokens = re.split(r"[,\s]+", observed.strip())
+    if "\n" not in expected and "\n" not in observed and exp_tokens and got_tokens:
+        missing = [t for t in exp_tokens if t not in got_tokens]
+        extra = [t for t in got_tokens if t not in exp_tokens]
+        detail = f"stdout_mismatch: expected {len(exp_tokens)} token(s), got {len(got_tokens)}"
+        if missing:
+            detail += f"; missing: {','.join(missing[:20])}"
+        if extra:
+            detail += f"; unexpected: {','.join(extra[:20])}"
+        if not missing and not extra:
+            detail += "; same tokens, different order/positions"
+        return detail
+    diff_lines = list(
+        difflib.unified_diff(
+            expected.splitlines(),
+            observed.splitlines(),
+            fromfile="expected",
+            tofile="observed",
+            lineterm="",
+        )
+    )
+    if diff_lines:
+        return "stdout_mismatch:\n" + "\n".join(diff_lines[:40])
+    return "stdout_mismatch"
+
+
+def derive_failure_summary(
+    generated_ok: bool,
+    run: dict[str, Any],
+    generation_error: str | None = None,
+    expected_stdout: str | None = None,
+) -> str:
     if not generated_ok:
         if generation_error:
             first_line = generation_error.strip().splitlines()[0]
@@ -1681,6 +1735,8 @@ def derive_failure_summary(generated_ok: bool, run: dict[str, Any], generation_e
         if stderr:
             return stderr.splitlines()[0]
         return f"nonzero_exit:{run['returncode']}"
+    if expected_stdout is not None:
+        return describe_stdout_mismatch(expected_stdout, run.get("stdout", ""))
     return "stdout_mismatch"
 
 
@@ -1954,6 +2010,7 @@ def apply_repairs(
                 generated_ok=attempt.get("generated_ok", False),
                 run=attempt["run"],
                 generation_error=attempt.get("generation_error"),
+                expected_stdout=task.expected_stdout,
             )
             repair_prompt = repair_prompt_builder(
                 task=task,
