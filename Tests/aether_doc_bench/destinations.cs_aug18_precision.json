@@ -1,0 +1,91 @@
+{
+  "destinations": [
+    {
+      "id": "claw2-qwen3-8b-nothink-4bit-cs-aug18",
+      "type": "openai_chat_completions",
+      "base_url": "http://claw2.tailfe3968.ts.net:8019/v1",
+      "api_key": "",
+      "model": "qwen3-8b-nothink-4bit-cs-aug18",
+      "temperature": 0.2,
+      "seed": 42,
+      "max_output_tokens": 3000,
+      "request_timeout_seconds": 900,
+      "request_max_retries": 1,
+      "retry_backoff_seconds": 5,
+      "cooldown_seconds": 0
+    },
+    {
+      "id": "claw2-qwen3-8b-nothink-8bit-cs-aug18",
+      "type": "openai_chat_completions",
+      "base_url": "http://claw2.tailfe3968.ts.net:8019/v1",
+      "api_key": "",
+      "model": "qwen3-8b-nothink-8bit-cs-aug18",
+      "temperature": 0.2,
+      "seed": 42,
+      "max_output_tokens": 3000,
+      "request_timeout_seconds": 900,
+      "request_max_retries": 1,
+      "retry_backoff_seconds": 5,
+      "cooldown_seconds": 0
+    },
+    {
+      "id": "claw2-qwen3-8b-nothink-16bit-cs-aug18",
+      "type": "openai_chat_completions",
+      "base_url": "http://claw2.tailfe3968.ts.net:8019/v1",
+      "api_key": "",
+      "model": "qwen3-8b-nothink-16bit-cs-aug18",
+      "temperature": 0.2,
+      "seed": 42,
+      "max_output_tokens": 3000,
+      "request_timeout_seconds": 900,
+      "request_max_retries": 1,
+      "retry_backoff_seconds": 5,
+      "cooldown_seconds": 0
+    },
+    {
+      "id": "claw2-qwen35-9b-4bit-cs-aug18",
+      "type": "openai_chat_completions",
+      "base_url": "http://claw2.tailfe3968.ts.net:8019/v1",
+      "api_key": "",
+      "model": "qwen35-9b-4bit-cs-aug18",
+      "temperature": 0.2,
+      "seed": 42,
+      "max_output_tokens": 3000,
+      "request_timeout_seconds": 900,
+      "request_max_retries": 1,
+      "retry_backoff_seconds": 5,
+      "cooldown_seconds": 0,
+      "chat_template_kwargs": {"enable_thinking": false}
+    },
+    {
+      "id": "claw2-qwen35-9b-8bit-cs-aug18",
+      "type": "openai_chat_completions",
+      "base_url": "http://claw2.tailfe3968.ts.net:8019/v1",
+      "api_key": "",
+      "model": "qwen35-9b-8bit-cs-aug18",
+      "temperature": 0.2,
+      "seed": 42,
+      "max_output_tokens": 3000,
+      "request_timeout_seconds": 900,
+      "request_max_retries": 1,
+      "retry_backoff_seconds": 5,
+      "cooldown_seconds": 0,
+      "chat_template_kwargs": {"enable_thinking": false}
+    },
+    {
+      "id": "claw2-qwen35-9b-16bit-cs-aug18",
+      "type": "openai_chat_completions",
+      "base_url": "http://claw2.tailfe3968.ts.net:8019/v1",
+      "api_key": "",
+      "model": "qwen35-9b-16bit-cs-aug18",
+      "temperature": 0.2,
+      "seed": 42,
+      "max_output_tokens": 3000,
+      "request_timeout_seconds": 900,
+      "request_max_retries": 1,
+      "retry_backoff_seconds": 5,
+      "cooldown_seconds": 0,
+      "chat_template_kwargs": {"enable_thinking": false}
+    }
+  ]
+}
