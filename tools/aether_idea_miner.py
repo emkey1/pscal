@@ -145,6 +145,7 @@ def build_generation_prompt(
     guide_text: str,
     n_programs: int,
     avoid_intents: list[str],
+    theme: str = "",
 ) -> str:
     areas = "\n".join(f"  - {a}" for a in SUGGESTED_AREAS)
     avoid_block = ""
@@ -155,6 +156,14 @@ def build_generation_prompt(
                 "\nYou (or another model) already wrote programs with these intents; "
                 "pick DIFFERENT ideas this round:\n" + joined + "\n"
             )
+    theme_block = ""
+    if theme:
+        theme_block = (
+            f"\nThis round, lean toward: {theme}. Still write complete, correct, "
+            "genuinely working programs -- the goal is real code that surprises a reader "
+            "or an LLM's default assumptions about the language, not code that's merely "
+            "obscure for its own sake or that breaks the compiler.\n"
+        )
     return textwrap.dedent(
         f"""\
         You are an expert Aether programmer exploring what the language can do.
@@ -166,7 +175,7 @@ def build_generation_prompt(
         fixed task: you decide what each program does. Aim for VARIETY across the
         set. For inspiration (not a checklist — ignore freely):
         {areas}
-        {avoid_block}
+        {avoid_block}{theme_block}
         Write naturally. If you expect a builtin, keyword, or construct to exist,
         USE it the way you would reach for it — do not avoid a feature just
         because you are unsure it is supported. Each program should be small
@@ -1058,6 +1067,7 @@ def run_miner(args: argparse.Namespace) -> dict[str, Any]:
                     guide_text=guide_text,
                     n_programs=args.programs_per_model,
                     avoid_intents=seen_intents[-12:],
+                    theme=args.theme,
                 )
                 generation = generate(prompt, destination)
                 raw = generation.get("raw_text", "")
@@ -1175,6 +1185,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="disable cross-system parallelism; run every destination one at a time")
     p.add_argument("--temperature", type=float, default=0.7,
                    help="generation temperature override for variety (default: 0.7; <0 uses provider default)")
+    p.add_argument("--theme", default="",
+                   help="extra steering line injected into the generation prompt, e.g. "
+                        "'unusual or non-intuitive corners of the language' -- appended as guidance, "
+                        "not a replacement for the open-ended 'write whatever you find interesting' framing")
     p.add_argument("--output-json", type=pathlib.Path, default=None,
                    help="write the full JSON report here (checkpointed after every program)")
     p.add_argument("--output-md", type=pathlib.Path, default=None, help="write the ranked Markdown report here")
