@@ -13,8 +13,10 @@ launched 2026-07-19.
 | 2 | qwen3-8b-nothink-8bit-cs-aug18 | done (recovered) | no | training succeeded (eval_loss ~0.122) but queue's auto-export crashed on an Unsloth 8-bit bug (get_loading_attributes lambda not JSON-serializable, see unsloth_qwen_coder_30b_sft.py commit); fixed + re-exported from the saved adapter via --adapter-dir, no retrain needed |
 | 3 | qwen3-8b-nothink-16bit-cs-aug18 | done | no | merged export OK, 5 shards |
 | 4 | qwen35-9b-4bit-cs-aug18 | done (recovered) | no | training succeeded (eval_loss ~0.107) but hit a second export bug: my first get_loading_attributes fix used vars(quant_config), which crashes for 4-bit's dict-typed quantization_config (no __dict__); fixed to hasattr()/delattr(), re-exported from saved adapter, merged_16bit confirmed (4 shards) |
-| 5 | qwen35-9b-8bit-cs-aug18 | running | no | corrected fix deployed while this run was still mid-training, before it reached export |
+| 5 | qwen35-9b-8bit-cs-aug18 | running (retry) | no | restarted from scratch after claw2 outage; queue resumed 2026-07-20T02:04Z, correctly skipped 1-4 via merged_16bit check |
 | 6 | qwen35-9b-16bit-cs-aug18 | queued | no | |
+
+**2026-07-20T01:55Z: claw2 powered off mid-run-5** (known intermittent issue per user, recurred a few days back then was stable). Runs 1-4's merged exports survived on persistent /storage, confirmed intact after claw2 came back ~2026-07-20T02:04Z. Queue resumed automatically (resumable design, skips any tag with an existing merged_16bit) -- no manual recovery needed for 1-4, only run 5 restarted from scratch.
 
 Status values: queued / running / done / FAILED. Benchmarked: no / yes (simple X/30,
 large X/8, cs X/19).
