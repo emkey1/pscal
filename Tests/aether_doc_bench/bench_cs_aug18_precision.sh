@@ -15,7 +15,11 @@ OUTDIR=Tests/aether_doc_bench/out/cs_aug18_precision
 mkdir -p "$OUTDIR"
 
 echo "=== serving $TAG on claw2 (vLLM, port 8019) ==="
-ssh claw@claw2 "cd ~/training/aether-qwen-coder-30b-unsloth && ./serve_any.sh $TAG"
+# 0.85 (serve_any.sh's default) requests 103GiB against a 121.63GiB unified-memory pool;
+# claw2 typically has ~29GiB in host-side use at any given moment, leaving too little
+# free for vLLM's startup check. 0.65 (~79GiB) comfortably covers a 9B model's weights
+# + KV cache at max-model-len 16384 with headroom for host-side memory pressure.
+ssh claw@claw2 "cd ~/training/aether-qwen-coder-30b-unsloth && ./serve_any.sh $TAG 16384 0.65"
 
 echo "=== waiting for vLLM readiness ==="
 for i in $(seq 1 60); do
