@@ -29,6 +29,27 @@ from unsloth import FastLanguageModel
 from transformers import AutoTokenizer, EarlyStoppingCallback
 from trl import SFTConfig, SFTTrainer
 
+# peft's LoRA layer dispatcher probes is_torchao_available() for every target module
+# regardless of whether the model actually uses torchao quantization; this pipeline
+# never does (only bitsandbytes 4-bit/8-bit, or no quantization at all for 16-bit), but
+# the tf520-fla image's installed torchao (0.14.0) is older than peft's minimum
+# (0.16.0), so the probe raises ImportError instead of returning False -- crashing
+# get_peft_model() for the plain (non-quantized) 16-bit LoRA case specifically, since
+# quantized cases match a different dispatcher first and never reach this check. Patch
+# it to a no-op False so PEFT falls through to the ordinary LoRA dispatcher.
+try:
+    import peft.import_utils as _peft_import_utils
+
+    _peft_import_utils.is_torchao_available = lambda: False
+except ImportError:
+    pass
+try:
+    import peft.tuners.lora.torchao as _peft_lora_torchao
+
+    _peft_lora_torchao.is_torchao_available = lambda: False
+except ImportError:
+    pass
+
 
 TARGET_MODULES = [
     "q_proj",
