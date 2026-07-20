@@ -9,11 +9,11 @@ launched 2026-07-19.
 
 | # | tag | training | benchmarked | notes |
 |---|---|---|---|---|
-| 1 | qwen3-8b-nothink-4bit-cs-aug18 | queued | no | |
-| 2 | qwen3-8b-nothink-8bit-cs-aug18 | queued | no | |
-| 3 | qwen3-8b-nothink-16bit-cs-aug18 | queued | no | |
-| 4 | qwen35-9b-4bit-cs-aug18 | queued | no | |
-| 5 | qwen35-9b-8bit-cs-aug18 | queued | no | |
+| 1 | qwen3-8b-nothink-4bit-cs-aug18 | done | no | merged export OK, 5 shards, ~15min |
+| 2 | qwen3-8b-nothink-8bit-cs-aug18 | done (recovered) | no | training succeeded (eval_loss ~0.122) but queue's auto-export crashed on an Unsloth 8-bit bug (get_loading_attributes lambda not JSON-serializable, see unsloth_qwen_coder_30b_sft.py commit); fixed + re-exported from the saved adapter via --adapter-dir, no retrain needed |
+| 3 | qwen3-8b-nothink-16bit-cs-aug18 | done | no | merged export OK, 5 shards |
+| 4 | qwen35-9b-4bit-cs-aug18 | running | no | |
+| 5 | qwen35-9b-8bit-cs-aug18 | queued | no | should train clean first-try -- 8-bit export fix deployed before this run started |
 | 6 | qwen35-9b-16bit-cs-aug18 | queued | no | |
 
 Status values: queued / running / done / FAILED. Benchmarked: no / yes (simple X/30,
