@@ -41,6 +41,37 @@ TARGET_MODULES = [
 ]
 
 
+def find_resumable_checkpoint(output_dir: Path) -> str | None:
+    """Return the highest-step checkpoint dir with an intact trainer_state.json, or None.
+
+    claw2 has crashed mid-training more than once; a crash mid-checkpoint-write leaves a
+    zero-byte, corrupt checkpoint-N dir with a *higher* step number than the last good
+    one, and transformers' own get_last_checkpoint() doesn't validate contents -- it would
+    pick the corrupt one. Validate instead of trusting the highest step number.
+    """
+    if not output_dir.exists():
+        return None
+    candidates: list[tuple[int, str]] = []
+    for entry in output_dir.iterdir():
+        if not entry.is_dir():
+            continue
+        match = re.match(r"^checkpoint-(\d+)$", entry.name)
+        if not match:
+            continue
+        state_file = entry / "trainer_state.json"
+        if not state_file.exists() or state_file.stat().st_size == 0:
+            continue
+        try:
+            json.loads(state_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        candidates.append((int(match.group(1)), str(entry)))
+    if not candidates:
+        return None
+    candidates.sort()
+    return candidates[-1][1]
+
+
 def read_jsonl(path: Path) -> list[dict]:
     rows: list[dict] = []
     with path.open("r", encoding="utf-8") as handle:
@@ -601,7 +632,10 @@ def main() -> int:
     }
     (args.output_dir / "run_metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
-    trainer.train()
+    resume_from_checkpoint = find_resumable_checkpoint(args.output_dir)
+    if resume_from_checkpoint is not None:
+        print(f"Resuming training from checkpoint: {resume_from_checkpoint}", flush=True)
+    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
     final_dir = args.output_dir / "final"
     trainer.save_model(str(final_dir))
     unsloth_tokenizer.save_pretrained(str(final_dir))
