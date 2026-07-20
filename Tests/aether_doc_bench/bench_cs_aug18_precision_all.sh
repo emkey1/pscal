@@ -17,8 +17,14 @@ mkdir -p "$(dirname "$LOG")"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a "$LOG"; }
 
+OUTDIR=Tests/aether_doc_bench/out/cs_aug18_precision
+
 log "BENCH ALL START — ${#TAGS[@]} models"
 for tag in "${TAGS[@]}"; do
+  if [ -f "$OUTDIR/${tag}_simple.json" ] && [ -f "$OUTDIR/${tag}_large.json" ] && [ -f "$OUTDIR/${tag}_cs.json" ]; then
+    log "SKIP $tag — all 3 suite results already present"
+    continue
+  fi
   log "=== benchmarking $tag ==="
   if ./Tests/aether_doc_bench/bench_cs_aug18_precision.sh "$tag" >> "$LOG" 2>&1; then
     log "OK $tag"

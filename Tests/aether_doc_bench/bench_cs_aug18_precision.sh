@@ -22,13 +22,27 @@ echo "=== serving $TAG on claw2 (vLLM, port 8019) ==="
 ssh claw@claw2 "cd ~/training/aether-qwen-coder-30b-unsloth && ./serve_any.sh $TAG 16384 0.65"
 
 echo "=== waiting for vLLM readiness ==="
+ready=0
 for i in $(seq 1 60); do
   if curl -sf "http://claw2.tailfe3968.ts.net:8019/v1/models" >/dev/null 2>&1; then
     echo "ready after ${i}0s"
+    ready=1
+    break
+  fi
+  # Bail early if the container already died (e.g. OOM at startup) instead of
+  # burning the full 10-minute timeout polling a server that will never answer.
+  if [ "$(ssh claw@claw2 "docker inspect --format '{{.State.Running}}' aether-bench-vllm-q7 2>/dev/null")" != "true" ]; then
+    echo "vLLM container exited during startup -- aborting"
     break
   fi
   sleep 10
 done
+if [ "$ready" -ne 1 ]; then
+  echo "ERROR: vLLM never became ready for $TAG -- not running the benchmark against a dead server" >&2
+  ssh claw@claw2 "docker logs aether-bench-vllm-q7 2>&1 | tail -30" >&2
+  ssh claw@claw2 "docker rm -f aether-bench-vllm-q7 >/dev/null 2>&1 || true"
+  exit 1
+fi
 
 for suite in simple large cs; do
   case "$suite" in
