@@ -55,7 +55,7 @@
       "request_max_retries": 1,
       "retry_backoff_seconds": 5,
       "cooldown_seconds": 0,
-      "chat_template_kwargs": {"enable_thinking": false}
+      "extra_body": {"chat_template_kwargs": {"enable_thinking": false}}
     },
     {
       "id": "claw2-qwen35-9b-8bit-cs-aug18",
@@ -70,7 +70,7 @@
       "request_max_retries": 1,
       "retry_backoff_seconds": 5,
       "cooldown_seconds": 0,
-      "chat_template_kwargs": {"enable_thinking": false}
+      "extra_body": {"chat_template_kwargs": {"enable_thinking": false}}
     },
     {
       "id": "claw2-qwen35-9b-16bit-cs-aug18",
@@ -85,7 +85,7 @@
       "request_max_retries": 1,
       "retry_backoff_seconds": 5,
       "cooldown_seconds": 0,
-      "chat_template_kwargs": {"enable_thinking": false}
+      "extra_body": {"chat_template_kwargs": {"enable_thinking": false}}
     }
   ]
 }
