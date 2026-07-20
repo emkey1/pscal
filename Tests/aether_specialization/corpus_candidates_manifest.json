@@ -11198,6 +11198,216 @@
           "imported_2026-07-19"
         ]
       }
+    },
+    {
+      "source_path": "/tmp/aether_openai_harvest/openai_gpt_5_4_mini_00_gcd_with_contracts.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/openai_gpt_5_4_mini_00_gcd_with_contracts.aether",
+      "sha256": "e46a727070f509f4ee7bb1867bdf650eb09f206450d3c998fb0b467db2bac526",
+      "stdout": "gcd(84, 30) = 6\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-20",
+          "openai"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_openai_harvest/openai_gpt_5_6_sol_00_bezout_extended_gcd_tuple.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/openai_gpt_5_6_sol_00_bezout_extended_gcd_tuple.aether",
+      "sha256": "db21223de5ffd7c34dded62d98f860fbd79989dc88ca4a4e544e6c823ef98e18",
+      "stdout": "gcd = 2\n240 * -9 + 46 * 47 = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-20",
+          "openai"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_openai_harvest/openai_gpt_5_4_00_traffic_light_state_machine.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/openai_gpt_5_4_00_traffic_light_state_machine.aether",
+      "sha256": "47584ffb5917768a9c5f9749e0cf52b452addf0352aab8e44ebee040cb071229",
+      "stdout": "tick 0: green / wait\ntick 1: yellow / wait\ntick 2: red / walk\ntick 3: green / wait\ntick 4: yellow / wait\ntick 5: red / walk\ntick 6: green / wait\ntick 7: yellow / wait\nsteps taken = 8\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-20",
+          "openai"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_openai_harvest/openai_gpt_5_2_00_toon_release_list_rollup.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/openai_gpt_5_2_00_toon_release_list_rollup.aether",
+      "sha256": "783dd5fb192f519e9c2cdd1b19c8a35e6df07d48fe3f92f25c8689d9fb027f21",
+      "stdout": "0: Aether v1.2.0 downloads=1200 stable=true\n1: Zephyr v0.9.5 downloads=450 stable=false\n2: Nimbus v2.0.1 downloads=5000 stable=true\n3: Cinder v1.1.0 downloads=800 stable=false\n\nreleases: 4\nstable:   2 (50.0%)\ndownloads total: 7450\ntop: Nimbus (5000)\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-20",
+          "openai"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_openai_harvest/openai_o3_00_toon_student_grade_distribution.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/openai_o3_00_toon_student_grade_distribution.aether",
+      "sha256": "aa0ae8d32a3ade9a8b0658fe2d2780f6639eb1839cc2c6f93344ae0ecfbea550",
+      "stdout": "Ann -> A\nBob -> C\nCarl -> D\nDana -> B\nEve -> F\nTotals: 5 students\nA=1 B=1 C=1 D=1 F=1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-20",
+          "openai"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_openai_harvest/openai_gpt_5_6_terra_00_contract_guarded_binary_search.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/openai_gpt_5_6_terra_00_contract_guarded_binary_search.aether",
+      "sha256": "e0a9b6268e6edbb8b58ce404dd5effa585051af1a69ae0e1fbfb69a5b6837f43",
+      "stdout": "Found 24 at index 4\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-20",
+          "openai"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_openai_harvest/openai_o3_01_par_parallel_range_sum.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/openai_o3_01_par_parallel_range_sum.aether",
+      "sha256": "80daa896409b58477bc95eaa2bb2071055fbd29df2b02d90f990437fae3f36e7",
+      "stdout": "Sum 1..100000 = 5000050000\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-20",
+          "openai"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_openai_harvest/openai_gpt_5_4_01_par_parallel_prime_counting.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/openai_gpt_5_4_01_par_parallel_prime_counting.aether",
+      "sha256": "28e7dba4a20ee1d75e15974f7e869aff89dc57aa0bf3ac6c3731c2e0597a820a",
+      "stdout": "primes in [2, 9000) = 1117\nsegment counts = 430, 353, 334\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-20",
+          "openai"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_openai_harvest/openai_gpt_5_6_terra_01_word_frequency_report.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/openai_gpt_5_6_terra_01_word_frequency_report.aether",
+      "sha256": "d47017110da30b6912ef972033c98d3a6bef1d498ac0e23f1cda191274285bb1",
+      "stdout": "Word frequency report:\nblue: 3\ngreen: 2\nred: 1\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-20",
+          "openai"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_openai_harvest/openai_gpt_5_5_00_turtle_robot_interpreter.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/openai_gpt_5_5_00_turtle_robot_interpreter.aether",
+      "sha256": "959fd2875b357ed1ab301206ab8fc1f6e100eee3d9627c6b9f6d8a8b990f2d0a",
+      "stdout": "commands: FFRFFLFFRFFF\nfinal position: (5, 4) facing E\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-20",
+          "openai"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_openai_harvest/openai_gpt_5_5_01_dp_coin_change_with_contracts.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/openai_gpt_5_5_01_dp_coin_change_with_contracts.aether",
+      "sha256": "9b8ef94d2e78b931f3764d05e9ba5fac6e2af130e1cf9c72cf60de3fff1ab059",
+      "stdout": "coin set: 1, 3, 4\ntarget: 27\nminimum coins: 7\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-20",
+          "openai"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_openai_harvest/openai_gpt_5_2_01_dp_01_knapsack.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/openai_gpt_5_2_01_dp_01_knapsack.aether",
+      "sha256": "c3f699c0e7db22741f6b65e7ad3b4f4999747c3007ba606e1b90788838e5bd89",
+      "stdout": "capacity=15 bestValue=540\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-20",
+          "openai"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_openai_harvest/openai_gpt_5_2_02_fast_doubling_fibonacci_tuple_par.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/openai_gpt_5_2_02_fast_doubling_fibonacci_tuple_par.aether",
+      "sha256": "1d2f25b031ef3dc172fb50f8a101c6826105964039b4aa741e53186219f2b481",
+      "stdout": "fib(40)=102334155\nfib(45)=1134903170\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-20",
+          "openai"
+        ]
+      }
+    },
+    {
+      "source_path": "/tmp/aether_openai_harvest/openai_gpt_5_2_03_bank_account_methods_contracts.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/openai_gpt_5_2_03_bank_account_methods_contracts.aether",
+      "sha256": "b384b9b17fce2609b24baa166893ee3796b1409f4ebf0e10dc77554c990f4540",
+      "stdout": "owner=Rin\nbalance=110\ncoffee 6: ok\nlaptop 300: nope\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "harvested_idea_miner_2026-07-20",
+          "openai"
+        ]
+      }
     }
   ]
 }
