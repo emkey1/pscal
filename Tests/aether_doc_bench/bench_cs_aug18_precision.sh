@@ -14,11 +14,37 @@ CFG=Tests/aether_doc_bench/destinations.cs_aug18_precision.json
 OUTDIR=Tests/aether_doc_bench/out/cs_aug18_precision
 mkdir -p "$OUTDIR"
 
+echo "=== checking claw2 free memory before serving ==="
+# Each vLLM container lifecycle (crash OR clean exit) appears to leave some unified
+# memory unreclaimed at the driver level on this GB10 box -- confirmed accumulating
+# across multiple successful/failed runs, only fully cleared by a full reboot (not
+# systemctl restart docker, not docker rm -f). Rather than fail late, proactively
+# reboot if headroom is too thin for a safe serve. MIN_FREE_GB is conservative: 40GiB
+# comfortably covers a 9B bf16 model (~17GiB weights) + KV cache at max-model-len 16384.
+MIN_FREE_GB=40
+free_gb=$(ssh claw@claw2 "free -g | awk '/Mem:/{print \$4}'")
+if [ "${free_gb:-0}" -lt "$MIN_FREE_GB" ]; then
+  echo "claw2 free memory (${free_gb}GiB) below ${MIN_FREE_GB}GiB threshold -- rebooting to clear the leak"
+  ssh claw@claw2 "sudo reboot" || true
+  echo "waiting for claw2 to go down..."
+  for i in $(seq 1 20); do
+    ssh -o ConnectTimeout=5 -o BatchMode=yes claw@claw2 "echo up" >/dev/null 2>&1 || break
+    sleep 5
+  done
+  echo "waiting for claw2 to come back..."
+  for i in $(seq 1 60); do
+    ssh -o ConnectTimeout=8 -o BatchMode=yes claw@claw2 "echo up" >/dev/null 2>&1 && break
+    sleep 10
+  done
+  sleep 15
+  free_gb=$(ssh claw@claw2 "free -g | awk '/Mem:/{print \$4}'")
+  echo "post-reboot free memory: ${free_gb}GiB"
+fi
+
 echo "=== serving $TAG on claw2 (vLLM, port 8019) ==="
-# 0.85 (serve_any.sh's default) requests 103GiB against a 121.63GiB unified-memory pool;
-# claw2 typically has ~29GiB in host-side use at any given moment, leaving too little
-# free for vLLM's startup check. 0.65 (~79GiB) comfortably covers a 9B model's weights
-# + KV cache at max-model-len 16384 with headroom for host-side memory pressure.
+# 0.65 (~79GiB) comfortably covers a 9B model's weights + KV cache at max-model-len
+# 16384; kept below serve_any.sh's 0.85 default given claw2's memory headroom is
+# already tight even right after a reboot/cleanup.
 ssh claw@claw2 "cd ~/training/aether-qwen-coder-30b-unsloth && ./serve_any.sh $TAG 16384 0.65"
 
 echo "=== waiting for vLLM readiness ==="
