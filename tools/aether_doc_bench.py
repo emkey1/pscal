@@ -1111,6 +1111,8 @@ def invoke_openai_responses(prompt: str, destination: Destination) -> dict[str, 
     }
     if destination.temperature >= 0:
         body["temperature"] = destination.temperature
+    if destination.extra_body:
+        body.update(destination.extra_body)
 
     payload = http_json_request(
         f"{base_url}/responses",

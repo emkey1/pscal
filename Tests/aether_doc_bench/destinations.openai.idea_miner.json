@@ -115,7 +115,8 @@
       "request_timeout_seconds": 300,
       "request_max_retries": 3,
       "retry_backoff_seconds": 15,
-      "cooldown_seconds": 2
+      "cooldown_seconds": 2,
+      "extra_body": {"text": {"verbosity": "medium"}}
     },
     {
       "id": "o3",
@@ -128,7 +129,8 @@
       "request_timeout_seconds": 300,
       "request_max_retries": 3,
       "retry_backoff_seconds": 15,
-      "cooldown_seconds": 2
+      "cooldown_seconds": 2,
+      "extra_body": {"text": {"verbosity": "medium"}}
     }
   ]
 }
