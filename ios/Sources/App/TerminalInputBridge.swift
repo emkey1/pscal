@@ -189,9 +189,9 @@ final class TerminalKeyInputView: UITextView {
         set { /* ignore external setters */ }
     }
 
+
     private var repeatKeyCommands: [RepeatCommand]
     private lazy var controlKeyCommands: [UIKeyCommand] = buildControlCommands()
-
 
     @objc private func playAccessoryClick() {
         UIDevice.current.playInputClick()
