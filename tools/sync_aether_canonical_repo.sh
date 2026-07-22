@@ -14,6 +14,19 @@
 set -u
 [ "${AETHER_CANONICAL_SYNC:-1}" = "0" ] && exit 0
 
+# This script is launched via `nohup ... &` from the canonical repo's
+# post-commit hook, which inherits its environment straight from git --
+# including GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_PREFIX/
+# GIT_OBJECT_DIRECTORY, which git sets (relative to the canonical repo) for
+# the hook's own use. Left set, they leak into every `git -C ...` call below
+# and get resolved against the wrong repo -- e.g. GIT_INDEX_FILE=.git/index
+# resolves against the submodule checkout, whose .git is a plaintext gitlink
+# file rather than a directory, so git fails with
+# ".git/index: index file open failed: Not a directory" on every attempt
+# (confirmed 2026-07-22). Unset them so every git call below resolves its
+# repo purely from -C, as if run fresh in an interactive shell.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_OBJECT_DIRECTORY
+
 PBUILD_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SUBMODULE_DIR="$PBUILD_ROOT/components/aether"
 LOG=/tmp/aether_canonical_sync.log
