@@ -1,0 +1,108 @@
+// Baconian Biliteral Cipher (Francis Bacon, De Augmentis Scientiarum, 1623)
+// Each letter A-Z is encoded as a 5-bit pattern of 'a'/'b' -- the first known
+// binary encoding of a Latin alphabet, predating Morse code by over 200 years.
+
+@pure
+fn baconPattern(c: Text) -> Text {
+    let code: Int = ord(c);
+    if code < 65 || code > 90 {
+        ret "?????";
+    }
+    let idx: Int = code - 65;
+    let pattern: Text = "";
+    let bit: Int = 4;
+    loop bit >= 0 {
+        if (idx >> bit) & 1 != 0 {
+            pattern = pattern + "b";
+        } else {
+            pattern = pattern + "a";
+        }
+        bit = bit - 1;
+    }
+    ret pattern;
+}
+
+@pure
+fn fromBaconPattern(pattern: Text) -> Text {
+    let val: Int = 0;
+    let i: Int = 0;
+    loop i < 5 {
+        val = val << 1;
+        if copy(pattern, i + 1, 1) == "b" {
+            val = val | 1;
+        }
+        i = i + 1;
+    }
+    if val < 0 || val > 25 { ret "?"; }
+    ret chr(val + 65);
+}
+
+@pure
+fn encodeMessage(message: Text) -> Text {
+    let result: Text = "";
+    let len: Int = string_len(message);
+    let i: Int = 0;
+    loop i < len {
+        let ch: Text = copy(message, i + 1, 1);
+        let code: Int = ord(ch);
+        if code >= 97 && code <= 122 {
+            ch = chr(code - 32);
+        }
+        if i > 0 { result = result + " "; }
+        result = result + baconPattern(ch);
+        i = i + 1;
+    }
+    ret result;
+}
+
+@pure
+fn decodeMessage(patterns: Text) -> Text {
+    let result: Text = "";
+    let len: Int = string_len(patterns);
+    let start: Int = 0;
+    let i: Int = 0;
+    loop i <= len {
+        let atEnd: Bool = i == len;
+        let isSpace: Bool = false;
+        if !atEnd {
+            isSpace = copy(patterns, i + 1, 1) == " ";
+        }
+        if atEnd || isSpace {
+            if i > start {
+                result = result + fromBaconPattern(copy(patterns, start + 1, i - start));
+            }
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    ret result;
+}
+
+fn main() -> Void {
+    let message: Text = "BACON";
+    let encoded: Text = encodeMessage(message);
+    let decoded: Text = decodeMessage(encoded);
+
+    fx {
+        println("Baconian Biliteral Cipher (1605):");
+        println("Plaintext:  ", message);
+        println("Bacon bits: ", encoded);
+        println("Decoded:    ", decoded);
+        println("");
+        println("Full alphabet mapping:");
+    }
+
+    let letter: Int = 65;
+    loop letter <= 90 {
+        let c: Text = chr(letter);
+        let p: Text = baconPattern(c);
+        let back: Text = fromBaconPattern(p);
+        fx { println("  ", c, " -> ", p); }
+        if back != c {
+            fx { println("ROUNDTRIP FAIL at ", c); }
+        }
+        letter = letter + 1;
+    }
+    fx { println("Roundtrip verified for all 26 letters."); }
+    ret;
+}

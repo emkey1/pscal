@@ -1,0 +1,93 @@
+// French Republican Calendar
+fn isRepublicanLeap(year: Int) -> Bool {
+    // Romme's rule: years 3, 7, 11 are leap (year 1 is not)
+    let cycleYear: Int = (year - 1) % 4 + 1;
+    ret cycleYear == 3 || cycleYear == 7 || cycleYear == 11;
+}
+
+fn dayOfYearToRepublican(dayOfYear: Int, year: Int) -> (Int, Int) {
+    // Returns (month, dayInMonth)
+    // 12 months x 30 days = 360, plus 5-6 sans-culottides
+
+    if dayOfYear <= 360 {
+        let month: Int = (dayOfYear - 1) / 30 + 1;
+        let day: Int = (dayOfYear - 1) % 30 + 1;
+        ret (month, day);
+    } else {
+        // Sans-culottides (5 or 6 days)
+        let extraDay: Int = dayOfYear - 360;
+        ret (13, extraDay); // Month 13 = sans-culottides
+    }
+}
+
+fn republicanMonthName(month: Int) -> Text {
+    // NOTE: month names as a Text[] array, not a fixed-width packed string --
+    // the names have unequal length (Nivôse=6, Thermidor=9, ...), so a
+    // fixed-stride copy() slice misaligns and returns garbage.
+    let monthNames: Text[] = ["Vendémiaire","Brumaire","Frimaire","Nivôse",
+                               "Pluviôse","Ventôse","Germinal","Floréal",
+                               "Prairial","Messidor","Thermidor","Fructidor",
+                               "Sans-culottides"];
+    if month >= 1 && month <= 13 {
+        ret monthNames[month - 1];
+    }
+    ret "Invalid";
+}
+
+fn republicanDayName(day: Int) -> Text {
+    // Décade: 10-day weeks. Same fixed-width pitfall as above -- use an array.
+    let dayNames: Text[] = ["Primidi","Duodi","Tridi","Quartidi","Quintidi",
+                             "Sextidi","Septidi","Octidi","Nonidi","Décadi"];
+    if day >= 1 && day <= 10 {
+        ret dayNames[day - 1];
+    }
+    ret "Invalid";
+}
+
+fn gregorianToRepublican(year: Int, month: Int, day: Int) -> (Int, Int, Int) {
+    // Simplified conversion starting from 22 Sep 1792 (Republican Year 1)
+    const baseYear: Int = 1792;
+    const baseMonth: Int = 9;
+    const baseDay: Int = 22;
+
+    // Calculate days since Republican epoch
+    let daysSinceEpoch: Int = 0;
+    let currentYear: Int = baseYear;
+    let currentMonth: Int = baseMonth;
+    let currentDay: Int = baseDay;
+
+    // Very simplified - just counting years
+    let republicanYear: Int = year - baseYear + 1;
+
+    // Approximate day of year
+    let dayOfYear: Int = day;
+    if month > 1 { dayOfYear = dayOfYear + 31; }
+    if month > 2 { dayOfYear = dayOfYear + 28; if (year % 4 == 0) { dayOfYear = dayOfYear + 1; } }
+    if month > 3 { dayOfYear = dayOfYear + 31; }
+    if month > 4 { dayOfYear = dayOfYear + 30; }
+    if month > 5 { dayOfYear = dayOfYear + 31; }
+    if month > 6 { dayOfYear = dayOfYear + 30; }
+    if month > 7 { dayOfYear = dayOfYear + 31; }
+    if month > 8 { dayOfYear = dayOfYear + 31; }
+    if month > 9 { dayOfYear = dayOfYear + 30; }
+    if month > 10 { dayOfYear = dayOfYear + 31; }
+    if month > 11 { dayOfYear = dayOfYear + 30; }
+
+    let (repMonth, repDay) = dayOfYearToRepublican(dayOfYear, republicanYear);
+    ret (republicanYear, repMonth, repDay);
+}
+
+fn main() -> Void {
+    fx {
+        // Test date: 1 Jan 2024
+        let (year, month, day) = gregorianToRepublican(2024, 1, 1);
+        let monthName: Text = republicanMonthName(month);
+        let dayName: Text = republicanDayName(day);
+
+        println("1 Jan 2024 -> Republican Year ", year, ", ", monthName, " ", day, " (", dayName, ")");
+
+        // Check leap year
+        println("Year ", year, " is leap: ", isRepublicanLeap(year));
+    }
+    ret;
+}

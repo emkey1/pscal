@@ -1,0 +1,37 @@
+// Caesar Cipher - shifts each letter by a fixed number
+fn shiftChar(ch: Text, shift: Int) -> Text {
+    let code: Int = ord(ch);
+    if code >= ord("A") && code <= ord("Z") {
+        ret chr(((code - ord("A") + shift) % 26) + ord("A"));
+    }
+    if code >= ord("a") && code <= ord("z") {
+        ret chr(((code - ord("a") + shift) % 26) + ord("a"));
+    }
+    ret ch;
+}
+
+fn caesarEncrypt(text: Text, shift: Int) -> Text {
+    let result: Text = "";
+    loop i in 0..string_len(text) {
+        let ch: Text = copy(text, i + 1, 1);
+        result = result + shiftChar(ch, shift);
+    }
+    ret result;
+}
+
+fn caesarDecrypt(text: Text, shift: Int) -> Text {
+    ret caesarEncrypt(text, 26 - (shift % 26));
+}
+
+fn main() -> Void {
+    fx {
+        let message: Text = "Hello World";
+        let shift: Int = 3;
+        let encrypted: Text = caesarEncrypt(message, shift);
+        let decrypted: Text = caesarDecrypt(encrypted, shift);
+        println("Original: ", message);
+        println("Encrypted: ", encrypted);
+        println("Decrypted: ", decrypted);
+    }
+    ret;
+}

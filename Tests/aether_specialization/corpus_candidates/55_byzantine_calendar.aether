@@ -1,0 +1,61 @@
+// Byzantine calendar calculations
+fn byzantineAM(year: Int, month: Int) -> Int {
+    // Epoch: 1 Sep 5509 BCE
+    // Year offset: +5508 for Jan-Aug, +5509 for Sep-Dec
+    if month >= 9 {
+        ret year + 5509;
+    } else {
+        ret year + 5508;
+    }
+}
+
+fn indiction(year: Int) -> Int {
+    // 15-year tax cycle starting 312 CE
+    // Year 313 CE = indiction 1
+    let offset: Int = year - 312;
+    ret (offset % 15) + 1;
+}
+
+fn verifyByzantineDate(year: Int, month: Int, amYear: Int, indictionYear: Int) -> Bool {
+    let calculatedAM: Int = byzantineAM(year, month);
+    let calculatedIndiction: Int = indiction(year);
+
+    ret calculatedAM == amYear && calculatedIndiction == indictionYear;
+}
+
+fn byzantineToDate(amYear: Int, indictionYear: Int) -> (Int, Int) {
+    // Find year where AM and indiction match
+    // AM year = year + 5508 or 5509
+    // Indiction = (year - 312) % 15 + 1
+
+    loop testYear in 1..10000 {
+        let am1: Int = testYear + 5508;
+        let am2: Int = testYear + 5509;
+        let ind: Int = indiction(testYear);
+
+        if (am1 == amYear || am2 == amYear) && ind == indictionYear {
+            ret (testYear, 0); // 0 means we can't determine month from this alone
+        }
+    }
+    ret (-1, -1); // Not found
+}
+
+fn main() -> Void {
+    fx {
+        // Test year 2024
+        let year: Int = 2024;
+        let am: Int = byzantineAM(year, 6); // June
+        let ind: Int = indiction(year);
+
+        println("Year ", year, " (June) -> AM: ", am, ", Indiction: ", ind);
+
+        // Verify consistency
+        let valid: Bool = verifyByzantineDate(year, 6, am, ind);
+        println("Date verification: ", valid);
+
+        // Reverse lookup
+        let (foundYear, foundMonth) = byzantineToDate(am, ind);
+        println("AM ", am, " + Indiction ", ind, " -> Year: ", foundYear);
+    }
+    ret;
+}

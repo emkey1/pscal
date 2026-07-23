@@ -1,0 +1,59 @@
+// Julian Period: LCM(28, 19, 15) = 7980 years
+fn solarCycle(year: Int) -> Int {
+    // 28-year solar cycle (Julian calendar)
+    ret ((year - 1) % 28) + 1;
+}
+
+fn goldenNumber(year: Int) -> Int {
+    // 19-year Metonic cycle (Golden Number)
+    ret ((year - 1) % 19) + 1;
+}
+
+fn indictionCycle(year: Int) -> Int {
+    // 15-year indiction cycle
+    ret ((year - 1) % 15) + 1;
+}
+
+fn julianPeriodFromTriple(solar: Int, golden: Int, indiction: Int) -> Int {
+    // Brute force search through 7980 years
+    loop jp in 1..7981 {
+        if solarCycle(jp) == solar && goldenNumber(jp) == golden && indictionCycle(jp) == indiction {
+            ret jp;
+        }
+    }
+    ret -1; // Not found (should never happen for valid triple)
+}
+
+fn julianDayFromJP(jp: Int) -> Int {
+    // JP year 1 = 1 Jan 4713 BCE Julian
+    // JD of 1 Jan 4713 BCE = 0
+    ret jp - 1; // Simplified: JD = JP - 1
+}
+
+fn main() -> Void {
+    fx {
+        // Test: Year 1 should have all cycles = 1
+        let solar1: Int = solarCycle(1);
+        let golden1: Int = goldenNumber(1);
+        let indiction1: Int = indictionCycle(1);
+        println("Year 1: Solar=", solar1, " Golden=", golden1, " Indiction=", indiction1);
+
+        // Test reverse lookup
+        let jp: Int = julianPeriodFromTriple(1, 1, 1);
+        println("Triple (1,1,1) -> JP year: ", jp);
+
+        // Test with known triple (e.g., year 2024)
+        let solar2024: Int = solarCycle(2024);
+        let golden2024: Int = goldenNumber(2024);
+        let indiction2024: Int = indictionCycle(2024);
+        println("Year 2024: Solar=", solar2024, " Golden=", golden2024, " Indiction=", indiction2024);
+
+        let jp2024: Int = julianPeriodFromTriple(solar2024, golden2024, indiction2024);
+        println("Triple for 2024 -> JP year: ", jp2024);
+
+        // Verify JD calculation
+        let jd: Int = julianDayFromJP(jp2024);
+        println("JP ", jp2024, " -> JD: ", jd);
+    }
+    ret;
+}

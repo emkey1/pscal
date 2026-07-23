@@ -1,0 +1,62 @@
+// Substitution Cipher - replaces each letter with a fixed permutation
+fn substitutionEncrypt(text: Text, mapping: Text) -> Text {
+    let result: Text = "";
+    loop i in 0..string_len(text) {
+        let ch: Text = copy(text, i + 1, 1);
+        let code: Int = ord(ch);
+        if code >= ord("A") && code <= ord("Z") {
+            let index: Int = code - ord("A");
+            let mappedChar: Text = copy(mapping, index + 1, 1);
+            result = result + mappedChar;
+        } else if code >= ord("a") && code <= ord("z") {
+            let index: Int = code - ord("a");
+            let mappedChar: Text = copy(mapping, index + 1, 1);
+            // mapping is all-uppercase; downcase the substituted letter so
+            // encryption preserves the original letter's case for decrypt.
+            result = result + chr(ord(mappedChar) + 32);
+        } else {
+            result = result + ch;
+        }
+    }
+    ret result;
+}
+
+fn substitutionDecrypt(text: Text, mapping: Text) -> Text {
+    let result: Text = "";
+    loop i in 0..string_len(text) {
+        let ch: Text = copy(text, i + 1, 1);
+        let code: Int = ord(ch);
+        if code >= ord("A") && code <= ord("Z") {
+            let index: Int = pos(ch, mapping) - 1;
+            if index >= 0 {
+                result = result + chr(index + ord("A"));
+            } else {
+                result = result + ch;
+            }
+        } else if code >= ord("a") && code <= ord("z") {
+            let upperCh: Text = stringofchar(chr(code - 32), 1);
+            let index: Int = pos(upperCh, mapping) - 1;
+            if index >= 0 {
+                result = result + chr(index + ord("a"));
+            } else {
+                result = result + ch;
+            }
+        } else {
+            result = result + ch;
+        }
+    }
+    ret result;
+}
+
+fn main() -> Void {
+    fx {
+        let message: Text = "Hello World";
+        let mapping: Text = "QWERTYUIOPASDFGHJKLZXCVBNM";
+        let encrypted: Text = substitutionEncrypt(message, mapping);
+        let decrypted: Text = substitutionDecrypt(encrypted, mapping);
+        println("Original: ", message);
+        println("Encrypted: ", encrypted);
+        println("Decrypted: ", decrypted);
+    }
+    ret;
+}

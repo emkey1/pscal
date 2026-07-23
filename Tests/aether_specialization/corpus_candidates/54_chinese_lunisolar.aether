@@ -1,0 +1,79 @@
+// Chinese calendar with leap month detection
+fn isLeapYear(year: Int) -> Bool {
+    ret (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+}
+
+// Approximate winter solstice date (Dec 21/22)
+fn winterSolstice(year: Int) -> Int {
+    // Simplified: returns day of year (355 or 356)
+    if isLeapYear(year) {
+        ret 356; // Dec 21 in leap year
+    } else {
+        ret 355; // Dec 21 in common year
+    }
+}
+
+// Metonic cycle: 7 leap months in 19 years
+fn isChineseLeapMonth(year: Int, month: Int) -> Bool {
+    // Years 3, 6, 8, 11, 14, 17, 19 in 19-year cycle have leap months
+    let cycleYear: Int = (year - 1) % 19 + 1;
+    if cycleYear == 3 || cycleYear == 6 || cycleYear == 8 || cycleYear == 11 ||
+       cycleYear == 14 || cycleYear == 17 || cycleYear == 19 {
+        ret true;
+    }
+    ret false;
+}
+
+// Determine which month is leap (simplified)
+fn getLeapMonth(year: Int) -> Int {
+    let cycleYear: Int = (year - 1) % 19 + 1;
+    if cycleYear == 3 { ret 3; }
+    if cycleYear == 6 { ret 6; }
+    if cycleYear == 8 { ret 8; }
+    if cycleYear == 11 { ret 11; }
+    if cycleYear == 14 { ret 14; }
+    if cycleYear == 17 { ret 17; }
+    if cycleYear == 19 { ret 19; }
+    ret 0; // No leap month
+}
+
+// Convert Chinese year/month to approximate Gregorian
+fn chineseToGregorian(year: Int, month: Int, isLeap: Bool) -> (Int, Int) {
+    // Base year 1900 for calculation
+    const baseYear: Int = 1900;
+    let yearOffset: Int = year - baseYear;
+
+    // Approximate months from winter solstice
+    let monthOffset: Int = month - 11; // 11th month contains winter solstice
+
+    if isLeap {
+        monthOffset = monthOffset + 1;
+    }
+
+    // Very rough conversion (not accounting for exact lunar months)
+    let gregorianMonth: Int = ((monthOffset + 11) % 12) + 1;
+    let gregorianYear: Int = baseYear + yearOffset + (monthOffset + 11) / 12;
+
+    ret (gregorianYear, gregorianMonth);
+}
+
+fn main() -> Void {
+    fx {
+        let testYear: Int = 2025;
+        let leapMonth: Int = getLeapMonth(testYear);
+
+        println("Year ", testYear, " has leap month: ", leapMonth);
+
+        // Test conversion for a leap month
+        if leapMonth > 0 {
+            let (gy, gm) = chineseToGregorian(testYear, leapMonth, true);
+            println("Leap month ", leapMonth, " in year ", testYear,
+                    " approximates to ", gm, "/", gy);
+        }
+
+        // Check Metonic cycle position
+        let cyclePos: Int = (testYear - 1) % 19 + 1;
+        println("Year ", testYear, " is position ", cyclePos, " in Metonic cycle");
+    }
+    ret;
+}
