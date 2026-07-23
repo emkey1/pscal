@@ -1,0 +1,79 @@
+// Mayan Long Count to Julian Day conversion
+fn longCountToJD(baktun: Int, katun: Int, tun: Int, winal: Int, kin: Int) -> Int {
+    const GMT_CONSTANT: Int = 584283;
+    let totalDays: Int = baktun * 144000 + katun * 7200 + tun * 360 + winal * 20 + kin;
+    ret GMT_CONSTANT + totalDays;
+}
+
+fn jdToLongCount(jd: Int) -> (Int, Int, Int, Int, Int) {
+    const GMT_CONSTANT: Int = 584283;
+    let totalDays: Int = jd - GMT_CONSTANT;
+
+    let baktun: Int = totalDays / 144000;
+    totalDays = totalDays % 144000;
+
+    let katun: Int = totalDays / 7200;
+    totalDays = totalDays % 7200;
+
+    let tun: Int = totalDays / 360;
+    totalDays = totalDays % 360;
+
+    let winal: Int = totalDays / 20;
+    let kin: Int = totalDays % 20;
+
+    ret (baktun, katun, tun, winal, kin);
+}
+
+// Tzolk'in: 260-day cycle (13 numbers x 20 day names)
+fn tzolkinFromJD(jd: Int) -> (Int, Text) {
+    // NOTE: day names stored as a Text[] array, not a fixed-width packed
+    // string -- the names have unequal length (Imix=4, Ik=2, Akbal=5, ...),
+    // so a fixed-stride copy() slice misaligns and returns garbage.
+    let dayNames: Text[] = ["Imix","Ik","Akbal","Kan","Chicchan","Cimi","Manik",
+                             "Lamat","Muluc","Oc","Chuen","Eb","Ben","Ix","Men",
+                             "Cib","Caban","Etznab","Cauac","Ahau"];
+    let dayNumber: Int = ((jd - 2) % 13) + 1;
+    let dayIndex: Int = (jd - 2) % 20;
+    ret (dayNumber, dayNames[dayIndex]);
+}
+
+// Haab': 365-day cycle (18 months x 20 days + 5 Wayeb')
+fn haabFromJD(jd: Int) -> (Int, Text) {
+    // Same fixed-width-vs-unequal-length pitfall as tzolkinFromJD -- use an
+    // array instead of a packed string.
+    let monthNames: Text[] = ["Pop","Uo","Zip","Zotz","Tzec","Xul","Yaxkin",
+                               "Mol","Chen","Yax","Zac","Ceh","Mac","Kankin",
+                               "Muan","Pax","Kayab","Cumku","Wayeb"];
+    let dayOfHaab: Int = (jd - 584283) % 365;
+    if dayOfHaab < 0 {
+        dayOfHaab = dayOfHaab + 365;
+    }
+
+    let monthIndex: Int = dayOfHaab / 20;
+    let dayInMonth: Int = dayOfHaab % 20;
+
+    if monthIndex >= 18 {
+        monthIndex = 18;
+    }
+
+    ret (dayInMonth, monthNames[monthIndex]);
+}
+
+fn main() -> Void {
+    fx {
+        // Example: Long Count 13.0.0.0.0 (creation date)
+        let jd: Int = longCountToJD(13, 0, 0, 0, 0);
+        println("Long Count 13.0.0.0.0 -> JD: ", jd);
+
+        // Convert back
+        let (b, k, t, w, ki) = jdToLongCount(jd);
+        println("JD ", jd, " -> Long Count: ", b, ".", k, ".", t, ".", w, ".", ki);
+
+        // Tzolk'in and Haab' for this date
+        let (tzNumber, tzName) = tzolkinFromJD(jd);
+        let (hDay, hMonth) = haabFromJD(jd);
+        println("Tzolk'in: ", tzNumber, " ", tzName);
+        println("Haab': ", hDay, " ", hMonth);
+    }
+    ret;
+}

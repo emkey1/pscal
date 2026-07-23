@@ -1,0 +1,88 @@
+// Rail Fence Cipher - writes text in a zigzag pattern and reads off rows
+fn railFenceEncrypt(text: Text, rails: Int) -> Text {
+    if rails <= 1 || string_len(text) <= 1 {
+        ret text;
+    }
+    let fence: Text[] = [];
+    loop i in 0..rails {
+        fence = fence + [""];
+    }
+    let currentRail: Int = 0;
+    let direction: Int = 1;
+    loop i in 0..string_len(text) {
+        let ch: Text = copy(text, i + 1, 1);
+        fence[currentRail] = fence[currentRail] + ch;
+        if currentRail == 0 {
+            direction = 1;
+        } else if currentRail == rails - 1 {
+            direction = -1;
+        }
+        currentRail = currentRail + direction;
+    }
+    let result: Text = "";
+    loop i in 0..rails {
+        result = result + fence[i];
+    }
+    ret result;
+}
+
+fn railFenceDecrypt(text: Text, rails: Int) -> Text {
+    if rails <= 1 || string_len(text) <= 1 {
+        ret text;
+    }
+    let n: Int = string_len(text);
+    let railLengths: Int[] = [];
+    loop i in 0..rails {
+        railLengths = railLengths + [0];
+    }
+    let currentRail: Int = 0;
+    let direction: Int = 1;
+    loop i in 0..n {
+        railLengths[currentRail] = railLengths[currentRail] + 1;
+        if currentRail == 0 {
+            direction = 1;
+        } else if currentRail == rails - 1 {
+            direction = -1;
+        }
+        currentRail = currentRail + direction;
+    }
+    let railData: Text[] = [];
+    let index: Int = 0;
+    loop i in 0..rails {
+        railData = railData + [copy(text, index + 1, railLengths[i])];
+        index = index + railLengths[i];
+    }
+    let railIndices: Int[] = [];
+    loop i in 0..rails {
+        railIndices = railIndices + [0];
+    }
+    let result: Text = "";
+    currentRail = 0;
+    direction = 1;
+    loop i in 0..n {
+        let railText: Text = railData[currentRail];
+        let pos: Int = railIndices[currentRail] + 1;
+        result = result + copy(railText, pos, 1);
+        railIndices[currentRail] = railIndices[currentRail] + 1;
+        if currentRail == 0 {
+            direction = 1;
+        } else if currentRail == rails - 1 {
+            direction = -1;
+        }
+        currentRail = currentRail + direction;
+    }
+    ret result;
+}
+
+fn main() -> Void {
+    fx {
+        let message: Text = "HELLO WORLD";
+        let rails: Int = 3;
+        let encrypted: Text = railFenceEncrypt(message, rails);
+        let decrypted: Text = railFenceDecrypt(encrypted, rails);
+        println("Original: ", message);
+        println("Encrypted: ", encrypted);
+        println("Decrypted: ", decrypted);
+    }
+    ret;
+}

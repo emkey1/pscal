@@ -12044,6 +12044,116 @@
         ],
         "notes": "Roman numeral bidirectional conversion (greedy descent + subtractive-pair detection); round-trip verified for all 12 test values including the classic IV/IX pitfalls"
       }
+    },
+    {
+      "source_path": "/tmp/corpus_new/47_baconian_cipher.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/47_baconian_cipher.aether",
+      "sha256": "847e1755c28ef144e9ef3d2d27685b197c736519afd05241cd4f9976eb6ca274",
+      "stdout": "Baconian Biliteral Cipher (1605):\nPlaintext:  BACON\nBacon bits: aaaab aaaaa aaaba abbba abbab\nDecoded:    BACON\n\nFull alphabet mapping:\n  A -> aaaaa\n  B -> aaaab\n  C -> aaaba\n  D -> aaabb\n  E -> aabaa\n  F -> aabab\n  G -> aabba\n  H -> aabbb\n  I -> abaaa\n  J -> abaab\n  K -> ababa\n  L -> ababb\n  M -> abbaa\n  N -> abbab\n  O -> abbba\n  P -> abbbb\n  Q -> baaaa\n  R -> baaab\n  S -> baaba\n  T -> baabb\n  U -> babaa\n  V -> babab\n  W -> babba\n  X -> babbb\n  Y -> bbaaa\n  Z -> bbaab\nRoundtrip verified for all 26 letters.\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new2/48_caesar_cipher_v2.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/48_caesar_cipher_v2.aether",
+      "sha256": "9ae28b4a4e1316fe5c73f80dda8395bb115c5b1ada1385244924271cf4c9b316",
+      "stdout": "Original: Hello World\nEncrypted: Khoor Zruog\nDecrypted: Hello World\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new2/49_vigenere_cipher_v2.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/49_vigenere_cipher_v2.aether",
+      "sha256": "3957ae1317fce99e9512ca9e673426f686b1985cbe9da5451e80b410bc76fecc",
+      "stdout": "Original: Attack at dawn\nEncrypted: Lxfopv ef rnhr\nDecrypted: Attack at dawn\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new2/50_substitution_cipher.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/50_substitution_cipher.aether",
+      "sha256": "0f86f679169c2cae05d048abbcd36fd4fcce430ebad9099ac1dd2e3738289b6f",
+      "stdout": "Original: Hello World\nEncrypted: Itssg Vgksr\nDecrypted: Hello World\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new2/51_rail_fence_cipher.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/51_rail_fence_cipher.aether",
+      "sha256": "539ca6b57805fe823811726b4a40576cdc9cbef59b631fbd3be837f1fec3905b",
+      "stdout": "Original: HELLO WORLD\nEncrypted: HOREL OLLWD\nDecrypted: HELLO WORLD\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new2/52_xor_cipher.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/52_xor_cipher.aether",
+      "sha256": "cbfe64ebf3d88097e4ace93d5503e4da7e41d5b765bb7665e90a8188822f8802",
+      "stdout": "Original: Secret Message\nEncrypted (first byte, decimal): 24\nDecrypted: Secret Message\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new3/53_mayan_calendar.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/53_mayan_calendar.aether",
+      "sha256": "e1f7d485bc07d46a94252e950e1adc784ea8bd20e97f4e731eaedd067dc159f6",
+      "stdout": "Long Count 13.0.0.0.0 -> JD: 2456283\nJD 2456283 -> Long Count: 13.0.0.0.0\nTzolk'in: 10 Ik\nHaab': 0 Muan\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new3/54_chinese_lunisolar.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/54_chinese_lunisolar.aether",
+      "sha256": "cfd11b75f39139b54bec67a62725c70f215cb444b6edc0add5437abc49119c44",
+      "stdout": "Year 2025 has leap month: 11\nLeap month 11 in year 2025 approximates to 1/2026\nYear 2025 is position 11 in Metonic cycle\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new3/55_byzantine_calendar.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/55_byzantine_calendar.aether",
+      "sha256": "0b50ad43fcb7e1ece1915fec6cf4508faf0a90f77cf6d742a13e2a52041e1cd9",
+      "stdout": "Year 2024 (June) -> AM: 7532, Indiction: 3\nDate verification: true\nAM 7532 + Indiction 3 -> Year: 2024\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new3/56_french_republican_calendar.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/56_french_republican_calendar.aether",
+      "sha256": "ffee3786936a5c9a17d908242dae143b963406822d5115bcd7e4515aeffe285f",
+      "stdout": "1 Jan 2024 -> Republican Year 233, Vend\u00e9miaire 1 (Primidi)\nYear 233 is leap: false\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new3/57_scaliger_julian_period.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/57_scaliger_julian_period.aether",
+      "sha256": "7c8fb77476e4b7de2712d5d6308712b997ae148bdb5b449c4e685211f8c45943",
+      "stdout": "Year 1: Solar=1 Golden=1 Indiction=1\nTriple (1,1,1) -> JP year: 1\nYear 2024: Solar=8 Golden=10 Indiction=14\nTriple for 2024 -> JP year: 2024\nJP 2024 -> JD: 2023\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
     }
   ]
 }

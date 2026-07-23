@@ -1,0 +1,25 @@
+// XOR Cipher - applies bitwise XOR with a repeating key
+fn xorCipher(text: Text, key: Text) -> Text {
+    let result: Text = "";
+    let keyLen: Int = string_len(key);
+    loop i in 0..string_len(text) {
+        let ch: Text = copy(text, i + 1, 1);
+        let keyChar: Text = copy(key, (i % keyLen) + 1, 1);
+        let xorResult: Int = ord(ch) xor ord(keyChar);
+        result = result + chr(xorResult);
+    }
+    ret result;
+}
+
+fn main() -> Void {
+    fx {
+        let message: Text = "Secret Message";
+        let key: Text = "KEY";
+        let encrypted: Text = xorCipher(message, key);
+        let decrypted: Text = xorCipher(encrypted, key);
+        println("Original: ", message);
+        println("Encrypted (first byte, decimal): ", int_to_text(ord(copy(encrypted, 1, 1))));
+        println("Decrypted: ", decrypted);
+    }
+    ret;
+}
