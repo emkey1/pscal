@@ -14,7 +14,8 @@ final class TerminalAccessoryView: UIView {
 
 // MARK: - Custom Native View with Expandable Settings Drawer
 
-final class NativeTerminalView: UITextView {
+final class NativeTerminalView: UITextView, UIInputViewAudioFeedback {
+    var enableInputClicksWhenVisible: Bool { return true }
     var onSettingsChanged: ((CGFloat, UIColor) -> Void)?
     var onInput: ((String) -> Void)?
     private var softKeyboardVisible: Bool = false
@@ -125,6 +126,7 @@ final class NativeTerminalView: UITextView {
             }
 
             btn.addTarget(self, action: #selector(keyTapped(_:)), for: .touchUpInside)
+            btn.addTarget(self, action: #selector(playInputClickSound), for: .touchDown)
             keysStack.addArrangedSubview(btn)
         }
 
@@ -187,6 +189,10 @@ final class NativeTerminalView: UITextView {
     }
 
     // MARK: Actions
+
+    @objc private func playInputClickSound() {
+        UIDevice.current.playInputClick()
+    }
 
     @objc private func keyTapped(_ sender: UIButton) {
         guard let title = sender.title(for: .normal) else { return }

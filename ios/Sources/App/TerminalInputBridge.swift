@@ -87,7 +87,8 @@ struct TerminalInputBridge: UIViewRepresentable {
 }
 
 @MainActor
-final class TerminalKeyInputView: UITextView {
+final class TerminalKeyInputView: UITextView, UIInputViewAudioFeedback {
+    var enableInputClicksWhenVisible: Bool { return true }
     var onInput: ((String) -> Void)?
     var onPaste: ((String) -> Void)?
     var onCopy: (() -> Void)?
@@ -218,6 +219,7 @@ final class TerminalKeyInputView: UITextView {
             button.configuration = config
             button.titleLabel?.font = UIFontMetrics.default.scaledFont(for: .systemFont(ofSize: 15, weight: .semibold))
             button.addTarget(self, action: action, for: .touchUpInside)
+            button.addTarget(self, action: #selector(playInputClickSound), for: .touchDown)
             return button
         }
 
@@ -889,6 +891,10 @@ final class TerminalKeyInputView: UITextView {
         }
 
         keyboardObservers = [willShow, willHide, focusRequested]
+    }
+
+    @objc private func playInputClickSound() {
+        UIDevice.current.playInputClick()
     }
 
     // MARK: - Accessory button actions
