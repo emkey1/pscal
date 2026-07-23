@@ -1,0 +1,97 @@
+// Hangul syllable composition: Unicode encodes pre-composed syllables
+// at U+AC00-U+D7AF via a formula rather than individual assignment.
+// A syllable = BASE + choseong_idx*588 + jungseong_idx*28 + jongseong_idx.
+// chr(codepoint) renders the composed glyph directly -- the Unicode
+// formula really is the whole composition algorithm.
+
+@pure
+fn findChoseongIdx(c: Text) -> Int {
+    if c == "ㅎ" { ret 18; }
+    if c == "ㄱ" { ret 0; }
+    if c == "ㅅ" { ret 9; }
+    if c == "ㅁ" { ret 6; }
+    if c == "ㄷ" { ret 3; }
+    if c == "ㅂ" { ret 7; }
+    if c == "ㅈ" { ret 12; }
+    if c == "ㅋ" { ret 15; }
+    if c == "ㄴ" { ret 2; }
+    ret -1;
+}
+
+@pure
+fn findJungseongIdx(c: Text) -> Int {
+    if c == "ㅏ" { ret 0; }
+    if c == "ㅡ" { ret 18; }
+    if c == "ㅜ" { ret 13; }
+    if c == "ㅗ" { ret 8; }
+    if c == "ㅓ" { ret 4; }
+    if c == "ㅇ" { ret -99; } // not a vowel; guards against a bad call
+    if c == "ㅣ" { ret 20; }
+    ret -1;
+}
+
+@pure
+fn findJongseongIdx(c: Text) -> Int {
+    // 28-entry table: 0=none, 1=ㄱ..27=ㅎ, skipping the tensed stops
+    // (ㄸ/ㅃ/ㅉ) which cannot occur as a syllable-final consonant.
+    if c == "" { ret 0; }
+    if c == "ㄱ" { ret 1; }
+    if c == "ㄴ" { ret 4; }
+    if c == "ㄹ" { ret 8; }
+    if c == "ㅁ" { ret 16; }
+    if c == "ㅂ" { ret 17; }
+    if c == "ㅇ" { ret 21; }
+    ret -1;
+}
+
+let SYLLABLE_BASE: Int = 44032;   // 0xAC00
+let CHOSEONG_STEP: Int = 588;     // 21 jungseong * 28 jongseong
+let JUNGSEONG_STEP: Int = 28;
+
+@pure
+fn composeHangul(choseong: Text, jungseong: Text, jongseong: Text) -> Int {
+    let ci: Int = findChoseongIdx(choseong);
+    let ji: Int = findJungseongIdx(jungseong);
+    let ki: Int = findJongseongIdx(jongseong);
+    if ci == -1 || ji == -1 || ki == -1 {
+        ret 0;
+    }
+    ret SYLLABLE_BASE + ci * CHOSEONG_STEP + ji * JUNGSEONG_STEP + ki;
+}
+
+@pure
+fn hexOfInt(n: Int) -> Text {
+    let digits: Text = "0123456789ABCDEF";
+    let v: Int = n;
+    let out: Text = "";
+    loop v > 0 {
+        let d: Int = v % 16;
+        out = copy(digits, d + 1, 1) + out;
+        v = v / 16;
+    }
+    loop length(out) < 4 {
+        out = "0" + out;
+    }
+    ret out;
+}
+
+fn main() -> Void {
+    let choseongs: Text[] = ["ㅎ", "ㄱ", "ㅅ", "ㅁ", "ㄷ", "ㅂ", "ㅈ", "ㅋ", "ㄴ", "ㄱ"];
+    let jungseongs: Text[] = ["ㅏ", "ㅡ", "ㅏ", "ㅜ", "ㅗ", "ㅓ", "ㅏ", "ㅣ", "ㅏ", "ㅜ"];
+    let jongseongs: Text[] = ["ㄴ", "ㄹ", "ㄴ", "ㄴ", "", "ㅂ", "ㅇ", "ㅁ", "ㄹ", "ㄱ"];
+
+    fx {
+        println("Hangul syllable composition:");
+        println("jamo      -> syllable (Unicode codepoint)");
+        println("----------------------------------------");
+    }
+    loop s in 0..length(choseongs) {
+        let cp: Int = composeHangul(choseongs[s], jungseongs[s], jongseongs[s]);
+        let glyph: Text = chr(cp);
+        fx {
+            println(choseongs[s], jungseongs[s], jongseongs[s],
+                    "  ->  U+", hexOfInt(cp), "  ", glyph);
+        }
+    }
+    ret;
+}

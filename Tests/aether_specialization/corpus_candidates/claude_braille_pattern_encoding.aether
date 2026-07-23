@@ -1,0 +1,139 @@
+// Braille: a tactile pictograph system where each character is a 2x3
+// matrix of raised dots. In Unicode, every possible on/off pattern of
+// the six dots is a distinct pictograph at U+2800 + pattern. The dot
+// numbering is:
+//   1 4
+//   2 5
+//   3 6
+// Letters a-z map to standard Braille patterns (decimal here -- Aether
+// has no `0b` binary literal syntax). chr(0x2800 + pattern) renders the
+// glyph directly.
+
+@pure
+fn braillePattern(letter: Text) -> Int {
+    if letter == "a" { ret 1; }    // dot 1
+    if letter == "b" { ret 3; }    // dots 1+2
+    if letter == "c" { ret 9; }    // dots 1+4
+    if letter == "d" { ret 25; }   // dots 1+4+5
+    if letter == "e" { ret 17; }   // dots 1+5
+    if letter == "f" { ret 11; }   // dots 1+2+4
+    if letter == "g" { ret 27; }   // dots 1+2+4+5
+    if letter == "h" { ret 19; }   // dots 1+2+5
+    if letter == "i" { ret 10; }   // dots 2+4
+    if letter == "j" { ret 26; }   // dots 2+4+5
+    if letter == "k" { ret 5; }    // dots 1+3
+    if letter == "l" { ret 7; }    // dots 1+2+3
+    if letter == "m" { ret 13; }   // dots 1+3+4
+    if letter == "n" { ret 29; }   // dots 1+3+4+5
+    if letter == "o" { ret 21; }   // dots 1+3+5
+    if letter == "p" { ret 15; }   // dots 1+2+3+4
+    if letter == "q" { ret 31; }   // dots 1+2+3+4+5
+    if letter == "r" { ret 23; }   // dots 1+2+3+5
+    if letter == "s" { ret 14; }   // dots 2+3+4
+    if letter == "t" { ret 30; }   // dots 2+3+4+5
+    if letter == "u" { ret 37; }   // dots 1+3+6
+    if letter == "v" { ret 39; }   // dots 1+2+3+6
+    if letter == "w" { ret 58; }   // dots 2+4+5+6 (w is special in Braille)
+    if letter == "x" { ret 45; }   // dots 1+3+4+6
+    if letter == "y" { ret 61; }   // dots 1+3+4+5+6
+    if letter == "z" { ret 53; }   // dots 1+3+5+6
+    ret 0;                          // space or unknown
+}
+
+@pure
+fn letterFromPattern(pattern: Int) -> Text {
+    if pattern == 1 { ret "a"; }
+    if pattern == 3 { ret "b"; }
+    if pattern == 9 { ret "c"; }
+    if pattern == 25 { ret "d"; }
+    if pattern == 17 { ret "e"; }
+    if pattern == 11 { ret "f"; }
+    if pattern == 27 { ret "g"; }
+    if pattern == 19 { ret "h"; }
+    if pattern == 10 { ret "i"; }
+    if pattern == 26 { ret "j"; }
+    if pattern == 5 { ret "k"; }
+    if pattern == 7 { ret "l"; }
+    if pattern == 13 { ret "m"; }
+    if pattern == 29 { ret "n"; }
+    if pattern == 21 { ret "o"; }
+    if pattern == 15 { ret "p"; }
+    if pattern == 31 { ret "q"; }
+    if pattern == 23 { ret "r"; }
+    if pattern == 14 { ret "s"; }
+    if pattern == 30 { ret "t"; }
+    if pattern == 37 { ret "u"; }
+    if pattern == 39 { ret "v"; }
+    if pattern == 58 { ret "w"; }
+    if pattern == 45 { ret "x"; }
+    if pattern == 61 { ret "y"; }
+    if pattern == 53 { ret "z"; }
+    if pattern == 0 { ret " "; }
+    ret "?";
+}
+
+@pure
+fn brailleChar(letter: Text) -> Text {
+    ret chr(0x2800 + braillePattern(letter));
+}
+
+@pure
+fn hexOfInt(n: Int) -> Text {
+    let digits: Text = "0123456789ABCDEF";
+    let v: Int = n;
+    let out: Text = "";
+    if v == 0 {
+        ret "00";
+    }
+    loop v > 0 {
+        let d: Int = v % 16;
+        out = copy(digits, d + 1, 1) + out;
+        v = v / 16;
+    }
+    loop length(out) < 2 {
+        out = "0" + out;
+    }
+    ret out;
+}
+
+fn main() -> Void {
+    let message: Text = "aether pictograph";
+
+    fx {
+        println("Text to Braille pictograph encoding:");
+        println("");
+        print("Plain:     ");
+        loop i in 0..length(message) {
+            print(copy(message, i + 1, 1), " ");
+        }
+        println("");
+
+        print("Braille:   ");
+        loop i in 0..length(message) {
+            let c: Text = copy(message, i + 1, 1);
+            print(brailleChar(c), " ");
+        }
+        println("");
+
+        print("Patterns:  ");
+        loop i in 0..length(message) {
+            let c: Text = copy(message, i + 1, 1);
+            let pat: Int = braillePattern(c);
+            print(hexOfInt(pat), " ");
+        }
+        println("");
+        println("");
+
+        println("Decoding back:");
+    }
+    let decoded: Text = "";
+    loop i in 0..length(message) {
+        let c: Text = copy(message, i + 1, 1);
+        let pat: Int = braillePattern(c);
+        decoded = decoded + letterFromPattern(pat);
+    }
+    fx {
+        println("Decoded: ", decoded);
+    }
+    ret;
+}

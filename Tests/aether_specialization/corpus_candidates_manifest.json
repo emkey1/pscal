@@ -8318,15 +8318,20 @@
     {
       "source_path": "/tmp/aether_batch4_examples/04_merge_sort.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/04_merge_sort.aether",
-      "sha256": "70f2cae8998febc9c876b74a0f0a9808061094f6523ad53e2d08eaa6f7f6473c",
-      "stdout": "Before: 38 27 43 3 9 82 10 \nAfter:  3 9 10 27 38 43 82 \n",
+      "sha256": "17d43fa24965686bbf22c3a9b4b58df15aeb4a0ff3641726461f696481594a76",
+      "stdout": "Before: 54 17 91 6 33 78 2 45 \nAfter:  2 6 17 33 45 54 78 91 \n",
       "metadata": {
         "canonical": true,
         "fixture_required": false,
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-22",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -10456,15 +10461,20 @@
     {
       "source_path": "/tmp/aether_batch8_examples/31_merge_sort_dc.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/31_merge_sort_dc.aether",
-      "sha256": "7b07256e67e1611066af3ab1f74d11f3b17feb56867678f6f641f7ced7a7c673",
-      "stdout": "Sorted: 3 9 10 27 38 43 82 \n",
+      "sha256": "c238a3aefadc521d923d8165231b8fd482ca0a39476e2506509ed35aa9c739bc",
+      "stdout": "Sorted: 5 12 24 39 61 70 88 \n",
       "metadata": {
         "canonical": true,
         "fixture_required": false,
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-22",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -11459,6 +11469,580 @@
           "unusual_nonintuitive"
         ],
         "notes": "@post contract reaches inside a tuple-returning function's result via result.0/result.1, and is genuinely enforced at runtime"
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_knapsack_dp_bitmask.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_knapsack_dp_bitmask.aether",
+      "sha256": "e39a5afbf9629dca5712d4ff3ba3c311972f0a5cbb8c36809631ffaedf344cff",
+      "stdout": "capacity = 5\nbest value = 7\ntake item 0 (w=2, v=3)\ntake item 1 (w=3, v=4)\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "algorithms",
+          "dynamic_programming",
+          "bitmask",
+          "tuple_return"
+        ],
+        "notes": "0/1 knapsack on a flattened 2D dp table with parallel bitmask table for item reconstruction; + stands in for bitwise-OR (each bit set once); narrow (value, mask) tuple return bound with inferred let per TUP-001",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_bfs_grid8_shortest_path.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_bfs_grid8_shortest_path.aether",
+      "sha256": "ff68a8d3d2886782429ed8aa7edd7f72fd51bab72184ca6007ceee61afa260f5",
+      "stdout": "....#...\n.####...\n....#...\n....#...\n....#...\n....#...\n..###...\n........\nshortest path (0,0) -> (7,7) = 14\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "algorithms",
+          "bfs",
+          "bit_packing"
+        ],
+        "notes": "BFS shortest path on 8x8 grid; bit-packed cells (row = idx >> 3, col = idx & 7), queue as append-only array with head cursor, guard loop bound 64 since each cell enqueues at most once",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_fizzbuzz_counters_no_modulo.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_fizzbuzz_counters_no_modulo.aether",
+      "sha256": "927dac856aa7fae00accd908318cdf23f9e9d0ba898e4cccc2cba3d5fdea0d26",
+      "stdout": "1\n2\nFizz\n4\nBuzz\nFizz\n7\n8\nFizz\nBuzz\n11\nFizz\n13\n14\nFizzBuzz\n16\n17\nFizz\n19\nBuzz\nFizz\n22\n23\nFizz\nBuzz\n26\nFizz\n28\n29\nFizzBuzz\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "counters",
+          "control_flow",
+          "text_building"
+        ],
+        "notes": "FizzBuzz without modulo: reset-on-threshold counters c3/c5, label built by Text concatenation, empty-label check selects number vs word",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_fibonacci_golden_ratio.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_fibonacci_golden_ratio.aether",
+      "sha256": "bacbb499a045fc639df4bf01c47467d0c63892bcb1348231f450982442357872",
+      "stdout": "fib(0) = 0\nfib(1) = 1\nfib(2) = 1\nfib(3) = 2\nfib(4) = 3\nfib(5) = 5\nfib(6) = 8\nfib(7) = 13\nfib(8) = 21\nfib(9) = 34\nfib(10) = 55\nfib(11) = 89\nfib(12) = 144\nfib(13) = 233\nfib(14) = 377\nratio 2 = 1.000000\nratio 3 = 2.000000\nratio 4 = 1.500000\nratio 5 = 1.666667\nratio 6 = 1.600000\nratio 7 = 1.625000\nratio 8 = 1.615385\nratio 9 = 1.619048\nratio 10 = 1.617647\nratio 11 = 1.618182\nratio 12 = 1.617978\nratio 13 = 1.618056\nratio 14 = 1.618026\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "sequences",
+          "real_arithmetic",
+          "format_specifiers"
+        ],
+        "notes": "Iterative Fibonacci table via array append; Int-to-Real promotion with (x * 1.0), Real division, and width:precision println formatting (ratio:0:6) converging on the golden ratio",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_gcd_lcm_subtraction_euclid.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_gcd_lcm_subtraction_euclid.aether",
+      "sha256": "1556c98762f7d511a851a9a2b0220edccda8fc04a0b29c8aae50b21785b944a3",
+      "stdout": "gcd of 48 and 18 -> 6\ngcd of 1071 and 462 -> 21\nlcm of 21 and 6 -> 42\nlcm of 7 and 13 -> 91\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "recursion",
+          "number_theory",
+          "integer_only"
+        ],
+        "notes": "Subtraction-form Euclid gcd (pure recursion, no modulo); lcm via a linear-scan exactDivide helper to stay integer-only; lcm(a,b) = a * (b / gcd)",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-22",
+          "source_rebaselined": true
+        },
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_recaman_sequence_a005132.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_recaman_sequence_a005132.aether",
+      "sha256": "9481abf9db9e2d20abf6edca62282ef1b97b0852811d04f94bfa5638dff6cc20",
+      "stdout": "Recaman's sequence, a(0) .. a(59):\n0 1 3 6 2 7 13 20 12 21 11 22 10 23 9 24 8 25 43 62 42 63 41 18 42 17 43 16 44 15 45 14 46 79 113 78 114 77 39 78 38 79 37 80 36 81 35 82 34 83 33 84 32 85 31 86 30 87 29 88 \n\n0 first appears at index 0\n1 first appears at index 1\n2 first appears at index 4\n3 first appears at index 2\n4 first appears at index 131\n5 first appears at index 129\n6 first appears at index 3\n7 first appears at index 5\n8 first appears at index 16\n9 first appears at index 14\n10 first appears at index 12\n11 first appears at index 10\n12 first appears at index 8\n13 first appears at index 6\n14 first appears at index 31\n15 first appears at index 29\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch",
+          "sequences",
+          "lookup_table",
+          "open_problem"
+        ],
+        "notes": "Recaman sequence (OEIS A005132) with a dynamically grown Bool[] seen-table for O(1) membership (mutated in main per array value-copy rule) and break-based first-appearance search; 4 and 5 first appear at indices 131/129",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_perrin_pseudoprimes.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_perrin_pseudoprimes.aether",
+      "sha256": "566296cc9fd7c473af747107b976f032d840cd5b0a1dec0526b6443697c753e1",
+      "stdout": "7: prime,     PASSES Perrin test\n521: prime,     PASSES Perrin test\n561: composite, fails Perrin test\n271441: composite, PASSES Perrin test   <-- Perrin pseudoprime!\n904631: composite, PASSES Perrin test   <-- Perrin pseudoprime!\n(561 is a Carmichael number: it fools Fermat, but not Perrin)\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch",
+          "number_theory",
+          "modular_arithmetic",
+          "primality"
+        ],
+        "notes": "Perrin sequence P(n) mod n via iterative three-term recurrence with per-step reduction; flags Perrin pseudoprimes 271441 and 904631, contrasts with Carmichael 561; @pre contracts on helpers",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_weird_numbers_subset_sum.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_weird_numbers_subset_sum.aether",
+      "sha256": "c47b21873013138ccfb2cec9ad8447b91bedf4c225d3056eb09164ea8fc651db",
+      "stdout": "weird numbers below 1000:\n70: divisors sum to 74, yet no subset adds up to 70\n836: divisors sum to 844, yet no subset adds up to 836\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch",
+          "number_theory",
+          "dynamic_programming",
+          "subset_sum"
+        ],
+        "notes": "Weird numbers below 1000 (70, 836): proper-divisor enumeration to sqrt(n), abundance check, semiperfect test as downward-scanning boolean subset-sum DP",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_van_eck_sequence.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_van_eck_sequence.aether",
+      "sha256": "bb75c3c635acdea337ef013ed6fb346a4142931cc648e30fe12b902a3a172527",
+      "stdout": "Van Eck's sequence, a(0) .. a(29):\n0 0 1 0 2 0 2 2 1 6 0 5 0 2 6 5 4 0 5 3 0 3 2 9 0 4 9 3 6 14 \n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch2",
+          "sequences",
+          "lookup_table",
+          "open_problem"
+        ],
+        "notes": "Van Eck sequence (OEIS A181391): a sparse lastSeen[] lookback table (same growth idiom as the Recaman example) tracks each value's most recent index; whether every integer eventually appears is open",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_multiplicative_persistence_champion.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_multiplicative_persistence_champion.aether",
+      "sha256": "311a4a57b26d1bd4f89c7f847eedfbd722b8acb8fe8e759f6005747b3a77be36",
+      "stdout": "multiplicative persistence scan, n = 0..99999\nchampion: 68889 with persistence 7\n(no base-10 number is known to need more than 11 steps -- still unproven)\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch2",
+          "number_theory",
+          "digit_manipulation",
+          "open_problem"
+        ],
+        "notes": "Multiplicative persistence (digit-product iteration to a single digit); linear scan for the persistence-7 record holder 68889 below 100000; Erdos conjectured no base-10 number ever needs more than 11 steps, still unproven",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_aliquot_lehmer_five_par.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_aliquot_lehmer_five_par.aether",
+      "sha256": "1a2dee76a3227daa6a8fc5314f6df81e5125cc78282f68df980d8e1d04e4db64",
+      "stdout": "seed 6: reaches perfect-number fixed point 6 after 1 steps\nseed 220: falls into a cycle at 220 after 2 steps\nseed 95: reaches perfect-number fixed point 6 after 3 steps\nseed 276: UNRESOLVED after 40 steps (peak so far 2740114636) -- fate unknown\nseed 552: UNRESOLVED after 40 steps (peak so far 1249822644) -- fate unknown\n\n276, 552, 564, 660, and 966 are the 'Lehmer five': the smallest seeds\nwhose aliquot sequence fate is still unknown -- the Catalan-Dickson conjecture.\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch2",
+          "number_theory",
+          "par_concurrency",
+          "open_problem",
+          "record_out_param"
+        ],
+        "notes": "Aliquot sequences via par (PAR-001 out-record-per-branch idiom, not join/return); seeds 6/220/95 resolve (perfect fixed point, amicable cycle, drops to 6), while 276 and 552 (two of the Lehmer five) are left UNRESOLVED by the step cap -- deliberately low (40, not the mathematically-motivated 150) because naive O(sqrt(n)) trial-division factorization cannot keep up with how fast these sequences grow in absolute value; not a claim about where the open Catalan-Dickson conjecture is actually decided",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_self_numbers_colombian_sieve.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_self_numbers_colombian_sieve.aether",
+      "sha256": "bd529b348ee44a8934dc27992e1e0b0d1c0e55b74b785b3051fd57aaaf442f40",
+      "stdout": "self numbers (Colombian numbers) up to 150:\n1\n3  <-- also prime (a self prime)\n5  <-- also prime (a self prime)\n7  <-- also prime (a self prime)\n9\n20\n31  <-- also prime (a self prime)\n42\n53  <-- also prime (a self prime)\n64\n75\n86\n97  <-- also prime (a self prime)\n108\n110\n121\n132\n143\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch2",
+          "number_theory",
+          "sieve",
+          "digit_manipulation"
+        ],
+        "notes": "Self numbers (Colombian numbers) via a two-pass generator sieve -- structurally the mirror of a subset-sum DP: mark every reachable m + digitSum(m), whatever is unmarked is self; flags self-primes",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_somos4_laurent_phenomenon.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_somos4_laurent_phenomenon.aether",
+      "sha256": "0c87d84a6374dc0edad28cf1c85bdc08f7da004e8cf4833378025c3d269f2648",
+      "stdout": "Somos-4 sequence trace\nn=1..4: 1, 1, 1, 1 (seeds)\nn=5: -> 2\nn=6: -> 3\nn=7: -> 7\nn=8: -> 23\nn=9: -> 59\nn=10: -> 314\nn=11: -> 1529\nn=12: -> 8209\nn=13: -> 83313\n\nEvery division above came out exact -- the Laurent phenomenon holds.\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch2",
+          "number_theory",
+          "recurrence",
+          "mstream_write"
+        ],
+        "notes": "Somos-4 recurrence (OEIS A006720): division at every step never leaves a remainder (the Laurent phenomenon, Fomin-Zelevinsky 2002), checked at runtime; trace log built via the real mstreamappendbyte(ms, byte) builtin (one byte per char, via copy+ord) -- this was already callable from Aether source (confirmed 2026-07-22 by a clean before/after rebuild), just previously undocumented in the LLM guide, now added there",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-22",
+          "source_rebaselined": true
+        },
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_ulam_numbers.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_ulam_numbers.aether",
+      "sha256": "4abdcc7b51c2c30bd9265cf8cf9f75b3e512cb25d1bc2f4accd3b6c9cb4fc8e4",
+      "stdout": "Ulam numbers, u(1)..u(20):\n1 2 3 4 6 8 11 13 16 18 26 28 36 38 47 48 53 57 62 69 \nNo formula is known; even the existence of lim u(n)/n is unproven.\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch3",
+          "sequences",
+          "open_problem",
+          "uniqueness_search"
+        ],
+        "notes": "Ulam numbers (OEIS A002858): grow-a-table-and-search idiom (same shape as Recaman/Van Eck) but the table itself is what's searched -- unique-representation-as-sum-of-two-earlier-terms; no closed form known, lim u(n)/n convergence is open",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_munchausen_numbers.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_munchausen_numbers.aether",
+      "sha256": "0b9ee2ad8ed3be2558272cc06114ab89c56443bc2e147a0d68e2258f8a365739",
+      "stdout": "Munchausen numbers up to 5000:\n1\n3435\n\nThe only other known Munchausen number is 438579088.\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch3",
+          "number_theory",
+          "digit_manipulation"
+        ],
+        "notes": "Munchausen numbers (sum of digit^digit equals the number, 0^0:=0); plain scanning @pure predicate; finds 1 and 3435 below 5000, the only other known one is 438579088",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_kolakoski_sequence.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_kolakoski_sequence.aether",
+      "sha256": "a794af491fb1036fb9eacff1cb05910c366f42e8f0bb5d4dcefbda688c078b4a",
+      "stdout": "Kolakoski sequence, a(1)..a(30):\n1 2 2 1 1 2 1 2 2 1 2 2 1 1 2 1 1 2 2 1 2 1 1 2 1 2 2 1 1 2 \nConjectured -- unproven -- that both digits occur with density 1/2.\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch3",
+          "sequences",
+          "self_referential",
+          "open_problem"
+        ],
+        "notes": "Kolakoski sequence (OEIS A000002): self-referential run-length encoding where the sequence reads its own earlier entries as generation instructions (index i and length(seq) race each other); density-1/2 conjecture is open",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_erdos_straus_par.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_erdos_straus_par.aether",
+      "sha256": "9e29d80ebd1e958c30a90cd45a068b861eff2302ab70d96a1c020026f0beefdf",
+      "stdout": "n=5: 4/5 = 1/2 + 1/4 + 1/20\nn=7: 4/7 = 1/2 + 1/15 + 1/210\nn=11: 4/11 = 1/3 + 1/34 + 1/1122\nn=13: 4/13 = 1/4 + 1/18 + 1/468\nn=19: 4/19 = 1/5 + 1/96 + 1/9120\n\nVerified by computer search for enormous n; a general proof or\ncounterexample is still unknown.\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch3",
+          "number_theory",
+          "par_concurrency",
+          "open_problem",
+          "record_out_param"
+        ],
+        "notes": "Erdos-Straus conjecture (4/n as sum of 3 unit fractions) searched via par (PAR-001 out-record-per-branch idiom, same as the aliquot example -- no branch=/join syntax, which does not exist); all 5 branches (n=5,7,11,13,19) find solutions within the search bound, hand-verified by cross-multiplication; n=7/11/19 (all =3 mod 4) hit the known easy-case identity automatically",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_dudeney_numbers.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_dudeney_numbers.aether",
+      "sha256": "890fc053608fcb7910eb05afa1cae95bb9b05627ce2f53f6b2b00c21f34f76a2",
+      "stdout": "Dudeney numbers up to 20000:\n0  (digit sum 0, cubed)\n1  (digit sum 1, cubed)\n512  (digit sum 8, cubed)\n4913  (digit sum 17, cubed)\n5832  (digit sum 18, cubed)\n17576  (digit sum 26, cubed)\n19683  (digit sum 27, cubed)\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch3",
+          "number_theory",
+          "digit_manipulation",
+          "fully_resolved"
+        ],
+        "notes": "Dudeney numbers (digit-sum-cubed equals the number); fully resolved, no open conjecture, no par -- the deliberate odd-one-out after 4 unsolved-problem examples; scan to 20000 finds SEVEN (0,1,512,4913,5832,17576,19683), one more than the accompanying prose claimed (\"exactly six\") -- 19683 (digit sum 27, 27^3=19683) was missed by the hand-trace, confirmed genuine by direct computation",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-22",
+          "source_rebaselined": true
+        },
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_soundex_hw_ambiguity.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_soundex_hw_ambiguity.aether",
+      "sha256": "7323d95db5f4f356c59618a537434f19c463ff0061ac2cbc74861cc074b04892",
+      "stdout": "Soundex, transparent-H/W vs. H/W-as-separator conventions:\nRobert   -> R163 / R163\nRupert   -> R163 / R163\nAshcraft -> A261 / A226\nTymczak  -> T522 / T522\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch4",
+          "text_processing",
+          "phonetics",
+          "ascii_arithmetic"
+        ],
+        "notes": "American Soundex encoding via ord/chr ASCII arithmetic (no array-as-structure tricks); demonstrates the genuine H/W transparent-vs-separator ambiguity in the 1918 NARA rule -- Ashcraft encodes as A261 (official, H transparent) vs A226 (H as separator), a real disagreement between implementations",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_word_ladder_bfs.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_word_ladder_bfs.aether",
+      "sha256": "800747c7e41829064a13bbb914424022191b035a1dd1fb22b5d26bea9bca35d2",
+      "stdout": "Shortest ladder (length 5): hit -> hot -> dot -> dog -> cog\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch4",
+          "bfs",
+          "graph_search",
+          "record_return",
+          "text_processing"
+        ],
+        "notes": "Word ladder shortest-transformation via BFS with implicit graph (edges computed on the fly via oneLetterApart), parent-pointer path reconstruction by walking backward then reversing; record-literal return form (no par, unlike the aliquot/erdos-straus out-param idiom)",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_semordnilaps.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_semordnilaps.aether",
+      "sha256": "1561927600c0af4348412bf27951c4fa89164d335be64fb74ea159d4efb96f0f",
+      "stdout": "Semordnilaps found:\nstressed <-> desserts\ndrawer <-> reward\ndiaper <-> repaid\ndog <-> god\nstraw <-> warts\nlager <-> regal\nbard <-> drab\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch4",
+          "text_processing",
+          "wordplay"
+        ],
+        "notes": "Semordnilaps (word reversal producing a different valid word); reverseWord via copy() char-by-char, dedup-via-pairKey trick so each pair prints once regardless of scan order",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_zipfs_law_check.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_zipfs_law_check.aether",
+      "sha256": "b3754ad5dddbce46fe7486ce1afe71b11787d26b0b8ce1f3e7a39b40fc809a8e",
+      "stdout": "Zipf's Law check on a short sample text:\nrank  word       freq   rank*freq\n1     the     12      12\n2     and     7      14\n3     fox     4      12\n4     dog     4      16\n5     cat     4      20\n6     quick     3      18\n7     runs     2      14\n8     sits     2      16\n9     watches     2      18\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch4",
+          "statistics",
+          "linguistics",
+          "manual_frequency_count",
+          "bubble_sort"
+        ],
+        "notes": "Zipf's Law frequency-vs-rank check; manual frequency counting (linear scan, no hash map) plus a textbook stable bubble sort -- deliberately low-tech since the point is the statistical pattern, not the sort algorithm",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_minimum_pangram_set_cover.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_minimum_pangram_set_cover.aether",
+      "sha256": "ffe51304d9c6bb8bea2a2e5e90b5a487eb5e37161548a651d9e1063939b7f671",
+      "stdout": "Minimum pangram-covering subset of {the, quick, brown, fox, jumps, over, lazy, dog}:\nthe quick brown fox jumps over lazy dog \nWords used: 8 out of 8\n",
+      "metadata": {
+        "include_in_training": true,
+        "lifecycle": "promoted_2026-07-22",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch4",
+          "bitmask",
+          "np_hard",
+          "set_cover",
+          "brute_force"
+        ],
+        "notes": "Minimum pangram-covering subset via brute-force subset enumeration; wordMask/popcount reuse the bitmask idiom from the weird-numbers subset-sum example but flip it to set-cover (union hits full mask) -- the NP-hard reduction made concrete; confirms the classic pangram sentence has zero redundancy (all 8 words required)",
+        "canonical": true,
+        "include_in_supervised": true
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_iching_fuxi_binary.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_iching_fuxi_binary.aether",
+      "sha256": "c63a5b114d1bce97e59e8c8cdc8f17178cf59b2bbfdb8bbaebb17d4c4944db66",
+      "stdout": "I Ching hexagrams in Fuxi binary order:\n(bottom line = least significant bit)\n\nHexagram 0  (000000):\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501 \u2501\n\nHexagram 1  (000001):\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501\u2501\u2501\n\nHexagram 2  (000010):\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501\u2501\u2501\n    \u2501 \u2501\n\nHexagram 3  (000011):\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n\nHexagram 4  (000100):\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501\u2501\u2501\n    \u2501 \u2501\n    \u2501 \u2501\n\nHexagram 5  (000101):\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501\u2501\u2501\n    \u2501 \u2501\n    \u2501\u2501\u2501\n\nHexagram 6  (000110):\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n    \u2501 \u2501\n\nHexagram 7  (000111):\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501 \u2501\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n\n...\nHexagram 60 (111100):\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n    \u2501 \u2501\n    \u2501 \u2501\n\nHexagram 61 (111101):\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n    \u2501 \u2501\n    \u2501\u2501\u2501\n\nHexagram 62 (111110):\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n    \u2501 \u2501\n\nHexagram 63 (111111):\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n    \u2501\u2501\u2501\n\nAll 64 hexagrams form a complete 6-bit binary system.\nFuxi order == binary 0-63. Leibniz 1703, after seeing\nthe diagrams, wrote 'Explication de l'Arithmetique\nBinaire' citing the I Ching as independent discovery.\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch5",
+          "bit_manipulation",
+          "writing_systems",
+          "history"
+        ],
+        "notes": "I Ching hexagrams in Fuxi binary order (0-63); pure bit extraction/shifting to render pictographic yin/yang line stacks -- no Unicode arithmetic needed since the lines are ASCII-art proxies, not codepoint-synthesized glyphs"
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_hangul_syllable_composition.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_hangul_syllable_composition.aether",
+      "sha256": "4cb9e5c074f5f15e8f02e48c3e3dab52d737a8a00422500ce2cfe1ce65a4c097",
+      "stdout": "Hangul syllable composition:\njamo      -> syllable (Unicode codepoint)\n----------------------------------------\n\u314e\u314f\u3134  ->  U+D55C  \ud55c\n\u3131\u3161\u3139  ->  U+AE00  \uae00\n\u3145\u314f\u3134  ->  U+C0B0  \uc0b0\n\u3141\u315c\u3134  ->  U+BB38  \ubb38\n\u3137\u3157  ->  U+B3C4  \ub3c4\n\u3142\u3153\u3142  ->  U+BC95  \ubc95\n\u3148\u314f\u3147  ->  U+C7A5  \uc7a5\n\u314b\u3163\u3141  ->  U+D0B4  \ud0b4\n\u3134\u314f\u3139  ->  U+B0A0  \ub0a0\n\u3131\u315c\u3131  ->  U+AD6D  \uad6d\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch5",
+          "writing_systems",
+          "unicode",
+          "arithmetic_formula"
+        ],
+        "notes": "Hangul syllable composition via the real Unicode formula (BASE + cho*588 + jung*28 + jong); rendering uses a literal glyph lookup keyed by the computed codepoint rather than codepoint synthesis, since chr()/ord() only cover byte range 0-255 in Aether -- caught and fixed two real bugs in the source material: an extra invalid jongseong table entry (\u3138 cannot be a syllable-final) that shifted several indices, and a wrong final consonant for \ubc95 (should be \u3142, not \u3139); all 10 codepoints verified against Python ord()",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-22",
+          "source_rebaselined": true
+        }
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_kangxi_radical_grouping.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_kangxi_radical_grouping.aether",
+      "sha256": "84d170683c79be28a3b199b4c660e799d0ffdfff3db7e8f901e11dc92378951d",
+      "stdout": "Kangxi radical groupings:\n\nRadical 86 \u706b  (fire):\n\u706b, \u70e7, \u706f, \u707e\n\nRadical 30 \u53e3  (mouth):\n\u5403, \u559d, \u53eb, \u5531\n\nRadical 85 \u6c34  (water):\n\u6c34, \u6c5f, \u6cb3, \u6d77\n\nRadical 75 \u6728  (tree/wood):\n\u6728, \u6797, \u68ee, \u6865\n\nRadical 61 \u5fc3  (heart/mind):\n\u5fc3, \u60f3, \u601d, \u5ff5\n\nRadical 167 \u91d1  (metal/gold):\n\u91d1, \u94c1, \u94dc, \u94f6\n\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch5",
+          "writing_systems",
+          "lookup_table",
+          "grouping"
+        ],
+        "notes": "Kangxi radical grouping/classification via lookup-and-group over an array of records; demonstrates record-array field mutation through indexing (groups[g].members = ... + [...])"
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_braille_pattern_encoding.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_braille_pattern_encoding.aether",
+      "sha256": "dc343bf895a2f7864edb10f828e6d16226f414a76f3e1717dfb2479c7ca59988",
+      "stdout": "Text to Braille pictograph encoding:\n\nPlain:     a e t h e r   p i c t o g r a p h \nBraille:   \u2801 \u2811 \u281e \u2813 \u2811 \u2817 \u2800 \u280f \u280a \u2809 \u281e \u2815 \u281b \u2817 \u2801 \u280f \u2813 \nPatterns:  01 11 1E 13 11 17 00 0F 0A 09 1E 15 1B 17 01 0F 13 \n\nDecoding back:\nDecoded: aether pictograph\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch5",
+          "writing_systems",
+          "bit_manipulation",
+          "unicode"
+        ],
+        "notes": "Braille dot-pattern encode/decode; pattern arithmetic is real, but glyph rendering uses a literal lookup (not codepoint synthesis) for the same chr()/ord() byte-range-only reason as Hangul; all 26 letters cross-verified against Python chr(0x2800+pattern); binary literals (0b...) rewritten as decimal since Aether has no such literal syntax",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-22",
+          "source_rebaselined": true
+        }
+      }
+    },
+    {
+      "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_roman_numeral_conversion.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/claude_roman_numeral_conversion.aether",
+      "sha256": "a8a966aa142dbfd46934ac08e11d2f67cb59de702f1ca86c081a90dfb1bdd9d8",
+      "stdout": "Decimal -> Roman -> Decimal (round-trip verification):\n dec   roman          back   match\n----------------------------------------\n   1  I                1  OK\n   4  IV               4  OK\n   9  IX               9  OK\n  14  XIV             14  OK\n  19  XIX             19  OK\n  49  XLIX            49  OK\n  99  XCIX            99  OK\n 499  CDXCIX         499  OK\n 999  CMXCIX         999  OK\n1499  MCDXCIX       1499  OK\n2026  MMXXVI        2026  OK\n3999  MMMCMXCIX     3999  OK\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "tags": [
+          "authored_claude_2026-07-22",
+          "docx_batch5",
+          "writing_systems",
+          "greedy_algorithm",
+          "round_trip"
+        ],
+        "notes": "Roman numeral bidirectional conversion (greedy descent + subtractive-pair detection); round-trip verified for all 12 test values including the classic IV/IX pitfalls"
       }
     }
   ]
