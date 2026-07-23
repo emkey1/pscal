@@ -1,0 +1,309 @@
+// Combinatorial Magic Squares & Latin Squares
+
+// ============================================================
+// 1. Lo Shu Magic Square (3x3)
+// The only 3x3 magic square (up to rotation/reflection)
+// where all rows, columns, and diagonals sum to 15
+// ============================================================
+
+fn createLoShuSquare() -> Int[][] {
+    ret [
+        [8, 1, 6],
+        [3, 5, 7],
+        [4, 9, 2]
+    ];
+}
+
+fn verifyMagicSquare(grid: Int[][]) -> Bool {
+    let size: Int = len(grid);
+    let target: Int = size * (size * size + 1) / 2;  // Sum for n x n magic square
+
+    // Check rows
+    loop row in 0..size {
+        let rowSum: Int = 0;
+        loop col in 0..size {
+            rowSum = rowSum + grid[row][col];
+        }
+        if rowSum != target {
+            ret false;
+        }
+    }
+
+    // Check columns
+    loop col in 0..size {
+        let colSum: Int = 0;
+        loop row in 0..size {
+            colSum = colSum + grid[row][col];
+        }
+        if colSum != target {
+            ret false;
+        }
+    }
+
+    // Check diagonals
+    let diag1: Int = 0;
+    let diag2: Int = 0;
+    loop i in 0..size {
+        diag1 = diag1 + grid[i][i];
+        diag2 = diag2 + grid[i][size - 1 - i];
+    }
+
+    ret diag1 == target && diag2 == target;
+}
+
+fn printMagicSquare(grid: Int[][]) -> Void {
+    fx {
+        loop row in 0..len(grid) {
+            print("[ ");
+            loop col in 0..len(grid[row]) {
+                print(grid[row][col]);
+                if col < len(grid[row]) - 1 {
+                    print(", ");
+                }
+            }
+            println(" ]");
+        }
+    }
+    ret;
+}
+
+fn printLoShuInfo() -> Void {
+    fx {
+        println("=== Lo Shu Magic Square ===");
+        println("Legend: Turtle emerging from the Luo River with numbers on its shell");
+        println("Origin: I Ching / Yijing (ancient Chinese divination text)");
+        println();
+    }
+
+    let square: Int[][] = createLoShuSquare();
+    printMagicSquare(square);
+    let ok: Bool = verifyMagicSquare(square);
+
+    fx {
+        println();
+        println("Properties:");
+        println("- 3x3 grid using numbers 1-9 exactly once");
+        println("- Magic constant: 15");
+        println("- Unique up to rotation and reflection");
+        println();
+        println("Verification: ", ok);
+        println();
+        println("Rotations/Reflections generate 8 variants:");
+        println("Original: 8-1-6 / 3-5-7 / 4-9-2");
+        println("90deg CW: 4-3-8 / 9-5-1 / 2-7-6");
+        println("Reflection (horizontal axis):");
+        println("         4-9-2 / 3-5-7 / 8-1-6");
+    }
+    ret;
+}
+
+// ============================================================
+// 2. Euler's 36 Officers Problem
+// 6x6 Greco-Latin square - Euler conjectured impossible in 1782
+// Proved only 6 is singular (Bose, Shrikhande, Parker, 1960)
+// ============================================================
+
+// Latin square: each symbol appears exactly once in each row and column
+fn createBaseLatinSquare() -> Int[][] {
+    ret [
+        [1, 2, 3, 4, 5, 6],
+        [2, 3, 4, 5, 6, 1],
+        [3, 4, 5, 6, 1, 2],
+        [4, 5, 6, 1, 2, 3],
+        [5, 6, 1, 2, 3, 4],
+        [6, 1, 2, 3, 4, 5]
+    ];
+}
+
+// Two Latin squares are orthogonal if, when superimposed,
+// each ordered pair of symbols appears exactly once.
+fn hasOrthogonalPair(sq1: Int[][], sq2: Int[][]) -> Bool {
+    let n: Int = len(sq1);
+    let seen: Int[] = [];
+    loop i in 0..(n * n) {
+        seen = seen + [0];
+    }
+
+    loop i in 0..n {
+        loop j in 0..n {
+            // Zero-indexed pair encoding: symbols are 1..n, so this maps
+            // every ordered pair uniquely into 0..n*n-1.
+            let pair: Int = (sq1[i][j] - 1) * n + (sq2[i][j] - 1);
+            if seen[pair] == 1 {
+                ret false;  // Duplicate pair found -- not orthogonal
+            }
+            seen[pair] = 1;
+        }
+    }
+    ret true;
+}
+
+fn printGrecoLatinAttempt(sq1: Int[][], sq2: Int[][]) -> Void {
+    let n: Int = len(sq1);
+    fx {
+        println("  Superimposed pairs (a,b) where a from Latin 1, b from Latin 2:");
+        loop i in 0..n {
+            print("Row ", i + 1, ": ");
+            loop j in 0..n {
+                print("(", sq1[i][j], ",", sq2[i][j], ") ");
+            }
+            println();
+        }
+    }
+    ret;
+}
+
+fn printEulerInfo() -> Void {
+    fx {
+        println("=== Euler's 36 Officers Problem ===");
+        println("Statement: Can 6 regiments each with 6 officers of different ranks");
+        println("           be arranged in a 6x6 formation where each row/column");
+        println("           contains exactly one officer from each regiment and rank?");
+        println();
+    }
+
+    let n: Int = 6;
+    let latin1: Int[][] = createBaseLatinSquare();
+
+    fx {
+        println("For order n=6, finding two orthogonal Latin squares:");
+        println();
+    }
+
+    // The standard cyclic Latin square paired with itself -- demonstrates
+    // that this naive pairing is NOT orthogonal (as expected for n=6).
+    printGrecoLatinAttempt(latin1, latin1);
+    let orthogonal: Bool = hasOrthogonalPair(latin1, latin1);
+
+    fx {
+        println();
+        println("Is this pairing orthogonal? ", orthogonal);
+        println();
+        println("Euler's conjecture (1782): no solution for n=6");
+        println("Tarry proved it impossible by exhaustive search (1901)");
+        println("Bose, Shrikhande, Parker proved n=6 is the ONLY singular case >2 (1960)");
+        println();
+        println("For orders other than 2 and 6, orthogonal Latin square pairs exist:");
+        println("- n=2: impossible (trivial)");
+        println("- n=6: IMPOSSIBLE (the singularity)");
+        println("- n=4,8,10,12...: solutions exist");
+    }
+    ret;
+}
+
+// ============================================================
+// 3. Ramanujan's Birthday Magic Square (4x4)
+// Srinivasa Ramanujan: 22 December 1887
+// Sums to 139 (22 + 12 + 87 + 18 = 139)
+// ============================================================
+
+fn createRamanujanSquare() -> Int[][] {
+    // Ramanujan's actual birthday magic square. (An earlier draft of this
+    // program tried to derive it from an additive d/m offset formula --
+    // that formula doesn't reproduce the real square: it only summed to
+    // 139 on row 0 by construction and failed every other symmetry.
+    // This is the genuine, independently-verifiable grid.)
+    ret [
+        [22, 12, 18, 87],
+        [88, 17,  9, 25],
+        [10, 24, 89, 16],
+        [19, 86, 23, 11]
+    ];
+}
+
+fn computeMagicSum(grid: Int[][]) -> Int {
+    ret grid[0][0] + grid[0][1] + grid[0][2] + grid[0][3];
+}
+
+fn verifyRamanujanSymmetries(grid: Int[][]) -> Int {
+    // Returns number of verified symmetric sums.
+    let sum: Int = computeMagicSum(grid);
+    let verified: Int = 0;
+
+    // Rows (4)
+    loop r in 0..4 {
+        let rowSum: Int = 0;
+        loop c in 0..4 {
+            rowSum = rowSum + grid[r][c];
+        }
+        if rowSum == sum {
+            verified = verified + 1;
+        }
+    }
+
+    // Columns (4)
+    loop c in 0..4 {
+        let colSum: Int = 0;
+        loop r in 0..4 {
+            colSum = colSum + grid[r][c];
+        }
+        if colSum == sum {
+            verified = verified + 1;
+        }
+    }
+
+    // Main diagonals (2)
+    let d1: Int = grid[0][0] + grid[1][1] + grid[2][2] + grid[3][3];
+    let d2: Int = grid[0][3] + grid[1][2] + grid[2][1] + grid[3][0];
+    if d1 == sum { verified = verified + 1; }
+    if d2 == sum { verified = verified + 1; }
+
+    // Corners (1)
+    let corners: Int = grid[0][0] + grid[0][3] + grid[3][0] + grid[3][3];
+    if corners == sum { verified = verified + 1; }
+
+    // Center 2x2 (1)
+    let center: Int = grid[1][1] + grid[1][2] + grid[2][1] + grid[2][2];
+    if center == sum { verified = verified + 1; }
+
+    // Four 2x2 corner squares (4)
+    let c1: Int = grid[0][0] + grid[0][1] + grid[1][0] + grid[1][1];
+    let c2: Int = grid[0][2] + grid[0][3] + grid[1][2] + grid[1][3];
+    let c3: Int = grid[2][0] + grid[2][1] + grid[3][0] + grid[3][1];
+    let c4: Int = grid[2][2] + grid[2][3] + grid[3][2] + grid[3][3];
+    if c1 == sum { verified = verified + 1; }
+    if c2 == sum { verified = verified + 1; }
+    if c3 == sum { verified = verified + 1; }
+    if c4 == sum { verified = verified + 1; }
+
+    ret verified;
+}
+
+fn printRamanujanInfo() -> Void {
+    fx {
+        println("=== Ramanujan's Birthday Magic Square ===");
+        println("Created by: Srinivasa Ramanujan (1887-1920)");
+        println("Birthdate: 22 December 1887 (22/12/1887)");
+        println();
+    }
+
+    let square: Int[][] = createRamanujanSquare();
+    printMagicSquare(square);
+    let magicSum: Int = computeMagicSum(square);
+    let symmetries: Int = verifyRamanujanSymmetries(square);
+
+    fx {
+        println();
+        println("Magic constant: ", magicSum);
+        println("Verification: 22 + 12 + 87 + 18 = ", 22 + 12 + 87 + 18);
+        println();
+        println("Verified symmetries: ", symmetries);
+        println("- 4 rows");
+        println("- 4 columns");
+        println("- 2 main diagonals");
+        println("- 4 corners");
+        println("- center 2x2");
+        println("- 4 corner 2x2 squares");
+        println("Total verified: ", symmetries, " of 16 checked symmetric sums");
+    }
+    ret;
+}
+
+fn main() -> Void {
+    printLoShuInfo();
+    fx { println(); }
+    printEulerInfo();
+    fx { println(); }
+    printRamanujanInfo();
+    ret;
+}

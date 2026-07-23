@@ -12154,6 +12154,16 @@
         "include_in_training": false,
         "lifecycle": "quarantine"
       }
+    },
+    {
+      "source_path": "/tmp/corpus_new4/58_magic_latin_squares.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/58_magic_latin_squares.aether",
+      "sha256": "2acaa1aa759fe093c052cb2c71a3ccdae14068ae83e6aaeef46732009e3a3e75",
+      "stdout": "=== Lo Shu Magic Square ===\nLegend: Turtle emerging from the Luo River with numbers on its shell\nOrigin: I Ching / Yijing (ancient Chinese divination text)\n\n[ 8, 1, 6 ]\n[ 3, 5, 7 ]\n[ 4, 9, 2 ]\n\nProperties:\n- 3x3 grid using numbers 1-9 exactly once\n- Magic constant: 15\n- Unique up to rotation and reflection\n\nVerification: true\n\nRotations/Reflections generate 8 variants:\nOriginal: 8-1-6 / 3-5-7 / 4-9-2\n90deg CW: 4-3-8 / 9-5-1 / 2-7-6\nReflection (horizontal axis):\n         4-9-2 / 3-5-7 / 8-1-6\n\n=== Euler's 36 Officers Problem ===\nStatement: Can 6 regiments each with 6 officers of different ranks\n           be arranged in a 6x6 formation where each row/column\n           contains exactly one officer from each regiment and rank?\n\nFor order n=6, finding two orthogonal Latin squares:\n\n  Superimposed pairs (a,b) where a from Latin 1, b from Latin 2:\nRow 1: (1,1) (2,2) (3,3) (4,4) (5,5) (6,6) \nRow 2: (2,2) (3,3) (4,4) (5,5) (6,6) (1,1) \nRow 3: (3,3) (4,4) (5,5) (6,6) (1,1) (2,2) \nRow 4: (4,4) (5,5) (6,6) (1,1) (2,2) (3,3) \nRow 5: (5,5) (6,6) (1,1) (2,2) (3,3) (4,4) \nRow 6: (6,6) (1,1) (2,2) (3,3) (4,4) (5,5) \n\nIs this pairing orthogonal? false\n\nEuler's conjecture (1782): no solution for n=6\nTarry proved it impossible by exhaustive search (1901)\nBose, Shrikhande, Parker proved n=6 is the ONLY singular case >2 (1960)\n\nFor orders other than 2 and 6, orthogonal Latin square pairs exist:\n- n=2: impossible (trivial)\n- n=6: IMPOSSIBLE (the singularity)\n- n=4,8,10,12...: solutions exist\n\n=== Ramanujan's Birthday Magic Square ===\nCreated by: Srinivasa Ramanujan (1887-1920)\nBirthdate: 22 December 1887 (22/12/1887)\n\n[ 22, 12, 18, 87 ]\n[ 88, 17, 9, 25 ]\n[ 10, 24, 89, 16 ]\n[ 19, 86, 23, 11 ]\n\nMagic constant: 139\nVerification: 22 + 12 + 87 + 18 = 139\n\nVerified symmetries: 16\n- 4 rows\n- 4 columns\n- 2 main diagonals\n- 4 corners\n- center 2x2\n- 4 corner 2x2 squares\nTotal verified: 16 of 16 checked symmetric sums\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
     }
   ]
 }
