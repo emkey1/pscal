@@ -12214,6 +12214,128 @@
         "include_in_training": false,
         "lifecycle": "quarantine"
       }
+    },
+    {
+      "source_path": "/tmp/corpus_new6/64_cyk_ambiguous_parser.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/64_cyk_ambiguous_parser.aether",
+      "sha256": "11552a021367c1f3103824c672150c320ebcdf66916e296d8d3e7efcdc95476d",
+      "stdout": "CYK word: baaba\nAccepted by the grammar: true\nDistinct S-rooted parse trees: 2\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new6/65_bellman_ford_negative_cycle.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/65_bellman_ford_negative_cycle.aether",
+      "sha256": "3178027387849d3ce7072a7f718199a80339202160391684acfd5e81e59c3927",
+      "stdout": "Negative cycle detected.\nForward cycle: 2 -> 3 -> 1 -> 2\nTotal cycle weight: -1\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new6/66_berlekamp_massey_gf2.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/66_berlekamp_massey_gf2.aether",
+      "sha256": "76ee21502547fffc3ee4570edfa27e374749a5c8e9f6118378c81968e5e3df67",
+      "stdout": "Observed bits: 10011010010000101011101100011111\nRecovered C(x) = 1 + x^2 + x^5\nLinear complexity: 5\nRecurrence validates every observation: true\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new6/67_bitboard_twelve_queens.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/67_bitboard_twelve_queens.aether",
+      "sha256": "1467c64350114efc269033456e8e7c54802a9711760feab16349638f38d88d83",
+      "stdout": "12-queens solution count: 14200\nFirst solution:\nQ . . . . . . . . . . . \n. . Q . . . . . . . . . \n. . . . Q . . . . . . . \n. . . . . . . Q . . . . \n. . . . . . . . . Q . . \n. . . . . . . . . . . Q \n. . . . . Q . . . . . . \n. . . . . . . . . . Q . \n. Q . . . . . . . . . . \n. . . . . . Q . . . . . \n. . . . . . . . Q . . . \n. . . Q . . . . . . . . \n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new6/68_dfa_partition_refinement.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/68_dfa_partition_refinement.aether",
+      "sha256": "3662aba8d3f036e6426cb9f9f5cf294f0d83381b91d1db790c0d2309abe73397",
+      "stdout": "Original state count: 6\nMinimal state count: 3\noriginal state 0 -> class 0\noriginal state 1 -> class 1\noriginal state 2 -> class 2\noriginal state 3 -> class 0\noriginal state 4 -> class 1\noriginal state 5 -> class 2\nMinimized transition table:\nclass 0: 0 -> 0, 1 -> 1, accepting = true\nclass 1: 0 -> 2, 1 -> 0, accepting = false\nclass 2: 0 -> 1, 1 -> 2, accepting = false\nSample bits 110110 finish in class 0, accepted = true\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new6/69_pell_equation_d61.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/69_pell_equation_d61.aether",
+      "sha256": "70c34b7e3e27a537fe25c333a0e9be5e2481735b03abf8af436e5050bb5d217a",
+      "stdout": "Pell equation: x^2 - 61*y^2 = 1\nMinimal x = 1766319049\nMinimal y = 226153980\nConvergents examined = 22\nVerification value = 1\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new6/70_pollard_rho_factorization.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/70_pollard_rho_factorization.aether",
+      "sha256": "df2a76e1f73c75a81f5f82df4733acb0765c6e78ccc3352416202798942645b4",
+      "stdout": "Target: 1000036000099\nNontrivial factorization: 1000033 * 1000003\nFirst factor prime: true\nSecond factor prime: true\nPollard polynomial constant: 1\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new6/71_xor_convolution_fwht.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/71_xor_convolution_fwht.aether",
+      "sha256": "b15e4634a719564a437a0c66b6c48bd6dfbfa86a731906dabd9767e7741e21f4",
+      "stdout": "First sequence: [3, 1, 4, 1, 5, 9, 2, 6]\nSecond sequence: [5, 3, 5, 8, 9, 7, 9, 3]\nXOR convolution: [190, 227, 178, 210, 183, 157, 198, 176]\nMatches quadratic verification: true\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new6/72_symplectic_three_body.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/72_symplectic_three_body.aether",
+      "sha256": "15dfaa4bfa986cf7eb7b76d1b00149d298e6ad8922af769b391f8ed9f96a9c3c",
+      "stdout": "Initial energy: -0.003670824142\nFinal energy:   -0.003670824098\nRelative drift: 0.000000011874\nbody 0 position = (0.002129, 0.004501)\nbody 1 position = (-0.447470, -0.903755)\nbody 2 position = (-2.229604, -4.713427)\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new6/73_quantum_harmonic_ground_state.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/73_quantum_harmonic_ground_state.aether",
+      "sha256": "a1e88a7c9d1c67cb60af3231cb8811e8d6d403d36d4e38bc6b1cafb2b9177d8b",
+      "stdout": "Ground-state energy estimate: 0.499800307\nExact energy:                 0.500000000\n<x^2> estimate:               0.500221960\nProbability density at x=0:  0.564120695\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new6/74_ising_model_binder_cumulant.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/74_ising_model_binder_cumulant.aether",
+      "sha256": "21e9af7402ed24ac7714d4c49f1343fdd9224ae81769a6a2da5ab2c7dac38779",
+      "stdout": "2D Ising lattice: 24 x 24\nTemperature: 2.2690\nEnergy per spin: -1.414243\nMean |magnetization|: 0.595264\nBinder cumulant: 0.559747\nSusceptibility proxy: 14.546839\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "environment_dependent": true,
+        "note": "Unseeded randomize(): Monte Carlo output differs run-to-run; stored stdout is a representative sample, not a pass/fail target."
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new6/75_lorenz_lyapunov_exponent.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/75_lorenz_lyapunov_exponent.aether",
+      "sha256": "edb61433f0b82e948d1d7318c22d344e80873fb598a482b5a6331fda7fd4b0ad",
+      "stdout": "Largest Lyapunov exponent: 0.918553\nFinal reference state: (13.201305, 9.815474, 36.452548)\nPositive exponent implies sensitive dependence on initial conditions.\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
     }
   ]
 }

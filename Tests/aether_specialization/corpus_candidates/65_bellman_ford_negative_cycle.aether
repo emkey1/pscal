@@ -1,0 +1,84 @@
+// Bellman-Ford negative-cycle detection with explicit cycle reconstruction.
+// Interpreting edge weights as time offsets, a negative cycle is a causal loop.
+
+fn edgeWeight(fromVertex: Int, toVertex: Int, edgeFrom: Int[], edgeTo: Int[], edgeCost: Int[]) -> Int {
+    let edgeCount: Int = length(edgeFrom);
+    loop e in 0..edgeCount {
+        if edgeFrom[e] == fromVertex && edgeTo[e] == toVertex {
+            ret edgeCost[e];
+        }
+    }
+    ret 0;
+}
+
+fn main() -> Void {
+    let vertexCount: Int = 6;
+    let edgeFrom: Int[] = [0, 1, 2, 3, 0, 4, 5, 2];
+    let edgeTo: Int[] = [1, 2, 3, 1, 4, 5, 3, 5];
+    let edgeCost: Int[] = [4, 1, -3, 1, 2, 2, 2, 5];
+    let edgeCount: Int = length(edgeFrom);
+
+    // Zero initialization is equivalent to adding a zero-cost super-source,
+    // so cycles in disconnected components are detected as well.
+    let distance: Int[] = [];
+    let predecessor: Int[] = [];
+    loop v in 0..vertexCount {
+        distance = distance + [0];
+        predecessor = predecessor + [-1];
+    }
+
+    let changedVertex: Int = -1;
+    loop pass in 0..vertexCount {
+        changedVertex = -1;
+        loop e in 0..edgeCount {
+            let fromVertex: Int = edgeFrom[e];
+            let toVertex: Int = edgeTo[e];
+            let candidate: Int = distance[fromVertex] + edgeCost[e];
+            if candidate < distance[toVertex] {
+                distance[toVertex] = candidate;
+                predecessor[toVertex] = fromVertex;
+                changedVertex = toVertex;
+            }
+        }
+    }
+
+    if changedVertex == -1 {
+        fx {
+            println("No negative cycle exists.");
+        }
+        ret;
+    }
+
+    // Move inside the cycle even if changedVertex lies on a tail leading to it.
+    let cycleVertex: Int = changedVertex;
+    loop i in 0..vertexCount {
+        cycleVertex = predecessor[cycleVertex];
+    }
+
+    // Follow predecessor edges until the starting cycle vertex repeats.
+    let backwardCycle: Int[] = [];
+    let current: Int = cycleVertex;
+    let cycleWeight: Int = 0;
+    loop {
+        backwardCycle = backwardCycle + [current];
+        let previous: Int = predecessor[current];
+        cycleWeight = cycleWeight + edgeWeight(previous, current, edgeFrom, edgeTo, edgeCost);
+        current = previous;
+        if current == cycleVertex {
+            break;
+        }
+    }
+
+    let cycleLength: Int = length(backwardCycle);
+    fx {
+        println("Negative cycle detected.");
+        print("Forward cycle: ");
+        loop i in 0..cycleLength {
+            let reverseIndex: Int = cycleLength - 1 - i;
+            print(backwardCycle[reverseIndex], " -> ");
+        }
+        println(backwardCycle[cycleLength - 1]);
+        println("Total cycle weight: ", cycleWeight);
+    }
+    ret;
+}

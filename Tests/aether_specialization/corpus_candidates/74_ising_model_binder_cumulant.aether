@@ -1,0 +1,115 @@
+// Metropolis Monte Carlo for the two-dimensional Ising model near criticality.
+// Besides energy and magnetization, it estimates the fourth-order Binder cumulant.
+
+fn totalMagnetization(spins: Int[]) -> Int {
+    let total: Int = 0;
+    let siteCount: Int = length(spins);
+    loop i in 0..siteCount {
+        total = total + spins[i];
+    }
+    ret total;
+}
+
+fn totalEnergy(spins: Int[], latticeSize: Int) -> Int {
+    let energy: Int = 0;
+    loop row in 0..latticeSize {
+        loop column in 0..latticeSize {
+            let index: Int = row * latticeSize + column;
+            let right: Int = row * latticeSize + ((column + 1) % latticeSize);
+            let down: Int = ((row + 1) % latticeSize) * latticeSize + column;
+            energy = energy - spins[index] * (spins[right] + spins[down]);
+        }
+    }
+    ret energy;
+}
+
+fn metropolisSweep(spins: Int[], latticeSize: Int, beta: Real) -> Int[] {
+    let siteCount: Int = latticeSize * latticeSize;
+    fx {
+        loop attempt in 0..siteCount {
+            let index: Int = random(siteCount);
+            let row: Int = index / latticeSize;
+            let column: Int = index % latticeSize;
+            let upRow: Int = (row + latticeSize - 1) % latticeSize;
+            let downRow: Int = (row + 1) % latticeSize;
+            let leftColumn: Int = (column + latticeSize - 1) % latticeSize;
+            let rightColumn: Int = (column + 1) % latticeSize;
+
+            let neighborSum: Int = spins[upRow * latticeSize + column]
+                + spins[downRow * latticeSize + column]
+                + spins[row * latticeSize + leftColumn]
+                + spins[row * latticeSize + rightColumn];
+            let deltaEnergy: Int = 2 * spins[index] * neighborSum;
+
+            if deltaEnergy <= 0 {
+                spins[index] = 0 - spins[index];
+            } else {
+                let acceptanceProbability: Real = exp(0.0 - beta * deltaEnergy * 1.0);
+                let draw: Real = random();
+                if draw < acceptanceProbability {
+                    spins[index] = 0 - spins[index];
+                }
+            }
+        }
+    }
+    ret spins;
+}
+
+fn main() -> Void {
+    let latticeSize: Int = 24;
+    let siteCount: Int = latticeSize * latticeSize;
+    let temperature: Real = 2.269;
+    let beta: Real = 1.0 / temperature;
+    let burnInSweeps: Int = 300;
+    let sampleSweeps: Int = 1_000;
+    let totalSweeps: Int = burnInSweeps + sampleSweeps;
+
+    let spins: Int[] = [];
+    loop i in 0..siteCount {
+        spins = spins + [1];
+    }
+
+    fx {
+        randomize();
+    }
+
+    let absoluteMagnetizationSum: Real = 0.0;
+    let magnetizationSquaredSum: Real = 0.0;
+    let magnetizationFourthSum: Real = 0.0;
+    let energySum: Real = 0.0;
+
+    loop sweep in 0..totalSweeps {
+        spins = metropolisSweep(spins, latticeSize, beta);
+        if sweep >= burnInSweeps {
+            let magnetization: Real = totalMagnetization(spins) * 1.0 / siteCount;
+            let magnetizationSquared: Real = magnetization * magnetization;
+            absoluteMagnetizationSum = absoluteMagnetizationSum + abs(magnetization);
+            magnetizationSquaredSum = magnetizationSquaredSum + magnetizationSquared;
+            magnetizationFourthSum = magnetizationFourthSum
+                + magnetizationSquared * magnetizationSquared;
+            energySum = energySum + totalEnergy(spins, latticeSize) * 1.0 / siteCount;
+        }
+    }
+
+    let sampleCount: Real = sampleSweeps * 1.0;
+    let averageAbsoluteMagnetization: Real = absoluteMagnetizationSum / sampleCount;
+    let averageMagnetizationSquared: Real = magnetizationSquaredSum / sampleCount;
+    let averageMagnetizationFourth: Real = magnetizationFourthSum / sampleCount;
+    let averageEnergy: Real = energySum / sampleCount;
+    let binderCumulant: Real = 1.0 - averageMagnetizationFourth
+        / (3.0 * averageMagnetizationSquared * averageMagnetizationSquared);
+    let susceptibility: Real = siteCount * 1.0
+        * (averageMagnetizationSquared
+            - averageAbsoluteMagnetization * averageAbsoluteMagnetization)
+        / temperature;
+
+    fx {
+        println("2D Ising lattice: ", latticeSize, " x ", latticeSize);
+        println("Temperature: ", temperature:0:4);
+        println("Energy per spin: ", averageEnergy:0:6);
+        println("Mean |magnetization|: ", averageAbsoluteMagnetization:0:6);
+        println("Binder cumulant: ", binderCumulant:0:6);
+        println("Susceptibility proxy: ", susceptibility:0:6);
+    }
+    ret;
+}

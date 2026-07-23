@@ -1,0 +1,119 @@
+// Largest Lyapunov exponent of the Lorenz attractor.
+// Two nearby trajectories are repeatedly renormalized using the Benettin method.
+
+// NOTE: both tuple-returning signatures below are kept on one line to dodge
+// a parser bug (as of 2026-07-23): `ret (a, b, c)` fails to parse when the
+// enclosing fn's parameter list spans multiple lines.
+fn lorenzDerivative(x: Real, y: Real, z: Real, sigma: Real, rho: Real, beta: Real) -> (Real, Real, Real) {
+    let dx: Real = sigma * (y - x);
+    let dy: Real = x * (rho - z) - y;
+    let dz: Real = x * y - beta * z;
+    ret (dx, dy, dz);
+}
+
+fn rungeKuttaStep(x: Real, y: Real, z: Real, timeStep: Real, sigma: Real, rho: Real, beta: Real) -> (Real, Real, Real) {
+    let (k1x, k1y, k1z) = lorenzDerivative(x, y, z, sigma, rho, beta);
+    let halfStep: Real = 0.5 * timeStep;
+
+    let (k2x, k2y, k2z) = lorenzDerivative(
+        x + halfStep * k1x,
+        y + halfStep * k1y,
+        z + halfStep * k1z,
+        sigma,
+        rho,
+        beta
+    );
+
+    let (k3x, k3y, k3z) = lorenzDerivative(
+        x + halfStep * k2x,
+        y + halfStep * k2y,
+        z + halfStep * k2z,
+        sigma,
+        rho,
+        beta
+    );
+
+    let (k4x, k4y, k4z) = lorenzDerivative(
+        x + timeStep * k3x,
+        y + timeStep * k3y,
+        z + timeStep * k3z,
+        sigma,
+        rho,
+        beta
+    );
+
+    let nextX: Real = x + timeStep * (k1x + 2.0 * k2x + 2.0 * k3x + k4x) / 6.0;
+    let nextY: Real = y + timeStep * (k1y + 2.0 * k2y + 2.0 * k3y + k4y) / 6.0;
+    let nextZ: Real = z + timeStep * (k1z + 2.0 * k2z + 2.0 * k3z + k4z) / 6.0;
+    ret (nextX, nextY, nextZ);
+}
+
+fn main() -> Void {
+    let sigma: Real = 10.0;
+    let rho: Real = 28.0;
+    let beta: Real = 8.0 / 3.0;
+    let timeStep: Real = 0.01;
+    let epsilon: Real = 0.00000001;
+    let stepCount: Int = 60_000;
+    let burnIn: Int = 5_000;
+
+    let xFirst: Real = 1.0;
+    let yFirst: Real = 1.0;
+    let zFirst: Real = 1.0;
+    let xSecond: Real = xFirst + epsilon;
+    let ySecond: Real = yFirst;
+    let zSecond: Real = zFirst;
+
+    let logarithmSum: Real = 0.0;
+    let sampleCount: Int = 0;
+
+    loop step in 0..stepCount {
+        let (nextXFirst, nextYFirst, nextZFirst) = rungeKuttaStep(
+            xFirst, yFirst, zFirst, timeStep, sigma, rho, beta
+        );
+        let (nextXSecond, nextYSecond, nextZSecond) = rungeKuttaStep(
+            xSecond, ySecond, zSecond, timeStep, sigma, rho, beta
+        );
+
+        xFirst = nextXFirst;
+        yFirst = nextYFirst;
+        zFirst = nextZFirst;
+        xSecond = nextXSecond;
+        ySecond = nextYSecond;
+        zSecond = nextZSecond;
+
+        let separationX: Real = xSecond - xFirst;
+        let separationY: Real = ySecond - yFirst;
+        let separationZ: Real = zSecond - zFirst;
+        let distance: Real = sqrt(
+            separationX * separationX
+            + separationY * separationY
+            + separationZ * separationZ
+        );
+
+        if distance > 0.0 {
+            if step >= burnIn {
+                logarithmSum = logarithmSum + ln(distance / epsilon);
+                sampleCount = sampleCount + 1;
+            }
+
+            let renormalization: Real = epsilon / distance;
+            xSecond = xFirst + separationX * renormalization;
+            ySecond = yFirst + separationY * renormalization;
+            zSecond = zFirst + separationZ * renormalization;
+        } else {
+            xSecond = xFirst + epsilon;
+            ySecond = yFirst;
+            zSecond = zFirst;
+        }
+    }
+
+    let exponent: Real = logarithmSum / (sampleCount * 1.0 * timeStep);
+    fx {
+        println("Largest Lyapunov exponent: ", exponent:0:6);
+        println("Final reference state: (", xFirst:0:6, ", ", yFirst:0:6,
+            ", ", zFirst:0:6, ")");
+        println("Positive exponent implies sensitive dependence on initial conditions.");
+    }
+    ret;
+}

@@ -1,0 +1,105 @@
+// Berlekamp-Massey over GF(2).
+// A hidden linear-feedback shift register generates a bit stream; the program
+// reconstructs its shortest connection polynomial from observations alone.
+
+fn generateSequence(count: Int) -> Int[] {
+    let sequence: Int[] = [1, 0, 0, 1, 1];
+    loop length(sequence) < count {
+        let n: Int = length(sequence);
+        let nextBit: Int = sequence[n - 2] ^ sequence[n - 5];
+        sequence = sequence + [nextBit & 1];
+    }
+    ret sequence;
+}
+
+fn berlekampMassey(sequence: Int[]) -> Int[] {
+    let n: Int = length(sequence);
+    let coefficientCount: Int = n + 1;
+    let connection: Int[] = [];
+    let backup: Int[] = [];
+
+    loop i in 0..coefficientCount {
+        connection = connection + [0];
+        backup = backup + [0];
+    }
+    connection[0] = 1;
+    backup[0] = 1;
+
+    let linearComplexity: Int = 0;
+    let lastUpdate: Int = -1;
+
+    loop index in 0..n {
+        let discrepancy: Int = sequence[index];
+        let tap: Int = 1;
+        loop tap <= linearComplexity {
+            discrepancy = discrepancy ^ (connection[tap] & sequence[index - tap]);
+            tap = tap + 1;
+        }
+
+        if discrepancy == 1 {
+            // Slice to force a genuine snapshot: plain array assignment
+            // aliases concatenation-built arrays (compiler quirk as of
+            // 2026-07-23), which would silently corrupt the backup polynomial.
+            let previousConnection: Int[] = connection[0..length(connection)];
+            let shift: Int = index - lastUpdate;
+            let updateCount: Int = n - shift + 1;
+            loop j in 0..updateCount {
+                connection[j + shift] = connection[j + shift] ^ backup[j];
+            }
+
+            if 2 * linearComplexity <= index {
+                linearComplexity = index + 1 - linearComplexity;
+                backup = previousConnection;
+                lastUpdate = index;
+            }
+        }
+    }
+
+    let resultEnd: Int = linearComplexity + 1;
+    let result: Int[] = connection[0..resultEnd];
+    ret result;
+}
+
+fn recurrenceHolds(sequence: Int[], connection: Int[]) -> Bool {
+    let degree: Int = length(connection) - 1;
+    let sequenceLength: Int = length(sequence);
+    loop index in degree..sequenceLength {
+        let predicted: Int = 0;
+        let tapEnd: Int = degree + 1;
+        loop tap in 1..tapEnd {
+            predicted = predicted ^ (connection[tap] & sequence[index - tap]);
+        }
+        if predicted != sequence[index] {
+            ret false;
+        }
+    }
+    ret true;
+}
+
+fn main() -> Void {
+    let observations: Int[] = generateSequence(32);
+    let connection: Int[] = berlekampMassey(observations);
+    let degree: Int = length(connection) - 1;
+    let valid: Bool = recurrenceHolds(observations, connection);
+    let observationCount: Int = length(observations);
+    let coefficientCount: Int = length(connection);
+
+    fx {
+        print("Observed bits: ");
+        loop i in 0..observationCount {
+            print(observations[i]);
+        }
+        println("");
+
+        print("Recovered C(x) = 1");
+        loop i in 1..coefficientCount {
+            if connection[i] == 1 {
+                print(" + x^", i);
+            }
+        }
+        println("");
+        println("Linear complexity: ", degree);
+        println("Recurrence validates every observation: ", valid);
+    }
+    ret;
+}
