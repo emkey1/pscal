@@ -1,0 +1,301 @@
+// Pursuit-Evasion on a Graph (Cops & Robbers) with fog-of-war
+// Two cop agents coordinate to catch one robber on an 8-node graph with a
+// bottleneck. Cops only see within a visibility radius (BFS hops) and share
+// a belief state -- the set of nodes the robber could occupy -- which
+// collapses when the robber is spotted and propagates one step per turn
+// while it is hidden. Deterministic strategies, so the run is reproducible.
+
+// --- Graph: left cluster {0,1,2,3}, right cluster {5,6,7}, bottleneck 1-4-5
+fn buildGraph() -> Int[][] {
+    ret [
+        [0, 1, 0, 1, 0, 0, 0, 0],
+        [1, 0, 1, 0, 1, 0, 0, 0],
+        [0, 1, 0, 1, 0, 0, 0, 0],
+        [1, 0, 1, 0, 0, 0, 0, 0],
+        [0, 1, 0, 0, 0, 1, 0, 0],
+        [0, 0, 0, 0, 1, 0, 1, 1],
+        [0, 0, 0, 0, 0, 1, 0, 1],
+        [0, 0, 0, 0, 0, 1, 1, 0]
+    ];
+}
+
+fn intArray(n: Int, val: Int) -> Int[] {
+    let a: Int[] = [];
+    loop i in 0..n { a = a + [val]; }
+    ret a;
+}
+
+fn boolArray(n: Int, val: Bool) -> Bool[] {
+    let a: Bool[] = [];
+    loop i in 0..n { a = a + [val]; }
+    ret a;
+}
+
+// --- BFS: nodes visible within maxHops of start
+fn computeVisibility(graph: Int[][], start: Int, maxHops: Int) -> Bool[] {
+    let n: Int = len(graph);
+    let visible: Bool[] = boolArray(n, false);
+    let dist: Int[] = intArray(n, -1);
+    let queue: Int[] = intArray(n, 0);
+    let qHead: Int = 0;
+    let qTail: Int = 0;
+
+    queue[qTail] = start;
+    qTail = qTail + 1;
+    dist[start] = 0;
+    visible[start] = true;
+
+    loop qHead < qTail {
+        let node: Int = queue[qHead];
+        qHead = qHead + 1;
+        if dist[node] < maxHops {
+            loop nb in 0..n {
+                if graph[node][nb] == 1 && dist[nb] == -1 {
+                    dist[nb] = dist[node] + 1;
+                    visible[nb] = true;
+                    queue[qTail] = nb;
+                    qTail = qTail + 1;
+                }
+            }
+        }
+    }
+    ret visible;
+}
+
+// --- BFS: shortest-path distance (-1 if unreachable)
+fn bfsDistance(graph: Int[][], start: Int, target: Int) -> Int {
+    let n: Int = len(graph);
+    let dist: Int[] = intArray(n, -1);
+    let queue: Int[] = intArray(n, 0);
+    let qHead: Int = 0;
+    let qTail: Int = 0;
+
+    queue[qTail] = start;
+    qTail = qTail + 1;
+    dist[start] = 0;
+
+    loop qHead < qTail {
+        let node: Int = queue[qHead];
+        qHead = qHead + 1;
+        if node == target { ret dist[node]; }
+        loop nb in 0..n {
+            if graph[node][nb] == 1 && dist[nb] == -1 {
+                dist[nb] = dist[node] + 1;
+                queue[qTail] = nb;
+                qTail = qTail + 1;
+            }
+        }
+    }
+    ret -1;
+}
+
+// --- BFS: first step on a shortest path from start toward target
+fn bfsNextStep(graph: Int[][], start: Int, target: Int) -> Int {
+    let n: Int = len(graph);
+    if start == target { ret start; }
+    let dist: Int[] = intArray(n, -1);
+    let prev: Int[] = intArray(n, -1);
+    let queue: Int[] = intArray(n, 0);
+    let qHead: Int = 0;
+    let qTail: Int = 0;
+
+    queue[qTail] = start;
+    qTail = qTail + 1;
+    dist[start] = 0;
+
+    loop qHead < qTail {
+        let node: Int = queue[qHead];
+        qHead = qHead + 1;
+        if node == target { break; }
+        loop nb in 0..n {
+            if graph[node][nb] == 1 && dist[nb] == -1 {
+                dist[nb] = dist[node] + 1;
+                prev[nb] = node;
+                queue[qTail] = nb;
+                qTail = qTail + 1;
+            }
+        }
+    }
+
+    if dist[target] == -1 { ret start; }  // unreachable: stay put
+    let curr: Int = target;
+    loop prev[curr] != start {
+        curr = prev[curr];
+    }
+    ret curr;
+}
+
+// --- Belief update (shared between cops, simulating a broadcast channel)
+// Visible robber: belief collapses to the exact node. Hidden robber: the
+// belief propagates one move (stay or step to a neighbor), pruned to nodes
+// outside every cop's visibility.
+fn updateBelief(belief: Bool[], graph: Int[][], visible: Bool[],
+                robberVisible: Bool, robberPos: Int) -> Bool[] {
+    let n: Int = len(graph);
+    let newBelief: Bool[] = boolArray(n, false);
+
+    if robberVisible {
+        newBelief[robberPos] = true;
+        ret newBelief;
+    }
+
+    // NOTE: this loop's variable name is deliberately unique program-wide: a
+    // `continue` inside a loop whose variable name is bound anywhere else in
+    // the program trips a compiler scope bug (SCOPE-001) as of aether
+    // 2026-07-20-1.
+    loop bcell in 0..n {
+        if visible[bcell] { continue; }  // spotted-empty nodes are ruled out
+        if belief[bcell] {
+            newBelief[bcell] = true;     // robber may have stayed
+        } else {
+            loop j in 0..n {
+                if graph[bcell][j] == 1 && belief[j] {
+                    newBelief[bcell] = true;  // robber may have stepped here
+                    break;
+                }
+            }
+        }
+    }
+    ret newBelief;
+}
+
+// --- Cop policy: step toward the nearest node the robber could occupy
+fn copDecision(copPos: Int, belief: Bool[], graph: Int[][]) -> Int {
+    let n: Int = len(graph);
+    let bestNode: Int = copPos;
+    let bestDist: Int = n + 1;
+
+    loop i in 0..n {
+        if belief[i] {
+            let d: Int = bfsDistance(graph, copPos, i);
+            if d >= 0 && d < bestDist {
+                bestDist = d;
+                bestNode = i;
+            }
+        }
+    }
+    ret bfsNextStep(graph, copPos, bestNode);
+}
+
+// --- Robber policy: if a cop is within 3 hops, step to the neighbor that
+// maximizes distance to the nearest cop; otherwise hold position.
+fn robberDecision(robberPos: Int, graph: Int[][], copPositions: Int[]) -> Int {
+    let n: Int = len(graph);
+
+    let nearestCopDist: Int = n + 1;
+    loop c in 0..len(copPositions) {
+        let d: Int = bfsDistance(graph, copPositions[c], robberPos);
+        if d >= 0 && d < nearestCopDist {
+            nearestCopDist = d;
+        }
+    }
+
+    if nearestCopDist > 3 { ret robberPos; }
+
+    let bestNeighbor: Int = robberPos;
+    let bestDist: Int = nearestCopDist;
+    loop nb in 0..n {
+        if graph[robberPos][nb] == 1 {
+            let d: Int = n + 1;
+            loop c in 0..len(copPositions) {
+                let cd: Int = bfsDistance(graph, copPositions[c], nb);
+                if cd >= 0 && cd < d {
+                    d = cd;
+                }
+            }
+            if d > bestDist {
+                bestDist = d;
+                bestNeighbor = nb;
+            }
+        }
+    }
+    ret bestNeighbor;
+}
+
+fn countTrue(flags: Bool[]) -> Int {
+    let count: Int = 0;
+    loop i in 0..len(flags) {
+        if flags[i] { count = count + 1; }
+    }
+    ret count;
+}
+
+fn main() -> Void {
+    let graph: Int[][] = buildGraph();
+    let n: Int = len(graph);
+    let visibilityRadius: Int = 2;
+    let maxTurns: Int = 20;
+
+    let copPositions: Int[] = [0, 3];
+    let robberPos: Int = 7;
+    let belief: Bool[] = boolArray(n, true);
+    let caught: Bool = false;
+    let caughtTurn: Int = 0;
+
+    fx {
+        println("=== Cops & Robbers: Pursuit-Evasion with Fog of War ===");
+        println("Graph: 8 nodes, bottleneck 1-4-5 between two clusters");
+        println("Cops start at nodes ", copPositions[0], " and ", copPositions[1],
+                "; robber starts at node ", robberPos);
+        println("Visibility radius: ", visibilityRadius, " hops; turn limit: ", maxTurns);
+        println();
+    }
+
+    let turn: Int = 1;
+    loop turn <= maxTurns && !caught {
+        // Phase 1: sense. Union the two cops' visibility (shared channel).
+        let cop0Vis: Bool[] = computeVisibility(graph, copPositions[0], visibilityRadius);
+        let cop1Vis: Bool[] = computeVisibility(graph, copPositions[1], visibilityRadius);
+        let unionVis: Bool[] = boolArray(n, false);
+        loop i in 0..n {
+            unionVis[i] = cop0Vis[i] || cop1Vis[i];
+        }
+        let robberVisible: Bool = unionVis[robberPos];
+
+        // Phase 2: shared belief update.
+        belief = updateBelief(belief, graph, unionVis, robberVisible, robberPos);
+        let possibleCount: Int = countTrue(belief);
+
+        fx {
+            println("--- Turn ", turn, " ---");
+            if robberVisible {
+                println("  Robber SPOTTED at node ", robberPos);
+            } else {
+                println("  Robber hidden; belief covers ", possibleCount, " node(s)");
+            }
+        }
+
+        // Phase 3: cops move (both chase the nearest believed location).
+        copPositions[0] = copDecision(copPositions[0], belief, graph);
+        copPositions[1] = copDecision(copPositions[1], belief, graph);
+        fx {
+            println("  Cop 0 -> node ", copPositions[0],
+                    ", Cop 1 -> node ", copPositions[1]);
+        }
+
+        if copPositions[0] == robberPos || copPositions[1] == robberPos {
+            caught = true;
+            caughtTurn = turn;
+        } else {
+            // Phase 4: robber moves.
+            robberPos = robberDecision(robberPos, graph, copPositions);
+            fx { println("  Robber -> node ", robberPos); }
+            if copPositions[0] == robberPos || copPositions[1] == robberPos {
+                caught = true;
+                caughtTurn = turn;
+            }
+        }
+        turn = turn + 1;
+    }
+
+    fx {
+        println();
+        if caught {
+            println("*** ROBBER CAPTURED at node ", robberPos,
+                    " on turn ", caughtTurn, " ***");
+        } else {
+            println("Robber evaded capture for ", maxTurns, " turns.");
+        }
+    }
+    ret;
+}

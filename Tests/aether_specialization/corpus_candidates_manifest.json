@@ -12164,6 +12164,16 @@
         "include_in_training": false,
         "lifecycle": "quarantine"
       }
+    },
+    {
+      "source_path": "/tmp/corpus_new5/59_cops_and_robbers.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/59_cops_and_robbers.aether",
+      "sha256": "53b2cb6051561e05c2f505318e2923a2ad1271a045672afe27c3358c6a15bcfb",
+      "stdout": "=== Cops & Robbers: Pursuit-Evasion with Fog of War ===\nGraph: 8 nodes, bottleneck 1-4-5 between two clusters\nCops start at nodes 0 and 3; robber starts at node 7\nVisibility radius: 2 hops; turn limit: 20\n\n--- Turn 1 ---\n  Robber hidden; belief covers 3 node(s)\n  Cop 0 -> node 1, Cop 1 -> node 0\n  Robber -> node 7\n--- Turn 2 ---\n  Robber hidden; belief covers 2 node(s)\n  Cop 0 -> node 4, Cop 1 -> node 1\n  Robber -> node 7\n--- Turn 3 ---\n  Robber SPOTTED at node 7\n  Cop 0 -> node 5, Cop 1 -> node 4\n  Robber -> node 7\n--- Turn 4 ---\n  Robber SPOTTED at node 7\n  Cop 0 -> node 7, Cop 1 -> node 5\n\n*** ROBBER CAPTURED at node 7 on turn 4 ***\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
     }
   ]
 }
