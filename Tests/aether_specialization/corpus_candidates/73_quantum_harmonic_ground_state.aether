@@ -70,11 +70,7 @@ fn main() -> Void {
                 + 0.5 * position * position * wave[i];
             nextWave[i] = wave[i] - imaginaryTimeStep * hWave;
         }
-        // Slice to keep wave and nextWave distinct buffers: assignment
-        // aliases concatenation-built arrays (compiler quirk as of
-        // 2026-07-23), and an alias would turn this Jacobi update into an
-        // in-place sweep that reads half-updated neighbors.
-        wave = normalizeWave(nextWave[0..pointCount], spacing);
+        wave = normalizeWave(nextWave, spacing);
     }
 
     let energy: Real = oscillatorEnergy(wave, spacing, center);

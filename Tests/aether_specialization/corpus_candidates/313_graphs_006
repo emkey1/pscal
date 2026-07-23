@@ -1,33 +1,41 @@
 // 313_graphs_006
-// Concepts: undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) — recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference
+// Concepts: undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) — recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; shared visit marks held in a record field (records pass by reference; bare arrays are value-copied at call boundaries)
 // expect: nodes: 5
 // expect: edges: 5
 // expect: reachable_from(4) = 5
 // expect: components = 1
 
-fn dfs(adj: Int[], visited: Int[], n: Int, u: Int) -> Int {
-    visited[u] = 1;
+type Marks {
+    cells: Int[] = [];
+}
+
+fn makeMarks(n: Int) -> Marks {
+    let m: Marks = new Marks();
+    loop i in 0..n { m.cells = m.cells + [0]; }
+    ret m;
+}
+
+fn dfs(adj: Int[], visited: Marks, n: Int, u: Int) -> Int {
+    visited.cells[u] = 1;
     let count: Int = 1;
     loop v in 0..n {
         if adj[u * n + v] == 1 {
-            if visited[v] == 0 { count = count + dfs(adj, visited, n, v); }
+            if visited.cells[v] == 0 { count = count + dfs(adj, visited, n, v); }
         }
     }
     ret count;
 }
 
 fn reachableFrom(adj: Int[], n: Int, src: Int) -> Int {
-    let visited: Int[] = [];
-    loop i in 0..n { visited = visited + [0]; }
+    let visited: Marks = makeMarks(n);
     ret dfs(adj, visited, n, src);
 }
 
 fn componentCount(adj: Int[], n: Int) -> Int {
-    let visited: Int[] = [];
-    loop i in 0..n { visited = visited + [0]; }
+    let visited: Marks = makeMarks(n);
     let comps: Int = 0;
     loop s in 0..n {
-        if visited[s] == 0 {
+        if visited.cells[s] == 0 {
             comps = comps + 1;
             let ignore: Int = dfs(adj, visited, n, s);
         }
