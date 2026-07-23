@@ -1,0 +1,48 @@
+// Continued-fraction solution of Pell's equation x^2 - D*y^2 = 1.
+// D=61 is famous because its smallest solution is unexpectedly enormous.
+
+fn main() -> Void {
+    let discriminant: Int = 61;
+    let aZero: Int = floor(sqrt(discriminant * 1.0));
+
+    if aZero * aZero == discriminant {
+        fx {
+            println("D is a perfect square, so the nontrivial Pell problem degenerates.");
+        }
+        ret;
+    }
+
+    let m: Int = 0;
+    let continuedDenominator: Int = 1;
+    let a: Int = aZero;
+
+    let numeratorPrevious: Int = 1;
+    let numerator: Int = a;
+    let denominatorPrevious: Int = 0;
+    let denominator: Int = 1;
+    let convergentCount: Int = 1;
+
+    loop numerator * numerator - discriminant * denominator * denominator != 1 {
+        m = continuedDenominator * a - m;
+        continuedDenominator = (discriminant - m * m) / continuedDenominator;
+        a = (aZero + m) / continuedDenominator;
+
+        let nextNumerator: Int = a * numerator + numeratorPrevious;
+        let nextDenominator: Int = a * denominator + denominatorPrevious;
+        numeratorPrevious = numerator;
+        denominatorPrevious = denominator;
+        numerator = nextNumerator;
+        denominator = nextDenominator;
+        convergentCount = convergentCount + 1;
+    }
+
+    let verification: Int = numerator * numerator - discriminant * denominator * denominator;
+    fx {
+        println("Pell equation: x^2 - ", discriminant, "*y^2 = 1");
+        println("Minimal x = ", numerator);
+        println("Minimal y = ", denominator);
+        println("Convergents examined = ", convergentCount);
+        println("Verification value = ", verification);
+    }
+    ret;
+}

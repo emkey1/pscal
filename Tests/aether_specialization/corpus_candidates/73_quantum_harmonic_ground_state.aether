@@ -1,0 +1,91 @@
+// Imaginary-time propagation for the one-dimensional quantum harmonic oscillator.
+// A finite-difference Hamiltonian projects an arbitrary Gaussian toward the ground state.
+
+fn normalizeWave(wave: Real[], spacing: Real) -> Real[] {
+    let pointCount: Int = length(wave);
+    let normSquared: Real = 0.0;
+    loop i in 0..pointCount {
+        normSquared = normSquared + wave[i] * wave[i] * spacing;
+    }
+
+    let scale: Real = 1.0 / sqrt(normSquared);
+    loop i in 0..pointCount {
+        wave[i] = wave[i] * scale;
+    }
+    ret wave;
+}
+
+fn oscillatorEnergy(wave: Real[], spacing: Real, center: Int) -> Real {
+    let pointCount: Int = length(wave);
+    let interiorEnd: Int = pointCount - 1;
+    let energy: Real = 0.0;
+
+    loop i in 1..interiorEnd {
+        let position: Real = (i - center) * spacing;
+        let laplacian: Real = (wave[i + 1] - 2.0 * wave[i] + wave[i - 1])
+            / (spacing * spacing);
+        let hWave: Real = 0.0 - 0.5 * laplacian
+            + 0.5 * position * position * wave[i];
+        energy = energy + wave[i] * hWave * spacing;
+    }
+    ret energy;
+}
+
+fn meanSquarePosition(wave: Real[], spacing: Real, center: Int) -> Real {
+    let pointCount: Int = length(wave);
+    let expectation: Real = 0.0;
+    loop i in 0..pointCount {
+        let position: Real = (i - center) * spacing;
+        expectation = expectation + position * position * wave[i] * wave[i] * spacing;
+    }
+    ret expectation;
+}
+
+fn main() -> Void {
+    let pointCount: Int = 201;
+    let center: Int = 100;
+    let spacing: Real = 0.08;
+    let imaginaryTimeStep: Real = 0.0005;
+    let stepCount: Int = 6_000;
+    let interiorEnd: Int = pointCount - 1;
+
+    let wave: Real[] = [];
+    let nextWave: Real[] = [];
+    loop i in 0..pointCount {
+        let position: Real = (i - center) * spacing;
+        wave = wave + [exp(0.0 - 0.30 * position * position)];
+        nextWave = nextWave + [0.0];
+    }
+    wave = normalizeWave(wave, spacing);
+
+    loop step in 0..stepCount {
+        nextWave[0] = 0.0;
+        nextWave[pointCount - 1] = 0.0;
+
+        loop i in 1..interiorEnd {
+            let position: Real = (i - center) * spacing;
+            let laplacian: Real = (wave[i + 1] - 2.0 * wave[i] + wave[i - 1])
+                / (spacing * spacing);
+            let hWave: Real = 0.0 - 0.5 * laplacian
+                + 0.5 * position * position * wave[i];
+            nextWave[i] = wave[i] - imaginaryTimeStep * hWave;
+        }
+        // Slice to keep wave and nextWave distinct buffers: assignment
+        // aliases concatenation-built arrays (compiler quirk as of
+        // 2026-07-23), and an alias would turn this Jacobi update into an
+        // in-place sweep that reads half-updated neighbors.
+        wave = normalizeWave(nextWave[0..pointCount], spacing);
+    }
+
+    let energy: Real = oscillatorEnergy(wave, spacing, center);
+    let positionVariance: Real = meanSquarePosition(wave, spacing, center);
+    let centerProbability: Real = wave[center] * wave[center];
+
+    fx {
+        println("Ground-state energy estimate: ", energy:0:9);
+        println("Exact energy:                 0.500000000");
+        println("<x^2> estimate:               ", positionVariance:0:9);
+        println("Probability density at x=0:  ", centerProbability:0:9);
+    }
+    ret;
+}

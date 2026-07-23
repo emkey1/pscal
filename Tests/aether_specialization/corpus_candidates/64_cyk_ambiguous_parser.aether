@@ -1,0 +1,86 @@
+// CYK parsing in Chomsky normal form.
+// The program decides whether "baaba" belongs to a classic ambiguous grammar
+// and counts all distinct parse trees rooted at S.
+
+const SymbolCount: Int = 4;
+const StartSymbol: Int = 0;
+
+fn cellIndex(start: Int, span: Int, symbol: Int, wordLength: Int) -> Int {
+    ret ((span - 1) * wordLength + start) * SymbolCount + symbol;
+}
+
+fn main() -> Void {
+    // Symbols: 0=S, 1=A, 2=B, 3=C.
+    // Binary productions:
+    // S -> AB | BC
+    // A -> BA
+    // B -> CC
+    // C -> AB
+    let binaryLeftSide: Int[] = [0, 0, 1, 2, 3];
+    let binaryFirst: Int[] = [1, 2, 2, 3, 1];
+    let binarySecond: Int[] = [2, 3, 1, 3, 2];
+
+    // Terminal productions: A -> a, B -> b, C -> a.
+    let terminalLeftSide: Int[] = [1, 2, 3];
+    let terminalText: Text[] = ["a", "b", "a"];
+
+    let word: Text = "baaba";
+    let wordLength: Int = string_len(word);
+    let cellCount: Int = wordLength * wordLength * SymbolCount;
+    let ways: Int[] = [];
+
+    loop i in 0..cellCount {
+        ways = ways + [0];
+    }
+
+    // Length-one spans come directly from terminal productions.
+    let terminalCount: Int = length(terminalLeftSide);
+    loop start in 0..wordLength {
+        let ch: Text = copy(word, start + 1, 1);
+        loop p in 0..terminalCount {
+            if terminalText[p] == ch {
+                let symbol: Int = terminalLeftSide[p];
+                let index: Int = cellIndex(start, 1, symbol, wordLength);
+                ways[index] = ways[index] + 1;
+            }
+        }
+    }
+
+    // Longer spans combine every split point and every binary production.
+    let productionCount: Int = length(binaryLeftSide);
+    let span: Int = 2;
+    loop span <= wordLength {
+        let lastStart: Int = wordLength - span + 1;
+        loop start in 0..lastStart {
+            loop split in 1..span {
+                let leftSpan: Int = split;
+                let rightSpan: Int = span - split;
+                let rightStart: Int = start + split;
+
+                loop p in 0..productionCount {
+                    let leftSymbol: Int = binaryFirst[p];
+                    let rightSymbol: Int = binarySecond[p];
+                    let parentSymbol: Int = binaryLeftSide[p];
+
+                    let leftIndex: Int = cellIndex(start, leftSpan, leftSymbol, wordLength);
+                    let rightIndex: Int = cellIndex(rightStart, rightSpan, rightSymbol, wordLength);
+                    let parentIndex: Int = cellIndex(start, span, parentSymbol, wordLength);
+                    let combinations: Int = ways[leftIndex] * ways[rightIndex];
+                    ways[parentIndex] = ways[parentIndex] + combinations;
+                }
+            }
+        }
+        span = span + 1;
+    }
+
+    let rootIndex: Int = cellIndex(0, wordLength, StartSymbol, wordLength);
+    let parseCount: Int = ways[rootIndex];
+    let accepted: Bool = parseCount > 0;
+
+    fx {
+        println("CYK word: ", word);
+        println("Accepted by the grammar: ", accepted);
+        println("Distinct S-rooted parse trees: ", parseCount);
+    }
+    ret;
+}

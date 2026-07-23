@@ -1,0 +1,152 @@
+// Velocity-Verlet integration of a planar Sun-Earth-Jupiter system.
+// The symplectic update is chosen to suppress secular energy drift.
+
+type Acceleration {
+    xComponent: Real[] = [];
+    yComponent: Real[] = [];
+}
+
+fn makeAcceleration(bodyCount: Int) -> Acceleration {
+    let result: Acceleration = new Acceleration();
+    loop i in 0..bodyCount {
+        result.xComponent = result.xComponent + [0.0];
+        result.yComponent = result.yComponent + [0.0];
+    }
+    ret result;
+}
+
+fn computeAcceleration(
+    x: Real[],
+    y: Real[],
+    mass: Real[],
+    gravitationalConstant: Real,
+    softening: Real,
+    result: Acceleration
+) -> Void {
+    let bodyCount: Int = length(x);
+    loop i in 0..bodyCount {
+        result.xComponent[i] = 0.0;
+        result.yComponent[i] = 0.0;
+    }
+
+    loop firstBody in 0..bodyCount {
+        let secondBody: Int = firstBody + 1;
+        loop secondBody < bodyCount {
+            let dx: Real = x[secondBody] - x[firstBody];
+            let dy: Real = y[secondBody] - y[firstBody];
+            let distanceSquared: Real = dx * dx + dy * dy + softening * softening;
+            let inverseCube: Real = 1.0 / (distanceSquared * sqrt(distanceSquared));
+            let scale: Real = gravitationalConstant * inverseCube;
+
+            result.xComponent[firstBody] = result.xComponent[firstBody]
+                + scale * mass[secondBody] * dx;
+            result.yComponent[firstBody] = result.yComponent[firstBody]
+                + scale * mass[secondBody] * dy;
+            result.xComponent[secondBody] = result.xComponent[secondBody]
+                - scale * mass[firstBody] * dx;
+            result.yComponent[secondBody] = result.yComponent[secondBody]
+                - scale * mass[firstBody] * dy;
+
+            secondBody = secondBody + 1;
+        }
+    }
+    ret;
+}
+
+fn totalEnergy(
+    x: Real[],
+    y: Real[],
+    velocityX: Real[],
+    velocityY: Real[],
+    mass: Real[],
+    gravitationalConstant: Real,
+    softening: Real
+) -> Real {
+    let bodyCount: Int = length(x);
+    let energy: Real = 0.0;
+
+    loop i in 0..bodyCount {
+        energy = energy + 0.5 * mass[i]
+            * (velocityX[i] * velocityX[i] + velocityY[i] * velocityY[i]);
+    }
+
+    loop firstBody in 0..bodyCount {
+        let secondBody: Int = firstBody + 1;
+        loop secondBody < bodyCount {
+            let dx: Real = x[secondBody] - x[firstBody];
+            let dy: Real = y[secondBody] - y[firstBody];
+            let distance: Real = sqrt(dx * dx + dy * dy + softening * softening);
+            energy = energy - gravitationalConstant
+                * mass[firstBody] * mass[secondBody] / distance;
+            secondBody = secondBody + 1;
+        }
+    }
+    ret energy;
+}
+
+fn main() -> Void {
+    let pi: Real = 4.0 * arctan(1.0);
+    let gravitationalConstant: Real = 4.0 * pi * pi;
+    let softening: Real = 0.000001;
+
+    let sunMass: Real = 1.0;
+    let earthMass: Real = 0.000003003;
+    let jupiterMass: Real = 0.0009543;
+    let earthVelocity: Real = 2.0 * pi;
+    let jupiterVelocity: Real = 2.0 * pi / sqrt(5.2);
+    let sunX: Real = 0.0 - earthMass * 1.0 - jupiterMass * 5.2;
+    let sunVelocity: Real = 0.0 - earthMass * earthVelocity
+        - jupiterMass * jupiterVelocity;
+
+    let mass: Real[] = [sunMass, earthMass, jupiterMass];
+    let x: Real[] = [sunX, 1.0, 5.2];
+    let y: Real[] = [0.0, 0.0, 0.0];
+    let velocityX: Real[] = [0.0, 0.0, 0.0];
+    let velocityY: Real[] = [sunVelocity, earthVelocity, jupiterVelocity];
+    let bodyCount: Int = length(mass);
+
+    let timeStep: Real = 0.002;
+    let stepCount: Int = 10_000;
+    let initialEnergy: Real = totalEnergy(
+        x, y, velocityX, velocityY, mass, gravitationalConstant, softening
+    );
+
+    let acceleration: Acceleration = makeAcceleration(bodyCount);
+    let nextAcceleration: Acceleration = makeAcceleration(bodyCount);
+    computeAcceleration(x, y, mass, gravitationalConstant, softening, acceleration);
+
+    loop step in 0..stepCount {
+        loop i in 0..bodyCount {
+            velocityX[i] = velocityX[i] + 0.5 * timeStep * acceleration.xComponent[i];
+            velocityY[i] = velocityY[i] + 0.5 * timeStep * acceleration.yComponent[i];
+            x[i] = x[i] + timeStep * velocityX[i];
+            y[i] = y[i] + timeStep * velocityY[i];
+        }
+
+        computeAcceleration(x, y, mass, gravitationalConstant, softening, nextAcceleration);
+
+        loop i in 0..bodyCount {
+            velocityX[i] = velocityX[i] + 0.5 * timeStep * nextAcceleration.xComponent[i];
+            velocityY[i] = velocityY[i] + 0.5 * timeStep * nextAcceleration.yComponent[i];
+        }
+
+        let oldAcceleration: Acceleration = acceleration;
+        acceleration = nextAcceleration;
+        nextAcceleration = oldAcceleration;
+    }
+
+    let finalEnergy: Real = totalEnergy(
+        x, y, velocityX, velocityY, mass, gravitationalConstant, softening
+    );
+    let relativeDrift: Real = abs((finalEnergy - initialEnergy) / initialEnergy);
+
+    fx {
+        println("Initial energy: ", initialEnergy:0:12);
+        println("Final energy:   ", finalEnergy:0:12);
+        println("Relative drift: ", relativeDrift:0:12);
+        loop i in 0..bodyCount {
+            println("body ", i, " position = (", x[i]:0:6, ", ", y[i]:0:6, ")");
+        }
+    }
+    ret;
+}

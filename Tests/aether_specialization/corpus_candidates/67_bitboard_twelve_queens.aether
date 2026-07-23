@@ -1,0 +1,93 @@
+// Bitboard backtracking for the 12-queens problem.
+// It counts every solution while retaining the first board found.
+
+type QueenResult {
+    count: Int = 0;
+    found: Bool = false;
+    firstPlacement: Int[] = [];
+}
+
+fn columnOfBit(bit: Int, boardSize: Int) -> Int {
+    let column: Int = 0;
+    let probe: Int = 1;
+    loop column < boardSize {
+        if probe == bit {
+            ret column;
+        }
+        probe = probe << 1;
+        column = column + 1;
+    }
+    ret -1;
+}
+
+fn searchQueens(
+    row: Int,
+    boardSize: Int,
+    mask: Int,
+    columns: Int,
+    descendingDiagonals: Int,
+    ascendingDiagonals: Int,
+    placement: Int[],
+    result: QueenResult
+) -> Void {
+    if row == boardSize {
+        result.count = result.count + 1;
+        if !result.found {
+            // Slice to snapshot: concatenation-built arrays alias on plain
+            // assignment (compiler quirk as of 2026-07-23); without the copy
+            // this field would keep tracking the live search array.
+            result.firstPlacement = placement[0..boardSize];
+            result.found = true;
+        }
+        ret;
+    }
+
+    let occupied: Int = (columns | descendingDiagonals | ascendingDiagonals) & mask;
+    let available: Int = mask ^ occupied;
+
+    loop available != 0 {
+        let bit: Int = available & (0 - available);
+        available = available ^ bit;
+        placement[row] = columnOfBit(bit, boardSize);
+
+        searchQueens(
+            row + 1,
+            boardSize,
+            mask,
+            columns | bit,
+            (descendingDiagonals | bit) << 1,
+            (ascendingDiagonals | bit) >> 1,
+            placement,
+            result
+        );
+    }
+    ret;
+}
+
+fn main() -> Void {
+    let boardSize: Int = 12;
+    let mask: Int = (1 << boardSize) - 1;
+    let placement: Int[] = [];
+    loop row in 0..boardSize {
+        placement = placement + [-1];
+    }
+
+    let result: QueenResult = new QueenResult();
+    searchQueens(0, boardSize, mask, 0, 0, 0, placement, result);
+
+    fx {
+        println(boardSize, "-queens solution count: ", result.count);
+        println("First solution:");
+        loop row in 0..boardSize {
+            loop column in 0..boardSize {
+                if result.firstPlacement[row] == column {
+                    print("Q ");
+                } else {
+                    print(". ");
+                }
+            }
+            println("");
+        }
+    }
+    ret;
+}

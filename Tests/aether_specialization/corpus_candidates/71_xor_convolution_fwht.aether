@@ -1,0 +1,88 @@
+// XOR convolution using the fast Walsh-Hadamard transform.
+// The transform diagonalizes convolution over the vector space of bit strings.
+
+fn walshHadamard(values: Int[], inverse: Bool) -> Int[] {
+    let n: Int = length(values);
+    let halfBlock: Int = 1;
+
+    loop halfBlock < n {
+        let blockSize: Int = halfBlock * 2;
+        let blockStart: Int = 0;
+        loop blockStart < n {
+            loop offset in 0..halfBlock {
+                let firstIndex: Int = blockStart + offset;
+                let secondIndex: Int = firstIndex + halfBlock;
+                let first: Int = values[firstIndex];
+                let second: Int = values[secondIndex];
+                values[firstIndex] = first + second;
+                values[secondIndex] = first - second;
+            }
+            blockStart = blockStart + blockSize;
+        }
+        halfBlock = halfBlock * 2;
+    }
+
+    if inverse {
+        loop i in 0..n {
+            values[i] = values[i] / n;
+        }
+    }
+    ret values;
+}
+
+fn printVector(label: Text, values: Int[]) -> Void {
+    let n: Int = length(values);
+    fx {
+        print(label, "[");
+        loop i in 0..n {
+            if i > 0 {
+                print(", ");
+            }
+            print(values[i]);
+        }
+        println("]");
+    }
+    ret;
+}
+
+fn main() -> Void {
+    let first: Int[] = [3, 1, 4, 1, 5, 9, 2, 6];
+    let second: Int[] = [5, 3, 5, 8, 9, 7, 9, 3];
+    let n: Int = length(first);
+
+    let transformedFirst: Int[] = walshHadamard(first, false);
+    let transformedSecond: Int[] = walshHadamard(second, false);
+    let spectralProduct: Int[] = [];
+    loop i in 0..n {
+        spectralProduct = spectralProduct + [transformedFirst[i] * transformedSecond[i]];
+    }
+    let convolution: Int[] = walshHadamard(spectralProduct, true);
+
+    // Independent O(n^2) verification.
+    let bruteForce: Int[] = [];
+    loop i in 0..n {
+        bruteForce = bruteForce + [0];
+    }
+    loop leftIndex in 0..n {
+        loop rightIndex in 0..n {
+            let targetIndex: Int = leftIndex ^ rightIndex;
+            bruteForce[targetIndex] = bruteForce[targetIndex]
+                + first[leftIndex] * second[rightIndex];
+        }
+    }
+
+    let verified: Bool = true;
+    loop i in 0..n {
+        if convolution[i] != bruteForce[i] {
+            verified = false;
+        }
+    }
+
+    printVector("First sequence: ", first);
+    printVector("Second sequence: ", second);
+    printVector("XOR convolution: ", convolution);
+    fx {
+        println("Matches quadratic verification: ", verified);
+    }
+    ret;
+}

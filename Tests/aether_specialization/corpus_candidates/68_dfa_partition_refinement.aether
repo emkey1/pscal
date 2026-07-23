@@ -1,0 +1,128 @@
+// DFA minimization by repeated partition refinement.
+// The six-state machine recognizes binary integers divisible by three, but
+// every semantic remainder state has been deliberately duplicated.
+
+fn statesEquivalent(
+    firstState: Int,
+    secondState: Int,
+    accepting: Bool[],
+    transitions: Int[],
+    classes: Int[],
+    alphabetSize: Int
+) -> Bool {
+    if accepting[firstState] != accepting[secondState] {
+        ret false;
+    }
+
+    loop symbol in 0..alphabetSize {
+        let firstTarget: Int = transitions[firstState * alphabetSize + symbol];
+        let secondTarget: Int = transitions[secondState * alphabetSize + symbol];
+        if classes[firstTarget] != classes[secondTarget] {
+            ret false;
+        }
+    }
+    ret true;
+}
+
+fn runDfa(bits: Text, transitions: Int[], startState: Int, alphabetSize: Int) -> Int {
+    let state: Int = startState;
+    let bitCount: Int = string_len(bits);
+    loop i in 0..bitCount {
+        let ch: Text = copy(bits, i + 1, 1);
+        let symbol: Int = if ch == "0" { 0 } else { 1 };
+        state = transitions[state * alphabetSize + symbol];
+    }
+    ret state;
+}
+
+fn main() -> Void {
+    let stateCount: Int = 6;
+    let alphabetSize: Int = 2;
+    let accepting: Bool[] = [true, false, false, true, false, false];
+
+    // Each row contains the targets for input symbols 0 and 1.
+    let transitions: Int[] = [
+        3, 1,
+        2, 3,
+        4, 2,
+        0, 4,
+        5, 0,
+        1, 5
+    ];
+
+    let classes: Int[] = [];
+    loop state in 0..stateCount {
+        if accepting[state] {
+            classes = classes + [1];
+        } else {
+            classes = classes + [0];
+        }
+    }
+
+    let classCount: Int = 0;
+    loop {
+        let newClasses: Int[] = [];
+        loop state in 0..stateCount {
+            newClasses = newClasses + [-1];
+        }
+
+        classCount = 0;
+        loop state in 0..stateCount {
+            let representative: Int = -1;
+            loop candidate in 0..state {
+                if statesEquivalent(state, candidate, accepting, transitions, classes, alphabetSize) {
+                    representative = candidate;
+                    break;
+                }
+            }
+
+            if representative == -1 {
+                newClasses[state] = classCount;
+                classCount = classCount + 1;
+            } else {
+                newClasses[state] = newClasses[representative];
+            }
+        }
+
+        let unchanged: Bool = true;
+        loop state in 0..stateCount {
+            if newClasses[state] != classes[state] {
+                unchanged = false;
+            }
+        }
+        classes = newClasses;
+        if unchanged {
+            break;
+        }
+    }
+
+    let sample: Text = "110110";
+    let sampleState: Int = runDfa(sample, transitions, 0, alphabetSize);
+
+    fx {
+        println("Original state count: ", stateCount);
+        println("Minimal state count: ", classCount);
+        loop state in 0..stateCount {
+            println("original state ", state, " -> class ", classes[state]);
+        }
+
+        println("Minimized transition table:");
+        loop classId in 0..classCount {
+            let representative: Int = -1;
+            loop state in 0..stateCount {
+                if classes[state] == classId {
+                    representative = state;
+                    break;
+                }
+            }
+            let onZero: Int = classes[transitions[representative * alphabetSize]];
+            let onOne: Int = classes[transitions[representative * alphabetSize + 1]];
+            println("class ", classId, ": 0 -> ", onZero, ", 1 -> ", onOne,
+                ", accepting = ", accepting[representative]);
+        }
+
+        println("Sample bits ", sample, " finish in class ", classes[sampleState],
+            ", accepted = ", accepting[sampleState]);
+    }
+    ret;
+}

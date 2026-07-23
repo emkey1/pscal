@@ -1,0 +1,106 @@
+// Deterministic Pollard-rho integer factorization.
+// Overflow-safe modular multiplication uses repeated doubling rather than a*b.
+
+fn greatestCommonDivisor(a: Int, b: Int) -> Int {
+    let x: Int = abs(a);
+    let y: Int = abs(b);
+    loop y != 0 {
+        let remainder: Int = x % y;
+        x = y;
+        y = remainder;
+    }
+    ret x;
+}
+
+fn multiplyModulo(a: Int, b: Int, modulus: Int) -> Int {
+    let addend: Int = a % modulus;
+    let multiplier: Int = b;
+    let result: Int = 0;
+
+    loop multiplier > 0 {
+        if odd(multiplier) {
+            result = (result + addend) % modulus;
+        }
+        addend = (addend + addend) % modulus;
+        multiplier = multiplier / 2;
+    }
+    ret result;
+}
+
+fn rhoStep(x: Int, constantTerm: Int, modulus: Int) -> Int {
+    ret (multiplyModulo(x, x, modulus) + constantTerm) % modulus;
+}
+
+fn pollardRho(n: Int, constantTerm: Int, iterationLimit: Int) -> Int {
+    if n % 2 == 0 {
+        ret 2;
+    }
+
+    let tortoise: Int = 2;
+    let hare: Int = 2;
+    let divisor: Int = 1;
+    let iterations: Int = 0;
+
+    loop divisor == 1 && iterations < iterationLimit {
+        tortoise = rhoStep(tortoise, constantTerm, n);
+        hare = rhoStep(rhoStep(hare, constantTerm, n), constantTerm, n);
+        divisor = greatestCommonDivisor(tortoise - hare, n);
+        iterations = iterations + 1;
+    }
+
+    if divisor == 1 || divisor == n {
+        ret -1;
+    }
+    ret divisor;
+}
+
+fn isPrime(n: Int) -> Bool {
+    if n < 2 {
+        ret false;
+    }
+    if n == 2 {
+        ret true;
+    }
+    if !odd(n) {
+        ret false;
+    }
+
+    let divisor: Int = 3;
+    loop divisor * divisor <= n {
+        if n % divisor == 0 {
+            ret false;
+        }
+        divisor = divisor + 2;
+    }
+    ret true;
+}
+
+fn main() -> Void {
+    let target: Int = 1_000_036_000_099;
+    let constantTerm: Int = 1;
+    let factor: Int = -1;
+
+    loop factor == -1 && constantTerm < 100 {
+        factor = pollardRho(target, constantTerm, 2_000_000);
+        if factor == -1 {
+            constantTerm = constantTerm + 1;
+        }
+    }
+
+    if factor == -1 {
+        fx {
+            println("No factor found within the deterministic retry budget.");
+        }
+        ret;
+    }
+
+    let cofactor: Int = target / factor;
+    fx {
+        println("Target: ", target);
+        println("Nontrivial factorization: ", factor, " * ", cofactor);
+        println("First factor prime: ", isPrime(factor));
+        println("Second factor prime: ", isPrime(cofactor));
+        println("Pollard polynomial constant: ", constantTerm);
+    }
+    ret;
+}
