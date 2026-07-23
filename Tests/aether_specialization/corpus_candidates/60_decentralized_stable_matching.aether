@@ -1,0 +1,130 @@
+// Decentralized Stable Matching (Gale-Shapley via simulated message passing)
+// Four proposer agents and four acceptor agents negotiate a matching with no
+// central broker: proposers send PROPOSE messages down their preference
+// lists; acceptors hold their best offer so far and RELEASE a previous match
+// when a better proposal arrives. Terminates when no agent has a move left,
+// then verifies stability by exhaustive blocking-pair search.
+
+// Preference lists: propPref[p] = acceptors in p's order of preference;
+// accPref[a] = proposers in a's order of preference (best first).
+fn buildProposerPrefs() -> Int[][] {
+    ret [
+        [0, 1, 2, 3],
+        [0, 1, 2, 3],
+        [1, 0, 2, 3],
+        [2, 1, 0, 3]
+    ];
+}
+
+fn buildAcceptorPrefs() -> Int[][] {
+    ret [
+        [1, 3, 2, 0],
+        [3, 2, 1, 0],
+        [0, 1, 2, 3],
+        [0, 1, 2, 3]
+    ];
+}
+
+// Lower rank = more preferred. Unknown agents rank worst.
+fn rankOf(prefList: Int[], agent: Int) -> Int {
+    loop i in 0..len(prefList) {
+        if prefList[i] == agent { ret i; }
+    }
+    ret len(prefList);
+}
+
+fn intArray(n: Int, val: Int) -> Int[] {
+    let a: Int[] = [];
+    loop i in 0..n { a = a + [val]; }
+    ret a;
+}
+
+fn main() -> Void {
+    let propPref: Int[][] = buildProposerPrefs();
+    let accPref: Int[][] = buildAcceptorPrefs();
+    let n: Int = len(propPref);
+
+    // Agent-local state (no shared broker): each proposer tracks how far
+    // down its own list it has proposed; matches are discovered only
+    // through the accept/release messages below.
+    let nextChoice: Int[] = intArray(n, 0);   // next preference index per proposer
+    let propMatch: Int[] = intArray(n, -1);   // acceptor matched to proposer, -1 = free
+    let accMatch: Int[] = intArray(n, -1);    // proposer matched to acceptor, -1 = free
+
+    fx {
+        println("=== Decentralized Stable Matching (message-passing Gale-Shapley) ===");
+        println(n, " proposers, ", n, " acceptors, no central broker");
+        println();
+    }
+
+    // Negotiation: each step, one free proposer with options left sends one
+    // PROPOSE message. Bounded by n*n total proposals (each proposer walks
+    // its list at most once), so the loop provably terminates.
+    let messages: Int = 0;
+    let active: Bool = true;
+    loop active {
+        active = false;
+        let p: Int = 0;
+        loop p < n {
+            if propMatch[p] == -1 && nextChoice[p] < n {
+                active = true;
+                let a: Int = propPref[p][nextChoice[p]];
+                messages = messages + 1;
+                let current: Int = accMatch[a];
+                if current == -1 {
+                    accMatch[a] = p;
+                    propMatch[p] = a;
+                    fx { println("P", p, " -> PROPOSE A", a, "   | A", a, ": ACCEPT (was free)"); }
+                } else if rankOf(accPref[a], p) < rankOf(accPref[a], current) {
+                    accMatch[a] = p;
+                    propMatch[p] = a;
+                    propMatch[current] = -1;
+                    fx {
+                        println("P", p, " -> PROPOSE A", a, "   | A", a,
+                                ": ACCEPT, RELEASE P", current);
+                    }
+                } else {
+                    nextChoice[p] = nextChoice[p] + 1;
+                    fx { println("P", p, " -> PROPOSE A", a, "   | A", a, ": REJECT"); }
+                }
+                p = n;  // one message per step: restart the scan
+            } else {
+                p = p + 1;
+            }
+        }
+    }
+
+    fx {
+        println();
+        println("Negotiation finished after ", messages, " messages.");
+        println("Final matching:");
+        loop p2 in 0..n {
+            println("  P", p2, " <-> A", propMatch[p2]);
+        }
+    }
+
+    // Stability audit: a blocking pair (p, a) is one where both would
+    // abandon their assigned partners for each other.
+    let blockingPairs: Int = 0;
+    loop p3 in 0..n {
+        loop a3 in 0..n {
+            if propMatch[p3] != a3 {
+                let prefersA: Bool =
+                    rankOf(propPref[p3], a3) < rankOf(propPref[p3], propMatch[p3]);
+                let prefersP: Bool =
+                    rankOf(accPref[a3], p3) < rankOf(accPref[a3], accMatch[a3]);
+                if prefersA && prefersP {
+                    blockingPairs = blockingPairs + 1;
+                    fx { println("  BLOCKING PAIR: P", p3, " / A", a3); }
+                }
+            }
+        }
+    }
+
+    fx {
+        println();
+        println("Blocking pairs found: ", blockingPairs);
+        println("Matching is stable: ", blockingPairs == 0);
+    }
+    ret;
+}
