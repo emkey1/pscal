@@ -1,0 +1,27 @@
+fn insertion_sort(arr: Int[]) -> Int[] {
+    let n: Int = length(arr);
+    loop i in 1..n {
+        let key: Int = arr[i];
+        let j: Int = i - 1;
+        loop {
+            if !(j >= 0 && arr[j] > key) { break; }
+            arr[j + 1] = arr[j];
+            j = j - 1;
+        }
+        arr[j + 1] = key;
+    }
+    ret arr;
+}
+
+fn main() -> Void {
+    let data: Int[] = [5, 2, 9, 1, 7];
+    data = insertion_sort(data);
+    fx {
+        println("Sorted array:");
+    }
+    loop i in 0..length(data) {
+        let v: Int = data[i];
+        fx { println(v); }
+    }
+    ret;
+}

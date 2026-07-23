@@ -1,0 +1,13 @@
+fn main() -> Void {
+    let scores: Int[] = [95, 42, 88, 70, 55];
+    let count: Int = 0;
+    loop i in 0..length(scores) {
+        if scores[i] >= 70 {
+            count = count + 1;
+        }
+    }
+    fx {
+        println("Total passing scores: ", count);
+    }
+    ret;
+}

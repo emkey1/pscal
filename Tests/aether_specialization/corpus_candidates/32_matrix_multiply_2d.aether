@@ -1,0 +1,77 @@
+type Matrix {
+    rows: Int;
+    cols: Int;
+    data: Real[][];
+
+    fn init(r: Int, c: Int) -> Void {
+        self.rows = r;
+        self.cols = c;
+        self.data = [];
+        loop i in 0..r {
+            let row: Real[] = [];
+            loop j in 0..c {
+                row = row + [0.0];
+            }
+            self.data = self.data + [row];
+        }
+        ret;
+    }
+
+    fn set(r: Int, c: Int, val: Real) -> Void {
+        self.data[r][c] = val;
+        ret;
+    }
+
+    fn get(r: Int, c: Int) -> Real {
+        ret self.data[r][c];
+    }
+
+    fn multiply(other: Matrix) -> Matrix {
+        let result: Matrix = new Matrix {};
+        result.init(self.rows, other.cols);
+        loop i in 0..self.rows {
+            loop j in 0..other.cols {
+                let sum: Real = 0.0;
+                loop k in 0..self.cols {
+                    sum = sum + self.data[i][k] * other.data[k][j];
+                }
+                result.set(i, j, sum);
+            }
+        }
+        ret result;
+    }
+
+    fn print_matrix() -> Void {
+        loop i in 0..self.rows {
+            let line: Text = "";
+            loop j in 0..self.cols {
+                line = line + formatfloat(self.data[i][j], 2) + "  ";
+            }
+            fx {
+                println(line);
+            }
+        }
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let a: Matrix = new Matrix {};
+    a.init(2, 3);
+    a.set(0, 0, 1.0); a.set(0, 1, 2.0); a.set(0, 2, 3.0);
+    a.set(1, 0, 4.0); a.set(1, 1, 5.0); a.set(1, 2, 6.0);
+
+    let b: Matrix = new Matrix {};
+    b.init(3, 2);
+    b.set(0, 0, 7.0); b.set(0, 1, 8.0);
+    b.set(1, 0, 9.0); b.set(1, 1, 10.0);
+    b.set(2, 0, 11.0); b.set(2, 1, 12.0);
+
+    let c: Matrix = a.multiply(b);
+
+    fx {
+        println("Matrix A * B =");
+    }
+    c.print_matrix();
+    ret;
+}

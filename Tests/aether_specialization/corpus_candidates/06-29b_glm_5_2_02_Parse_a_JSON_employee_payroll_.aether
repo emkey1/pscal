@@ -1,0 +1,72 @@
+@pure
+fn levelFor(salary: Int) -> Text {
+    if salary >= 100000 {
+        ret "senior";
+    }
+    if salary >= 60000 {
+        ret "mid";
+    }
+    ret "junior";
+}
+
+type Payroll {
+    total: Int;
+    senior: Int;
+    mid: Int;
+    junior: Int;
+    budget: Int;
+
+    fn record(salary: Int, level: Text) -> Void {
+        self.total = self.total + 1;
+        self.budget = self.budget + salary;
+        if level == "senior" {
+            self.senior = self.senior + 1;
+            ret;
+        }
+        if level == "mid" {
+            self.mid = self.mid + 1;
+            ret;
+        }
+        self.junior = self.junior + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let payload: Text = "{\"employees\":[{\"name\":\"Alice\",\"salary\":120000},{\"name\":\"Bob\",\"salary\":75000},{\"name\":\"Carol\",\"salary\":45000},{\"name\":\"Dave\",\"salary\":95000},{\"name\":\"Eve\",\"salary\":60000}]}";
+    let doc: ToonDoc = toon_parse(payload);
+    let root: ToonNode = toon_root(doc);
+    let employees: ToonNode = toon_key(root, "employees");
+
+    let payroll: Payroll = new Payroll();
+
+    loop i in 0..toon_len(employees) {
+        let emp: ToonNode = toon_at(employees, i);
+        let name: Text = toon_get_text(emp, "name");
+        let salary: Int = toon_get_int_or(emp, "salary", 0);
+        let level: Text = levelFor(salary);
+        payroll.record(salary, level);
+        fx {
+            println(name, " ($", salary, ") -> ", level);
+        }
+        toon_free(emp);
+    }
+
+    let avg: Real = payroll.budget * 1.0 / payroll.total;
+    fx {
+        println("---");
+        println("Total employees: ", payroll.total);
+        println("Senior: ", payroll.senior, " | Mid: ", payroll.mid, " | Junior: ", payroll.junior);
+        println("Total budget: $", payroll.budget);
+        println("Average salary: $", avg:0:2);
+    }
+
+    toon_free(employees);
+    toon_close(doc);
+    ret;
+}

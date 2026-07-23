@@ -1,0 +1,19 @@
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { ret false; }
+    loop i in 2..sqrt(n) {
+        if n % i == 0 { ret false; }
+    }
+    ret true;
+}
+
+fn main() -> Void {
+    fx {
+        println("Primes below 100:");
+    }
+    loop i in 0..100 {
+        if is_prime(i) {
+            fx { println(i); }
+        }
+    }
+    ret;
+}

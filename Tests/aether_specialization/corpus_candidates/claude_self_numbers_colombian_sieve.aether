@@ -1,0 +1,68 @@
+// A number n is a "self number" (Colombian number) if there is no m with
+// g(m) = m + digitSum(m) equal to n. Sieve every generator up to the
+// limit, mark what it produces, and whatever's left unmarked is self.
+
+@pure
+fn digitSum(n: Int) -> Int {
+    let value: Int = n;
+    let total: Int = 0;
+    loop value > 0 {
+        total = total + (value % 10);
+        value = value / 10;
+    }
+    ret total;
+}
+
+@pre limit > 0
+@pure
+fn selfNumberSieve(limit: Int) -> Bool[] {
+    let generated: Bool[] = [];
+    loop i in 0..(limit + 1) {
+        generated = generated + [false];
+    }
+    loop m in 1..(limit + 1) {
+        let g: Int = m + digitSum(m);
+        if g <= limit {
+            generated[g] = true;
+        }
+    }
+    ret generated;
+}
+
+@pre n > 1
+@pure
+fn isPrimeTrial(n: Int) -> Bool {
+    if n % 2 == 0 {
+        ret n == 2;
+    }
+    let d: Int = 3;
+    loop d * d <= n {
+        if n % d == 0 {
+            ret false;
+        }
+        d = d + 2;
+    }
+    ret true;
+}
+
+fn main() -> Void {
+    let limit: Int = 150;
+    let generated: Bool[] = selfNumberSieve(limit);
+
+    fx {
+        println("self numbers (Colombian numbers) up to ", limit, ":");
+    }
+    loop n in 1..(limit + 1) {
+        if !generated[n] {
+            let star: Bool = n > 1 && isPrimeTrial(n);
+            fx {
+                if star {
+                    println(n, "  <-- also prime (a self prime)");
+                } else {
+                    println(n);
+                }
+            }
+        }
+    }
+    ret;
+}

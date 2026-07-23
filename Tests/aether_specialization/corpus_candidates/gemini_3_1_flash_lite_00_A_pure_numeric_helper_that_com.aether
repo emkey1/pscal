@@ -1,0 +1,16 @@
+@pure
+fn fib(n: Int) -> Int {
+    if n <= 1 {
+        ret n;
+    }
+    ret fib(n - 1) + fib(n - 2);
+}
+
+fn main() -> Void {
+    let target: Int = 10;
+    let result: Int = fib(target);
+    fx {
+        println("Fibonacci(", target, ") = ", result);
+    }
+    ret;
+}

@@ -1,0 +1,20 @@
+@pre score >= 0
+@post length(result) >= 2
+@pure
+fn normalize_score(score: Int) -> Text {
+    let percent: Real = score * 100.0 / 100.0;
+    ret formatfloat(percent, 2);
+}
+
+fn main() -> Void {
+    let scores: Int[] = [85, 92, 40, 100];
+    fx {
+        println("Normalized Scores:");
+    }
+    loop i in 0..length(scores) {
+        let raw: Int = scores[i];
+        let formatted: Text = normalize_score(raw);
+        fx { println("Score ", raw, " -> ", formatted); }
+    }
+    ret;
+}

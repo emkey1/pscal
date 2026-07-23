@@ -1,0 +1,13 @@
+@pure
+fn rectangle_area(length: Int, width: Int) -> Int {
+    ret length * width;
+}
+
+fn main() -> Void {
+    let length: Int = 5;
+    let width: Int = 4;
+    fx {
+        println("Area: ", rectangle_area(length, width));
+    }
+    ret;
+}

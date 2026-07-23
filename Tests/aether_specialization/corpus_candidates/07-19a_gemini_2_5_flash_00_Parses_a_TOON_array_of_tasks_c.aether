@@ -1,0 +1,44 @@
+type TaskSummary {
+    totalTasks: Int;
+    activeTasks: Int;
+    totalActiveHours: Int;
+
+    fn recordTask(status: Text, hours: Int) -> Void {
+        self.totalTasks = self.totalTasks + 1;
+        if status == "active" {
+            self.activeTasks = self.activeTasks + 1;
+            self.totalActiveHours = self.totalActiveHours + hours;
+        }
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("[{\"status\":\"active\",\"hours\":5},{\"status\":\"inactive\",\"hours\":3},{\"status\":\"active\",\"hours\":8}]");
+    let root: ToonNode = toon_root(doc);
+
+    let summary: TaskSummary = new TaskSummary();
+
+    loop i in 0..toon_len(root) {
+        let taskNode: ToonNode = toon_at(root, i);
+        let status: Text = toon_get_text_or(taskNode, "status", "unknown");
+        let hours: Int = toon_get_int_or(taskNode, "hours", 0);
+
+        summary.recordTask(status, hours);
+    }
+
+    fx {
+        println("--- Task Summary ---");
+        println("Total Tasks: ", summary.totalTasks);
+        println("Active Tasks: ", summary.activeTasks);
+        println("Total Active Hours: ", summary.totalActiveHours);
+    }
+
+    toon_close(doc);
+    ret;
+}

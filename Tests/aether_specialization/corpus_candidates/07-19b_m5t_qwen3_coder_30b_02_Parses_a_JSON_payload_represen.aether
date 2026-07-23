@@ -1,0 +1,45 @@
+type User {
+    name: Text;
+    age: Int;
+    status: Text;
+}
+
+@pure
+fn classifyStatus(age: Int) -> Text {
+    if age >= 65 {
+        ret "senior";
+    }
+    if age >= 18 {
+        ret "adult";
+    }
+    ret "minor";
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("[{\"name\":\"Alice\",\"age\":25,\"status\":\"active\"},{\"name\":\"Bob\",\"age\":70,\"status\":\"inactive\"},{\"name\":\"Charlie\",\"age\":16,\"status\":\"active\"}]");
+    let root: ToonNode = toon_root(doc);
+
+    let totalAge: Int = 0;
+    let count: Int = 0;
+
+    loop i in 0..toon_len(root) {
+        let userNode: ToonNode = toon_at(root, i);
+        let age: Int = toon_get_int_or(userNode, "age", 0);
+        totalAge = totalAge + age;
+        count = count + 1;
+    }
+
+    let avgAge: Real = totalAge * 1.0 / count;
+
+    fx {
+        println("Average age: ", avgAge:0:1);
+    }
+
+    toon_close(doc);
+    ret;
+}

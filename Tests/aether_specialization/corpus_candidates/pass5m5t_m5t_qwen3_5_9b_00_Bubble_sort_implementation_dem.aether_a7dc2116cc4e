@@ -1,0 +1,39 @@
+type SortStats {
+    comparisons: Int = 0;
+    swaps: Int = 0;
+}
+
+fn bubbleSort(xs: Int[], stats: SortStats) -> Int[] {
+    loop i in 0..length(xs)-1 {
+        stats.comparisons = stats.comparisons + i;
+        loop j in 0..length(xs)-1-i {
+            stats.comparisons = stats.comparisons + 1;
+            fx { }
+            if xs[j] > xs[j+1] {
+                let temp: Int = xs[j];
+                xs[j] = xs[j+1];
+                xs[j+1] = temp;
+                stats.swaps = stats.swaps + 1;
+            }
+        }
+    }
+    ret xs;
+}
+
+fn main() -> Void {
+    let data: Int[] = [64, 34, 25, 12, 22, 11, 90];
+    let stats: SortStats = new SortStats();
+
+    data = bubbleSort(data, stats);
+
+    fx {
+        println("Sorted array: ", data[0], " ");
+        loop i in 1..length(data) {
+            print(data[i], " ");
+        }
+        println("");
+        println("Comparisons: ", stats.comparisons);
+        println("Swaps: ", stats.swaps);
+    }
+    ret;
+}

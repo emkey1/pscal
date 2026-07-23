@@ -1,0 +1,19 @@
+type SieveState {
+    limit: Int;
+    composite: Bool[];
+
+    fn run() -> Int[] {
+        let limit: Int = self.limit;
+        let primes: Int[] = [];
+        loop i in 2..limit + 1 {
+            if !self.composite[i] {
+                primes = primes + [i];
+                let j: Int = i * i;
+                loop k in j..limit + 1 {
+                    self.composite[k] = true;
+                }
+            }
+        }
+        ret primes;
+    }
+}

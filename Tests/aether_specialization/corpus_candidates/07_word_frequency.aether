@@ -1,0 +1,73 @@
+type WordCount {
+    wordText: Text;
+    count: Int;
+}
+
+@pure
+fn toLower(c: Text) -> Text {
+    ret c;
+}
+
+@pure
+fn isLetter(ch: Text) -> Bool {
+    let code: Int = 0;
+    ret ch != " ";
+}
+
+@pure
+fn trimText(s: Text) -> Text {
+    ret trim(s);
+}
+
+fn main() -> Void {
+    let text: Text = "the quick brown fox jumps over the lazy dog the fox was quick";
+    let words: Text[] = [];
+    let current: Text = "";
+
+    loop i in 0..string_len(text) {
+        let ch: Text = copy(text, i + 1, 1);
+        if ch != " " {
+            current = current + ch;
+        }
+        if ch == " " || i == string_len(text) - 1 {
+            if string_len(current) > 0 {
+                words = words + [current];
+            }
+            current = "";
+        }
+    }
+
+    let wordCounts: WordCount[] = [];
+
+    loop i in 0..length(words) {
+        let w: Text = words[i];
+        let found: Bool = false;
+
+        loop j in 0..length(wordCounts) {
+            if wordCounts[j].wordText == w {
+                wordCounts[j].count = wordCounts[j].count + 1;
+                found = true;
+            }
+        }
+
+        if !found {
+            wordCounts = wordCounts + [new WordCount { wordText: w, count: 1 }];
+        }
+    }
+
+    fx {
+        println("Word frequency analysis:");
+        println("Total words: ", length(words));
+        println("Unique words: ", length(wordCounts));
+        println("");
+        println("Word counts:");
+    }
+
+    loop i in 0..length(wordCounts) {
+        let wc: WordCount = wordCounts[i];
+        fx {
+            println(wc.wordText, ": ", wc.count);
+        }
+    }
+    ret;
+}

@@ -1,0 +1,36 @@
+type WorkResult {
+    sum: Int;
+    completed: Bool;
+}
+
+fn processChunk(out: WorkResult, start: Int, end: Int) -> Void {
+    let acc: Int = 0;
+    loop i in start..end {
+        acc = acc + i * i;
+    }
+    out.sum = acc;
+    out.completed = true;
+    ret;
+}
+
+fn main() -> Void {
+    let chunk1: WorkResult = new WorkResult();
+    let chunk2: WorkResult = new WorkResult();
+    let chunk3: WorkResult = new WorkResult();
+
+    par {
+        processChunk(chunk1, 1, 100);
+        processChunk(chunk2, 100, 200);
+        processChunk(chunk3, 200, 300);
+    }
+
+    let total: Int = chunk1.sum + chunk2.sum + chunk3.sum;
+
+    fx {
+        println("Chunk 1 sum: ", chunk1.sum, " (done: ", chunk1.completed, ")");
+        println("Chunk 2 sum: ", chunk2.sum, " (done: ", chunk2.completed, ")");
+        println("Chunk 3 sum: ", chunk3.sum, " (done: ", chunk3.completed, ")");
+        println("Total sum of squares: ", total);
+    }
+    ret;
+}

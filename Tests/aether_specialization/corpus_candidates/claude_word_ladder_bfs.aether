@@ -1,0 +1,96 @@
+// Word ladder: given a dictionary and a start/end word of equal length,
+// find the shortest chain where each step changes exactly one letter and
+// every intermediate word is itself a valid dictionary word. This is
+// graph BFS where the graph is never built explicitly -- edges are
+// computed on the fly from letter-by-letter comparison.
+
+type LadderResult {
+    found: Bool;
+    length: Int;
+    path: Int[];
+}
+
+@pure
+fn oneLetterApart(a: Text, b: Text) -> Bool {
+    if length(a) != length(b) {
+        ret false;
+    }
+    let diff: Int = 0;
+    loop i in 0..length(a) {
+        if ord(copy(a, i + 1, 1)) != ord(copy(b, i + 1, 1)) {
+            diff = diff + 1;
+        }
+    }
+    ret diff == 1;
+}
+
+fn wordLadderBFS(nodes: Text[], startIdx: Int, endIdx: Int) -> LadderResult {
+    let n: Int = length(nodes);
+    let dist: Int[] = [];
+    let parent: Int[] = [];
+    loop i in 0..n {
+        dist = dist + [-1];
+        parent = parent + [-1];
+    }
+
+    dist[startIdx] = 1;
+    let queue: Int[] = [];
+    queue = queue + [startIdx];
+    let head: Int = 0;
+
+    loop head < length(queue) {
+        let current: Int = queue[head];
+        head = head + 1;
+        if current == endIdx {
+            break;
+        }
+        loop j in 0..n {
+            if dist[j] == -1 && oneLetterApart(nodes[current], nodes[j]) {
+                dist[j] = dist[current] + 1;
+                parent[j] = current;
+                queue = queue + [j];
+            }
+        }
+    }
+
+    if dist[endIdx] == -1 {
+        ret LadderResult { found: false, length: 0, path: [] };
+    }
+
+    let reversePath: Int[] = [];
+    let walker: Int = endIdx;
+    loop walker != -1 {
+        reversePath = reversePath + [walker];
+        walker = parent[walker];
+    }
+
+    let path: Int[] = [];
+    let k: Int = length(reversePath) - 1;
+    loop k >= 0 {
+        path = path + [reversePath[k]];
+        k = k - 1;
+    }
+
+    ret LadderResult { found: true, length: dist[endIdx], path: path };
+}
+
+fn main() -> Void {
+    let nodes: Text[] = ["hit", "hot", "dot", "dog", "lot", "log", "cog"];
+    let result: LadderResult = wordLadderBFS(nodes, 0, 6);
+
+    fx {
+        if result.found {
+            print("Shortest ladder (length ", result.length, "): ");
+            loop i in 0..length(result.path) {
+                print(nodes[result.path[i]]);
+                if i < length(result.path) - 1 {
+                    print(" -> ");
+                }
+            }
+            println("");
+        } else {
+            println("No ladder exists with this dictionary.");
+        }
+    }
+    ret;
+}

@@ -1,0 +1,18 @@
+fn find_lcm(a: Int, b: Int) -> Int {
+    let greater: Int = if a > b { a } else { b };
+    loop {
+        if greater % a == 0 && greater % b == 0 {
+            ret greater;
+        }
+        greater = greater + 1;
+    }
+}
+
+fn main() -> Void {
+    let a: Int = 15;
+    let b: Int = 20;
+    fx {
+        println("LCM of ", a, " and ", b, ": ", find_lcm(a, b));
+    }
+    ret;
+}

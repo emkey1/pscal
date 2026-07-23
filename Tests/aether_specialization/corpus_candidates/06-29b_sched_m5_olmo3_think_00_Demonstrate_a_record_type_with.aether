@@ -1,0 +1,39 @@
+type BankAccount {
+    balance: Real;
+
+    @pure
+    fn deposit(amount: Real) -> Void {
+        self.balance = self.balance + amount;
+    }
+
+    @pure
+    fn withdraw(amount: Real) -> Bool {
+        if self.balance >= amount {
+            self.balance = self.balance - amount;
+            ret true;
+        }
+        ret false;
+    }
+}
+
+fn main() -> Void {
+    let account: BankAccount = new BankAccount(); // initializes to 0.0
+    account.balance = 100.0; 
+
+    fx {
+        println("Initial balance: ", account.balance);
+    }
+
+    account.deposit(50.0); 
+    fx { println("Balance after depositing $50: ", account.balance); }
+    
+    let withdrawalSuccessful: Bool = account.withdraw(30.0);
+    if withdrawalSuccessful {
+        fx { println("Withdrew $30 successfully"); }
+    } else {
+        fx { println("Withdrawal failed due to insufficient funds"); }
+    }
+
+    // No effects here except the above, so no more fx needed
+    ret;
+}

@@ -1,0 +1,68 @@
+@pure
+fn caesarShift(char: Text, shift: Int) -> Text {
+    if string_len(char) != 1 {
+        ret char;
+    }
+    let code: Int = ord(char);
+    let newCode: Int;
+    if code >= 65 && code <= 90 {
+        newCode = ((code - 65 + shift) % 26 + 26) % 26 + 65;
+    } else if code >= 97 && code <= 122 {
+        newCode = ((code - 97 + shift) % 26 + 26) % 26 + 97;
+    } else {
+        newCode = code;
+    }
+    ret chr(newCode);
+}
+
+@pure
+fn caesarEncrypt(text: Text, shift: Int) -> Text {
+    let result: Text = "";
+    loop i in 1..string_len(text) + 1 {
+        let ch: Text = copy(text, i, 1);
+        let shifted: Text = caesarShift(ch, shift);
+        result = result + shifted;
+    }
+    ret result;
+}
+
+@pure
+fn caesarDecrypt(text: Text, shift: Int) -> Text {
+    ret caesarEncrypt(text, -shift);
+}
+
+fn main() -> Void {
+    let original: Text = "Hello, World! 123";
+    let shift: Int = 7;
+
+    let encrypted: Text = caesarEncrypt(original, shift);
+    let decrypted: Text = caesarDecrypt(encrypted, shift);
+
+    fx {
+        println("Caesar Cipher Demonstration");
+        println("==========================");
+        println("");
+        println("Original:   ", original);
+        println("Shift:      ", shift);
+        println("Encrypted:  ", encrypted);
+        println("Decrypted:  ", decrypted);
+        println("");
+        if original == decrypted {
+            println("Round-trip successful: decryption matches original!");
+        } else {
+            println("Round-trip failed: decryption does not match original.");
+        }
+        println("");
+        println("Character-by-character transformation:");
+        loop i in 1..string_len(original) + 1 {
+            let ch: Text = copy(original, i, 1);
+            let enc: Text = caesarShift(ch, shift);
+            if string_len(ch) == 1 {
+                fx {
+                    println("  ", ch, " (", ord(ch), ") -> ", enc, " (", ord(enc), ")");
+                }
+            }
+        }
+    }
+    ret;
+}

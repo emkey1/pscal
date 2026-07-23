@@ -1,0 +1,26 @@
+type Counter {
+    value: Int;
+
+    fn bump(self) -> Int {
+        self.value = self.value + 1;
+        ret self.value;
+    }
+
+    fn reset(self) -> Void {
+        self.value = 0;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let c: Counter = new Counter();
+    fx {
+        c.bump();
+        c.bump();
+        c.bump();
+        println("Counter after 3 bumps:", c.value);
+        c.reset();
+        println("Counter after reset:", c.value);
+    }
+    ret;
+}

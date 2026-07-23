@@ -1,0 +1,45 @@
+@pure
+@pre base > 0
+@pre height > 0
+@post result > 0
+fn triangleArea(base: Real, height: Real) -> Real {
+    ret base * height / 2.0;
+}
+
+@pure
+fn classifyTriangle(base: Real, sideA: Real, sideB: Real) -> Text {
+    let a: Real = base;
+    let b: Real = sideA;
+    let c: Real = sideB;
+    if a == b && b == c {
+        ret "equilateral";
+    }
+    if a == b || b == c || a == c {
+        ret "isosceles";
+    }
+    ret "scalene";
+}
+
+fn main() -> Void {
+    let a1: Real = triangleArea(10.0, 5.0);
+    let a2: Real = triangleArea(8.0, 6.0);
+    let a3: Real = triangleArea(12.0, 4.0);
+
+    fx {
+        println("area1 = ", a1:0:2);
+        println("area2 = ", a2:0:2);
+        println("area3 = ", a3:0:2);
+    }
+
+    let t1: Text = classifyTriangle(5.0, 5.0, 5.0);
+    let t2: Text = classifyTriangle(5.0, 5.0, 7.0);
+    let t3: Text = classifyTriangle(3.0, 4.0, 5.0);
+
+    fx {
+        println("tri1 = ", t1);
+        println("tri2 = ", t2);
+        println("tri3 = ", t3);
+    }
+
+    ret;
+}

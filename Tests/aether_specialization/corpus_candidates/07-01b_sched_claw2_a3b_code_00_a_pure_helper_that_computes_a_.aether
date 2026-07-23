@@ -1,0 +1,19 @@
+@pure
+fn fib(n: Int) -> Int {
+    if n == 0 { ret 0; }
+    let a: Int = 0;
+    let b: Int = 1;
+    loop i in 2..n + 1 {
+        let next: Int = a + b;
+        a = b;
+        b = next;
+    }
+    ret b;
+}
+
+fn main() -> Void {
+    let target: Int = 9;
+    let answer: Int = fib(target);
+    fx { println("fib(", target, ") = ", answer); }
+    ret;
+}

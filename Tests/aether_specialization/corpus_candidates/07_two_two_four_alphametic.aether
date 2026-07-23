@@ -1,0 +1,50 @@
+// Solve the alphametic TWO + TWO = FOUR using column carries.
+
+@pure
+fn allDistinct6(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int) -> Bool {
+    let digits: Int[] = [a, b, c, d, e, f];
+    let i: Int = 0;
+
+    loop i < length(digits) {
+        let j: Int = i + 1;
+        loop j < length(digits) {
+            if digits[i] == digits[j] {
+                ret false;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    ret true;
+}
+
+fn main() -> Void {
+    let f: Int = 1;
+    let solutions: Int = 0;
+
+    loop t in 2..10 {
+        loop w in 0..10 {
+            loop o in 0..10 {
+                let r: Int = (2 * o) % 10;
+                let carry1: Int = (2 * o) / 10;
+                let u: Int = (2 * w + carry1) % 10;
+                let carry2: Int = (2 * w + carry1) / 10;
+                let hundreds: Int = 2 * t + carry2;
+
+                if hundreds == o + 10 * f && allDistinct6(t, w, o, f, u, r) {
+                    let two: Int = t * 100 + w * 10 + o;
+                    let four: Int = f * 1000 + o * 100 + u * 10 + r;
+                    fx {
+                        println(two, " + ", two, " = ", four);
+                    }
+                    solutions = solutions + 1;
+                }
+            }
+        }
+    }
+
+    fx {
+        println("solutions = ", solutions);
+    }
+    ret;
+}

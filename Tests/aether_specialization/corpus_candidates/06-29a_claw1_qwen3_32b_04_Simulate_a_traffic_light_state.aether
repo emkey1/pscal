@@ -1,0 +1,32 @@
+type TrafficLight {
+    state: Text;
+
+    fn next(self: TrafficLight) -> Text {
+        if self.state == "red" {
+            self.state = "green";
+            ret "green";
+        }
+        if self.state == "green" {
+            self.state = "yellow";
+            ret "yellow";
+        }
+        self.state = "red";
+        ret "red";
+    }
+}
+
+fn new_TrafficLight() -> TrafficLight {
+    ret TrafficLight { state: "red" };
+}
+
+fn main() -> Void {
+    let light: TrafficLight = new_TrafficLight();
+    fx {
+        println("Traffic light cycle:");
+        loop i in 0..5 {
+            println(light.next());
+            sleep(1000);
+        }
+    }
+    ret;
+}

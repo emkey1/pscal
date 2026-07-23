@@ -1,0 +1,56 @@
+@pure
+fn bitAt(k: Int) -> Int {
+    let b: Int = 1;
+    loop i in 0..k {
+        b = b * 2;
+    }
+    ret b;
+}
+
+@pure
+fn knapsack(weights: Int[], values: Int[], cap: Int) -> (Int, Int) {
+    let items: Int = length(weights);
+    let width: Int = cap + 1;
+    let rows: Int = items + 1;
+    let cells: Int = rows * width;
+    let dp: Int[] = [];
+    let mk: Int[] = [];
+    loop i in 0..cells {
+        dp = dp + [0];
+        mk = mk + [0];
+    }
+    loop i in 1..rows {
+        loop w in 0..width {
+            let prev: Int = (i - 1) * width;
+            let best: Int = dp[prev + w];
+            let mask: Int = mk[prev + w];
+            if weights[i - 1] <= w {
+                let cand: Int = dp[prev + (w - weights[i - 1])] + values[i - 1];
+                if cand > best {
+                    best = cand;
+                    mask = mk[prev + (w - weights[i - 1])] + bitAt(i - 1);
+                }
+            }
+            dp[i * width + w] = best;
+            mk[i * width + w] = mask;
+        }
+    }
+    ret (dp[items * width + cap], mk[items * width + cap]);
+}
+
+fn main() -> Void {
+    let weights: Int[] = [2, 3, 4, 5];
+    let values: Int[] = [3, 4, 5, 6];
+    let cap: Int = 5;
+    let res = knapsack(weights, values, cap);
+    fx {
+        println("capacity = ", cap);
+        println("best value = ", res.0);
+        loop i in 0..length(weights) {
+            if (res.1 & bitAt(i)) > 0 {
+                println("take item ", i, " (w=", weights[i], ", v=", values[i], ")");
+            }
+        }
+    }
+    ret;
+}

@@ -1,0 +1,74 @@
+type Node {
+    value: Int;
+    next: Node;
+}
+
+fn makeNode(val: Int) -> Node {
+    ret new Node { value: val, next: nil };
+}
+
+type LinkedList {
+    head: Node;
+
+    fn prepend(val: Int) -> Void {
+        let node: Node = makeNode(val);
+        node.next = self.head;
+        self.head = node;
+        ret;
+    }
+
+    fn append(val: Int) -> Void {
+        let node: Node = makeNode(val);
+        if self.head == nil {
+            self.head = node;
+            ret;
+        }
+        let current: Node = self.head;
+        loop current.next != nil {
+            current = current.next;
+        }
+        current.next = node;
+        ret;
+    }
+
+    fn length() -> Int {
+        let count: Int = 0;
+        let current: Node = self.head;
+        loop current != nil {
+            count = count + 1;
+            current = current.next;
+        }
+        ret count;
+    }
+
+    fn toText() -> Text {
+        let result: Text = "[";
+        let current: Node = self.head;
+        let first: Bool = true;
+        loop current != nil {
+            if !first {
+                result = result + ", ";
+            }
+            result = result + itoa(current.value);
+            first = false;
+            current = current.next;
+        }
+        ret result + "]";
+    }
+}
+
+fn main() -> Void {
+    let list: LinkedList = new LinkedList { head: nil };
+
+    list.append(10);
+    list.append(20);
+    list.append(30);
+    list.prepend(5);
+    list.prepend(1);
+
+    fx {
+        println("List: ", list.toText());
+        println("Length: ", list.length());
+    }
+    ret;
+}

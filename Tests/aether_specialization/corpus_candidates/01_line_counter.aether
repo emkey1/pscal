@@ -1,0 +1,36 @@
+// Line/word/char counter over an in-memory Text[] of lines. Aether exposes
+// no readable "file variable" type from its own syntax (assign/reset/readln
+// are real vm_builtins, but "First arg to Assign must be a file variable"
+// -- there is no Aether-level file-content-read API), so this demonstrates
+// the counting logic directly rather than pretending to open a real file.
+fn main() -> Void {
+    let lines: Text[] = [
+        "the quick brown fox",
+        "jumps over the lazy dog",
+        "aether is a compact language"
+    ];
+
+    let lineCount: Int = 0;
+    let wordCount: Int = 0;
+    let charCount: Int = 0;
+
+    loop li in 0..length(lines) {
+        let line: Text = lines[li];
+        lineCount = lineCount + 1;
+        charCount = charCount + string_len(line);
+
+        let words: Text[] = split(line, " ");
+        loop wi in 0..length(words) {
+            if string_len(words[wi]) > 0 {
+                wordCount = wordCount + 1;
+            }
+        }
+    }
+
+    fx {
+        println("Lines: ", lineCount);
+        println("Words: ", wordCount);
+        println("Chars: ", charCount);
+    }
+    ret;
+}

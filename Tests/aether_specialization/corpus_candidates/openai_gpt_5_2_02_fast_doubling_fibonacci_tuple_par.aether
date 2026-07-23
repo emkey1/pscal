@@ -1,0 +1,49 @@
+type Box {
+    value: Int = 0;
+}
+
+@pure
+@post result.0 >= 0 && result.1 >= 0
+fn fibPair(n: Int) -> (Int, Int) {
+    if n == 0 {
+        ret (0, 1);
+    }
+
+    let half: Int = n / 2;
+    let (a, b) = fibPair(half);
+
+    let c: Int = a * (2 * b - a);
+    let d: Int = a * a + b * b;
+
+    if (n % 2) == 0 {
+        ret (c, d);
+    }
+    ret (d, c + d);
+}
+
+@pure
+fn fib(n: Int) -> Int {
+    let (a, b) = fibPair(n);
+    ret a;
+}
+
+fn computeFib(n: Int, out: Box) -> Void {
+    out.value = fib(n);
+    ret;
+}
+
+fn main() -> Void {
+    let a: Box = new Box();
+    let b: Box = new Box();
+
+    par {
+        computeFib(40, a);
+        computeFib(45, b);
+    }
+
+    fx {
+        println("fib(40)=", a.value);
+        println("fib(45)=", b.value);
+    }
+    ret;
+}

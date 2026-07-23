@@ -1,0 +1,23 @@
+@pure
+fn count_word(text: Text, word: Text) -> Int {
+    let words: Text[] = split(text, " ");
+    let count: Int = 0;
+    loop i in 0..length(words) {
+        if words[i] == word {
+            count = count + 1;
+        }
+    }
+    ret count;
+}
+
+fn main() -> Void {
+    let sample: Text = "aether is fast and aether is safe";
+    let target: Text = "aether";
+    let count: Int = count_word(sample, target);
+    
+    fx {
+        println("Text: ", sample);
+        println("Occurrences of '", target, "': ", count);
+    }
+    ret;
+}

@@ -1,0 +1,21 @@
+type Bag {
+    items: Int[];
+    label: Text;
+}
+
+fn stampFirst(b: Bag, value: Int) -> Void {
+    b.items[0] = value;
+}
+
+fn main() -> Void {
+    let bag: Bag = new Bag { items: [1, 2, 3], label: "original" };
+    stampFirst(bag, 999);
+    fx {
+        println("bag.items[0] after stampFirst = ", bag.items[0]);
+        println("(a bare Int[] parameter would NOT have shown this change --");
+        println(" arrays value-copy at a call boundary, but a record does not,");
+        println(" so an array FIELD inside a record inherits reference semantics");
+        println(" from its containing record.)");
+    }
+    ret;
+}

@@ -1,0 +1,51 @@
+fn main() -> Void {
+    fx {
+        println("System Configuration Check");
+        println("===========================");
+        println("");
+        
+        let home: Text = getenv("HOME");
+        if home == "" {
+            home = getenv("USERPROFILE");
+        }
+        
+        println("Home directory: ", home);
+        println("");
+        
+        let config_paths: Text[] = ["/etc/hosts", "/tmp/test_config.txt", "nonexistent_file.txt"];
+        
+        loop i in 0..length(config_paths) {
+            let path: Text = config_paths[i];
+            if fileexists(path) {
+                println("[FOUND]  ", path);
+            } else {
+                println("[MISSING] ", path);
+            }
+        }
+        
+        println("");
+        println("Environment variables:");
+        
+        let vars: Text[] = ["PATH", "HOME", "USER", "SHELL"];
+        
+        loop i in 0..length(vars) {
+            let key: Text = vars[i];
+            let val: Text = getenv(key);
+            if val != "" {
+                println("  ", key, " = ", val);
+            } else {
+                println("  ", key, " = <not set>");
+            }
+        }
+        
+        let param_count: Int = paramcount();
+        println("");
+        println("CLI arguments (", param_count, "):");
+        
+        loop i in 0..param_count {
+            println("  arg[", i, "] = ", paramstr(i));
+        }
+    }
+    
+    ret;
+}

@@ -1,0 +1,123 @@
+type Room {
+    name: Text;
+    description: Text;
+    exits: Text[];
+    exit_dests: Int[];
+    visited: Bool;
+}
+
+type Game {
+    rooms: Room[];
+    current_room: Int;
+    player_inventory: Text[];
+    game_over: Bool;
+
+    fn init() -> Void {
+        self.rooms = [];
+        self.current_room = 0;
+        self.player_inventory = [];
+        self.game_over = false;
+        ret;
+    }
+
+    fn add_room(name: Text, desc: Text) -> Int {
+        let r: Room = new Room {};
+        r.name = name;
+        r.description = desc;
+        r.exits = [];
+        r.exit_dests = [];
+        r.visited = false;
+        self.rooms = self.rooms + [r];
+        ret length(self.rooms) - 1;
+    }
+
+    fn add_exit(from_room: Int, direction: Text, to_room: Int) -> Void {
+        self.rooms[from_room].exits = self.rooms[from_room].exits + [direction];
+        self.rooms[from_room].exit_dests = self.rooms[from_room].exit_dests + [to_room];
+        ret;
+    }
+
+    fn describe() -> Void {
+        let r: Room = self.rooms[self.current_room];
+        fx {
+            println("");
+            println("== ", r.name, " ==");
+            println(r.description);
+        }
+        if length(r.exits) > 0 {
+            let exits_str: Text = "Exits: ";
+            loop i in 0..length(r.exits) {
+                exits_str = exits_str + r.exits[i] + " ";
+            }
+            fx {
+                println(exits_str);
+            }
+        }
+        ret;
+    }
+
+    fn move(direction: Text) -> Bool {
+        let r: Room = self.rooms[self.current_room];
+        loop i in 0..length(r.exits) {
+            if r.exits[i] == direction {
+                self.current_room = r.exit_dests[i];
+                ret true;
+            }
+        }
+        fx {
+            println("You can't go that way.");
+        }
+        ret false;
+    }
+
+    fn take_item(item: Text) -> Void {
+        self.player_inventory = self.player_inventory + [item];
+        fx {
+            println("You picked up: ", item);
+        }
+        ret;
+    }
+
+    fn show_inventory() -> Void {
+        fx {
+            if length(self.player_inventory) == 0 {
+                println("Your inventory is empty.");
+            } else {
+                println("Inventory:");
+                loop i in 0..length(self.player_inventory) {
+                    println("  ", self.player_inventory[i]);
+                }
+            }
+        }
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let g: Game = new Game {};
+    g.init();
+
+    let entrance: Int = g.add_room("Entrance Hall", "A grand hall with marble floors. Dust hangs in the air.");
+    let library: Int = g.add_room("Library", "Shelves of ancient books stretch to the ceiling. A golden key rests on a table.");
+    let dungeon: Int = g.add_room("Dungeon", "Cold stone walls. A locked door leads further, but you need a key.");
+    let treasure: Int = g.add_room("Treasure Room", "Piles of gold and jewels surround you. You've won!");
+
+    g.add_exit(entrance, "north", library);
+    g.add_exit(entrance, "down", dungeon);
+    g.add_exit(library, "south", entrance);
+    g.add_exit(dungeon, "up", entrance);
+    g.add_exit(dungeon, "north", treasure);
+
+    g.describe();
+    let moved1: Bool = g.move("north");
+    g.describe();
+    g.take_item("golden key");
+    g.show_inventory();
+    let moved2: Bool = g.move("south");
+    let moved3: Bool = g.move("down");
+    g.describe();
+    let moved4: Bool = g.move("north");
+    g.describe();
+
+    ret;
+}

@@ -1,0 +1,67 @@
+// Markov chain over word transitions. Aether has no generic Map<K,V> type
+// (no generics at all) and no .contains()/.put()/.get() method-call sugar,
+// so transitions are modeled as a linear array of (key, nexts) records
+// instead, matching the plain-array idiom used elsewhere in this corpus.
+type Transition {
+    key: Text;
+    nexts: Text[];
+}
+
+type MarkovChain {
+    transitions: Transition[];
+}
+
+fn find_transition(chain: MarkovChain, key: Text) -> Int {
+    loop i in 0..length(chain.transitions) {
+        if chain.transitions[i].key == key {
+            ret i;
+        }
+    }
+    ret -1;
+}
+
+fn train(chain: MarkovChain, text: Text) -> Void {
+    let words: Text[] = split(text, " ");
+    loop i in 0..length(words) - 1 {
+        let key: Text = words[i];
+        let next: Text = words[i + 1];
+        let idx: Int = find_transition(chain, key);
+        if idx == -1 {
+            chain.transitions = chain.transitions + [new Transition { key: key, nexts: [next] }];
+        } else {
+            chain.transitions[idx].nexts = chain.transitions[idx].nexts + [next];
+        }
+    }
+    ret;
+}
+
+fn generate(chain: MarkovChain, start: Text, length_limit: Int) -> Text {
+    let result: Text = start;
+    let current: Text = start;
+    loop i in 0..length_limit {
+        let idx: Int = find_transition(chain, current);
+        if idx == -1 {
+            break;
+        }
+        let next_words: Text[] = chain.transitions[idx].nexts;
+        let pick: Int = 0;
+        fx { pick = random(length(next_words)); }
+        current = next_words[pick];
+        result = result + " " + current;
+    }
+    ret result;
+}
+
+fn main() -> Void {
+    let chain: MarkovChain = new MarkovChain { transitions: [] };
+    let text: Text = "the cat sat on the mat the dog sat on the log";
+    train(chain, text);
+
+    let generated: Text = "";
+    fx {
+        randomize();
+        generated = generate(chain, "the", 10);
+        println("Generated: ", generated);
+    }
+    ret;
+}

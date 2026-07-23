@@ -1,0 +1,31 @@
+@pure
+fn extract_code(log_line: Text) -> Text {
+    let code_start: Int = pos("CODE:", log_line);
+    if code_start == 0 {
+        ret "NONE";
+    }
+    let start_idx: Int = code_start + 5;
+    let rest: Text = copy(log_line, start_idx, string_len(log_line) - start_idx + 1);
+    let trimmed: Text = trim(rest);
+    ret trimmed;
+}
+
+fn main() -> Void {
+    let logs: Text[] = [
+        "INFO: System started CODE: A123",
+        "WARN: High load CODE: B99",
+        "ERROR: Crash CODE: C00",
+        "No code here",
+        "   CODE: D01   "
+    ];
+
+    fx { println("Log Code Extraction:"); }
+
+    loop i in 0..length(logs) {
+        let line: Text = logs[i];
+        let code: Text = extract_code(line);
+        fx { println("Line ", i, ": ", code); }
+    }
+
+    ret;
+}

@@ -1,0 +1,57 @@
+@pure
+fn classify_status(code: Int) -> Text {
+    if code == 200 {
+        ret "OK";
+    }
+    if code >= 400 {
+        ret "ERROR";
+    }
+    ret "PENDING";
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let json_payload: Text = "{\"users\":[{\"id\":1,\"meta\":{\"status\":200,\"details\":{\"code\":\"A\"}}},{\"id\":2,\"meta\":{\"status\":404}}]}";
+    let doc: ToonDoc = toon_parse(json_payload);
+    let root: ToonNode = toon_root(doc);
+    let users: ToonNode = toon_key(root, "users");
+    let count: Int = 0;
+
+    fx {
+        println("Processing Users:");
+    }
+
+    loop i in 0..toon_len(users) {
+        let user: ToonNode = toon_at(users, i);
+        let id: Int = toon_get_int_or(user, "id", 0);
+        let status: Text = "UNKNOWN";
+
+        if toon_has_key(user, "meta") {
+            let meta: ToonNode = toon_key(user, "meta");
+            let code: Int = toon_get_int_or(meta, "status", 0);
+            status = classify_status(code);
+
+            if toon_has_key(meta, "details") {
+                let details: ToonNode = toon_key(meta, "details");
+                let detail_code: Text = toon_get_text_or(details, "code", "N/A");
+                fx { println("  ID: ", id, " | Status: ", status, " | Detail: ", detail_code); }
+            } else {
+                fx { println("  ID: ", id, " | Status: ", status, " | No details"); }
+            }
+        } else {
+            fx { println("  ID: ", id, " | No metadata"); }
+        }
+        count = count + 1;
+    }
+
+    fx {
+        println("Total processed: ", count);
+    }
+
+    toon_close(doc);
+    ret;
+}

@@ -1,0 +1,26 @@
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("TOON unavailable"); }
+        ret;
+    }
+
+    let payload: Text = "[{\"id\": 101, \"status\": \"ok\"}, {\"id\": 102, \"status\": \"fail\"}, {\"id\": 103, \"status\": \"ok\"}]";
+    let doc: ToonDoc = toon_parse(payload);
+    let root: ToonNode = toon_root(doc);
+
+    let ok_count: Int = 0;
+    loop i in 0..toon_len(root) {
+        let item: ToonNode = toon_at(root, i);
+        let status: Text = toon_get_text_or(item, "status", "unknown");
+        let id: Int = toon_get_int_or(item, "id", 0);
+
+        if status == "ok" {
+            ok_count = ok_count + 1;
+            fx { println("ID ", id, " is OK"); }
+        }
+    }
+
+    fx { println("Total OK: ", ok_count); }
+    toon_close(doc);
+    ret;
+}

@@ -1,0 +1,46 @@
+@pre n >= 2
+@post length(result) > 0
+@pure
+fn sieveOfEratosthenes(n: Int) -> Int[] {
+    let isPrime: Bool[] = [];
+    loop i in 0..n + 1 {
+        isPrime = isPrime + [true];
+    }
+    isPrime[0] = false;
+    if n >= 1 {
+        isPrime[1] = false;
+    }
+
+    loop p in 2..n + 1 {
+        if isPrime[p] {
+            let square: Int = p * p;
+            if square <= n {
+                loop multiple in square..n + 1 {
+                    isPrime[multiple] = false;
+                }
+            }
+        }
+    }
+
+    let primes: Int[] = [];
+    loop i in 0..n + 1 {
+        if isPrime[i] {
+            primes = primes + [i];
+        }
+    }
+    ret primes;
+}
+
+fn main() -> Void {
+    let limit: Int = 50;
+    let primes: Int[] = sieveOfEratosthenes(limit);
+    fx {
+        println("Primes up to ", limit, ": ");
+        loop i in 0..length(primes) {
+            print(primes[i], " ");
+        }
+        println("");
+        println("Count: ", length(primes));
+    }
+    ret;
+}

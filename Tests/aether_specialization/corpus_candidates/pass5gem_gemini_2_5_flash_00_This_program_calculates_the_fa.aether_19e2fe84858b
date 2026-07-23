@@ -1,0 +1,31 @@
+@pre n >= 0
+@post result >= 1 || n == 0
+@pure
+fn factorial(n: Int) -> Int {
+    if n == 0 {
+        ret 1;
+    }
+    let res: Int = 1;
+    loop i in 1..n+1 {
+        res = res * i;
+    }
+    ret res;
+}
+
+fn main() -> Void {
+    let num1: Int = 5;
+    let fact1: Int = factorial(num1);
+
+    let num2: Int = 0;
+    let fact2: Int = factorial(num2);
+
+    let num3: Int = 3;
+    let fact3: Int = factorial(num3);
+
+    fx {
+        println("Factorial of ", num1, " is ", fact1);
+        println("Factorial of ", num2, " is ", fact2);
+        println("Factorial of ", num3, " is ", fact3);
+    }
+    ret;
+}

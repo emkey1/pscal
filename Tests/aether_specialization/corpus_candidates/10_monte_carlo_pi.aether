@@ -1,0 +1,27 @@
+fn main() -> Void {
+    let samples: Int = 100000;
+    let insideCircle: Int = 0;
+
+    fx {
+        randomize();
+        loop i in 0..samples {
+            let x: Real = random();
+            let y: Real = random();
+            let dist: Real = sqrt(x * x + y * y);
+            if dist <= 1.0 {
+                insideCircle = insideCircle + 1;
+            }
+        }
+    }
+
+    let piEstimate: Real = 4.0 * insideCircle * 1.0 / samples;
+
+    fx {
+        println("Monte Carlo Pi Estimation");
+        println("Samples: ", samples);
+        println("Hits inside circle: ", insideCircle);
+        println("Estimated pi: ", piEstimate:0:6);
+        println("Actual pi:    3.141593");
+    }
+    ret;
+}

@@ -1,0 +1,45 @@
+// A typed ledger — record defaults, methods, pointer-backed mutation
+
+type Account {
+    owner: Text = "";
+    balance: Int = 0;
+    overdrafts: Int = 0;
+
+    fn deposit(amount: Int) -> Void {
+        self.balance = self.balance + amount;
+        ret;
+    }
+
+    @pre amount > 0
+    fn withdraw(amount: Int) -> Bool {
+        if amount > self.balance {
+            self.overdrafts = self.overdrafts + 1;
+            ret false;
+        }
+        self.balance = self.balance - amount;
+        ret true;
+    }
+
+    fn status() -> Text {
+        if self.balance >= 10000 {
+            ret "premium";
+        }
+        if self.balance >= 0 {
+            ret "standard";
+        }
+        ret "frozen";
+    }
+}
+
+fn main() -> Void {
+    let acct: Account = new Account { owner: "Ada", balance: 12000 };
+    acct.deposit(500);
+    let ok1: Bool = acct.withdraw(2000);
+    let ok2: Bool = acct.withdraw(99999);
+    fx {
+        println(acct.owner, " status=", acct.status(), " balance=", acct.balance);
+        println("first withdrawal ok: ", ok1, " | second ok: ", ok2);
+        println("overdraft attempts: ", acct.overdrafts);
+    }
+    ret;
+}

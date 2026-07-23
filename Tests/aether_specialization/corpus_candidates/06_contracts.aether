@@ -1,0 +1,45 @@
+// Contracts — pre/post guards and a (non-binding) cost budget
+
+@pure
+@pre score >= 0
+@post result <= 100
+fn clampScore(score: Int) -> Int {
+    if score > 100 {
+        ret 100;
+    }
+    ret score;
+}
+
+@pure
+@pre n >= 0
+@cost 100 ops
+fn triangle(n: Int) -> Int {
+    ret n * (n + 1) / 2;
+}
+
+@pre length(xs) > 0
+@post length(result) <= length(xs)
+fn positives(xs: Int[]) -> Int[] {
+    let out: Int[] = [];
+    loop i in 0..length(xs) {
+        if xs[i] > 0 {
+            out = out + [xs[i]];
+        }
+    }
+    ret out;
+}
+
+fn main() -> Void {
+    fx {
+        println("clamp 137 -> ", clampScore(137));
+        println("triangle 10 -> ", triangle(10));
+    }
+    let mixed: Int[] = [-3, 7, 0, 12, -1, 5];
+    let kept: Int[] = positives(mixed);
+    loop i in 0..length(kept) {
+        fx {
+            println("kept[", i, "] = ", kept[i]);
+        }
+    }
+    ret;
+}

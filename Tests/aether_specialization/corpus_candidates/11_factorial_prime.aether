@@ -1,0 +1,44 @@
+type Report {
+    number: Int;
+    is_prime: Bool;
+    fact: Int;
+}
+
+@pure
+fn is_prime(n: Int) -> Bool {
+    if n < 2 { ret false; }
+    if n == 2 { ret true; }
+    if n % 2 == 0 { ret false; }
+    let i: Int = 3;
+    loop i * i <= n {
+        if n % i == 0 { ret false; }
+        i = i + 2;
+    }
+    ret true;
+}
+
+fn main() -> Void {
+    let nums: Int[] = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    let results: Report[] = [];
+
+    loop i in 0..length(nums) {
+        let n: Int = nums[i];
+        let p: Bool = is_prime(n);
+        let f: Int = factorial(n);
+
+        let r: Report = new Report { number: n, is_prime: p, fact: f };
+        results = results + [r];
+    }
+
+    fx {
+        println("Number | Prime | Factorial");
+        println("---------------------------");
+        loop i in 0..length(results) {
+            let r: Report = results[i];
+            let p_str: Text = if r.is_prime { "Yes" } else { "No" };
+            println(r.number, " | ", p_str, " | ", r.fact);
+        }
+    }
+
+    ret;
+}

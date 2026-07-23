@@ -1,0 +1,36 @@
+@pure
+@pre length(xs) > 0
+@post result >= -1
+fn binarySearch(xs: Int[], target: Int) -> Int {
+    let low: Int = 0;
+    let high: Int = length(xs) - 1;
+
+    loop low <= high {
+        let middle: Int = (low + high) / 2;
+        if xs[middle] == target {
+            ret middle;
+        }
+        if xs[middle] < target {
+            low = middle + 1;
+        } else {
+            high = middle - 1;
+        }
+    }
+
+    ret -1;
+}
+
+fn main() -> Void {
+    let values: Int[] = [3, 7, 11, 18, 24, 31, 42, 56];
+    let target: Int = 24;
+    let index: Int = binarySearch(values, target);
+
+    fx {
+        if index >= 0 {
+            println("Found ", target, " at index ", index);
+        } else {
+            println(target, " was not found");
+        }
+    }
+    ret;
+}

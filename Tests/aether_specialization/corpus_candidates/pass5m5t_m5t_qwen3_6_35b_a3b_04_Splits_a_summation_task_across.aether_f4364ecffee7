@@ -1,0 +1,31 @@
+type Accumulator {
+    value: Int;
+}
+
+fn sum_range(start: Int, end: Int, out: Accumulator) -> Void {
+    let acc: Int = 0;
+    loop i in start..end {
+        acc = acc + i;
+    }
+    out.value = acc;
+    ret;
+}
+
+fn main() -> Void {
+    let limit: Int = 100;
+    let mid: Int = (limit + 1) / 2;
+
+    let left: Accumulator = new Accumulator();
+    let right: Accumulator = new Accumulator();
+
+    par {
+        sum_range(1, mid + 1, left);
+        sum_range(mid + 1, limit + 1, right);
+    }
+
+    let total: Int = left.value + right.value;
+    fx {
+        println("Sum 1 to ", limit, " = ", total);
+    }
+    ret;
+}

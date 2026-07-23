@@ -1,0 +1,62 @@
+type Item {
+    name: Text;
+    quantity: Int;
+    price: Real;
+}
+
+type Inventory {
+    items: Item[];
+
+    fn add(itemName: Text, qty: Int, unitPrice: Real) -> Void {
+        let found: Bool = false;
+        loop i in 0..length(self.items) {
+            if self.items[i].name == itemName {
+                self.items[i].quantity = self.items[i].quantity + qty;
+                found = true;
+            }
+        }
+        if !found {
+            let newItem: Item = new Item { name: itemName, quantity: qty, price: unitPrice };
+            self.items = self.items + [newItem];
+        }
+        ret;
+    }
+
+    fn totalValue() -> Real {
+        let total: Real = 0.0;
+        loop i in 0..length(self.items) {
+            total = total + (self.items[i].quantity * self.items[i].price);
+        }
+        ret total;
+    }
+
+    fn print() -> Void {
+        loop i in 0..length(self.items) {
+            let item: Item = self.items[i];
+            let value: Real = item.quantity * item.price;
+            fx {
+                println(item.name, ": qty=", item.quantity, " price=", item.price:0:2, " value=", value:0:2);
+            }
+        }
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let store: Inventory = new Inventory { items: [] };
+
+    store.add("Apple", 100, 0.50);
+    store.add("Banana", 50, 0.30);
+    store.add("Orange", 75, 0.75);
+    store.add("Apple", 25, 0.50);
+
+    fx {
+        println("Inventory:");
+    }
+    store.print();
+
+    fx {
+        println("Total inventory value: $", store.totalValue():0:2);
+    }
+    ret;
+}

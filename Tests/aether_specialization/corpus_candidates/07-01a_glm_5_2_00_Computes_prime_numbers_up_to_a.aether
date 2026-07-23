@@ -1,0 +1,30 @@
+fn main() -> Void {
+    const Limit: Int = 30;
+    let is_prime: Bool[] = [];
+    loop i in 0..Limit+1 {
+        is_prime = is_prime + [true];
+    }
+    is_prime[0] = false;
+    is_prime[1] = false;
+    
+    loop p in 2..Limit+1 {
+        if is_prime[p] {
+            let multiple: Int = p * p;
+            loop multiple <= Limit {
+                is_prime[multiple] = false;
+                multiple = multiple + p;
+            }
+        }
+    }
+    
+    fx {
+        print("Primes up to ", Limit, ": ");
+        loop i in 2..Limit+1 {
+            if is_prime[i] {
+                print(i, " ");
+            }
+        }
+        println("");
+    }
+    ret;
+}

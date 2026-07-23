@@ -1,0 +1,85 @@
+@pure
+fn bfs8(walls: Int[], start: Int, goal: Int) -> Int {
+    // 64 cells; row = idx >> 3, col = idx & 7
+    let dist: Int[] = [];
+    loop i in 0..64 {
+        dist = dist + [-1];
+    }
+    let queue: Int[] = [];
+    queue = queue + [start];
+    dist[start] = 0;
+    let head: Int = 0;
+    loop guard in 0..64 {
+        if head < length(queue) {
+            let cur: Int = queue[head];
+            head = head + 1;
+            let row: Int = cur >> 3;
+            let col: Int = cur & 7;
+            let next: Int = dist[cur] + 1;
+            if row > 0 {
+                let nb: Int = cur - 8;
+                if walls[nb] == 0 && dist[nb] == -1 {
+                    dist[nb] = next;
+                    queue = queue + [nb];
+                }
+            }
+            if row < 7 {
+                let nb: Int = cur + 8;
+                if walls[nb] == 0 && dist[nb] == -1 {
+                    dist[nb] = next;
+                    queue = queue + [nb];
+                }
+            }
+            if col > 0 {
+                let nb: Int = cur - 1;
+                if walls[nb] == 0 && dist[nb] == -1 {
+                    dist[nb] = next;
+                    queue = queue + [nb];
+                }
+            }
+            if col < 7 {
+                let nb: Int = cur + 1;
+                if walls[nb] == 0 && dist[nb] == -1 {
+                    dist[nb] = next;
+                    queue = queue + [nb];
+                }
+            }
+        }
+    }
+    ret dist[goal];
+}
+
+fn main() -> Void {
+    let walls: Int[] = [];
+    loop i in 0..64 {
+        walls = walls + [0];
+    }
+    // vertical barrier in column 4, rows 0..6, with a gap at row 7
+    loop r in 0..7 {
+        walls[r * 8 + 4] = 1;
+    }
+    // extra rubble
+    walls[9] = 1;
+    walls[10] = 1;
+    walls[11] = 1;
+    walls[50] = 1;
+    walls[51] = 1;
+
+    let d: Int = bfs8(walls, 0, 63);
+
+    fx {
+        loop r in 0..8 {
+            let line: Text = "";
+            loop c in 0..8 {
+                if walls[r * 8 + c] == 1 {
+                    line = line + "#";
+                } else {
+                    line = line + ".";
+                }
+            }
+            println(line);
+        }
+        println("shortest path (0,0) -> (7,7) = ", d);
+    }
+    ret;
+}

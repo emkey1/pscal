@@ -1,0 +1,41 @@
+type Tracker {
+    longestStart: Int;
+    maxSteps: Int;
+
+    fn update(start: Int, steps: Int) -> Void {
+        if steps > self.maxSteps {
+            self.maxSteps = steps;
+            self.longestStart = start;
+        }
+        ret;
+    }
+}
+
+@pure
+@pre n > 0
+@post result >= 0
+fn collatzSteps(n: Int) -> Int {
+    let steps: Int = 0;
+    let current: Int = n;
+    loop current > 1 {
+        if current % 2 == 0 {
+            current = current / 2;
+        } else {
+            current = current * 3 + 1;
+        }
+        steps = steps + 1;
+    }
+    ret steps;
+}
+
+fn main() -> Void {
+    let tracker: Tracker = new Tracker();
+    loop i in 1..50 {
+        let steps: Int = collatzSteps(i);
+        tracker.update(i, steps);
+    }
+    fx {
+        println("Longest Collatz chain under 50 starts at ", tracker.longestStart, " with ", tracker.maxSteps, " steps.");
+    }
+    ret;
+}

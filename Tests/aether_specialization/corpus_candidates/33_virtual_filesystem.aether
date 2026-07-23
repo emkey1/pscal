@@ -1,0 +1,77 @@
+type FSNode {
+    name: Text;
+    is_dir: Bool;
+    content: Text;
+    children: FSNode[];
+
+    fn init(name: Text, is_dir: Bool) -> Void {
+        self.name = name;
+        self.is_dir = is_dir;
+        self.content = "";
+        self.children = [];
+        ret;
+    }
+
+    fn find_child(name: Text) -> FSNode {
+        loop i in 0..length(self.children) {
+            if self.children[i].name == name {
+                ret self.children[i];
+            }
+        }
+        ret new FSNode {};
+    }
+
+    fn mkdir(name: Text) -> Bool {
+        let dir: FSNode = new FSNode {};
+        dir.init(name, true);
+        self.children = self.children + [dir];
+        ret true;
+    }
+
+    fn create_file(name: Text, content: Text) -> Bool {
+        let file: FSNode = new FSNode {};
+        file.init(name, false);
+        file.content = content;
+        self.children = self.children + [file];
+        ret true;
+    }
+
+    fn list(indent: Text) -> Void {
+        let suffix: Text = "";
+        if self.is_dir {
+            suffix = "/";
+        }
+        fx {
+            println(indent + self.name + suffix);
+        }
+        if self.is_dir {
+            loop i in 0..length(self.children) {
+                self.children[i].list(indent + "  ");
+            }
+        }
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let root: FSNode = new FSNode {};
+    root.init("/", true);
+
+    root.mkdir("home");
+    let home: FSNode = root.find_child("home");
+    home.mkdir("user");
+    let user: FSNode = home.find_child("user");
+    user.create_file("readme.txt", "Hello Aether!");
+    user.mkdir("projects");
+    let projects: FSNode = user.find_child("projects");
+    projects.create_file("main.ae", "fn main() {}");
+    root.mkdir("etc");
+    let etc: FSNode = root.find_child("etc");
+    etc.create_file("config.cfg", "debug=true");
+
+    fx {
+        println("File system tree:");
+    }
+    root.list("");
+    ret;
+}

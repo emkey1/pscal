@@ -1,0 +1,51 @@
+// Sensor sweep — TOON array root, typed extraction, rollup record
+
+type Sweep {
+    total: Int = 0;
+    hot: Int = 0;
+    cold: Int = 0;
+    ok: Int = 0;
+
+    fn record(temp: Real) -> Text {
+        self.total = self.total + 1;
+        if temp >= 80.0 {
+            self.hot = self.hot + 1;
+            ret "HOT";
+        }
+        if temp <= 10.0 {
+            self.cold = self.cold + 1;
+            ret "COLD";
+        }
+        self.ok = self.ok + 1;
+        ret "OK";
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("[{\"site\":\"alpha\",\"temp\":82.5},{\"site\":\"beta\",\"temp\":4.0},{\"site\":\"gamma\",\"temp\":21.3}]");
+    let root: ToonNode = toon_root(doc);
+    let sweep: Sweep = new Sweep();
+
+    loop i in 0..toon_len(root) {
+        let row: ToonNode = toon_at(root, i);
+        let site: Text = toon_get_text_or(row, "site", "unknown");
+        let temp: Real = toon_get_real_or(row, "temp", 0.0);
+        let status: Text = sweep.record(temp);
+        fx {
+            println(site, " temp=", temp:0:1, " -> ", status);
+        }
+        toon_free(row);
+    }
+
+    fx {
+        println("sites=", sweep.total, " hot=", sweep.hot, " cold=", sweep.cold, " ok=", sweep.ok);
+    }
+
+    toon_close(doc);
+    ret;
+}

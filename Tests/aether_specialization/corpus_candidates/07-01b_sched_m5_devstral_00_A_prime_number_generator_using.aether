@@ -1,0 +1,38 @@
+fn sieve(max: Int) -> Int[] {
+    let isPrime: Bool[] = [];
+    loop i in 0..max+1 { isPrime = isPrime + [true]; }
+    isPrime[0] = false;
+    isPrime[1] = false;
+
+    loop i in 2..max+1 {
+        if isPrime[i] {
+            let j: Int = i * 2;
+            loop {
+                if j > max { break; }
+                isPrime[j] = false;
+                j = j + i;
+            }
+        }
+    }
+
+    let primes: Int[] = [];
+    loop i in 2..max+1 {
+        if isPrime[i] { primes = primes + [i]; }
+    }
+    ret primes;
+}
+
+fn main() -> Void {
+    let max: Int = 100;
+    let primes: Int[] = sieve(max);
+
+    fx {
+        println("Primes up to ", max, ":");
+        loop i in 0..length(primes) {
+            print(primes[i]);
+            if i < length(primes)-1 { print(", "); }
+        }
+        println();
+    }
+    ret;
+}

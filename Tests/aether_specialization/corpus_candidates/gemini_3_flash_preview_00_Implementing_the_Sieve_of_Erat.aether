@@ -1,0 +1,38 @@
+fn main() -> Void {
+    const Limit: Int = 50;
+    let primes: Bool[] = [];
+
+    // Initialize sieve array with true
+    loop i in 0..Limit + 1 {
+        primes = primes + [true];
+    }
+
+    // 0 and 1 are not prime
+    if Limit >= 0 { primes[0] = false; }
+    if Limit >= 1 { primes[1] = false; }
+
+    // Sieve of Eratosthenes logic
+    loop p in 2..Limit + 1 {
+        if primes[p] {
+            // p is prime, mark its multiples starting from p*p
+            let multiple: Int = p * p;
+            loop multiple <= Limit {
+                primes[multiple] = false;
+                multiple = multiple + p;
+            }
+        }
+    }
+
+    // Output the results
+    fx {
+        println("Primes up to ", Limit, ":");
+        loop i in 0..Limit + 1 {
+            if primes[i] {
+                print(i, " ");
+            }
+        }
+        println("");
+    }
+
+    ret;
+}

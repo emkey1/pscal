@@ -1,0 +1,62 @@
+@post length(result) == length(arr)
+fn mergeSort(arr: Int[]) -> Int[] {
+    let n: Int = length(arr);
+    if n <= 1 {
+        ret arr;
+    }
+    let mid: Int = n / 2;
+    let left: Int[] = [];
+    let right: Int[] = [];
+    loop i in 0..mid {
+        left = left + [arr[i]];
+    }
+    loop i in mid..n {
+        right = right + [arr[i]];
+    }
+    let sortedLeft: Int[] = mergeSort(left);
+    let sortedRight: Int[] = mergeSort(right);
+    ret merge(sortedLeft, sortedRight);
+}
+
+fn merge(a: Int[], b: Int[]) -> Int[] {
+    let result: Int[] = [];
+    let i: Int = 0;
+    let j: Int = 0;
+    loop i < length(a) && j < length(b) {
+        if a[i] <= b[j] {
+            result = result + [a[i]];
+            i = i + 1;
+        } else {
+            result = result + [b[j]];
+            j = j + 1;
+        }
+    }
+    loop i < length(a) {
+        result = result + [a[i]];
+        i = i + 1;
+    }
+    loop j < length(b) {
+        result = result + [b[j]];
+        j = j + 1;
+    }
+    ret result;
+}
+
+fn printArray(label: Text, xs: Int[]) -> Void {
+    fx {
+        print(label);
+        loop i in 0..length(xs) {
+            print(xs[i], " ");
+        }
+        println("");
+    }
+    ret;
+}
+
+fn main() -> Void {
+    let data: Int[] = [54, 17, 91, 6, 33, 78, 2, 45];
+    printArray("Before: ", data);
+    let sorted: Int[] = mergeSort(data);
+    printArray("After:  ", sorted);
+    ret;
+}

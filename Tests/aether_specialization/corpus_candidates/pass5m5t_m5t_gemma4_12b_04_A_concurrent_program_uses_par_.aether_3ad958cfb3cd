@@ -1,0 +1,26 @@
+type TaskResult {
+    id: Int;
+    value: Int;
+}
+
+fn process_task(out: TaskResult, id: Int) -> Void {
+    let val: Int = id * 10;
+    out.id = id;
+    out.value = val;
+}
+
+fn main() -> Void {
+    let res1: TaskResult = new TaskResult();
+    let res2: TaskResult = new TaskResult();
+
+    par {
+        process_task(res1, 1);
+        process_task(res2, 2);
+    }
+
+    fx {
+        println("Task 1 result: ", res1.value);
+        println("Task 2 result: ", res2.value);
+    }
+    ret;
+}

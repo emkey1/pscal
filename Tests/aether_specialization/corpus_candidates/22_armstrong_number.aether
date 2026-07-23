@@ -1,0 +1,18 @@
+fn is_armstrong(n: Int) -> Bool {
+    let num_str: Text = int_to_text(n);
+    let power: Int = string_len(num_str);
+    let sum: Int = 0;
+    loop i in 0..string_len(num_str) {
+        let digit: Int = parse_int(copy(num_str, i + 1, 1));
+        sum = sum + pow(digit, power);
+    }
+    ret sum == n;
+}
+
+fn main() -> Void {
+    let num: Int = 153;
+    fx {
+        println(num, " is armstrong: ", is_armstrong(num));
+    }
+    ret;
+}

@@ -1,0 +1,100 @@
+// Roman numerals: seven pictographs whose shapes originate from
+// hand gestures and tally marks.
+//   I = one finger       V = hand shape (four fingers+thumb)
+//   X = crossed hands    L = half of C
+//   C = centum (100)     D = half of M
+//   M = mille (1000)
+// The subtractive rule (IV not IIII) evolved in the Republic era;
+// earlier Romans wrote IIII for 4. This modern form is bidirectional.
+
+@pure
+fn toRoman(n: Int) -> Text {
+    let values: Int[] = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];
+    let symbols: Text[] = ["M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"];
+    let result: Text = "";
+    let remaining: Int = n;
+    loop i in 0..length(values) {
+        loop remaining >= values[i] {
+            result = result + symbols[i];
+            remaining = remaining - values[i];
+        }
+    }
+    ret result;
+}
+
+@pure
+fn romanValue(c: Text) -> Int {
+    if c == "I" { ret 1; }
+    if c == "V" { ret 5; }
+    if c == "X" { ret 10; }
+    if c == "L" { ret 50; }
+    if c == "C" { ret 100; }
+    if c == "D" { ret 500; }
+    if c == "M" { ret 1000; }
+    ret 0;
+}
+
+@pre length(s) > 0
+@pure
+fn fromRoman(s: Text) -> Int {
+    let total: Int = 0;
+    let i: Int = 0;
+    loop i < length(s) {
+        let cur: Int = romanValue(copy(s, i + 1, 1));
+        if i + 1 < length(s) {
+            let next: Int = romanValue(copy(s, i + 2, 1));
+            if cur < next {
+                total = total + (next - cur);
+                i = i + 2;
+            } else {
+                total = total + cur;
+                i = i + 1;
+            }
+        } else {
+            total = total + cur;
+            i = i + 1;
+        }
+    }
+    ret total;
+}
+
+@pure
+fn padLeft(s: Text, width: Int) -> Text {
+    let out: Text = s;
+    loop length(out) < width {
+        out = " " + out;
+    }
+    ret out;
+}
+
+@pure
+fn padRight(s: Text, width: Int) -> Text {
+    let out: Text = s;
+    loop length(out) < width {
+        out = out + " ";
+    }
+    ret out;
+}
+
+fn main() -> Void {
+    let testNumbers: Int[] = [1, 4, 9, 14, 19, 49, 99, 499, 999, 1499, 2026, 3999];
+
+    fx {
+        println("Decimal -> Roman -> Decimal (round-trip verification):");
+        println(" dec   roman          back   match");
+        println("----------------------------------------");
+    }
+    loop i in 0..length(testNumbers) {
+        let n: Int = testNumbers[i];
+        let rom: Text = toRoman(n);
+        let back: Int = fromRoman(rom);
+        let ok: Text = "OK";
+        if back != n {
+            ok = "MISMATCH";
+        }
+        fx {
+            println(padLeft(int_to_text(n), 4), "  ", padRight(rom, 10), "  ", padLeft(int_to_text(back), 6), "  ", ok);
+        }
+    }
+    ret;
+}

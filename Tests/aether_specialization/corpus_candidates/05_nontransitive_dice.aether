@@ -1,0 +1,42 @@
+// Demonstrate Efron's nontransitive dice: superiority forms a cycle.
+
+@pre length(a) > 0
+@pre length(b) > 0
+@post result.0 >= 0
+@post result.1 > 0
+fn matchup(a: Int[], b: Int[]) -> (Int, Int) {
+    let wins: Int = 0;
+    let comparisons: Int = 0;
+
+    loop i in 0..length(a) {
+        loop j in 0..length(b) {
+            if a[i] > b[j] {
+                wins = wins + 1;
+            }
+            comparisons = comparisons + 1;
+        }
+    }
+    ret (wins, comparisons);
+}
+
+fn report(nameA: Text, a: Int[], nameB: Text, b: Int[]) -> Void {
+    let (wins, total) = matchup(a, b);
+    let rate: Real = wins * 100.0 / total;
+    fx {
+        println(nameA, " beats ", nameB, " in ", wins, "/", total, " matchups (", rate:0:2, "%)");
+    }
+    ret;
+}
+
+fn main() -> Void {
+    let dieA: Int[] = [4, 4, 4, 4, 0, 0];
+    let dieB: Int[] = [3, 3, 3, 3, 3, 3];
+    let dieC: Int[] = [6, 6, 2, 2, 2, 2];
+    let dieD: Int[] = [5, 5, 5, 1, 1, 1];
+
+    report("A", dieA, "B", dieB);
+    report("B", dieB, "C", dieC);
+    report("C", dieC, "D", dieD);
+    report("D", dieD, "A", dieA);
+    ret;
+}

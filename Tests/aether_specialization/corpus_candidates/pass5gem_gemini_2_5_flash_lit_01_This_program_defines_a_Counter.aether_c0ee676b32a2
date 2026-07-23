@@ -1,0 +1,27 @@
+type Counter {
+    value: Int;
+
+    // Increments the counter and returns the new value.
+    fn bump() -> Int {
+        self.value = self.value + 1;
+        ret self.value;
+    }
+}
+
+fn main() -> Void {
+    // Initialize a Counter object. Fields not explicitly set take their default values.
+    let c: Counter = new Counter();
+    c.value = 41; // Set initial value
+
+    // Call the method on the Counter object.
+    let result1: Int = c.bump();
+    let result2: Int = c.bump();
+
+    fx {
+        println("Initial value set to: 41");
+        println("First bump result: ", result1);
+        println("Second bump result: ", result2);
+        println("Final counter value: ", c.value);
+    }
+    ret;
+}

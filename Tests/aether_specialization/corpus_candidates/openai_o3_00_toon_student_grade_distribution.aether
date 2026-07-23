@@ -1,0 +1,59 @@
+@pure
+fn classify(score: Int) -> Text {
+    if score >= 90 { ret "A"; }
+    if score >= 80 { ret "B"; }
+    if score >= 70 { ret "C"; }
+    if score >= 60 { ret "D"; }
+    ret "F";
+}
+
+type Totals {
+    total: Int;
+    a: Int;
+    b: Int;
+    c: Int;
+    d: Int;
+    f: Int;
+
+    fn record(grade: Text) -> Void {
+        self.total = self.total + 1;
+        if grade == "A" { self.a = self.a + 1; ret; }
+        if grade == "B" { self.b = self.b + 1; ret; }
+        if grade == "C" { self.c = self.c + 1; ret; }
+        if grade == "D" { self.d = self.d + 1; ret; }
+        self.f = self.f + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let payload: Text = "{\"students\":[{\"name\":\"Ann\",\"score\":95},{\"name\":\"Bob\",\"score\":78},{\"name\":\"Carl\",\"score\":62},{\"name\":\"Dana\",\"score\":88},{\"name\":\"Eve\",\"score\":55}]}";
+    let doc: ToonDoc = toon_parse(payload);
+    let root: ToonNode = toon_root(doc);
+    let students: ToonNode = toon_key(root, "students");
+    let totals: Totals = new Totals();
+
+    loop i in 0..toon_len(students) {
+        let s: ToonNode = toon_at(students, i);
+        let name: Text = toon_get_text(s, "name");
+        let score: Int = toon_get_int_or(s, "score", 0);
+        let grade: Text = classify(score);
+        totals.record(grade);
+        fx {
+            println(name, " -> ", grade);
+        }
+    }
+
+    fx {
+        println("Totals: ", totals.total, " students");
+        println("A=", totals.a, " B=", totals.b, " C=", totals.c, " D=", totals.d, " F=", totals.f);
+    }
+
+    toon_close(doc);
+    ret;
+}

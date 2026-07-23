@@ -1,0 +1,17 @@
+fn find_max(arr: Int[]) -> Int {
+    let max: Int = arr[0];
+    loop i in 1..length(arr) {
+        if arr[i] > max {
+            max = arr[i];
+        }
+    }
+    ret max;
+}
+
+fn main() -> Void {
+    let nums: Int[] = [5, 2, 8, 12, 3];
+    fx {
+        println("Max value: ", find_max(nums));
+    }
+    ret;
+}

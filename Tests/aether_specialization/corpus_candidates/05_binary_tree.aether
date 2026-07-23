@@ -1,0 +1,69 @@
+type TreeNode {
+    value: Int;
+    left: TreeNode;
+    right: TreeNode;
+}
+
+fn makeTreeNode(val: Int) -> TreeNode {
+    ret new TreeNode { value: val, left: nil, right: nil };
+}
+
+fn insert(root: TreeNode, val: Int) -> TreeNode {
+    if root == nil {
+        ret makeTreeNode(val);
+    }
+    if val < root.value {
+        root.left = insert(root.left, val);
+    } else {
+        root.right = insert(root.right, val);
+    }
+    ret root;
+}
+
+fn inorder(root: TreeNode) -> Text {
+    if root == nil {
+        ret "";
+    }
+    let result: Text = inorder(root.left);
+    result = result + itoa(root.value) + " ";
+    result = result + inorder(root.right);
+    ret result;
+}
+
+fn preorder(root: TreeNode) -> Text {
+    if root == nil {
+        ret "";
+    }
+    let result: Text = itoa(root.value) + " ";
+    result = result + preorder(root.left);
+    result = result + preorder(root.right);
+    ret result;
+}
+
+fn postorder(root: TreeNode) -> Text {
+    if root == nil {
+        ret "";
+    }
+    let result: Text = postorder(root.left);
+    result = result + postorder(root.right);
+    result = result + itoa(root.value) + " ";
+    ret result;
+}
+
+fn main() -> Void {
+    let root: TreeNode = nil;
+    root = insert(root, 50);
+    root = insert(root, 30);
+    root = insert(root, 70);
+    root = insert(root, 20);
+    root = insert(root, 40);
+    root = insert(root, 60);
+    root = insert(root, 80);
+
+    fx {
+        println("Inorder:   ", inorder(root));
+        println("Preorder:  ", preorder(root));
+        println("Postorder: ", postorder(root));
+    }
+    ret;
+}

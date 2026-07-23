@@ -1,0 +1,66 @@
+type ProductStats {
+    total: Int;
+    expensive: Int;
+    cheap: Int;
+
+    fn record(price: Real) -> Void {
+        self.total = self.total + 1;
+        if price > 50.0 {
+            self.expensive = self.expensive + 1;
+        } else {
+            self.cheap = self.cheap + 1;
+        }
+        ret;
+    }
+}
+
+@pure
+fn classify_product(product: ToonNode) -> Text {
+    let price: Real = toon_get_real_or(product, "price", 0.0);
+    let name: Text = toon_get_text_or(product, "name", "Unknown");
+    
+    if price > 100.0 {
+        ret name + ": Premium";
+    }
+    if price >= 50.0 {
+        ret name + ": Standard";
+    }
+    ret name + ": Budget";
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let json: Text = "{\"products\":[{\"name\":\"Laptop\",\"price\":1299.99},{\"name\":\"Mouse\",\"price\":19.99},{\"name\":\"Keyboard\",\"price\":75.00}]}";
+    let doc: ToonDoc = toon_parse(json);
+    let root: ToonNode = toon_root(doc);
+    let products: ToonNode = toon_key(root, "products");
+
+    let stats: ProductStats = new ProductStats();
+
+    loop i in 0..toon_len(products) {
+        let product: ToonNode = toon_at(products, i);
+        fx {
+            println(classify_product(product));
+        }
+        
+        let price: Real = toon_get_real_or(product, "price", 0.0);
+        stats.record(price);
+
+        toon_free(product);
+    }
+
+    fx {
+        println("");
+        println("Total products: ", itoa(stats.total));
+        println("Expensive (>50): ", itoa(stats.expensive));
+        println("Cheap (<=50): ", itoa(stats.cheap));
+    }
+
+    toon_free(products);
+    toon_close(doc);
+    ret;
+}

@@ -1,0 +1,51 @@
+// Multiplicative persistence: repeatedly multiply a number's digits until
+// a single digit remains; count the steps. Erdos conjectured that no
+// base-10 number needs more than 11 steps. It remains unproven -- only
+// checked far beyond any number yet found. This scan hunts for the
+// "record holder" (the largest persistence reached) below a range.
+
+@pure
+fn digitProduct(n: Int) -> Int {
+    let value: Int = n;
+    let product: Int = 1;
+    if value == 0 {
+        ret 0;
+    }
+    loop value > 0 {
+        product = product * (value % 10);
+        value = value / 10;
+    }
+    ret product;
+}
+
+@pre n >= 0
+@pure
+fn persistence(n: Int) -> Int {
+    let value: Int = n;
+    let steps: Int = 0;
+    loop value >= 10 {
+        value = digitProduct(value);
+        steps = steps + 1;
+    }
+    ret steps;
+}
+
+fn main() -> Void {
+    let rangeMax: Int = 100000;
+    let champion: Int = 0;
+    let best: Int = 0;
+    loop n in 0..rangeMax {
+        let p: Int = persistence(n);
+        if p > best {
+            best = p;
+            champion = n;
+        }
+    }
+
+    fx {
+        println("multiplicative persistence scan, n = 0..", rangeMax - 1);
+        println("champion: ", champion, " with persistence ", best);
+        println("(no base-10 number is known to need more than 11 steps -- still unproven)");
+    }
+    ret;
+}

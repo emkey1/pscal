@@ -1,0 +1,52 @@
+// Munchausen numbers: n such that sum(d^d for each digit d) == n,
+// using the convention 0^0 := 0. Named because the number "lifts
+// itself" the way Baron Munchausen claimed to pull himself out of a
+// swamp by his own hair. In base 10 there are only FOUR known:
+// 0, 1, 3435, and 438579088 -- and it's proven no others exist below
+// a very large bound via a digit-sum argument, though this scan only
+// checks a small window.
+
+@pure
+fn digitPower(d: Int) -> Int {
+    if d == 0 {
+        ret 0;
+    }
+    let result: Int = 1;
+    let i: Int = 0;
+    loop i < d {
+        result = result * d;
+        i = i + 1;
+    }
+    ret result;
+}
+
+@pre n > 0
+@pure
+fn munchausenSum(n: Int) -> Int {
+    let value: Int = n;
+    let total: Int = 0;
+    loop value > 0 {
+        total = total + digitPower(value % 10);
+        value = value / 10;
+    }
+    ret total;
+}
+
+fn main() -> Void {
+    let limit: Int = 5000;
+    fx {
+        println("Munchausen numbers up to ", limit, ":");
+    }
+    loop n in 1..(limit + 1) {
+        if munchausenSum(n) == n {
+            fx {
+                println(n);
+            }
+        }
+    }
+    fx {
+        println("");
+        println("The only other known Munchausen number is 438579088.");
+    }
+    ret;
+}

@@ -1,0 +1,75 @@
+@pre n > 0
+@pure
+fn properDivisors(n: Int) -> Int[] {
+    let ds: Int[] = [];
+    if n > 1 {
+        ds = ds + [1];
+    }
+    let d: Int = 2;
+    loop d * d <= n {
+        if n % d == 0 {
+            ds = ds + [d];
+            let other: Int = n / d;
+            if other != d {
+                ds = ds + [other];
+            }
+        }
+        d = d + 1;
+    }
+    ret ds;
+}
+
+@pure
+fn sumOf(xs: Int[]) -> Int {
+    let total: Int = 0;
+    loop i in 0..length(xs) {
+        total = total + xs[i];
+    }
+    ret total;
+}
+
+// Subset-sum over the divisor list: classic boolean DP, scanning sums
+// downward so each divisor is used at most once.
+@pure
+fn subsetSumsTo(ds: Int[], target: Int) -> Bool {
+    let can: Bool[] = [true];        // sum 0 is always reachable
+    loop i in 0..target {
+        can = can + [false];
+    }
+    loop di in 0..length(ds) {
+        let d: Int = ds[di];
+        let s: Int = target;
+        loop s >= d {
+            if !can[s] && can[s - d] {
+                can[s] = true;
+            }
+            s = s - 1;
+        }
+    }
+    ret can[target];
+}
+
+@pre n > 0
+@pure
+fn isWeird(n: Int) -> Bool {
+    let ds: Int[] = properDivisors(n);
+    if sumOf(ds) <= n {
+        ret false;                   // deficient or perfect: disqualified
+    }
+    ret !subsetSumsTo(ds, n);
+}
+
+fn main() -> Void {
+    fx {
+        println("weird numbers below 1000:");
+    }
+    loop n in 1..1000 {
+        if isWeird(n) {
+            let ds: Int[] = properDivisors(n);
+            fx {
+                println(n, ": divisors sum to ", sumOf(ds), ", yet no subset adds up to ", n);
+            }
+        }
+    }
+    ret;
+}

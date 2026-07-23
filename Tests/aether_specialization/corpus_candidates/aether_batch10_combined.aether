@@ -1,0 +1,139 @@
+@pure
+fn safeIndex(n: Int, limit: Int) -> Int {
+    if n < 0 {
+        ret 0;
+    }
+    if n >= limit {
+        ret limit - 1;
+    }
+    ret n;
+}
+
+@pure
+fn scoreBand(score: Int) -> Text {
+    if score >= 95 {
+        ret "diamond";
+    }
+    if score >= 80 {
+        ret "gold";
+    }
+    if score >= 60 {
+        ret "silver";
+    }
+    if score >= 40 {
+        ret "bronze";
+    }
+    ret "rust";
+}
+
+@pure
+fn summarizeFlags(flags: Int[]) -> Int {
+    let total: Int = 0;
+    loop i in 0..length(flags) {
+        total = total + flags[i];
+    }
+    ret total;
+}
+
+type Meter {
+    name: Text = "";
+    count: Int = 0;
+    total: Real = 0.0;
+
+    fn add(value: Real) -> Void {
+        self.count = self.count + 1;
+        self.total = self.total + value;
+        ret;
+    }
+
+    fn avg() -> Real {
+        if self.count == 0 {
+            ret 0.0;
+        }
+        ret self.total / self.count;
+    }
+}
+
+fn parseRecord(line: Text) -> (Text, Real, Bool) {
+    let parts: Text[] = split(line, ",");
+    let label: Text = if length(parts) > 0 { trim(parts[0]) } else { "" };
+    let valueText: Text = if length(parts) > 1 { trim(parts[1]) } else { "0" };
+    let flagText: Text = if length(parts) > 2 { trim(parts[2]) } else { "false" };
+    ret (label, parse_float(valueText), parse_bool(flagText));
+}
+
+fn buildRamp(count: Int) -> Int[] {
+    let xs: Int[] = [];
+    loop i in 0..count {
+        xs = xs + [i * i];
+    }
+    ret xs;
+}
+
+fn main() -> Void {
+    let input: Text[] = [
+        "alpha,12.5,true",
+        "beta,3.25,false",
+        "gamma,88.0,true",
+        "delta,0.5,false",
+        "epsilon,101.75,true"
+    ];
+
+    let ramp: Int[] = buildRamp(8);
+    let flags: Int[] = [1, 0, 1, 1, 0, 1, 0, 1];
+    let hits: Int = summarizeFlags(flags);
+    let meter: Meter = new Meter { name: "dataset" };
+    let top: Real = 0.0;
+    let bottom: Real = 0.0;
+    let chosenLabel: Text = "";
+    let chosenScore: Real = 0.0;
+    let chosenFlag: Bool = false;
+    let idx: Int = safeIndex(12, length(input));
+
+    loop i in 0..length(input) {
+        let (label, value, flag) = parseRecord(input[i]);
+
+        meter.add(value);
+
+        if i == 0 {
+            top = value;
+            bottom = value;
+        } else {
+            if value > top {
+                top = value;
+            }
+            if value < bottom {
+                bottom = value;
+            }
+        }
+
+        if flag && chosenLabel == "" {
+            chosenLabel = label;
+            chosenScore = value;
+            chosenFlag = flag;
+        }
+    }
+
+    let band: Text = scoreBand(round(meter.avg()));
+    let span: Real = top - bottom;
+    let rampPick: Int = ramp[idx];
+    let parity: Bool = odd(hits + rampPick);
+
+    fx {
+        println("meter name = ", meter.name);
+        println("count = ", meter.count);
+        println("avg = ", meter.avg():0:2);
+        println("span = ", span:0:2);
+        println("band = ", band);
+        println("chosen = ", chosenLabel, " / ", chosenScore:0:2, " / ", chosenFlag);
+        println("hits = ", hits);
+        println("ramp pick = ", rampPick);
+        println("parity = ", parity);
+        println("flags total = ", summarizeFlags(flags));
+        println("copy demo = ", copy("Aether", 2, 3));
+        println("pos demo = ", pos("th", "Aether"));
+        println("stringofchar demo = ", stringofchar("*", 5));
+    }
+
+    ret;
+}

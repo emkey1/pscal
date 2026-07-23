@@ -1,0 +1,38 @@
+fn main() -> Void {
+    fx {
+        randomize();
+        println("Simulating 20 steps of a 1D Random Walk:");
+        println("Start at 0");
+    }
+
+    let position: Int = 0;
+    let max_pos: Int = 0;
+    let min_pos: Int = 0;
+
+    loop step in 1..21 {
+        fx {
+            let roll: Int = random(2);
+            if roll == 0 {
+                position = position - 1;
+            } else {
+                position = position + 1;
+            }
+
+            if position > max_pos {
+                max_pos = position;
+            }
+            if position < min_pos {
+                min_pos = position;
+            }
+
+            println("Step ", step, ": ", position, " (Max: ", max_pos, ", Min: ", min_pos, ")");
+        }
+    }
+
+    fx {
+        println("Final Position: ", position);
+        println("Range: ", min_pos, " to ", max_pos);
+    }
+
+    ret;
+}

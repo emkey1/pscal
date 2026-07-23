@@ -1,0 +1,45 @@
+// Find the smallest positive integer expressible as two distinct sums of cubes.
+
+@pre n >= 0
+@pure
+fn cube(n: Int) -> Int {
+    ret n * n * n;
+}
+
+fn main() -> Void {
+    let limit: Int = 20;
+    let found: Bool = false;
+    let a: Int = 1;
+
+    loop a <= limit && !found {
+        let b: Int = a;
+        loop b <= limit && !found {
+            let left: Int = cube(a) + cube(b);
+            let c: Int = a + 1;
+
+            loop c <= limit && !found {
+                let d: Int = c;
+                loop d <= limit && !found {
+                    let right: Int = cube(c) + cube(d);
+                    if left == right {
+                        fx {
+                            println(left, " = ", a, "^3 + ", b, "^3 = ", c, "^3 + ", d, "^3");
+                        }
+                        found = true;
+                    }
+                    d = d + 1;
+                }
+                c = c + 1;
+            }
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+
+    if !found {
+        fx {
+            println("No taxicab number found below cube base ", limit);
+        }
+    }
+    ret;
+}

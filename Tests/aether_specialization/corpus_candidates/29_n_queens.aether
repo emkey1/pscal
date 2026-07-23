@@ -1,0 +1,72 @@
+type Board {
+    size: Int;
+    queens: Int[];
+
+    fn init(n: Int) -> Void {
+        self.size = n;
+        self.queens = [];
+        loop i in 0..n {
+            self.queens = self.queens + [-1];
+        }
+        ret;
+    }
+
+    fn is_safe(col: Int, row: Int) -> Bool {
+        loop c in 0..col {
+            let r: Int = self.queens[c];
+            if r == row {
+                ret false;
+            }
+            if r - c == row - col || r + c == row + col {
+                ret false;
+            }
+        }
+        ret true;
+    }
+
+    fn solve(col: Int) -> Bool {
+        if col >= self.size {
+            ret true;
+        }
+        loop row in 0..self.size {
+            if self.is_safe(col, row) {
+                self.queens[col] = row;
+                if self.solve(col + 1) {
+                    ret true;
+                }
+                self.queens[col] = -1;
+            }
+        }
+        ret false;
+    }
+
+    fn print_board() -> Void {
+        loop r in 0..self.size {
+            let line: Text = "";
+            loop c in 0..self.size {
+                if self.queens[c] == r {
+                    line = line + "Q ";
+                } else {
+                    line = line + ". ";
+                }
+            }
+            fx {
+                println(line);
+            }
+        }
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let b: Board = new Board {};
+    b.init(8);
+    if b.solve(0) {
+        b.print_board();
+    } else {
+        fx {
+            println("No solution found.");
+        }
+    }
+    ret;
+}

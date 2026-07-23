@@ -1,0 +1,111 @@
+// Run Conway's Game of Life on a torus, so every edge wraps around.
+
+@pure
+fn cellIndex(x: Int, y: Int, width: Int) -> Int {
+    ret y * width + x;
+}
+
+@pre width > 0
+@pre height > 0
+@pure
+fn aliveAt(cells: Int[], x: Int, y: Int, width: Int, height: Int) -> Int {
+    let wrappedX: Int = x;
+    let wrappedY: Int = y;
+
+    loop wrappedX < 0 {
+        wrappedX = wrappedX + width;
+    }
+    loop wrappedX >= width {
+        wrappedX = wrappedX - width;
+    }
+    loop wrappedY < 0 {
+        wrappedY = wrappedY + height;
+    }
+    loop wrappedY >= height {
+        wrappedY = wrappedY - height;
+    }
+
+    ret cells[cellIndex(wrappedX, wrappedY, width)];
+}
+
+@pre length(cells) == width * height
+@post length(result) == width * height
+@pure
+fn nextGeneration(cells: Int[], width: Int, height: Int) -> Int[] {
+    let output: Int[] = [];
+
+    loop y in 0..height {
+        loop x in 0..width {
+            let neighbors: Int = 0;
+            let dy: Int = -1;
+
+            loop dy <= 1 {
+                let dx: Int = -1;
+                loop dx <= 1 {
+                    if dx != 0 || dy != 0 {
+                        neighbors = neighbors + aliveAt(cells, x + dx, y + dy, width, height);
+                    }
+                    dx = dx + 1;
+                }
+                dy = dy + 1;
+            }
+
+            let current: Int = cells[cellIndex(x, y, width)];
+            let next: Int = 0;
+            if current == 1 && (neighbors == 2 || neighbors == 3) {
+                next = 1;
+            }
+            if current == 0 && neighbors == 3 {
+                next = 1;
+            }
+            output = output + [next];
+        }
+    }
+    ret output;
+}
+
+fn render(cells: Int[], width: Int, height: Int, generation: Int) -> Void {
+    fx {
+        println("generation ", generation);
+    }
+
+    loop y in 0..height {
+        let line: Text = "";
+        loop x in 0..width {
+            if cells[cellIndex(x, y, width)] == 1 {
+                line = line + "#";
+            } else {
+                line = line + ".";
+            }
+        }
+        fx {
+            println(line);
+        }
+    }
+    ret;
+}
+
+fn main() -> Void {
+    let width: Int = 20;
+    let height: Int = 10;
+    let total: Int = width * height;
+    let cells: Int[] = [];
+
+    loop i in 0..total {
+        cells = cells + [0];
+    }
+
+    cells[cellIndex(1, 0, width)] = 1;
+    cells[cellIndex(2, 1, width)] = 1;
+    cells[cellIndex(0, 2, width)] = 1;
+    cells[cellIndex(1, 2, width)] = 1;
+    cells[cellIndex(2, 2, width)] = 1;
+
+    let generation: Int = 0;
+    loop generation < 8 {
+        render(cells, width, height, generation);
+        cells = nextGeneration(cells, width, height);
+        generation = generation + 1;
+    }
+    ret;
+}

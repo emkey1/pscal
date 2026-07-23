@@ -1,0 +1,42 @@
+@pure
+fn analyzeText(text: Text) -> (Int, Int, Int) {
+    let length: Int = string_len(text);
+    let words: Int = 0;
+    let upper: Int = 0;
+
+    if length == 0 {
+        ret (0, 0, 0);
+    }
+
+    let i: Int = 0;
+    loop {
+        if i >= length { break; }
+
+        let ch: Text = copy(text, i+1, 1);
+        if ch == " " || ch == "\t" {
+            words = words + 1;
+        }
+        if ch >= "A" && ch <= "Z" {
+            upper = upper + 1;
+        }
+        i = i + 1;
+    }
+
+    ret (length, words+1, upper);
+}
+
+fn main() -> Void {
+    let input: Text = "Hello World from Aether!";
+    let (length, words, upper) = analyzeText(input);
+
+    fx {
+        println("Analysis of '", input, "':");
+        println("Length: ", length);
+        println("Words: ", words);
+        println("Uppercase letters: ", upper);
+
+        let density: Real = (100.0 * words) / length;
+        println("Word density: ", density:0:2, "%");
+    }
+    ret;
+}

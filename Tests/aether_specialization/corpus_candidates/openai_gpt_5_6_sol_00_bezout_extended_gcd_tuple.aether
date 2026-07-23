@@ -1,0 +1,27 @@
+@pure
+@pre a >= 0 && b >= 0
+@post result.0 >= 0
+@post result.0 == a * result.1 + b * result.2
+fn extendedGcd(a: Int, b: Int) -> (Int, Int, Int) {
+    if b == 0 {
+        ret (a, 1, 0);
+    }
+
+    let (g, previousX, previousY) = extendedGcd(b, a % b);
+    let quotient: Int = a / b;
+    let x: Int = previousY;
+    let y: Int = previousX - quotient * previousY;
+    ret (g, x, y);
+}
+
+fn main() -> Void {
+    let a: Int = 240;
+    let b: Int = 46;
+    let (gcd, x, y) = extendedGcd(a, b);
+
+    fx {
+        println("gcd = ", gcd);
+        println(a, " * ", x, " + ", b, " * ", y, " = ", gcd);
+    }
+    ret;
+}

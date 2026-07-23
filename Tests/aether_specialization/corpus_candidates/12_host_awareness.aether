@@ -1,0 +1,42 @@
+// Host awareness — CLI args, environment, filesystem probes
+
+fn main() -> Void {
+    let argc: Int = 0;
+    fx {
+        argc = paramcount();
+        println("program: ", paramstr(0));
+        println("args:    ", argc);
+    }
+
+    loop i in 1..argc + 1 {
+        fx {
+            println("arg[", i, "] = ", paramstr(i));
+        }
+    }
+
+    let home: Text = "";
+    let workers: Int = 0;
+    let cwd: Text = "";
+    fx {
+        home = getenv("HOME");
+        workers = getenvint("WORKERS", 4);
+        cwd = getcurrentdir();
+    }
+
+    fx {
+        println("HOME = ", home, " | WORKERS = ", workers);
+        println("cwd  = ", cwd);
+        if fileexists("/etc/hosts") {
+            println("/etc/hosts is present");
+        } else {
+            println("/etc/hosts not found");
+        }
+        let rc: Int = mkdir("aether_out");
+        if rc == 0 {
+            println("created aether_out/");
+        } else {
+            println("mkdir returned ", rc, " (already exists is fine)");
+        }
+    }
+    ret;
+}

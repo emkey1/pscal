@@ -1,0 +1,36 @@
+type Counter {
+    count: Int;
+
+    fn bump() -> Int {
+        self.count = self.count + 1;
+        ret self.count;
+    }
+
+    fn reset() -> Void {
+        self.count = 0;
+        ret;
+    }
+}
+
+@pure
+fn count_chars(text: Text) -> Int {
+    let len: Int = string_len(text);
+    ret len;
+}
+
+fn main() -> Void {
+    let msg: Text = "Aether is great";
+    let c: Counter = new Counter();
+    let n: Int = count_chars(msg);
+
+    loop i in 0..n {
+        let ch: Text = copy(msg, i + 1, 1);
+        c.bump();
+        fx { println("Char ", i + 1, ": ", ch); }
+    }
+
+    fx { println("Total chars: ", c.count); }
+    c.reset();
+    fx { println("After reset: ", c.count); }
+    ret;
+}

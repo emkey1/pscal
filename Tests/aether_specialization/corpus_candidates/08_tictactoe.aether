@@ -1,0 +1,100 @@
+type Board {
+    cells: Text[];
+
+    fn get(r: Int, c: Int) -> Text {
+        ret self.cells[r * 3 + c];
+    }
+
+    fn place(r: Int, c: Int, mark: Text) -> Void {
+        self.cells[r * 3 + c] = mark;
+        ret;
+    }
+
+    fn checkWin(mark: Text) -> Bool {
+        loop r in 0..3 {
+            if self.get(r, 0) == mark && self.get(r, 1) == mark && self.get(r, 2) == mark {
+                ret true;
+            }
+        }
+        loop c in 0..3 {
+            if self.get(0, c) == mark && self.get(1, c) == mark && self.get(2, c) == mark {
+                ret true;
+            }
+        }
+        if self.get(0, 0) == mark && self.get(1, 1) == mark && self.get(2, 2) == mark {
+            ret true;
+        }
+        if self.get(0, 2) == mark && self.get(1, 1) == mark && self.get(2, 0) == mark {
+            ret true;
+        }
+        ret false;
+    }
+
+    fn isFull() -> Bool {
+        loop i in 0..9 {
+            if self.cells[i] == " " {
+                ret false;
+            }
+        }
+        ret true;
+    }
+
+    fn display() -> Void {
+        loop r in 0..3 {
+            fx { println(" ", self.get(r, 0), " | ", self.get(r, 1), " | ", self.get(r, 2)); }
+            if r < 2 {
+                fx { println("-----------"); }
+            }
+        }
+        ret;
+    }
+}
+
+fn makeBoard() -> Board {
+    let empty: Text[] = [];
+    loop i in 0..9 {
+        empty = empty + [" "];
+    }
+    ret new Board { cells: empty };
+}
+
+fn main() -> Void {
+    let board: Board = makeBoard();
+    let current: Text = "X";
+    let gameOver: Bool = false;
+
+    fx { println("Tic-Tac-Toe: X goes first"); }
+
+    loop !gameOver {
+        board.display();
+
+        let placed: Bool = false;
+        loop r in 0..3 {
+            if placed { break; }
+            loop c in 0..3 {
+                if placed { break; }
+                if board.get(r, c) == " " {
+                    board.place(r, c, current);
+                    placed = true;
+                }
+            }
+        }
+
+        if board.checkWin(current) {
+            board.display();
+            fx { println(current, " wins!"); }
+            gameOver = true;
+        } else if board.isFull() {
+            board.display();
+            fx { println("Draw!"); }
+            gameOver = true;
+        } else {
+            if current == "X" {
+                current = "O";
+            } else {
+                current = "X";
+            }
+        }
+    }
+    ret;
+}

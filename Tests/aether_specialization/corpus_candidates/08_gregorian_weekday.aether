@@ -1,0 +1,37 @@
+// Compute Gregorian weekdays with integer arithmetic.
+
+@pre year >= 1583
+@pre month >= 1 && month <= 12
+@pre day >= 1 && day <= 31
+@post result >= 0 && result <= 6
+fn weekdayIndex(year: Int, month: Int, day: Int) -> Int {
+    let offsets: Int[] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    let adjustedYear: Int = year;
+    if month < 3 {
+        adjustedYear = adjustedYear - 1;
+    }
+    ret (adjustedYear + adjustedYear div 4 - adjustedYear div 100 + adjustedYear div 400 + offsets[month - 1] + day) % 7;
+}
+
+@pre index >= 0 && index <= 6
+fn weekdayName(index: Int) -> Text {
+    let names: Text[] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    ret names[index];
+}
+
+fn showDate(year: Int, month: Int, day: Int) -> Void {
+    let index: Int = weekdayIndex(year, month, day);
+    let name: Text = weekdayName(index);
+    fx {
+        println(year, "-", month, "-", day, " is a ", name);
+    }
+    ret;
+}
+
+fn main() -> Void {
+    showDate(1969, 7, 20);
+    showDate(2000, 1, 1);
+    showDate(2038, 1, 19);
+    showDate(2400, 2, 29);
+    ret;
+}

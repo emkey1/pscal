@@ -1,0 +1,68 @@
+type Matrix {
+    rows: Int;
+    cols: Int;
+    data: Real[];
+
+    fn at(r: Int, c: Int) -> Real {
+        ret self.data[r * self.cols + c];
+    }
+
+    fn set(r: Int, c: Int, val: Real) -> Void {
+        self.data[r * self.cols + c] = val;
+        ret;
+    }
+
+    fn print(label: Text) -> Void {
+        fx { println(label, " (", self.rows, "x", self.cols, "):"); }
+        loop r in 0..self.rows {
+            let line: Text = "  ";
+            loop c in 0..self.cols {
+                let val: Real = self.at(r, c);
+                line = line + formatfloat(val, 2) + " ";
+            }
+            fx { println(line); }
+        }
+        ret;
+    }
+}
+
+fn makeMatrix(rows: Int, cols: Int) -> Matrix {
+    let data: Real[] = [];
+    loop i in 0..rows * cols {
+        data = data + [0.0];
+    }
+    ret new Matrix { rows: rows, cols: cols, data: data };
+}
+
+@pre a.cols == b.rows
+fn matmul(a: Matrix, b: Matrix) -> Matrix {
+    let result: Matrix = makeMatrix(a.rows, b.cols);
+    loop i in 0..a.rows {
+        loop j in 0..b.cols {
+            let sum: Real = 0.0;
+            loop k in 0..a.cols {
+                sum = sum + a.at(i, k) * b.at(k, j);
+            }
+            result.set(i, j, sum);
+        }
+    }
+    ret result;
+}
+
+fn main() -> Void {
+    let a: Matrix = makeMatrix(2, 3);
+    a.set(0, 0, 1.0); a.set(0, 1, 2.0); a.set(0, 2, 3.0);
+    a.set(1, 0, 4.0); a.set(1, 1, 5.0); a.set(1, 2, 6.0);
+
+    let b: Matrix = makeMatrix(3, 2);
+    b.set(0, 0, 7.0);  b.set(0, 1, 8.0);
+    b.set(1, 0, 9.0);  b.set(1, 1, 10.0);
+    b.set(2, 0, 11.0); b.set(2, 1, 12.0);
+
+    let c: Matrix = matmul(a, b);
+
+    a.print("A");
+    b.print("B");
+    c.print("A x B");
+    ret;
+}

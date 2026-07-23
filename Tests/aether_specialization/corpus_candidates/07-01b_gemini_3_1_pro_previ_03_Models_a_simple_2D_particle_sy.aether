@@ -1,0 +1,46 @@
+type Particle {
+    x: Real;
+    y: Real;
+    vx: Real;
+    vy: Real;
+
+    fn applyForce(forceX: Real, forceY: Real, dt: Real) -> Void {
+        self.vx = self.vx + forceX * dt;
+        self.vy = self.vy + forceY * dt;
+        ret;
+    }
+
+    fn update(dt: Real) -> Void {
+        self.x = self.x + self.vx * dt;
+        self.y = self.y + self.vy * dt;
+        ret;
+    }
+}
+
+fn createParticle(startX: Real, startY: Real) -> Particle {
+    let p: Particle = new Particle();
+    p.x = startX;
+    p.y = startY;
+    p.vx = 0.0;
+    p.vy = 0.0;
+    ret p;
+}
+
+fn main() -> Void {
+    let p: Particle = createParticle(0.0, 10.0);
+    let gravity: Real = -9.81;
+    let dt: Real = 0.5;
+
+    fx {
+        println("Start: x=", p.x:0:2, " y=", p.y:0:2);
+    }
+
+    loop step in 1..6 {
+        p.applyForce(2.0, gravity, dt);
+        p.update(dt);
+        fx {
+            println("Step ", step, ": x=", p.x:0:2, " y=", p.y:0:2, " (vy=", p.vy:0:2, ")");
+        }
+    }
+    ret;
+}

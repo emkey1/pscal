@@ -1,0 +1,88 @@
+type Robot {
+    x: Int = 0;
+    y: Int = 0;
+    dir: Text = "N";
+
+    fn turnLeft() -> Void {
+        if self.dir == "N" {
+            self.dir = "W";
+            ret;
+        }
+        if self.dir == "W" {
+            self.dir = "S";
+            ret;
+        }
+        if self.dir == "S" {
+            self.dir = "E";
+            ret;
+        }
+        self.dir = "N";
+        ret;
+    }
+
+    fn turnRight() -> Void {
+        if self.dir == "N" {
+            self.dir = "E";
+            ret;
+        }
+        if self.dir == "E" {
+            self.dir = "S";
+            ret;
+        }
+        if self.dir == "S" {
+            self.dir = "W";
+            ret;
+        }
+        self.dir = "N";
+        ret;
+    }
+
+    fn step() -> Void {
+        if self.dir == "N" {
+            self.y = self.y + 1;
+            ret;
+        }
+        if self.dir == "S" {
+            self.y = self.y - 1;
+            ret;
+        }
+        if self.dir == "E" {
+            self.x = self.x + 1;
+            ret;
+        }
+        self.x = self.x - 1;
+        ret;
+    }
+
+    fn apply(command: Text) -> Void {
+        if command == "F" {
+            self.step();
+            ret;
+        }
+        if command == "L" {
+            self.turnLeft();
+            ret;
+        }
+        if command == "R" {
+            self.turnRight();
+            ret;
+        }
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let bot: Robot = new Robot { x: 0, y: 0, dir: "N" };
+    let program: Text = "FFRFFLFFRFFF";
+
+    loop i in 1..(string_len(program) + 1) {
+        let command: Text = copy(program, i, 1);
+        bot.apply(command);
+    }
+
+    fx {
+        println("commands: ", program);
+        println("final position: (", bot.x, ", ", bot.y, ") facing ", bot.dir);
+    }
+    ret;
+}

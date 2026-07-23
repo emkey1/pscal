@@ -1,0 +1,40 @@
+@pure
+fn getMaxLength(words: Text[]) -> Int {
+    let maxLen: Int = 0;
+    let count: Int = length(words);
+    loop i in 0..count {
+        let wLen: Int = string_len(words[i]);
+        if wLen > maxLen {
+            maxLen = wLen;
+        }
+    }
+    ret maxLen;
+}
+
+fn main() -> Void {
+    let sentence: Text = "Aether is a compact front end";
+    let words: Text[] = split(sentence, " ");
+    let count: Int = length(words);
+    let width: Int = getMaxLength(words) + 4;
+
+    let border: Text = stringofchar("-", width);
+
+    fx {
+        println("+", border, "+");
+    }
+
+    loop i in 0..count {
+        let word: Text = words[i];
+        let wLen: Int = string_len(word);
+        let padLen: Int = width - wLen - 2;
+        let pad: Text = stringofchar(" ", padLen);
+        fx {
+            println("| ", word, pad, "|");
+        }
+    }
+
+    fx {
+        println("+", border, "+");
+    }
+    ret;
+}

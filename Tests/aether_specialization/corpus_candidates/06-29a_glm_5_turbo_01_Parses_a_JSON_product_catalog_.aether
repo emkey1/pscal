@@ -1,0 +1,95 @@
+type CategorySummary {
+    name: Text;
+    count: Int;
+    total: Real;
+    minPrice: Real;
+    maxPrice: Real;
+
+    fn record(price: Real) -> Void {
+        self.count = self.count + 1;
+        self.total = self.total + price;
+        if price < self.minPrice {
+            self.minPrice = price;
+        }
+        if price > self.maxPrice {
+            self.maxPrice = price;
+        }
+        ret;
+    }
+
+    fn avgPrice() -> Real {
+        if self.count == 0 {
+            ret 0.0;
+        }
+        ret self.total / self.count;
+    }
+}
+
+@pure
+fn classifyPrice(price: Real) -> Text {
+    if price < 10.0 {
+        ret "budget";
+    }
+    if price < 50.0 {
+        ret "mid-range";
+    }
+    ret "premium";
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("[{\"name\":\"Widget\",\"category\":\"tools\",\"price\":12.50},{\"name\":\"Gadget\",\"category\":\"tools\",\"price\":45.00},{\"name\":\"Sprocket\",\"category\":\"tools\",\"price\":8.99},{\"name\":\"Doohickey\",\"category\":\"electronics\",\"price\":129.99},{\"name\":\"Thingamajig\",\"category\":\"electronics\",\"price\":67.50},{\"name\":\"Whatchamacallit\",\"category\":\"office\",\"price\":3.25}]");
+    let root: ToonNode = toon_root(doc);
+
+    let tools: CategorySummary = new CategorySummary();
+    tools.name = "tools";
+    tools.minPrice = 999999.0;
+    tools.maxPrice = 0.0;
+    let electronics: CategorySummary = new CategorySummary();
+    electronics.name = "electronics";
+    electronics.minPrice = 999999.0;
+    electronics.maxPrice = 0.0;
+    let office: CategorySummary = new CategorySummary();
+    office.name = "office";
+    office.minPrice = 999999.0;
+    office.maxPrice = 0.0;
+
+    loop i in 0..toon_len(root) {
+        let item: ToonNode = toon_at(root, i);
+        let name: Text = toon_get_text(item, "name");
+        let category: Text = toon_get_text(item, "category");
+        let price: Real = toon_get_real_or(item, "price", 0.0);
+        let tier: Text = classifyPrice(price);
+
+        if category == "tools" {
+            tools.record(price);
+        }
+        if category == "electronics" {
+            electronics.record(price);
+        }
+        if category == "office" {
+            office.record(price);
+        }
+
+        fx {
+            println(name, " | ", category, " | $", price:0:2, " | ", tier);
+        }
+
+        toon_free(item);
+    }
+
+    fx {
+        println("");
+        println("=== Category Summary ===");
+        println("tools: count=", tools.count, " avg=$", tools.avgPrice():0:2, " range=$", tools.minPrice:0:2, "-$", tools.maxPrice:0:2);
+        println("electronics: count=", electronics.count, " avg=$", electronics.avgPrice():0:2, " range=$", electronics.minPrice:0:2, "-$", electronics.maxPrice:0:2);
+        println("office: count=", office.count, " avg=$", office.avgPrice():0:2, " range=$", office.minPrice:0:2, "-$", office.maxPrice:0:2);
+    }
+
+    toon_close(doc);
+    ret;
+}

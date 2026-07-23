@@ -1,0 +1,23 @@
+@pre raw >= 0
+@post result == "F" || result == "D" || result == "C" || result == "B" || result == "A"
+@pure
+fn classifyScore(raw: Int) -> Text {
+    if raw >= 90 { ret "A"; }
+    if raw >= 80 { ret "B"; }
+    if raw >= 70 { ret "C"; }
+    if raw >= 60 { ret "D"; }
+    ret "F";
+}
+
+fn main() -> Void {
+    let scores: Int[] = [59, 63, 82, 91];
+    let n: Int = length(scores);
+    loop i in 0..n {
+        let raw: Int = scores[i];
+        let grade: Text = classifyScore(raw);
+
+        fx { println("raw ", raw, " -> grade ", grade); }
+    }
+
+    ret;
+}

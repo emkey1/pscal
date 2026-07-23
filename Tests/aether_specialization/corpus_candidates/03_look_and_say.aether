@@ -1,0 +1,38 @@
+// Generate the look-and-say sequence by scanning one character at a time.
+
+@pre string_len(source) > 0
+@post string_len(result) > 0
+fn nextTerm(source: Text) -> Text {
+    let total: Int = string_len(source);
+    let output: Text = "";
+    let i: Int = 1;
+
+    loop i <= total {
+        let symbol: Text = copy(source, i, 1);
+        let run: Int = 1;
+
+        loop i + run <= total {
+            let candidate: Text = copy(source, i + run, 1);
+            if candidate != symbol {
+                break;
+            }
+            run = run + 1;
+        }
+
+        output = output + itoa(run) + symbol;
+        i = i + run;
+    }
+    ret output;
+}
+
+fn main() -> Void {
+    let term: Text = "1";
+
+    loop generation in 1..13 {
+        fx {
+            println(generation, ": ", term, "  length=", string_len(term));
+        }
+        term = nextTerm(term);
+    }
+    ret;
+}

@@ -1,0 +1,41 @@
+@pure
+fn countWord(words: Text[], target: Text) -> Int {
+    let total: Int = 0;
+
+    loop i in 0..length(words) {
+        if words[i] == target {
+            total = total + 1;
+        }
+    }
+
+    ret total;
+}
+
+fn main() -> Void {
+    let sentence: Text = "blue green blue red green blue";
+    let words: Text[] = split(sentence, " ");
+    let unique: Text[] = [];
+
+    loop i in 0..length(words) {
+        let seen: Bool = false;
+
+        loop j in 0..length(unique) {
+            if unique[j] == words[i] {
+                seen = true;
+            }
+        }
+
+        if !seen {
+            unique = unique + [words[i]];
+        }
+    }
+
+    fx {
+        println("Word frequency report:");
+        loop i in 0..length(unique) {
+            let count: Int = countWord(words, unique[i]);
+            println(unique[i], ": ", count);
+        }
+    }
+    ret;
+}

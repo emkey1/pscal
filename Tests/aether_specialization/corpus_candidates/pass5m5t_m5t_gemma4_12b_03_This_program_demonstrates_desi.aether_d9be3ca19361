@@ -1,0 +1,17 @@
+@pre score >= 0 && total > 0
+@post result <= 100.0
+@pure
+fn calculate_percentage(score: Int, total: Int) -> Real {
+    ret (score * 100.0) / total;
+}
+
+fn main() -> Void {
+    let score: Int = 85;
+    let total: Int = 100;
+    let pct: Real = calculate_percentage(score, total);
+
+    fx {
+        println("Performance Score: ", pct:0:2, "%");
+    }
+    ret;
+}

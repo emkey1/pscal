@@ -1,0 +1,40 @@
+type Tally {
+    total: Int;
+    label: Text;
+}
+
+fn worker(out: Tally, n: Int) -> Void {
+    let sum: Int = 0;
+    loop i in 0..n {
+        sum = sum + i;
+    }
+    out.total = sum;
+    fx { println("Worker ", out.label, " finished sum: ", sum); }
+    ret;
+}
+
+fn main() -> Void {
+    let task_a: Tally = new Tally { label: "Alpha" };
+    let task_b: Tally = new Tally { label: "Beta" };
+    let task_c: Tally = new Tally { label: "Gamma" };
+
+    fx {
+        println("Starting concurrent tasks...");
+    }
+
+    par {
+        worker(task_a, 100);
+        worker(task_b, 200);
+        worker(task_c, 300);
+    }
+
+    fx {
+        println("All tasks complete.");
+        println("Alpha total: ", task_a.total);
+        println("Beta total: ", task_b.total);
+        println("Gamma total: ", task_c.total);
+        println("Grand Total: ", task_a.total + task_b.total + task_c.total);
+    }
+
+    ret;
+}

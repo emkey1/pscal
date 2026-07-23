@@ -1,0 +1,44 @@
+@pure
+@pre a > 0
+@pre b > 0
+@post result > 0
+fn gcd(a: Int, b: Int) -> Int {
+    let x: Int = a;
+    let y: Int = b;
+    
+    loop {
+        if y == 0 {
+            ret x;
+        }
+        let temp: Int = y;
+        y = x % y;
+        x = temp;
+    }
+    
+    ret x;
+}
+
+@pure
+@pre a > 0
+@pre b > 0
+@post result.0 > 0
+@post result.1 > 0
+fn gcd_lcm(a: Int, b: Int) -> (Int, Int) {
+    let divisor: Int = gcd(a, b);
+    let multiple: Int = (a / divisor) * b;
+    ret (divisor, multiple);
+}
+
+fn main() -> Void {
+    let a: Int = 48;
+    let b: Int = 18;
+    
+    let (d, m) = gcd_lcm(a, b);
+    
+    fx {
+        println("For ", a, " and ", b, ":");
+        println("GCD = ", d);
+        println("LCM = ", m);
+    }
+    ret;
+}

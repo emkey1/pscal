@@ -1,0 +1,38 @@
+@pure
+fn describe_node_type(node: ToonNode) -> Text {
+    if toon_is_text(node) { ret "TEXT"; }
+    if toon_is_int(node) { ret "INT"; }
+    if toon_is_real(node) { ret "REAL"; }
+    if toon_is_bool(node) { ret "BOOL"; }
+    if toon_is_null(node) { ret "NULL"; }
+    if toon_is_arr(node) { ret "ARRAY"; }
+    if toon_is_obj(node) { ret "OBJECT"; }
+    ret "UNKNOWN";
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let json: Text = "{\"name\":\"Test\",\"count\":42,\"active\":true,\"data\":[1,2],\"empty\":null}";
+    let doc: ToonDoc = toon_parse(json);
+    let root: ToonNode = toon_root(doc);
+
+    fx { println("Analyzing JSON structure:"); }
+
+    let keys: Text[] = ["name", "count", "active", "data", "empty"];
+
+    loop i in 0..length(keys) {
+        let k: Text = keys[i];
+        if toon_has_key(root, k) {
+            let val: ToonNode = toon_key(root, k);
+            let type_str: Text = describe_node_type(val);
+            fx { println("  Key: ", k, " -> Type: ", type_str); }
+        }
+    }
+
+    toon_close(doc);
+    ret;
+}

@@ -1,0 +1,25 @@
+fn main() -> Void {
+    fx {
+        let defaultMessage: Text = " No message provided by env ";
+        let envMessage: Text = getenv("AETHER_MESSAGE");
+
+        let messageToProcess: Text = if string_len(envMessage) > 0 { envMessage } else { defaultMessage };
+
+        let trimmedMessage: Text = trim(messageToProcess);
+        let msgLen: Int = string_len(trimmedMessage);
+
+        println("Original (from env or default): \"", messageToProcess, "\"");
+        println("Trimmed message: \"", trimmedMessage, "\" (Length: ", msgLen, ")");
+
+        if msgLen >= 5 {
+            let firstFive: Text = copy(trimmedMessage, 1, 5); // 1-based start, 5 characters
+            let remainingPart: Text = copy(trimmedMessage, 6, msgLen - 5);
+            println("First 5 chars: \"", firstFive, "\"");
+            println("Remaining part: \"", remainingPart, "\"");
+            println("Concatenated: \"", firstFive + remainingPart, "\"");
+        } else {
+            println("Message too short for substring operations (min 5 chars required).");
+        }
+    }
+    ret;
+}

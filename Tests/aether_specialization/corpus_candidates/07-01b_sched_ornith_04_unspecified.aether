@@ -1,0 +1,37 @@
+type Row {
+    name: Text;
+    age: Int;
+    score: Real;
+}
+
+@pure
+fn parseLine(line: Text) -> (Text, Int, Real) {
+    let parts: Text[] = split(line, ",");
+    let name: Text = trim(parts[0]);
+    let age: Int = parse_int(trim(parts[1]));
+    let score: Real = parse_float(trim(parts[2]));
+    ret (name, age, score);
+}
+
+fn main() -> Void {
+    let lines: Text[] = [
+        "Alice, 30, 95.5",
+        "Bob, 25, 82.0",
+        "Carol, 35, 71.3",
+        "Dan, 28, 88.9"
+    ];
+
+    fx {
+        println("Name      | Age | Score");
+        println("----------+-----+------");
+    }
+
+    loop i in 0..length(lines) {
+        let (name, age, score): (Text, Int, Real) = parseLine(lines[i]);
+        fx {
+            println(name, "      | ", age, " | ", score:0:1);
+        }
+    }
+
+    ret;
+}

@@ -1,0 +1,73 @@
+@pre n > 1
+@pure
+fn isPrimeTrial(n: Int) -> Bool {
+    if n % 2 == 0 {
+        ret n == 2;
+    }
+    let d: Int = 3;
+    loop d * d <= n {
+        if n % d == 0 {
+            ret false;
+        }
+        d = d + 2;
+    }
+    ret true;
+}
+
+// P(n) mod n, computed iteratively so values never explode.
+@pre n > 0
+@pure
+fn perrinMod(n: Int) -> Int {
+    if n == 1 {
+        ret 0;                 // P(1) = 0
+    }
+    if n == 2 {
+        ret 0;                 // P(2) = 2 == 0 (mod 2)
+    }
+    let a: Int = 3 % n;        // P(0)
+    let b: Int = 0;            // P(1)
+    let c: Int = 2 % n;        // P(2)
+    let k: Int = 3;
+    loop k <= n {
+        let next: Int = (a + b) % n;
+        a = b;
+        b = c;
+        c = next;
+        k = k + 1;
+    }
+    ret c;
+}
+
+fn report(n: Int) -> Void {
+    let prime: Bool = isPrimeTrial(n);
+    let passes: Bool = perrinMod(n) == 0;
+    fx {
+        print(n, ": ");
+        if prime {
+            print("prime,     ");
+        } else {
+            print("composite, ");
+        }
+        if passes {
+            print("PASSES Perrin test");
+        } else {
+            print("fails Perrin test");
+        }
+        if !prime && passes {
+            print("   <-- Perrin pseudoprime!");
+        }
+        println("");
+    }
+    ret;
+}
+
+fn main() -> Void {
+    let candidates: Int[] = [7, 521, 561, 271441, 904631];
+    loop i in 0..length(candidates) {
+        report(candidates[i]);
+    }
+    fx {
+        println("(561 is a Carmichael number: it fools Fermat, but not Perrin)");
+    }
+    ret;
+}

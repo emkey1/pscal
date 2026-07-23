@@ -1,0 +1,13 @@
+fn main() -> Void {
+    fx {
+        let number = 42;
+        if number > 0 {
+            println("Positive")
+        } else if number < 0 {
+            println("Negative")
+        } else {
+            println("Zero")
+        }
+    }
+    ret;
+}

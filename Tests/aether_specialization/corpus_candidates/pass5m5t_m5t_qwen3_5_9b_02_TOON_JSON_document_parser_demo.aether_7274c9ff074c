@@ -1,0 +1,29 @@
+fn main() -> Void {
+    fx {
+        let doc: ToonDoc = toon_parse("{\"users\":[{\"id\":1,\"name\":\"Alice\",\"score\":85},{\"id\":2,\"name\":\"Bob\",\"score\":92},{\"id\":3,\"name\":\"Charlie\",\"score\":78}]}");
+        let root: ToonNode = toon_root(doc);
+        let users: ToonNode = toon_key(root, "users");
+        
+        loop i in 0..toon_len(users) {
+            let user: ToonNode = toon_at(users, i);
+            let name: Text = "UNKNOWN";
+            if toon_has_key(user, "name") {
+                name = toon_get_text_or(user, "name", "UNKNOWN");
+            }
+            let score: Int = 0;
+            if toon_has_key(user, "score") {
+                score = toon_get_int_or(user, "score", 0);
+            }
+            
+            fx {
+                println("User ", i, ": ", name, " Score: ", score);
+            }
+            
+            toon_free(user);
+        }
+        
+        toon_free(users);
+        toon_close(doc);
+    }
+    ret;
+}

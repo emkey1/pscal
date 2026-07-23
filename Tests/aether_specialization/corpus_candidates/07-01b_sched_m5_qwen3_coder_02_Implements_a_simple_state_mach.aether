@@ -1,0 +1,76 @@
+type TrafficLightState {
+    current: Text;
+    counter: Int;
+    
+    fn transition() -> Void {
+        if self.current == "red" {
+            self.current = "green";
+        } else if self.current == "green" {
+            self.current = "yellow";
+        } else {
+            self.current = "red";
+        }
+        self.counter = 0;
+        ret;
+    }
+    
+    fn tick() -> Void {
+        self.counter = self.counter + 1;
+        ret;
+    }
+}
+
+@pure
+fn get_duration(state: Text) -> Int {
+    if state == "red" {
+        ret 30;
+    }
+    if state == "green" {
+        ret 45;
+    }
+    ret 10;
+}
+
+fn main() -> Void {
+    let light: TrafficLightState = new TrafficLightState();
+    light.current = "red";
+    
+    fx {
+        println("Traffic Light Simulator");
+        println("=======================");
+        println("");
+    }
+    
+    let max_cycles: Int = 2;
+    let cycle_count: Int = 0;
+    
+    loop {
+        if cycle_count >= max_cycles {
+            ret;
+        }
+        
+        let duration: Int = get_duration(light.current);
+        fx {
+            println("State: ", light.current, " (", duration, " ticks)");
+        }
+        
+        loop {
+            if light.counter >= duration {
+                ret;
+            }
+            
+            light.tick();
+            fx {
+                print(".");
+            }
+        }
+        
+        light.transition();
+        cycle_count = cycle_count + 1;
+        fx {
+            println("");
+        }
+    }
+    
+    ret;
+}

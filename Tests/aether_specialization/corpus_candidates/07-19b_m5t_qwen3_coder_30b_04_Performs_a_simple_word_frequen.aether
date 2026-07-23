@@ -1,0 +1,42 @@
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("[\"hello world\",\"hello aether\",\"world of aether\"]");
+    let root: ToonNode = toon_root(doc);
+
+    let freq: Text[] = [];
+    
+    loop i in 0..toon_len(root) {
+        let line: Text = toon_get_text(toon_at(root, i), "");
+        let words: Text[] = split(line, " ");
+        
+        loop j in 0..length(words) {
+            let word: Text = words[j];
+            let found: Bool = false;
+            
+            loop k in 0..length(freq) {
+                if freq[k] == word {
+                    found = true;
+                    break;
+                }
+            }
+            
+            if !found {
+                freq = freq + [word];
+            }
+        }
+    }
+
+    fx {
+        println("Unique words found: ", length(freq));
+        loop i in 0..length(freq) {
+            println("Word ", i, ": ", freq[i]);
+        }
+    }
+
+    toon_close(doc);
+    ret;
+}

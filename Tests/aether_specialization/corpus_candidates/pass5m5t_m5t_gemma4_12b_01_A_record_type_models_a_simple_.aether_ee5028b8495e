@@ -1,0 +1,27 @@
+type Account {
+    id: Int;
+    balance: Int;
+
+    fn deposit(amount: Int) -> Void {
+        self.balance = self.balance + amount;
+    }
+
+    fn withdraw(amount: Int) -> Bool {
+        if self.balance >= amount {
+            self.balance = self.balance - amount;
+            ret true;
+        }
+        ret false;
+    }
+}
+
+fn main() -> Void {
+    let acc: Account = new Account { id: 101, balance: 500 };
+    acc.deposit(200);
+    let success: Bool = acc.withdraw(150);
+    fx {
+        println("Account ", acc.id, " final balance: ", acc.balance);
+        println("Withdrawal successful: ", success);
+    }
+    ret;
+}

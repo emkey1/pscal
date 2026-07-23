@@ -1,0 +1,99 @@
+type Grid {
+    width: Int;
+    height: Int;
+    cells: Int[];
+
+    fn idx(r: Int, c: Int) -> Int {
+        ret r * self.width + c;
+    }
+
+    fn alive(r: Int, c: Int) -> Bool {
+        if r < 0 || r >= self.height || c < 0 || c >= self.width {
+            ret false;
+        }
+        ret self.cells[self.idx(r, c)] == 1;
+    }
+
+    fn countNeighbors(r: Int, c: Int) -> Int {
+        let count: Int = 0;
+        let dr: Int = -1;
+        loop dr <= 1 {
+            let dc: Int = -1;
+            loop dc <= 1 {
+                if dr != 0 || dc != 0 {
+                    if self.alive(r + dr, c + dc) {
+                        count = count + 1;
+                    }
+                }
+                dc = dc + 1;
+            }
+            dr = dr + 1;
+        }
+        ret count;
+    }
+
+    fn step() -> Grid {
+        let next: Int[] = [];
+        loop i in 0..self.width * self.height {
+            next = next + [0];
+        }
+        let result: Grid = new Grid { width: self.width, height: self.height, cells: next };
+
+        loop r in 0..self.height {
+            loop c in 0..self.width {
+                let n: Int = self.countNeighbors(r, c);
+                let current: Int = self.cells[self.idx(r, c)];
+                if current == 1 && (n == 2 || n == 3) {
+                    result.cells[result.idx(r, c)] = 1;
+                }
+                if current == 0 && n == 3 {
+                    result.cells[result.idx(r, c)] = 1;
+                }
+            }
+        }
+        ret result;
+    }
+
+    fn display() -> Void {
+        loop r in 0..self.height {
+            let line: Text = "";
+            loop c in 0..self.width {
+                if self.alive(r, c) {
+                    line = line + "# ";
+                } else {
+                    line = line + ". ";
+                }
+            }
+            fx { println(line); }
+        }
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let w: Int = 10;
+    let h: Int = 6;
+    let cells: Int[] = [];
+    loop i in 0..w * h {
+        cells = cells + [0];
+    }
+    let grid: Grid = new Grid { width: w, height: h, cells: cells };
+
+    grid.cells[grid.idx(1, 2)] = 1;
+    grid.cells[grid.idx(2, 3)] = 1;
+    grid.cells[grid.idx(3, 1)] = 1;
+    grid.cells[grid.idx(3, 2)] = 1;
+    grid.cells[grid.idx(3, 3)] = 1;
+
+    let generations: Int = 5;
+    loop gen in 0..generations {
+        fx {
+            println("--- Generation ", gen, " ---");
+        }
+        grid.display();
+        grid = grid.step();
+    }
+    fx { println("--- Final ---"); }
+    grid.display();
+    ret;
+}

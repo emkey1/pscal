@@ -1,0 +1,18 @@
+@pure
+fn fibonacci(n: Int) -> Int {
+    if n <= 1 {
+        ret n;
+    }
+    ret fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+fn main() -> Void {
+    fx {
+        let limit: Int = 10;
+        println("First ", limit, " Fibonacci numbers:");
+        loop i in 0..limit {
+            println(fibonacci(i));
+        }
+    }
+    ret;
+}

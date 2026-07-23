@@ -1,0 +1,24 @@
+@pre length(xs) > 0
+@post result >= 0.0
+@pure
+fn averageOf(xs: Int[]) -> Real {
+    let sum: Int = 0;
+    let n: Int = length(xs);
+    loop i in 0..n { sum = sum + xs[i]; }
+    ret sum * 1.0 / n;
+}
+
+fn main() -> Void {
+    let samples: Int[] = [75, 84, 92];
+    let target: Int = 6;
+
+    let mean: Real = averageOf(samples);
+
+    fx {
+        println("mean = ", mean:0:1);
+        if mean >= target { println("good enough"); ret; }
+        println("below threshold");
+    }
+
+    ret;
+}

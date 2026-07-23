@@ -1,0 +1,118 @@
+// Kangxi Radical Grouping: the 214 radicals classify every CJK
+// character by its semantic root. Characters sharing a radical (e.g.
+// 口 "mouth": 吃 eat, 喝 drink, 叫 call, 唱 sing) share meaning.
+// This is a pure lookup-and-group problem, but the structure it reveals
+// is the oldest surviving semantic classification system in the world.
+
+type RadicalEntry {
+    character: Text;
+    radical: Text;
+    radicalNum: Int;
+}
+
+type RadicalGroup {
+    radical: Text;
+    radicalNum: Int;
+    meaning: Text;
+    members: Text[];
+}
+
+@pure
+fn lookupRadical(c: Text) -> RadicalEntry {
+    // A small lookup covering the example characters in the sample.
+    if c == "火" { ret RadicalEntry{character: c, radical: "火", radicalNum: 86}; }
+    if c == "烧" { ret RadicalEntry{character: c, radical: "火", radicalNum: 86}; }
+    if c == "灯" { ret RadicalEntry{character: c, radical: "火", radicalNum: 86}; }
+    if c == "灾" { ret RadicalEntry{character: c, radical: "火", radicalNum: 86}; }
+    if c == "吃" { ret RadicalEntry{character: c, radical: "口", radicalNum: 30}; }
+    if c == "喝" { ret RadicalEntry{character: c, radical: "口", radicalNum: 30}; }
+    if c == "叫" { ret RadicalEntry{character: c, radical: "口", radicalNum: 30}; }
+    if c == "唱" { ret RadicalEntry{character: c, radical: "口", radicalNum: 30}; }
+    if c == "水" { ret RadicalEntry{character: c, radical: "水", radicalNum: 85}; }
+    if c == "江" { ret RadicalEntry{character: c, radical: "水", radicalNum: 85}; }
+    if c == "河" { ret RadicalEntry{character: c, radical: "水", radicalNum: 85}; }
+    if c == "海" { ret RadicalEntry{character: c, radical: "水", radicalNum: 85}; }
+    if c == "木" { ret RadicalEntry{character: c, radical: "木", radicalNum: 75}; }
+    if c == "林" { ret RadicalEntry{character: c, radical: "木", radicalNum: 75}; }
+    if c == "森" { ret RadicalEntry{character: c, radical: "木", radicalNum: 75}; }
+    if c == "桥" { ret RadicalEntry{character: c, radical: "木", radicalNum: 75}; }
+    if c == "心" { ret RadicalEntry{character: c, radical: "心", radicalNum: 61}; }
+    if c == "想" { ret RadicalEntry{character: c, radical: "心", radicalNum: 61}; }
+    if c == "思" { ret RadicalEntry{character: c, radical: "心", radicalNum: 61}; }
+    if c == "念" { ret RadicalEntry{character: c, radical: "心", radicalNum: 61}; }
+    if c == "金" { ret RadicalEntry{character: c, radical: "金", radicalNum: 167}; }
+    if c == "铁" { ret RadicalEntry{character: c, radical: "金", radicalNum: 167}; }
+    if c == "铜" { ret RadicalEntry{character: c, radical: "金", radicalNum: 167}; }
+    if c == "银" { ret RadicalEntry{character: c, radical: "金", radicalNum: 167}; }
+    ret RadicalEntry{character: c, radical: "?", radicalNum: 0};
+}
+
+@pure
+fn radicalMeaning(radical: Text) -> Text {
+    if radical == "火" { ret "fire"; }
+    if radical == "口" { ret "mouth"; }
+    if radical == "水" { ret "water"; }
+    if radical == "木" { ret "tree/wood"; }
+    if radical == "心" { ret "heart/mind"; }
+    if radical == "金" { ret "metal/gold"; }
+    ret "unknown";
+}
+
+fn main() -> Void {
+    let sample: Text[] = [
+        "火", "烧", "灯", "灾",
+        "吃", "喝", "叫", "唱",
+        "水", "江", "河", "海",
+        "木", "林", "森", "桥",
+        "心", "想", "思", "念",
+        "金", "铁", "铜", "银"
+    ];
+
+    let groups: RadicalGroup[] = [];
+
+    loop i in 0..length(sample) {
+        let entry: RadicalEntry = lookupRadical(sample[i]);
+        let foundGroup: Bool = false;
+        loop g in 0..length(groups) {
+            if groups[g].radical == entry.radical {
+                groups[g].members = groups[g].members + [entry.character];
+                foundGroup = true;
+                break;
+            }
+        }
+        if !foundGroup {
+            groups = groups + [RadicalGroup{
+                radical: entry.radical,
+                radicalNum: entry.radicalNum,
+                meaning: radicalMeaning(entry.radical),
+                members: [entry.character]
+            }];
+        }
+    }
+
+    fx {
+        println("Kangxi radical groupings:");
+        println("");
+    }
+    loop g in 0..length(groups) {
+        fx {
+            println("Radical ", groups[g].radicalNum, " ", groups[g].radical,
+                    "  (", groups[g].meaning, "):");
+        }
+        let first: Bool = true;
+        loop m in 0..length(groups[g].members) {
+            fx {
+                if !first {
+                    print(", ");
+                }
+                print(groups[g].members[m]);
+                first = false;
+            }
+        }
+        fx {
+            println("");
+            println("");
+        }
+    }
+    ret;
+}

@@ -1,0 +1,49 @@
+type TrafficLight {
+    phase: Int = 0;
+    steps: Int = 0;
+
+    fn step() -> Void {
+        self.steps = self.steps + 1;
+        if self.phase == 0 {
+            self.phase = 1;
+            ret;
+        }
+        if self.phase == 1 {
+            self.phase = 2;
+            ret;
+        }
+        self.phase = 0;
+        ret;
+    }
+
+    fn label() -> Text {
+        if self.phase == 0 {
+            ret "green";
+        }
+        if self.phase == 1 {
+            ret "yellow";
+        }
+        ret "red";
+    }
+
+    fn canWalk() -> Bool {
+        ret self.phase == 2;
+    }
+}
+
+fn main() -> Void {
+    let light: TrafficLight = new TrafficLight();
+
+    loop i in 0..8 {
+        let walk: Text = if light.canWalk() { "walk" } else { "wait" };
+        fx {
+            println("tick ", i, ": ", light.label(), " / ", walk);
+        }
+        light.step();
+    }
+
+    fx {
+        println("steps taken = ", light.steps);
+    }
+    ret;
+}

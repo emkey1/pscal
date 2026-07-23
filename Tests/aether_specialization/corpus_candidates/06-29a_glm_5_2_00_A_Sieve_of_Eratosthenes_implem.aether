@@ -1,0 +1,47 @@
+@pure
+fn sieve(limit: Int) -> Int[] {
+    let flags: Bool[] = [];
+    let i: Int = 0;
+    loop i <= limit {
+        flags = flags + [true];
+        i = i + 1;
+    }
+    flags[0] = false;
+    if limit >= 1 {
+        flags[1] = false;
+    }
+    let p: Int = 2;
+    loop p * p <= limit {
+        if flags[p] {
+            let m: Int = p * p;
+            loop m <= limit {
+                flags[m] = false;
+                m = m + p;
+            }
+        }
+        p = p + 1;
+    }
+    let primes: Int[] = [];
+    let k: Int = 2;
+    loop k <= limit {
+        if flags[k] {
+            primes = primes + [k];
+        }
+        k = k + 1;
+    }
+    ret primes;
+}
+
+fn main() -> Void {
+    let limit: Int = 100;
+    let primes: Int[] = sieve(limit);
+    fx {
+        println("Primes up to ", limit, ":");
+        loop i in 0..length(primes) {
+            print(primes[i], " ");
+        }
+        println("");
+        println("Total: ", length(primes));
+    }
+    ret;
+}

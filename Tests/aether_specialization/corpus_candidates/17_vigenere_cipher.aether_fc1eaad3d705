@@ -1,0 +1,38 @@
+@pure
+fn vigenere_encrypt(text: Text, key: Text) -> Text {
+    let result: Text = "";
+    let key_len: Int = string_len(key);
+    loop i in 0..string_len(text) {
+        let c: Int = ord(copy(text, i + 1, 1));
+        let k: Int = ord(copy(key, (i % key_len) + 1, 1));
+        let encrypted: Int = (c + k - 2 * 97) % 26 + 97;
+        result = result + chr(encrypted);
+    }
+    ret result;
+}
+
+@pure
+fn vigenere_decrypt(text: Text, key: Text) -> Text {
+    let result: Text = "";
+    let key_len: Int = string_len(key);
+    loop i in 0..string_len(text) {
+        let c: Int = ord(copy(text, i + 1, 1));
+        let k: Int = ord(copy(key, (i % key_len) + 1, 1));
+        let decrypted: Int = (c - k + 26) % 26 + 97;
+        result = result + chr(decrypted);
+    }
+    ret result;
+}
+
+fn main() -> Void {
+    let plaintext: Text = "hello";
+    let key: Text = "secret";
+    let ciphertext: Text = vigenere_encrypt(plaintext, key);
+    let decrypted: Text = vigenere_decrypt(ciphertext, key);
+    fx {
+        println("Original: ", plaintext);
+        println("Encrypted: ", ciphertext);
+        println("Decrypted: ", decrypted);
+    }
+    ret;
+}

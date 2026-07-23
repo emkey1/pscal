@@ -1,0 +1,11 @@
+fn main() -> Void {
+    fx {
+        let n = 10;
+        let sum: Int = 0;
+        loop i in 1..n + 1 {
+            sum = sum + i;
+        }
+        println("Sum of numbers from 1 to ", n, " is ", sum);
+    }
+    ret;
+}

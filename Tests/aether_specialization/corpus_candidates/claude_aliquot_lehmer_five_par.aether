@@ -1,0 +1,139 @@
+// Aliquot sequence: a(0) = seed, a(k+1) = sum of proper divisors of a(k).
+// Outcomes: hits 0 (terminates), hits a fixed point (perfect number),
+// falls into a cycle (amicable/sociable numbers), or -- for a handful of
+// small seeds including 276, 552, 564, 660, 966 (the "Lehmer five") --
+// nobody knows. Whether these always resolve is the open Catalan-Dickson
+// conjecture. Each seed races independently via par (PAR-001): every
+// branch gets its own out-record to write into.
+
+type ScanResult {
+    seed: Int;
+    status: Int;      // 0=hit 0, 1=perfect fixed point, 2=cycle, 3=unresolved
+    steps: Int;
+    finalValue: Int;
+    peakValue: Int;
+}
+
+@pre n >= 0
+@pure
+fn aliquotSum(n: Int) -> Int {
+    if n <= 1 {
+        ret 0;
+    }
+    let total: Int = 1;
+    let d: Int = 2;
+    loop d * d <= n {
+        if n % d == 0 {
+            total = total + d;
+            let other: Int = n / d;
+            if other != d {
+                total = total + other;
+            }
+        }
+        d = d + 1;
+    }
+    ret total;
+}
+
+fn traceAliquot(out: ScanResult, seed: Int, stepCap: Int) -> Void {
+    let history: Int[] = [seed];
+    let current: Int = seed;
+    let peak: Int = seed;
+    let step: Int = 0;
+    let status: Int = 3;
+    let finalValue: Int = seed;
+
+    loop step < stepCap {
+        let next: Int = aliquotSum(current);
+        step = step + 1;
+
+        if next == 0 {
+            status = 0;
+            finalValue = 0;
+            break;
+        }
+        if next == current {
+            status = 1;
+            finalValue = next;
+            break;
+        }
+
+        let seenAt: Int = -1;
+        loop i in 0..length(history) {
+            if history[i] == next {
+                seenAt = i;
+                break;
+            }
+        }
+        if seenAt >= 0 {
+            status = 2;
+            finalValue = next;
+            break;
+        }
+
+        if next > peak {
+            peak = next;
+        }
+        history = history + [next];
+        current = next;
+        finalValue = current;
+    }
+
+    out.seed = seed;
+    out.status = status;
+    out.steps = step;
+    out.finalValue = finalValue;
+    out.peakValue = peak;
+    ret;
+}
+
+fn describe(r: ScanResult) -> Void {
+    fx {
+        print("seed ", r.seed, ": ");
+        if r.status == 0 {
+            println("terminates at 0 after ", r.steps, " steps (peak ", r.peakValue, ")");
+        } else {
+            if r.status == 1 {
+                println("reaches perfect-number fixed point ", r.finalValue, " after ", r.steps, " steps");
+            } else {
+                if r.status == 2 {
+                    println("falls into a cycle at ", r.finalValue, " after ", r.steps, " steps");
+                } else {
+                    println("UNRESOLVED after ", r.steps, " steps (peak so far ", r.peakValue, ") -- fate unknown");
+                }
+            }
+        }
+    }
+    ret;
+}
+
+fn main() -> Void {
+    let capSteps: Int = 40;
+
+    let rPerfect: ScanResult = new ScanResult();
+    let rAmicable: ScanResult = new ScanResult();
+    let rDeficient: ScanResult = new ScanResult();
+    let rLehmer276: ScanResult = new ScanResult();
+    let rLehmer552: ScanResult = new ScanResult();
+
+    par {
+        traceAliquot(rPerfect, 6, capSteps);
+        traceAliquot(rAmicable, 220, capSteps);
+        traceAliquot(rDeficient, 95, capSteps);
+        traceAliquot(rLehmer276, 276, capSteps);
+        traceAliquot(rLehmer552, 552, capSteps);
+    }
+
+    describe(rPerfect);
+    describe(rAmicable);
+    describe(rDeficient);
+    describe(rLehmer276);
+    describe(rLehmer552);
+
+    fx {
+        println("");
+        println("276, 552, 564, 660, and 966 are the 'Lehmer five': the smallest seeds");
+        println("whose aliquot sequence fate is still unknown -- the Catalan-Dickson conjecture.");
+    }
+    ret;
+}

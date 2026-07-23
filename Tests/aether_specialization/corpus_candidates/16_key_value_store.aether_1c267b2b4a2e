@@ -1,0 +1,79 @@
+type DB {
+    data: Text[];
+}
+
+fn open_store(filename: Text) -> DB {
+    let data: Text[] = [];
+    fx {
+        if fileexists(filename) {
+            let f: File;
+            assign(f, filename);
+            reset(f);
+            loop {
+                if eof(f) { break; }
+                let line: Text;
+                readln(f, line);
+                if string_len(line) > 0 {
+                    data = data + [line];
+                }
+            }
+            close(f);
+        }
+    }
+    ret new DB { data: data };
+}
+
+fn put_entry(db: DB, key: Text, value: Text) -> Void {
+    let index: Int = -1;
+    let i: Int = 0;
+    loop i < length(db.data) {
+        if db.data[i] == key {
+            index = i;
+            break;
+        }
+        i = i + 2;
+    }
+    if index != -1 {
+        db.data[index + 1] = value;
+    } else {
+        db.data = db.data + [key];
+        db.data = db.data + [value];
+    }
+    ret;
+}
+
+fn get_entry(db: DB, key: Text) -> Text {
+    let i: Int = 0;
+    loop i < length(db.data) {
+        if db.data[i] == key {
+            ret db.data[i + 1];
+        }
+        i = i + 2;
+    }
+    ret "";
+}
+
+fn save_store(db: DB, filename: Text) -> Void {
+    fx {
+        let f: File;
+        assign(f, filename);
+        rewrite(f);
+        loop i in 0..length(db.data) {
+            writeln(f, db.data[i]);
+        }
+        close(f);
+    }
+    ret;
+}
+
+fn main() -> Void {
+    let db: DB = open_store("/tmp/aether_db_demo.txt");
+    put_entry(db, "name", "Alice");
+    put_entry(db, "age", "30");
+    fx {
+        println("Name: ", get_entry(db, "name"));
+        println("Age: ", get_entry(db, "age"));
+    }
+    save_store(db, "/tmp/aether_db_demo.txt");
+    ret;
+}

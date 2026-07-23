@@ -1,0 +1,32 @@
+const SUBSTRING_START: Int = 1; // 1-based start
+const SUBSTRING_COUNT: Int = 5;
+
+fn main() -> Void {
+    fx {
+        if paramcount() > 1 {
+            let rawInput: Text = paramstr(1);
+            let trimmedInput: Text = trim(rawInput);
+            let inputLen: Int = string_len(trimmedInput);
+
+            fx {
+                println("Original input: \"", rawInput, "\" (length: ", string_len(rawInput), ")");
+                println("Trimmed input: \"", trimmedInput, "\" (length: ", inputLen, ")");
+            }
+
+            if inputLen >= SUBSTRING_START + SUBSTRING_COUNT - 1 {
+                let extracted: Text = copy(trimmedInput, SUBSTRING_START, SUBSTRING_COUNT);
+                fx {
+                    println("Extracted substring (", SUBSTRING_START, " to ", SUBSTRING_START + SUBSTRING_COUNT - 1, "): \"", extracted, "\"");
+                }
+            } else {
+                fx {
+                    println("Input is too short to extract ", SUBSTRING_COUNT, " characters from position ", SUBSTRING_START, ".");
+                }
+            }
+        } else {
+            println("Usage: aether myprogram.aer \" <some text>\"");
+            println("No command-line argument provided.");
+        }
+    }
+    ret;
+}

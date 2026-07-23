@@ -1,0 +1,77 @@
+fn sieve(limit: Int) -> Int[] {
+    let flags: Bool[] = [];
+    let bound: Int = limit + 1;
+    loop i in 0..bound {
+        flags = flags + [true];
+    }
+    flags[0] = false;
+    if limit >= 1 {
+        flags[1] = false;
+    }
+    let i: Int = 2;
+    loop i * i <= limit {
+        if flags[i] {
+            let j: Int = i * i;
+            loop j <= limit {
+                flags[j] = false;
+                j = j + i;
+            }
+        }
+        i = i + 1;
+    }
+    let primes: Int[] = [];
+    loop k in 0..bound {
+        if flags[k] {
+            primes = primes + [k];
+        }
+    }
+    ret primes;
+}
+
+fn factorize(n: Int, primes: Int[]) -> Int[] {
+    let factors: Int[] = [];
+    let remaining: Int = n;
+    loop i in 0..length(primes) {
+        let p: Int = primes[i];
+        if p * p > remaining {
+            break;
+        }
+        loop remaining % p == 0 {
+            factors = factors + [p];
+            remaining = remaining / p;
+        }
+    }
+    if remaining > 1 {
+        factors = factors + [remaining];
+    }
+    ret factors;
+}
+
+fn joinFactors(factors: Int[]) -> Text {
+    let result: Text = "";
+    loop j in 0..length(factors) {
+        if j > 0 {
+            result = result + " * ";
+        }
+        result = result + int_to_text(factors[j]);
+    }
+    ret result;
+}
+
+fn main() -> Void {
+    let limit: Int = 200;
+    let primes: Int[] = sieve(limit);
+    fx {
+        println("Primes up to ", limit, ": ", length(primes), " found");
+    }
+    let testNumbers: Int[] = [60, 84, 97, 360, 1024];
+    loop i in 0..length(testNumbers) {
+        let n: Int = testNumbers[i];
+        let factors: Int[] = factorize(n, primes);
+        let desc: Text = joinFactors(factors);
+        fx {
+            println(n, " = ", desc);
+        }
+    }
+    ret;
+}

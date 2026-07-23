@@ -1,0 +1,25 @@
+fn main() -> Void {
+    let c3: Int = 0;
+    let c5: Int = 0;
+    fx {
+        loop n in 1..31 {
+            c3 = c3 + 1;
+            c5 = c5 + 1;
+            let label: Text = "";
+            if c3 == 3 {
+                label = label + "Fizz";
+                c3 = 0;
+            }
+            if c5 == 5 {
+                label = label + "Buzz";
+                c5 = 0;
+            }
+            if label == "" {
+                println(n);
+            } else {
+                println(label);
+            }
+        }
+    }
+    ret;
+}

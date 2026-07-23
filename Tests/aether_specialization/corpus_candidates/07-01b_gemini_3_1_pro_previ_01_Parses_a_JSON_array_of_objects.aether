@@ -1,0 +1,47 @@
+type Stats {
+    totalUsers: Int;
+    activeUsers: Int;
+    totalScore: Int;
+
+    fn record(active: Bool, score: Int) -> Void {
+        self.totalUsers = self.totalUsers + 1;
+        self.totalScore = self.totalScore + score;
+        if active {
+            self.activeUsers = self.activeUsers + 1;
+        }
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("TOON not available"); }
+        ret;
+    }
+    let payload: Text = "[{\"name\":\"Alice\",\"active\":true,\"score\":120},{\"name\":\"Bob\",\"active\":false,\"score\":85},{\"name\":\"Charlie\",\"active\":true,\"score\":95}]";
+    let doc: ToonDoc = toon_parse(payload);
+    let root: ToonNode = toon_root(doc);
+
+    let stats: Stats = new Stats();
+
+    loop i in 0..toon_len(root) {
+        let user: ToonNode = toon_at(root, i);
+        let active: Bool = toon_get_bool_or(user, "active", false);
+        let score: Int = toon_get_int_or(user, "score", 0);
+        stats.record(active, score);
+    }
+
+    let avg: Real = 0.0;
+    if stats.totalUsers > 0 {
+        avg = stats.totalScore * 1.0 / stats.totalUsers;
+    }
+
+    fx {
+        println("Total Users: ", stats.totalUsers);
+        println("Active Users: ", stats.activeUsers);
+        println("Average Score: ", avg:0:2);
+    }
+
+    toon_close(doc);
+    ret;
+}

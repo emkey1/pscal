@@ -1,0 +1,61 @@
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let payload: Text = "{\"employees\":[{\"name\":\"Alice\",\"dept\":\"Eng\",\"salary\":95000},{\"name\":\"Bob\",\"dept\":\"Eng\",\"salary\":88000},{\"name\":\"Carol\",\"dept\":\"Sales\",\"salary\":72000},{\"name\":\"Dave\",\"dept\":\"Sales\",\"salary\":68000},{\"name\":\"Eve\",\"dept\":\"Eng\",\"salary\":102000}]}";
+
+    let doc: ToonDoc = toon_parse(payload);
+    let root: ToonNode = toon_root(doc);
+    let employees: ToonNode = toon_key(root, "employees");
+
+    let engTotal: Int = 0;
+    let engCount: Int = 0;
+    let salesTotal: Int = 0;
+    let salesCount: Int = 0;
+
+    loop i in 0..toon_len(employees) {
+        let emp: ToonNode = toon_at(employees, i);
+        let name: Text = toon_get_text(emp, "name");
+        let dept: Text = toon_get_text(emp, "dept");
+        let salary: Int = toon_get_int_or(emp, "salary", 0);
+
+        if dept == "Eng" {
+            engTotal = engTotal + salary;
+            engCount = engCount + 1;
+        }
+        if dept == "Sales" {
+            salesTotal = salesTotal + salary;
+            salesCount = salesCount + 1;
+        }
+
+        fx {
+            println(name, " | ", dept, " | $", salary);
+        }
+
+        toon_free(emp);
+    }
+
+    fx {
+        println("");
+        println("=== Department Averages ===");
+    }
+
+    if engCount > 0 {
+        let engAvg: Real = engTotal * 1.0 / engCount;
+        fx {
+            println("Eng:   count=", engCount, "  avg=$", engAvg:0:0);
+        }
+    }
+    if salesCount > 0 {
+        let salesAvg: Real = salesTotal * 1.0 / salesCount;
+        fx {
+            println("Sales: count=", salesCount, "  avg=$", salesAvg:0:0);
+        }
+    }
+
+    toon_free(employees);
+    toon_close(doc);
+    ret;
+}

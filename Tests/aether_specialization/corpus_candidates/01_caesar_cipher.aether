@@ -1,0 +1,39 @@
+@pure
+fn encrypt(plaintext: Text, shift: Int) -> Text {
+    let result: Text = "";
+    let len: Int = string_len(plaintext);
+    loop i in 0..len {
+        let ch: Text = copy(plaintext, i + 1, 1);
+        let code: Int = ord(ch);
+        if code >= 65 && code <= 90 {
+            let shifted: Int = ((code - 65 + shift) % 26) + 65;
+            result = result + chr(shifted);
+        } else if code >= 97 && code <= 122 {
+            let shifted: Int = ((code - 97 + shift) % 26) + 97;
+            result = result + chr(shifted);
+        } else {
+            result = result + ch;
+        }
+    }
+    ret result;
+}
+
+@pure
+fn decrypt(ciphertext: Text, shift: Int) -> Text {
+    ret encrypt(ciphertext, 26 - (shift % 26));
+}
+
+fn main() -> Void {
+    let message: Text = "Hello World";
+    let key: Int = 3;
+
+    let encrypted: Text = encrypt(message, key);
+    let decrypted: Text = decrypt(encrypted, key);
+
+    fx {
+        println("Original:  ", message);
+        println("Encrypted: ", encrypted);
+        println("Decrypted: ", decrypted);
+    }
+    ret;
+}

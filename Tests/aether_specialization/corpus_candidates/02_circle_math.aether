@@ -1,0 +1,29 @@
+// Circle math — Machin pi, hypotenuse, stable decimal output
+
+const Radius: Real = 2.5;
+
+@pure
+fn circleArea(r: Real) -> Real {
+    let pi: Real = 16.0 * arctan(1.0 / 5.0) - 4.0 * arctan(1.0 / 239.0);
+    ret pi * sqr(r);
+}
+
+@pure
+fn circleCircumference(r: Real) -> Real {
+    let pi: Real = 16.0 * arctan(1.0 / 5.0) - 4.0 * arctan(1.0 / 239.0);
+    ret 2.0 * pi * r;
+}
+
+fn main() -> Void {
+    let area: Real = circleArea(Radius);
+    let circumference: Real = circleCircumference(Radius);
+    let diagonal: Real = sqrt(sqr(3.0) + sqr(4.0));
+    fx {
+        println("radius        = ", Radius:0:2);
+        println("area          = ", area:0:4);
+        println("circumference = ", circumference:0:4);
+        println("3-4-5 hypotenuse = ", diagonal:0:1);
+        println("area as text  = " + formatfloat(area, 2));
+    }
+    ret;
+}

@@ -1,0 +1,22 @@
+@pure
+fn fibTable(count: Int) -> Int[] {
+    let xs: Int[] = [0, 1];
+    loop i in 2..count {
+        xs = xs + [xs[i - 2] + xs[i - 1]];
+    }
+    ret xs;
+}
+
+fn main() -> Void {
+    let fibs: Int[] = fibTable(15);
+    fx {
+        loop i in 0..length(fibs) {
+            println("fib(", i, ") = ", fibs[i]);
+        }
+        loop i in 2..length(fibs) {
+            let ratio: Real = (fibs[i] * 1.0) / fibs[i - 1];
+            println("ratio ", i, " = ", ratio:0:6);
+        }
+    }
+    ret;
+}

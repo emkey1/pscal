@@ -1,0 +1,70 @@
+@pure
+fn isPrime(n: Int) -> Bool {
+    if n <= 1 {
+        ret false;
+    }
+    if n <= 3 {
+        ret true;
+    }
+    if n % 2 == 0 {
+        ret false;
+    }
+    if n % 3 == 0 {
+        ret false;
+    }
+
+    let i: Int = 5;
+    loop i * i <= n {
+        if n % i == 0 || n % (i + 2) == 0 {
+            ret false;
+        }
+        i = i + 6;
+    }
+    ret true;
+}
+
+@pure
+fn nextPrime(n: Int) -> Int {
+    let candidate: Int = n + 1;
+    loop {
+        if isPrime(candidate) {
+            ret candidate;
+        }
+        candidate = candidate + 1;
+    }
+}
+
+fn main() -> Void {
+    let testNumbers: Int[] = [1, 2, 17, 18, 29, 100, 131];
+
+    fx {
+        println("Prime number checks:");
+    }
+    loop i in 0..length(testNumbers) {
+        let n: Int = testNumbers[i];
+        let prime: Bool = isPrime(n);
+        fx {
+            println(n, " is ", if prime { "prime" } else { "not prime" });
+        }
+    }
+
+    let limit: Int = 50;
+    let primes: Int[] = [];
+    let candidate: Int = 2;
+
+    loop candidate <= limit {
+        if isPrime(candidate) {
+            primes = primes + [candidate];
+        }
+        candidate = candidate + 1;
+    }
+
+    fx {
+        println("Primes up to ", limit, ":");
+        loop i in 0..length(primes) {
+            print(primes[i], " ");
+        }
+        println("");
+    }
+    ret;
+}

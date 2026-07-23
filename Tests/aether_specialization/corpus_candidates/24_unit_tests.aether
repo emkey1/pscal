@@ -1,0 +1,36 @@
+// A minimal test runner. Aether has no function values (FUNC-001) -- no
+// closures, no fn-typed fields -- so tests can't be stored as
+// Test { fn: () -> Bool } records. Each test's boolean result is computed
+// directly and reported through a small helper instead.
+fn report(name: Text, passed: Bool, passCount: Int, failCount: Int) -> Int[] {
+    fx {
+        if passed {
+            println("[PASS] ", name);
+        } else {
+            println("[FAIL] ", name);
+        }
+    }
+    if passed {
+        ret [passCount + 1, failCount];
+    }
+    ret [passCount, failCount + 1];
+}
+
+fn main() -> Void {
+    let passCount: Int = 0;
+    let failCount: Int = 0;
+
+    let r1: Int[] = report("2 + 2 = 4", 2 + 2 == 4, passCount, failCount);
+    passCount = r1[0]; failCount = r1[1];
+
+    let r2: Int[] = report("5 > 3", 5 > 3, passCount, failCount);
+    passCount = r2[0]; failCount = r2[1];
+
+    let r3: Int[] = report("Hello starts with H", copy("Hello", 1, 1) == "H", passCount, failCount);
+    passCount = r3[0]; failCount = r3[1];
+
+    fx {
+        println("Passed: ", passCount, "/", passCount + failCount);
+    }
+    ret;
+}

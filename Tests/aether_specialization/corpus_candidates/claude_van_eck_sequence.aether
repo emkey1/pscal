@@ -1,0 +1,35 @@
+// Van Eck's sequence (OEIS A181391): a(0) = 0. For n > 0, look at a(n-1).
+// If that value occurred earlier in the sequence, a(n) is the distance
+// back to its MOST RECENT prior occurrence; otherwise a(n) = 0.
+// Whether every nonnegative integer eventually appears is open.
+
+fn main() -> Void {
+    let terms: Int = 30;
+    let seq: Int[] = [0];
+    let lastSeen: Int[] = [-1];   // lastSeen[v] = most recent index of v, or -1
+
+    let i: Int = 1;
+    loop i < terms {
+        let prev: Int = seq[i - 1];
+        loop length(lastSeen) <= prev {
+            lastSeen = lastSeen + [-1];
+        }
+        let j: Int = lastSeen[prev];
+        let next: Int = 0;
+        if j >= 0 {
+            next = (i - 1) - j;
+        }
+        lastSeen[prev] = i - 1;
+        seq = seq + [next];
+        i = i + 1;
+    }
+
+    fx {
+        println("Van Eck's sequence, a(0) .. a(", terms - 1, "):");
+        loop k in 0..terms {
+            print(seq[k], " ");
+        }
+        println("");
+    }
+    ret;
+}

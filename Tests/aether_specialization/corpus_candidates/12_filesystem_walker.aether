@@ -1,0 +1,25 @@
+fn check_path(path: Text) -> Void {
+    fx {
+        if fileexists(path) {
+            println("EXISTS: ", path);
+        } else {
+            println("MISSING: ", path);
+        }
+    }
+    ret;
+}
+
+fn main() -> Void {
+    fx {
+        println("System Path Check:");
+        check_path("/etc/hosts");
+        check_path("/etc/passwd");
+        check_path("/tmp");
+        check_path("/var/log");
+        check_path("/nonexistent_file_xyz");
+
+        let cwd: Text = getcurrentdir();
+        check_path(cwd);
+    }
+    ret;
+}

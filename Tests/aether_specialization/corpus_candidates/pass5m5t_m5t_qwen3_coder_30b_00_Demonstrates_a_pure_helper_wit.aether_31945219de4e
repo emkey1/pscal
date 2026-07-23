@@ -1,0 +1,29 @@
+@pure
+@pre score >= 0 && score <= 100
+@post result == "A" || result == "B" || result == "C" || result == "D" || result == "F"
+fn grade(score: Int) -> Text {
+    if score >= 90 {
+        ret "A";
+    }
+    if score >= 80 {
+        ret "B";
+    }
+    if score >= 70 {
+        ret "C";
+    }
+    if score >= 60 {
+        ret "D";
+    }
+    ret "F";
+}
+
+fn main() -> Void {
+    let scores: Int[] = [95, 87, 76, 65, 42];
+    fx {
+        loop i in 0..length(scores) {
+            let g: Text = grade(scores[i]);
+            println("Score ", scores[i], " gets grade ", g);
+        }
+    }
+    ret;
+}

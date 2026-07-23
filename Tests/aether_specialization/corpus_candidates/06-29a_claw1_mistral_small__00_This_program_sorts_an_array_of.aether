@@ -1,0 +1,23 @@
+fn bubbleSort(arr: Int[]) -> Int[] {
+    let len = length(arr);
+    loop i in 0..len - 1 {
+        loop j in 0..len - i - 2 {
+            if arr[j] > arr[j + 1] {
+                let temp = arr[j];
+                arr[j] = arr[j + 1];
+                arr[j + 1] = temp;
+            }
+        }
+    }
+    ret arr;
+}
+
+fn main() -> Void {
+    let unsorted: Int[] = [64, 34, 25, 12, 22, 11, 90];
+    fx { println("Original array:", unsorted); }
+
+    let sorted: Int[] = bubbleSort(unsorted);
+
+    fx { println("Sorted array:", sorted); }
+    ret;
+}
