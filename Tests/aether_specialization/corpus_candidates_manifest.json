@@ -12174,6 +12174,46 @@
         "include_in_training": false,
         "lifecycle": "quarantine"
       }
+    },
+    {
+      "source_path": "/tmp/corpus_new5/60_decentralized_stable_matching.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/60_decentralized_stable_matching.aether",
+      "sha256": "8cb4a42bc6419089158de827a6299f3fcf78bcac036b56649a6ab8e2f32f8b92",
+      "stdout": "=== Decentralized Stable Matching (message-passing Gale-Shapley) ===\n4 proposers, 4 acceptors, no central broker\n\nP0 -> PROPOSE A0   | A0: ACCEPT (was free)\nP1 -> PROPOSE A0   | A0: ACCEPT, RELEASE P0\nP0 -> PROPOSE A0   | A0: REJECT\nP0 -> PROPOSE A1   | A1: ACCEPT (was free)\nP2 -> PROPOSE A1   | A1: ACCEPT, RELEASE P0\nP0 -> PROPOSE A1   | A1: REJECT\nP0 -> PROPOSE A2   | A2: ACCEPT (was free)\nP3 -> PROPOSE A2   | A2: REJECT\nP3 -> PROPOSE A1   | A1: ACCEPT, RELEASE P2\nP2 -> PROPOSE A1   | A1: REJECT\nP2 -> PROPOSE A0   | A0: REJECT\nP2 -> PROPOSE A2   | A2: REJECT\nP2 -> PROPOSE A3   | A3: ACCEPT (was free)\n\nNegotiation finished after 13 messages.\nFinal matching:\n  P0 <-> A2\n  P1 <-> A0\n  P2 <-> A3\n  P3 <-> A1\n\nBlocking pairs found: 0\nMatching is stable: true\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new5/61_bounded_pcp_search.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/61_bounded_pcp_search.aether",
+      "sha256": "6b1d7a81c7a38cd0e5873090ce2de6f56587d464a976544f441801b450486f93",
+      "stdout": "=== Bounded PCP Search ===\nDominoes (top/bottom):\n  1: a / baa\n  2: ab / aa\n  3: bba / bb\nDepth bound: 6\n\nDepth 1: 1 live state(s)\nDepth 2: 1 live state(s)\nDepth 3: 2 live state(s)\n\nSOLUTION found at depth 4:\n  sequence: 3 2 3 1 \n  top:    bbaabbbaa\n  bottom: bbaabbbaa\n  independently verified: true\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new5/62_physarum_routing.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/62_physarum_routing.aether",
+      "sha256": "91fdb186d33bea72bb4f7dbcc760a07c55dc4cad617fc6b3af636b918c09260b",
+      "stdout": "=== Physarum Maze Routing ===\n6 nodes; source 0, sink 5\nRoute A (short): 0-1-5      Route B (long): 0-2-3-4-5\nAll tube conductivities start at 1.0\n\nAfter 10 steps:\n  Route A tubes: 0-1: 28.925465  1-5: 28.925465\n  Route B tubes: 0-2: 4.045558  2-3: 4.045558  3-4: 4.045558  4-5: 4.045558\nAfter 20 steps:\n  Route A tubes: 0-1: 836.682554  1-5: 836.682554\n  Route B tubes: 0-2: 16.366537  2-3: 16.366537  3-4: 16.366537  4-5: 16.366537\nAfter 30 steps:\n  Route A tubes: 0-1: 24201.432355  1-5: 24201.432355\n  Route B tubes: 0-2: 66.211772  2-3: 66.211772  3-4: 66.211772  4-5: 66.211772\n\nMean conductivity -- short route: 24201.432355, long route: 66.211772\nShort route dominates: true\nThe mold has collapsed onto the shortest path 0 -> 1 -> 5.\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
+    },
+    {
+      "source_path": "/tmp/corpus_new5/63_combinatorial_double_auction.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/63_combinatorial_double_auction.aether",
+      "sha256": "f81758336d8dac2c02e216524011e84ac46a6622a760c9e7bfaf91e24441b2c8",
+      "stdout": "=== Combinatorial Double Auction ===\nSeller S0: inventory [CPU:4 RAM:8 GPU:1], reserve 50\nSeller S1: inventory [CPU:2 RAM:4 GPU:2], reserve 60\nSeller S2: inventory [CPU:8 RAM:8 GPU:0], reserve 40\nBuyer  B0: wants [CPU:2 RAM:4 GPU:1], values it at 90\nBuyer  B1: wants [CPU:4 RAM:8 GPU:0], values it at 80\nBuyer  B2: wants [CPU:2 RAM:4 GPU:2], values it at 65\nBuyer  B3: wants [CPU:2 RAM:8 GPU:0], values it at 70\n\nFeasible pairs (sorted by surplus): 7\n  B0 x S0  surplus 40\n  B1 x S2  surplus 40\n  B0 x S1  surplus 30\n  B1 x S0  surplus 30\n  B3 x S2  surplus 30\n  B3 x S0  surplus 20\n  B2 x S1  surplus 5\n\nTRADE B0 x S0: [CPU:2 RAM:4 GPU:1] cleared at midpoint price 70 (surplus 40)\nTRADE B1 x S2: [CPU:4 RAM:8 GPU:0] cleared at midpoint price 60 (surplus 40)\nTRADE B3 x S2: FAILED on RAM (inventory drained by earlier trade) -- ROLLED BACK\nTRADE B3 x S0: FAILED on RAM (inventory drained by earlier trade) -- ROLLED BACK\nTRADE B2 x S1: [CPU:2 RAM:4 GPU:2] cleared at midpoint price 62 (surplus 5)\n\nExecuted trades: 3   rollbacks: 2\nTotal surplus: 85\nRemaining inventories:\n  S0: [CPU:2 RAM:4 GPU:0]\n  S1: [CPU:0 RAM:0 GPU:0]\n  S2: [CPU:4 RAM:0 GPU:0]\n  B3 left unmatched\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine"
+      }
     }
   ]
 }

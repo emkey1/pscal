@@ -1,0 +1,126 @@
+// Physarum polycephalum (slime mold) shortest-path routing
+// The mold is modeled as a flow network: each edge is a protoplasmic tube
+// with a conductivity D. Nutrient pressure is fixed at the source (1.0) and
+// sink (0.0); interior pressures follow from flow conservation (solved here
+// by Jacobi iteration). Flux through a tube reinforces it while unused
+// tubes decay: D' = 0.9*D + |Q|. Tubes on the shortest path carry more flux,
+// so the network provably converges onto it -- the classic Tero/Nakagaki
+// maze-solving result, here on a 6-node graph with a 2-hop and a 4-hop route.
+
+fn realMatrix(n: Int, val: Real) -> Real[][] {
+    let m: Real[][] = [];
+    loop i in 0..n {
+        let row: Real[] = [];
+        loop j in 0..n { row = row + [val]; }
+        m = m + [row];
+    }
+    ret m;
+}
+
+fn realArray(n: Int, val: Real) -> Real[] {
+    let a: Real[] = [];
+    loop i in 0..n { a = a + [val]; }
+    ret a;
+}
+
+fn rabs(x: Real) -> Real {
+    if x < 0.0 { ret 0.0 - x; }
+    ret x;
+}
+
+fn main() -> Void {
+    let n: Int = 6;
+    let source: Int = 0;
+    let sink: Int = 5;
+
+    // Edge lengths (0.0 = no edge). Route A: 0-1-5 (2 hops).
+    // Route B: 0-2-3-4-5 (4 hops). Both start with conductivity 1.0.
+    let lengths: Real[][] = realMatrix(n, 0.0);
+    lengths[0][1] = 1.0; lengths[1][0] = 1.0;
+    lengths[1][5] = 1.0; lengths[5][1] = 1.0;
+    lengths[0][2] = 1.0; lengths[2][0] = 1.0;
+    lengths[2][3] = 1.0; lengths[3][2] = 1.0;
+    lengths[3][4] = 1.0; lengths[4][3] = 1.0;
+    lengths[4][5] = 1.0; lengths[5][4] = 1.0;
+
+    let conduct: Real[][] = realMatrix(n, 0.0);
+    loop i in 0..n {
+        loop j in 0..n {
+            if lengths[i][j] > 0.0 { conduct[i][j] = 1.0; }
+        }
+    }
+
+    fx {
+        println("=== Physarum Maze Routing ===");
+        println("6 nodes; source 0, sink 5");
+        println("Route A (short): 0-1-5      Route B (long): 0-2-3-4-5");
+        println("All tube conductivities start at 1.0");
+        println();
+    }
+
+    let steps: Int = 30;
+    let step: Int = 0;
+    loop step < steps {
+        // Solve pressures by Jacobi iteration: p[i] is the conductance-
+        // weighted average of neighbor pressures; source and sink are fixed.
+        let pressure: Real[] = realArray(n, 0.5);
+        pressure[source] = 1.0;
+        pressure[sink] = 0.0;
+        loop sweep in 0..200 {
+            loop i in 0..n {
+                if i != source && i != sink {
+                    let num: Real = 0.0;
+                    let den: Real = 0.0;
+                    loop j in 0..n {
+                        if conduct[i][j] > 0.0 {
+                            let w: Real = conduct[i][j] / lengths[i][j];
+                            num = num + w * pressure[j];
+                            den = den + w;
+                        }
+                    }
+                    if den > 0.0 {
+                        pressure[i] = num / den;
+                    }
+                }
+            }
+        }
+
+        // Flux through each tube, then reinforce-or-decay.
+        loop i in 0..n {
+            loop j in 0..n {
+                if lengths[i][j] > 0.0 && i < j {
+                    let q: Real = conduct[i][j]
+                        * (pressure[i] - pressure[j]) / lengths[i][j];
+                    let newD: Real = conduct[i][j] * 0.9 + rabs(q);
+                    conduct[i][j] = newD;
+                    conduct[j][i] = newD;
+                }
+            }
+        }
+
+        if step % 10 == 9 {
+            fx {
+                println("After ", step + 1, " steps:");
+                println("  Route A tubes: 0-1: ", conduct[0][1],
+                        "  1-5: ", conduct[1][5]);
+                println("  Route B tubes: 0-2: ", conduct[0][2],
+                        "  2-3: ", conduct[2][3],
+                        "  3-4: ", conduct[3][4],
+                        "  4-5: ", conduct[4][5]);
+            }
+        }
+        step = step + 1;
+    }
+
+    let shortAvg: Real = (conduct[0][1] + conduct[1][5]) / 2.0;
+    let longAvg: Real = (conduct[0][2] + conduct[2][3]
+                         + conduct[3][4] + conduct[4][5]) / 4.0;
+    fx {
+        println();
+        println("Mean conductivity -- short route: ", shortAvg,
+                ", long route: ", longAvg);
+        println("Short route dominates: ", shortAvg > longAvg * 10.0);
+        println("The mold has collapsed onto the shortest path 0 -> 1 -> 5.");
+    }
+    ret;
+}

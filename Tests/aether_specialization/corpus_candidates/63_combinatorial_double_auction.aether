@@ -1,0 +1,177 @@
+// Combinatorial Double Auction with transactional rollback
+// Buyers bid on all-or-nothing bundles of goods (CPU/RAM/GPU units); sellers
+// offer inventories with a reserve price. Feasible buyer/seller pairs are
+// computed up front, sorted by surplus (bid - reserve), and executed
+// greedily. Because feasibility is NOT rechecked after earlier trades drain
+// inventory, an execution can fail partway through deducting goods -- the
+// deliberately-exercised case here -- and must roll back its partial
+// deductions, leaving the seller's inventory exactly as it was.
+
+fn intArray(n: Int, val: Int) -> Int[] {
+    let a: Int[] = [];
+    loop i in 0..n { a = a + [val]; }
+    ret a;
+}
+
+fn goodName(g: Int) -> Text {
+    if g == 0 { ret "CPU"; }
+    if g == 1 { ret "RAM"; }
+    ret "GPU";
+}
+
+fn bundleText(b: Int[]) -> Text {
+    let s: Text = "[";
+    loop g in 0..len(b) {
+        if g > 0 { s = s + " "; }
+        s = s + goodName(g) + ":" + IntToStr(b[g]);
+    }
+    ret s + "]";
+}
+
+fn main() -> Void {
+    let numGoods: Int = 3;
+
+    // Sellers: inventory + reserve price for any bundle drawn from it.
+    let sellerInv: Int[][] = [
+        [4, 8, 1],
+        [2, 4, 2],
+        [8, 8, 0]
+    ];
+    let sellerReserve: Int[] = [50, 60, 40];
+    let numSellers: Int = len(sellerInv);
+
+    // Buyers: all-or-nothing bundle demand + private valuation.
+    let buyerDemand: Int[][] = [
+        [2, 4, 1],
+        [4, 8, 0],
+        [2, 4, 2],
+        [2, 8, 0]
+    ];
+    let buyerValue: Int[] = [90, 80, 65, 70];
+    let numBuyers: Int = len(buyerDemand);
+
+    fx {
+        println("=== Combinatorial Double Auction ===");
+        loop s in 0..numSellers {
+            println("Seller S", s, ": inventory ", bundleText(sellerInv[s]),
+                    ", reserve ", sellerReserve[s]);
+        }
+        loop b in 0..numBuyers {
+            println("Buyer  B", b, ": wants ", bundleText(buyerDemand[b]),
+                    ", values it at ", buyerValue[b]);
+        }
+        println();
+    }
+
+    // Phase 1: enumerate pairs feasible against the ORIGINAL inventories.
+    let pairBuyer: Int[] = [];
+    let pairSeller: Int[] = [];
+    let pairSurplus: Int[] = [];
+    loop b in 0..numBuyers {
+        loop s in 0..numSellers {
+            let surplus: Int = buyerValue[b] - sellerReserve[s];
+            let feasible: Bool = surplus >= 0;
+            loop g in 0..numGoods {
+                if sellerInv[s][g] < buyerDemand[b][g] { feasible = false; }
+            }
+            if feasible {
+                pairBuyer = pairBuyer + [b];
+                pairSeller = pairSeller + [s];
+                pairSurplus = pairSurplus + [surplus];
+            }
+        }
+    }
+
+    // Sort pairs by surplus, descending (insertion sort, stable).
+    let numPairs: Int = len(pairBuyer);
+    loop i in 1..numPairs {
+        let kb: Int = pairBuyer[i];
+        let ks: Int = pairSeller[i];
+        let ku: Int = pairSurplus[i];
+        let j: Int = i - 1;
+        loop j >= 0 && pairSurplus[j] < ku {
+            pairBuyer[j + 1] = pairBuyer[j];
+            pairSeller[j + 1] = pairSeller[j];
+            pairSurplus[j + 1] = pairSurplus[j];
+            j = j - 1;
+        }
+        pairBuyer[j + 1] = kb;
+        pairSeller[j + 1] = ks;
+        pairSurplus[j + 1] = ku;
+    }
+
+    fx {
+        println("Feasible pairs (sorted by surplus): ", numPairs);
+        loop k in 0..numPairs {
+            println("  B", pairBuyer[k], " x S", pairSeller[k],
+                    "  surplus ", pairSurplus[k]);
+        }
+        println();
+    }
+
+    // Phase 2: greedy execution with per-trade rollback.
+    let buyerDone: Bool[] = [];
+    loop b2 in 0..numBuyers { buyerDone = buyerDone + [false]; }
+    let trades: Int = 0;
+    let rollbacks: Int = 0;
+    let totalSurplus: Int = 0;
+
+    loop k in 0..numPairs {
+        let b: Int = pairBuyer[k];
+        let s: Int = pairSeller[k];
+        if !buyerDone[b] {
+            // Attempt: deduct good by good, remembering how far we got.
+            let deducted: Int[] = intArray(numGoods, 0);
+            let failedGood: Int = -1;
+            loop g in 0..numGoods {
+                if failedGood == -1 {
+                    if sellerInv[s][g] >= buyerDemand[b][g] {
+                        sellerInv[s][g] = sellerInv[s][g] - buyerDemand[b][g];
+                        deducted[g] = buyerDemand[b][g];
+                    } else {
+                        failedGood = g;
+                    }
+                }
+            }
+
+            if failedGood >= 0 {
+                // ROLLBACK: restore every partial deduction.
+                loop g2 in 0..numGoods {
+                    sellerInv[s][g2] = sellerInv[s][g2] + deducted[g2];
+                }
+                rollbacks = rollbacks + 1;
+                fx {
+                    println("TRADE B", b, " x S", s, ": FAILED on ",
+                            goodName(failedGood),
+                            " (inventory drained by earlier trade) -- ROLLED BACK");
+                }
+            } else {
+                buyerDone[b] = true;
+                trades = trades + 1;
+                totalSurplus = totalSurplus + pairSurplus[k];
+                let price: Int = (buyerValue[b] + sellerReserve[s]) / 2;
+                fx {
+                    println("TRADE B", b, " x S", s, ": ", bundleText(buyerDemand[b]),
+                            " cleared at midpoint price ", price,
+                            " (surplus ", pairSurplus[k], ")");
+                }
+            }
+        }
+    }
+
+    fx {
+        println();
+        println("Executed trades: ", trades, "   rollbacks: ", rollbacks);
+        println("Total surplus: ", totalSurplus);
+        println("Remaining inventories:");
+        loop s2 in 0..numSellers {
+            println("  S", s2, ": ", bundleText(sellerInv[s2]));
+        }
+        loop b3 in 0..numBuyers {
+            if !buyerDone[b3] {
+                println("  B", b3, " left unmatched");
+            }
+        }
+    }
+    ret;
+}

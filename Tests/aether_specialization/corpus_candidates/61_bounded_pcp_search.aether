@@ -1,0 +1,140 @@
+// Bounded Post Correspondence Problem (PCP) search
+// PCP is undecidable in general; bounding the sequence length makes it a
+// finite search. Dominoes are (top, bottom) string pairs; the goal is a
+// sequence of domino indices (repeats allowed) where the concatenated tops
+// equal the concatenated bottoms. This uses the classic solvable instance
+//   1=(a, baa)  2=(ab, aa)  3=(bba, bb)
+// whose shortest solution is 3 2 3 1, and runs a breadth-first search over
+// "difference" states: at every step one side is a prefix of the other, so
+// a state is just (which side is ahead, the unmatched remainder).
+
+fn isPrefixOf(a: Text, b: Text) -> Bool {
+    let la: Int = string_len(a);
+    if la > string_len(b) { ret false; }
+    if la == 0 { ret true; }
+    ret copy(b, 1, la) == a;
+}
+
+fn suffixFrom(s: Text, start: Int) -> Text {
+    ret copy(s, start + 1, string_len(s) - start);
+}
+
+// Rebuild both strings from a solution (sequence of 1-based domino digits)
+// and confirm they match -- the search result is verified, not trusted.
+fn verifySolution(tops: Text[], bottoms: Text[], seq: Text) -> Bool {
+    let topStr: Text = "";
+    let botStr: Text = "";
+    loop i in 0..string_len(seq) {
+        let idx: Int = ord(copy(seq, i + 1, 1)) - ord("1");
+        topStr = topStr + tops[idx];
+        botStr = botStr + bottoms[idx];
+    }
+    fx {
+        println("  top:    ", topStr);
+        println("  bottom: ", botStr);
+    }
+    ret topStr == botStr;
+}
+
+fn main() -> Void {
+    let tops: Text[] = ["a", "ab", "bba"];
+    let bottoms: Text[] = ["baa", "aa", "bb"];
+    let numDominoes: Int = len(tops);
+    let maxDepth: Int = 6;
+
+    fx {
+        println("=== Bounded PCP Search ===");
+        println("Dominoes (top/bottom):");
+        loop i in 0..numDominoes {
+            println("  ", i + 1, ": ", tops[i], " / ", bottoms[i]);
+        }
+        println("Depth bound: ", maxDepth);
+        println();
+    }
+
+    // Frontier state: rems[k] = unmatched remainder, sides[k] = which side
+    // is ahead (0 = top string longer, 1 = bottom string longer),
+    // seqs[k] = domino indices so far as a digit string.
+    let rems: Text[] = [];
+    let sides: Int[] = [];
+    let seqs: Text[] = [];
+
+    // Depth 1: seed with every domino where one side is a prefix of the other.
+    loop d in 0..numDominoes {
+        let t: Text = tops[d];
+        let b: Text = bottoms[d];
+        let digit: Text = chr(ord("1") + d);
+        if t == b {
+            fx { println("Trivial solution: domino ", d + 1); }
+        } else if isPrefixOf(t, b) {
+            rems = rems + [suffixFrom(b, string_len(t))];
+            sides = sides + [1];
+            seqs = seqs + [digit];
+        } else if isPrefixOf(b, t) {
+            rems = rems + [suffixFrom(t, string_len(b))];
+            sides = sides + [0];
+            seqs = seqs + [digit];
+        }
+    }
+
+    let solution: Text = "";
+    let depth: Int = 1;
+    loop depth < maxDepth && solution == "" && len(rems) > 0 {
+        fx { println("Depth ", depth, ": ", len(rems), " live state(s)"); }
+        let newRems: Text[] = [];
+        let newSides: Int[] = [];
+        let newSeqs: Text[] = [];
+
+        loop k in 0..len(rems) {
+            loop d2 in 0..numDominoes {
+                if solution == "" {
+                    // Extend: the ahead side carries its surplus (rem) into
+                    // the comparison. If the top is ahead, the effective new
+                    // top text is rem + tile-top vs. the tile-bottom alone;
+                    // mirrored when the bottom is ahead.
+                    let sTop: Text = tops[d2];
+                    let sBot: Text = bottoms[d2];
+                    if sides[k] == 0 {
+                        sTop = rems[k] + tops[d2];
+                    } else {
+                        sBot = rems[k] + bottoms[d2];
+                    }
+                    let digit2: Text = chr(ord("1") + d2);
+                    if sTop == sBot {
+                        solution = seqs[k] + digit2;
+                    } else if isPrefixOf(sTop, sBot) {
+                        newRems = newRems + [suffixFrom(sBot, string_len(sTop))];
+                        newSides = newSides + [1];
+                        newSeqs = newSeqs + [seqs[k] + digit2];
+                    } else if isPrefixOf(sBot, sTop) {
+                        newRems = newRems + [suffixFrom(sTop, string_len(sBot))];
+                        newSides = newSides + [0];
+                        newSeqs = newSeqs + [seqs[k] + digit2];
+                    }
+                    // else: mismatch, branch pruned
+                }
+            }
+        }
+        rems = newRems;
+        sides = newSides;
+        seqs = newSeqs;
+        depth = depth + 1;
+    }
+
+    fx { println(); }
+    if solution != "" {
+        fx {
+            println("SOLUTION found at depth ", string_len(solution), ":");
+            print("  sequence: ");
+            loop i in 0..string_len(solution) {
+                print(copy(solution, i + 1, 1), " ");
+            }
+            println();
+        }
+        let ok: Bool = verifySolution(tops, bottoms, solution);
+        fx { println("  independently verified: ", ok); }
+    } else {
+        fx { println("No solution within depth ", maxDepth, "."); }
+    }
+    ret;
+}
