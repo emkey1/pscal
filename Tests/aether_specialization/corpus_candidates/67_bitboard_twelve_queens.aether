@@ -33,10 +33,7 @@ fn searchQueens(
     if row == boardSize {
         result.count = result.count + 1;
         if !result.found {
-            // Slice to snapshot: concatenation-built arrays alias on plain
-            // assignment (compiler quirk as of 2026-07-23); without the copy
-            // this field would keep tracking the live search array.
-            result.firstPlacement = placement[0..boardSize];
+            result.firstPlacement = placement;
             result.found = true;
         }
         ret;

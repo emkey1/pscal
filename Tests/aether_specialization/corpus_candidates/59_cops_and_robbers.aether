@@ -139,18 +139,14 @@ fn updateBelief(belief: Bool[], graph: Int[][], visible: Bool[],
         ret newBelief;
     }
 
-    // NOTE: this loop's variable name is deliberately unique program-wide: a
-    // `continue` inside a loop whose variable name is bound anywhere else in
-    // the program trips a compiler scope bug (SCOPE-001) as of aether
-    // 2026-07-20-1.
-    loop bcell in 0..n {
-        if visible[bcell] { continue; }  // spotted-empty nodes are ruled out
-        if belief[bcell] {
-            newBelief[bcell] = true;     // robber may have stayed
+    loop i in 0..n {
+        if visible[i] { continue; }  // spotted-empty nodes are ruled out
+        if belief[i] {
+            newBelief[i] = true;     // robber may have stayed
         } else {
             loop j in 0..n {
-                if graph[bcell][j] == 1 && belief[j] {
-                    newBelief[bcell] = true;  // robber may have stepped here
+                if graph[i][j] == 1 && belief[j] {
+                    newBelief[i] = true;  // robber may have stepped here
                     break;
                 }
             }

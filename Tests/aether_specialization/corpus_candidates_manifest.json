@@ -6179,7 +6179,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_000",
       "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_000",
-      "sha256": "8101d1203e7efd111399a6d6017d2082dc5ee54cb0e62a500bd5fce0d3ce12e7",
+      "sha256": "082a7eaf802745b7326372c12575bffa607a37de7dfbb1c686aea5732968da35",
       "stdout": "nodes: 5\nedges: 3\nreachable_from(0) = 4\ncomponents = 2\n",
       "metadata": {
         "canonical": true,
@@ -6193,13 +6193,18 @@
           "adjacency",
           "matrix"
         ],
-        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-23",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_001",
       "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_001",
-      "sha256": "46aafaff1459950838c79046061924c21739ce3e30c366d2669343d38cd5a005",
+      "sha256": "a0dff7dac2679c10562074d6047d34c9536094fafb05e5704f4e37f984e5e48c",
       "stdout": "nodes: 7\nedges: 11\nreachable_from(0) = 7\ncomponents = 1\n",
       "metadata": {
         "canonical": true,
@@ -6213,13 +6218,18 @@
           "adjacency",
           "matrix"
         ],
-        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-23",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_002",
       "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_002",
-      "sha256": "96f6df19249fe13d1d9c729c5cdd84f63f428135a1f60902c6db6debbc2cc2ab",
+      "sha256": "cee9c88f4c3960f37f04863c8e5076be6b3bc64c0bbd7ae7cbcc1b4ff58ee2b4",
       "stdout": "nodes: 4\nedges: 2\nreachable_from(2) = 3\ncomponents = 2\n",
       "metadata": {
         "canonical": true,
@@ -6233,13 +6243,18 @@
           "adjacency",
           "matrix"
         ],
-        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-23",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_003",
       "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_003",
-      "sha256": "a2e2a6bac670c7d850d0803da1a373c22fc4254d3ce19b1473089cda25e19578",
+      "sha256": "c44f14709fcba2502459565afeb637d8cda1828c879a0dc067f6ba8203ce2f8c",
       "stdout": "nodes: 7\nedges: 10\nreachable_from(2) = 7\ncomponents = 1\n",
       "metadata": {
         "canonical": true,
@@ -6253,13 +6268,18 @@
           "adjacency",
           "matrix"
         ],
-        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-23",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_004",
       "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_004",
-      "sha256": "1aa031ca75f8852a0d0c5f2a1110bf7894911d8b71168a8ba7c79265849d2f9d",
+      "sha256": "246aa6f5c86fa0b21851ae4ebc076feaba7b1e99d3be05c4a7e5365f57fe107b",
       "stdout": "nodes: 5\nedges: 3\nreachable_from(0) = 2\ncomponents = 2\n",
       "metadata": {
         "canonical": true,
@@ -6273,13 +6293,18 @@
           "adjacency",
           "matrix"
         ],
-        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-23",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_005",
       "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_005",
-      "sha256": "364ffede849fccd2ef579005b6f1fa78dfd673a4672cf7c70be9d683daa654ae",
+      "sha256": "15d5f4b57c414c55305f5e3903daa5cddc8d677bb595aa3dd635a953d1873e84",
       "stdout": "nodes: 7\nedges: 10\nreachable_from(3) = 7\ncomponents = 1\n",
       "metadata": {
         "canonical": true,
@@ -6293,13 +6318,18 @@
           "adjacency",
           "matrix"
         ],
-        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-23",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_006",
       "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_006",
-      "sha256": "b6d4eee0570f184c56b94cc1387c4ac0261e0ca59d43929ca23c7b9015156d72",
+      "sha256": "ec64076c0067827348bdc1100080f35f88fda8f2ce96bd4eefa0e133fcd3b58f",
       "stdout": "nodes: 5\nedges: 5\nreachable_from(4) = 5\ncomponents = 1\n",
       "metadata": {
         "canonical": true,
@@ -6313,13 +6343,18 @@
           "adjacency",
           "matrix"
         ],
-        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-23",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_007",
       "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_007",
-      "sha256": "8a373c726f129d1432547b570d7c841f864ef1756afef395b38a9372a8747ced",
+      "sha256": "5fbeaa4a9b10bbc3b7827b5d26387fb5f9b09adba40320d3d18f88f7f45b9450",
       "stdout": "nodes: 6\nedges: 7\nreachable_from(4) = 6\ncomponents = 1\n",
       "metadata": {
         "canonical": true,
@@ -6333,13 +6368,18 @@
           "adjacency",
           "matrix"
         ],
-        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-23",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/313_graphs_008",
       "repo_path": "Tests/aether_specialization/corpus_candidates/313_graphs_008",
-      "sha256": "265e51db39435915083ee62794cf3a688c13a4e0158bd1eb68c5039a5cee4a7e",
+      "sha256": "69d9266a14d35e47e14eace67a0d854997e9741ea3ceb0269f9a3a3e047f0361",
       "stdout": "nodes: 5\nedges: 7\nreachable_from(1) = 5\ncomponents = 1\n",
       "metadata": {
         "canonical": true,
@@ -6353,7 +6393,12 @@
           "adjacency",
           "matrix"
         ],
-        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference"
+        "notes": "undirected graph as a flat n*n adjacency matrix (adj[u*n+v]) \u2014 recursive DFS reachable-node count from a source, connected-component count by scanning unvisited roots, undirected edge count; visited[] passed by reference",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-23",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -12168,11 +12213,16 @@
     {
       "source_path": "/tmp/corpus_new5/59_cops_and_robbers.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/59_cops_and_robbers.aether",
-      "sha256": "53b2cb6051561e05c2f505318e2923a2ad1271a045672afe27c3358c6a15bcfb",
+      "sha256": "dc2752f30a7caf0f86cf159c0e77223c152abc8202ad51bdc68f5b6b801c1992",
       "stdout": "=== Cops & Robbers: Pursuit-Evasion with Fog of War ===\nGraph: 8 nodes, bottleneck 1-4-5 between two clusters\nCops start at nodes 0 and 3; robber starts at node 7\nVisibility radius: 2 hops; turn limit: 20\n\n--- Turn 1 ---\n  Robber hidden; belief covers 3 node(s)\n  Cop 0 -> node 1, Cop 1 -> node 0\n  Robber -> node 7\n--- Turn 2 ---\n  Robber hidden; belief covers 2 node(s)\n  Cop 0 -> node 4, Cop 1 -> node 1\n  Robber -> node 7\n--- Turn 3 ---\n  Robber SPOTTED at node 7\n  Cop 0 -> node 5, Cop 1 -> node 4\n  Robber -> node 7\n--- Turn 4 ---\n  Robber SPOTTED at node 7\n  Cop 0 -> node 7, Cop 1 -> node 5\n\n*** ROBBER CAPTURED at node 7 on turn 4 ***\n",
       "metadata": {
         "include_in_training": false,
-        "lifecycle": "quarantine"
+        "lifecycle": "quarantine",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-23",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -12238,21 +12288,31 @@
     {
       "source_path": "/tmp/corpus_new6/66_berlekamp_massey_gf2.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/66_berlekamp_massey_gf2.aether",
-      "sha256": "76ee21502547fffc3ee4570edfa27e374749a5c8e9f6118378c81968e5e3df67",
+      "sha256": "c8fb084be7292e97bbecd0f001e31805a385e4f0bb1ac26c1280d3aebec75e2d",
       "stdout": "Observed bits: 10011010010000101011101100011111\nRecovered C(x) = 1 + x^2 + x^5\nLinear complexity: 5\nRecurrence validates every observation: true\n",
       "metadata": {
         "include_in_training": false,
-        "lifecycle": "quarantine"
+        "lifecycle": "quarantine",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-23",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/tmp/corpus_new6/67_bitboard_twelve_queens.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/67_bitboard_twelve_queens.aether",
-      "sha256": "1467c64350114efc269033456e8e7c54802a9711760feab16349638f38d88d83",
+      "sha256": "050b2a90e60fd6a120b1e86e1d4ccc2f79d183c311aeb7be92073582c37d4d68",
       "stdout": "12-queens solution count: 14200\nFirst solution:\nQ . . . . . . . . . . . \n. . Q . . . . . . . . . \n. . . . Q . . . . . . . \n. . . . . . . Q . . . . \n. . . . . . . . . Q . . \n. . . . . . . . . . . Q \n. . . . . Q . . . . . . \n. . . . . . . . . . Q . \n. Q . . . . . . . . . . \n. . . . . . Q . . . . . \n. . . . . . . . Q . . . \n. . . Q . . . . . . . . \n",
       "metadata": {
         "include_in_training": false,
-        "lifecycle": "quarantine"
+        "lifecycle": "quarantine",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-23",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -12308,11 +12368,16 @@
     {
       "source_path": "/tmp/corpus_new6/73_quantum_harmonic_ground_state.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/73_quantum_harmonic_ground_state.aether",
-      "sha256": "a1e88a7c9d1c67cb60af3231cb8811e8d6d403d36d4e38bc6b1cafb2b9177d8b",
+      "sha256": "c0d396fa59e952386494586429d752916f0b42b9d1756293946138b38c8ea17d",
       "stdout": "Ground-state energy estimate: 0.499800307\nExact energy:                 0.500000000\n<x^2> estimate:               0.500221960\nProbability density at x=0:  0.564120695\n",
       "metadata": {
         "include_in_training": false,
-        "lifecycle": "quarantine"
+        "lifecycle": "quarantine",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-23",
+          "source_rebaselined": true
+        }
       }
     },
     {
