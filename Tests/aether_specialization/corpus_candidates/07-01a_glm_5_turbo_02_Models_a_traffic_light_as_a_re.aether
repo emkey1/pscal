@@ -1,0 +1,49 @@
+type TrafficLight {
+    state: Text;
+    ticks: Int;
+
+    fn tick() -> Void {
+        self.ticks = self.ticks + 1;
+        if self.state == "green" {
+            if self.ticks >= 5 {
+                self.state = "yellow";
+                self.ticks = 0;
+            }
+            ret;
+        }
+        if self.state == "yellow" {
+            if self.ticks >= 2 {
+                self.state = "red";
+                self.ticks = 0;
+            }
+            ret;
+        }
+        if self.ticks >= 4 {
+            self.state = "green";
+            self.ticks = 0;
+        }
+        ret;
+    }
+
+    fn report() -> Void {
+        fx {
+            println("  tick ", self.ticks, " -> [", self.state, "]");
+        }
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let light: TrafficLight = new TrafficLight();
+    light.state = "green";
+    light.ticks = 0;
+
+    fx { println("Traffic Light Simulation (15 ticks):"); }
+    let i: Int = 0;
+    loop i < 15 {
+        light.report();
+        light.tick();
+        i = i + 1;
+    }
+    ret;
+}

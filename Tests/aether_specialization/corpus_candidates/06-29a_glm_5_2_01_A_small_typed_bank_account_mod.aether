@@ -1,0 +1,53 @@
+type Account {
+    owner: Text;
+    balance: Real;
+    transactions: Int;
+
+    fn deposit(amount: Real) -> Void {
+        self.balance = self.balance + amount;
+        self.transactions = self.transactions + 1;
+        fx {
+            println(self.owner, " +", amount:0:2, " => balance: ", self.balance:0:2);
+        }
+        ret;
+    }
+
+    fn withdraw(amount: Real) -> Bool {
+        if amount > self.balance {
+            fx {
+                println(self.owner, " insufficient funds for withdrawal of ", amount:0:2);
+            }
+            ret false;
+        }
+        self.balance = self.balance - amount;
+        self.transactions = self.transactions + 1;
+        fx {
+            println(self.owner, " -", amount:0:2, " => balance: ", self.balance:0:2);
+        }
+        ret true;
+    }
+
+    fn summary() -> Void {
+        fx {
+            println("--- ", self.owner, " ---");
+            println("  balance:      ", self.balance:0:2);
+            println("  transactions: ", self.transactions);
+        }
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let alice: Account = Account { owner: "Alice", balance: 1000.0, transactions: 0 };
+    let bob: Account = Account { owner: "Bob", balance: 500.0, transactions: 0 };
+
+    alice.deposit(250.0);
+    alice.withdraw(100.0);
+    alice.withdraw(2000.0);
+    bob.deposit(75.5);
+    bob.withdraw(300.0);
+
+    alice.summary();
+    bob.summary();
+    ret;
+}

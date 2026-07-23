@@ -1,0 +1,60 @@
+type IntStack {
+    data: Int[];
+    size: Int;
+    cap: Int;
+
+    fn isEmpty() -> Bool {
+        ret self.size == 0;
+    }
+
+    fn push(val: Int) -> Void {
+        if self.size < self.cap {
+            self.data = self.data + [val];
+            self.size = self.size + 1;
+        }
+        ret;
+    }
+
+    fn pop() -> Int {
+        self.size = self.size - 1;
+        ret self.data[self.size];
+    }
+
+    fn peek() -> Int {
+        ret self.data[self.size - 1];
+    }
+}
+
+@pre stack.size > 0
+@post result >= 0
+fn safePop(stack: IntStack) -> Int {
+    ret stack.pop();
+}
+
+@pre stack.size > 0
+@post result >= 0
+fn safePeek(stack: IntStack) -> Int {
+    ret stack.peek();
+}
+
+fn main() -> Void {
+    let s: IntStack = new IntStack();
+    s.cap = 10;
+    s.size = 0;
+    s.data = [];
+
+    let i: Int = 1;
+    loop i <= 7 {
+        s.push(i * i);
+        i = i + 1;
+    }
+
+    fx { println("Pushed squares: 1 4 9 16 25 36 49"); }
+    fx { println("Top before pop: ", safePeek(s)); }
+    fx { println("Popping all:"); }
+    loop !s.isEmpty() {
+        let val: Int = safePop(s);
+        fx { println("  -> ", val); }
+    }
+    ret;
+}

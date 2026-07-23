@@ -1,0 +1,35 @@
+const MaxFib: Int = 20;
+
+@pure
+fn generate_fib(limit: Int) -> Int[] {
+    let xs: Int[] = [];
+    if limit <= 0 {
+        ret [];
+    }
+    xs = xs + [0];
+    if limit == 1 {
+        ret xs;
+    }
+    xs = xs + [1];
+    let a: Int = 0;
+    let b: Int = 1;
+    loop i in 2..limit {
+        let next: Int = a + b;
+        a = b;
+        b = next;
+        xs = xs + [next];
+    }
+    ret xs;
+}
+
+fn main() -> Void {
+    let fibs: Int[] = generate_fib(MaxFib);
+    fx {
+        println("Fibonacci sequence (", length(fibs), " terms):");
+        loop i in 0..length(fibs) {
+            print(fibs[i], " ");
+        }
+        println("");
+    }
+    ret;
+}

@@ -1,0 +1,51 @@
+fn sieve(limit: Int) -> Int[] {
+    let isPrime: Bool[] = [];
+    let i: Int = 0;
+    loop i <= limit {
+        isPrime = isPrime + [true];
+        i = i + 1;
+    }
+    isPrime[0] = false;
+    isPrime[1] = false;
+
+    let p: Int = 2;
+    loop p * p <= limit {
+        if isPrime[p] {
+            let multiple: Int = p * p;
+            loop multiple <= limit {
+                isPrime[multiple] = false;
+                multiple = multiple + p;
+            }
+        }
+        p = p + 1;
+    }
+
+    let primes: Int[] = [];
+    let j: Int = 2;
+    loop j <= limit {
+        if isPrime[j] {
+            primes = primes + [j];
+        }
+        j = j + 1;
+    }
+    ret primes;
+}
+
+fn main() -> Void {
+    let primes: Int[] = sieve(100);
+    let count: Int = length(primes);
+    fx {
+        println("Primes up to 100 (", count, " found):");
+    }
+    let i: Int = 0;
+    loop i < count {
+        fx {
+            print(primes[i], " ");
+        }
+        i = i + 1;
+    }
+    fx {
+        println("");
+    }
+    ret;
+}

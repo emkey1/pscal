@@ -1,0 +1,28 @@
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let json: Text = "[{\"title\":\"Task1\",\"done\":true},{\"title\":\"Task2\",\"done\":false}]";
+    let doc: ToonDoc = toon_parse(json);
+    let root: ToonNode = toon_root(doc);
+
+    let total: Int = toon_len(root);
+    let doneCount: Int = 0;
+    loop i in 0..total {
+        let task: ToonNode = toon_at(root, i);
+        let title: Text = toon_get_text(task, "title");
+        let isDone: Bool = toon_get_bool(task, "done");
+        if isDone { doneCount = doneCount + 1; }
+        fx { println("Task:", title, "Done:", isDone); }
+    }
+
+    let pending: Int = total - doneCount;
+    fx {
+        println("Summary: total=", total, " done=", doneCount, " pending=", pending);
+    }
+
+    toon_close(doc);
+    ret;
+}

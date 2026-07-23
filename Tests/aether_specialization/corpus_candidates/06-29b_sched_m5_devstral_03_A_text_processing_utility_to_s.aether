@@ -1,0 +1,35 @@
+@pure
+fn countVowels(word: Text) -> Int {
+    let vowels: Text = "aeiouAEIOU";
+    let count: Int = 0;
+    loop i in 1..string_len(vowels) {
+        let vowel: Text = copy(vowels, i, 1);
+        if pos(word, vowel) != 0 {
+            count = count + 1;
+        }
+    }
+    ret count;
+}
+
+fn main() -> Void {
+    let sentence: Text = "Hello World from Aether";
+    fx {
+        println("Sentence:", sentence);
+    }
+
+    let words: Text[] = split(sentence, " ");
+    let totalVowels: Int = 0;
+
+    loop i in 0..length(words) {
+        let word: Text = words[i];
+        fx {
+            println("Word '", word, "':", countVowels(word), " vowels");
+        }
+        totalVowels = totalVowels + countVowels(word);
+    }
+
+    fx {
+        println("Total vowels:", totalVowels);
+    }
+    ret;
+}

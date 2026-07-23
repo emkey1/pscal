@@ -1,0 +1,34 @@
+fn main() -> Void {
+    fx {
+        println("=== Environment Inspector ===");
+
+        let cwd: Text = getcurrentdir();
+        println("Current Dir: ", cwd);
+
+        let home: Text = getenv("HOME");
+        if home == "" {
+            println("HOME not set");
+        } else {
+            println("HOME: ", home);
+        }
+
+        let user: Text = getenv("USER");
+        if user == "" {
+            user = getenv("USERNAME");
+        }
+        if user != "" {
+            println("User: ", user);
+        }
+
+        let arg_count: Int = paramcount();
+        println("Argument count: ", arg_count);
+
+        loop i in 0..arg_count {
+            let arg: Text = paramstr(i);
+            println("  Arg[", i, "]: ", arg);
+        }
+
+        println("=== End ===");
+    }
+    ret;
+}

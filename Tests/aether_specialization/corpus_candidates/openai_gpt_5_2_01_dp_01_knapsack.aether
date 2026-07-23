@@ -1,0 +1,44 @@
+type Item {
+    name: Text = "";
+    weight: Int = 0;
+    value: Int = 0;
+}
+
+fn main() -> Void {
+    let items: Item[] = [
+        new Item { name: "map", weight: 9, value: 150 },
+        new Item { name: "compass", weight: 13, value: 35 },
+        new Item { name: "water", weight: 4, value: 200 },
+        new Item { name: "sandwich", weight: 3, value: 120 },
+        new Item { name: "jacket", weight: 6, value: 180 },
+        new Item { name: "camera", weight: 5, value: 160 }
+    ];
+
+    let cap: Int = 15;
+
+    let dp: Int[] = [];
+    loop c in 0..(cap + 1) { dp = dp + [0]; }
+
+    loop i in 0..length(items) {
+        let it: Item = items[i];
+
+        let next: Int[] = [];
+        loop c in 0..(cap + 1) { next = next + [dp[c]]; }
+
+        loop c in 0..(cap + 1) {
+            if c >= it.weight {
+                let cand: Int = dp[c - it.weight] + it.value;
+                if cand > next[c] {
+                    next[c] = cand;
+                }
+            }
+        }
+
+        dp = next;
+    }
+
+    fx {
+        println("capacity=", cap, " bestValue=", dp[cap]);
+    }
+    ret;
+}

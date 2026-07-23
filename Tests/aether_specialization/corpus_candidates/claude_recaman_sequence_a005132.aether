@@ -1,0 +1,60 @@
+// Recaman's sequence (OEIS A005132): a(n) = a(n-1) - n when that value is
+// positive and not yet in the sequence, otherwise a(n) = a(n-1) + n.
+// The addition branch may repeat earlier values. Whether EVERY nonnegative
+// integer eventually appears is still an open problem.
+
+fn main() -> Void {
+    let terms: Int = 201;            // compute a(0) .. a(200)
+    let seq: Int[] = [0];
+    let seen: Bool[] = [true];       // seen[v] <=> v already in sequence
+    let current: Int = 0;
+
+    loop step in 1..terms {
+        let back: Int = current - step;
+        if back > 0 {
+            loop length(seen) <= back {
+                seen = seen + [false];
+            }
+        }
+        if back > 0 && !seen[back] {
+            current = back;
+        } else {
+            current = current + step;
+        }
+        loop length(seen) <= current {
+            seen = seen + [false];
+        }
+        seen[current] = true;
+        seq = seq + [current];
+    }
+
+    fx {
+        println("Recaman's sequence, a(0) .. a(59):");
+        loop i in 0..60 {
+            print(seq[i], " ");
+        }
+        println("");
+        println("");
+    }
+
+    // Hunt for the small values inside the computed window.
+    loop k in 0..16 {
+        let at: Int = -1;
+        let i: Int = 0;
+        loop i < length(seq) {
+            if seq[i] == k {
+                at = i;
+                break;
+            }
+            i = i + 1;
+        }
+        fx {
+            if at >= 0 {
+                println(k, " first appears at index ", at);
+            } else {
+                println(k, " does not appear in the first ", length(seq), " terms");
+            }
+        }
+    }
+    ret;
+}

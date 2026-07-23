@@ -1,0 +1,19 @@
+@pure
+@pre base > 0
+@pre height > 0
+@post result >= 0
+fn triangle_area(base: Int, height: Int) -> Real {
+    ret 0.5 * base * height;
+}
+
+fn main() -> Void {
+    let base: Int = 10;
+    let height: Int = 5;
+    let area: Real = triangle_area(base, height);
+
+    fx {
+        println("Base: ", base, " Height: ", height);
+        println("Area: ", area:0:2);
+    }
+    ret;
+}

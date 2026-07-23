@@ -1,0 +1,54 @@
+// Somos-4 (OEIS A006720): a(1..4) = 1, and for n > 4,
+//   a(n) = (a(n-1)*a(n-3) + a(n-2)^2) / a(n-4)
+// Every term is an integer despite the division at every step -- the
+// "Laurent phenomenon," proved by Fomin and Zelevinsky in 2002. This
+// walk logs every step into an MStream (byte-appended one character at
+// a time via mstreamappendbyte) and flushes it once at the end.
+
+fn appendText(ms: MStream, text: Text) -> Void {
+    let n: Int = length(text);
+    loop i in 0..n {
+        let ch: Text = copy(text, i + 1, 1);
+        mstreamappendbyte(ms, ord(ch));
+    }
+    ret;
+}
+
+fn main() -> Void {
+    let terms: Int = 13;
+    let a: Int[] = [1, 1, 1, 1];
+    let log: MStream = mstreamcreate();
+
+    appendText(log, "Somos-4 sequence trace\n");
+    appendText(log, "n=1..4: 1, 1, 1, 1 (seeds)\n");
+
+    let n: Int = 5;
+    loop n <= terms {
+        let numerator: Int = a[n - 2] * a[n - 4] + a[n - 3] * a[n - 3];
+        let denom: Int = a[n - 5];
+        let remainder: Int = numerator % denom;
+
+        if remainder != 0 {
+            fx {
+                println("UNEXPECTED: non-exact division at n=", n, " -- a counterexample to Laurent!");
+            }
+        }
+
+        let next: Int = numerator / denom;
+        a = a + [next];
+
+        appendText(log, "n=" + int_to_text(n) + ": -> " + int_to_text(next) + "\n");
+
+        n = n + 1;
+    }
+
+    let report: Text = mstreambuffer(log);
+    fx {
+        print(report);
+        println("");
+        println("Every division above came out exact -- the Laurent phenomenon holds.");
+    }
+
+    mstreamfree(log);
+    ret;
+}

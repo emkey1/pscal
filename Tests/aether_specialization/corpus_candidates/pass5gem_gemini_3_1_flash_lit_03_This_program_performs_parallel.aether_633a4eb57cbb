@@ -1,0 +1,25 @@
+type Result {
+    val: Int = 0;
+}
+
+fn compute_power(out: Result, base: Int, exp: Int) -> Void {
+    let res: Int = 1;
+    loop i in 0..exp {
+        res = res * base;
+    }
+    out.val = res;
+    ret;
+}
+
+fn main() -> Void {
+    let r1: Result = new Result();
+    let r2: Result = new Result();
+    par {
+        compute_power(r1, 2, 10);
+        compute_power(r2, 3, 5);
+    }
+    fx {
+        println("2^10 = ", r1.val, ", 3^5 = ", r2.val);
+    }
+    ret;
+}

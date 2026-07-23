@@ -1,0 +1,13 @@
+@pre divisor != 0
+@post result >= 0
+fn safe_divide(dividend: Int, divisor: Int) -> Int {
+    ret dividend / divisor;
+}
+
+fn main() -> Void {
+    let val: Int = safe_divide(100, 5);
+    fx {
+        println("Result: ", val);
+    }
+    ret;
+}

@@ -1,0 +1,67 @@
+type VendingMachine {
+    stock: Int;
+    balance: Int;
+    price: Int;
+    totalSales: Int;
+
+    @pre self.stock > 0
+    @pre self.balance >= 0
+    fn vend() -> Bool {
+        if self.balance >= self.price {
+            self.balance = self.balance - self.price;
+            self.stock = self.stock - 1;
+            self.totalSales = self.totalSales + 1;
+            ret true;
+        }
+        ret false;
+    }
+
+    fn deposit(amount: Int) -> Void {
+        self.balance = self.balance + amount;
+        ret;
+    }
+
+    fn restock(count: Int) -> Void {
+        self.stock = self.stock + count;
+        ret;
+    }
+
+    fn report() -> Text {
+        ret "Stock: " + int_to_text(self.stock) + " | Balance: " + int_to_text(self.balance) + " | Sales: " + int_to_text(self.totalSales);
+    }
+}
+
+fn main() -> Void {
+    let machine: VendingMachine = new VendingMachine { stock: 5, balance: 0, price: 3, totalSales: 0 };
+
+    fx {
+        println("Initial state: ", machine.report());
+    }
+
+    machine.deposit(10);
+    machine.vend();
+    machine.vend();
+    machine.vend();
+
+    fx {
+        println("After 3 vend (balance=1): ", machine.report());
+    }
+
+    machine.vend(); // Should fail: balance 1 < price 3
+
+    fx {
+        println("After failed vend: ", machine.report());
+    }
+
+    machine.restock(10);
+    machine.deposit(15);
+
+    loop i in 0..5 {
+        machine.vend();
+    }
+
+    fx {
+        println("After restock + 5 vends: ", machine.report());
+    }
+    ret;
+}

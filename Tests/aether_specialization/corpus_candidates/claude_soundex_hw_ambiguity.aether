@@ -1,0 +1,78 @@
+// American Soundex: keep the first letter, then map remaining letters to
+// digits (b,f,p,v=1; c,g,j,k,q,s,x,z=2; d,t=3; l=4; m,n=5; r=6), collapsing
+// adjacent letters with the same digit into one. Vowels always break a run
+// of identical digits. H and W are the famous edge case: the official NARA
+// rule treats them as "transparent" (they don't break a run), but many
+// implementations wrongly treat them like vowels -- producing two different,
+// both "standard," codes for the same name.
+
+@pure
+fn soundexDigit(c: Int) -> Int {
+    if c == 66 || c == 70 || c == 80 || c == 86 { ret 1; }              // B F P V
+    if c == 67 || c == 71 || c == 74 || c == 75 || c == 81 || c == 83 || c == 88 || c == 90 { ret 2; } // C G J K Q S X Z
+    if c == 68 || c == 84 { ret 3; }   // D T
+    if c == 76 { ret 4; }              // L
+    if c == 77 || c == 78 { ret 5; }   // M N
+    if c == 82 { ret 6; }              // R
+    ret 0;                              // vowels, Y -- and H/W, handled separately
+}
+
+@pure
+fn isHOrW(c: Int) -> Bool {
+    ret c == 72 || c == 87;
+}
+
+@pre length(name) > 0
+fn soundex(name: Text, hwAreSeparators: Bool) -> Text {
+    let upper: Int[] = [];
+    loop i in 0..length(name) {
+        let ch: Text = copy(name, i + 1, 1);
+        let c: Int = ord(ch);
+        if c >= 97 && c <= 122 {
+            c = c - 32;
+        }
+        upper = upper + [c];
+    }
+
+    let digits: Text = "";
+    let lastDigit: Int = soundexDigit(upper[0]);
+
+    let j: Int = 1;
+    loop j < length(upper) && length(digits) < 3 {
+        let c: Int = upper[j];
+        if isHOrW(c) {
+            if hwAreSeparators {
+                lastDigit = 0;
+            }
+            // else: transparent -- lastDigit unchanged, per the NARA rule
+        } else {
+            let d: Int = soundexDigit(c);
+            if d == 0 {
+                lastDigit = 0;   // a true vowel always breaks the run
+            } else {
+                if d != lastDigit {
+                    digits = digits + int_to_text(d);
+                }
+                lastDigit = d;
+            }
+        }
+        j = j + 1;
+    }
+
+    loop length(digits) < 3 {
+        digits = digits + "0";
+    }
+
+    ret chr(upper[0]) + digits;
+}
+
+fn main() -> Void {
+    fx {
+        println("Soundex, transparent-H/W vs. H/W-as-separator conventions:");
+        println("Robert   -> ", soundex("Robert", false), " / ", soundex("Robert", true));
+        println("Rupert   -> ", soundex("Rupert", false), " / ", soundex("Rupert", true));
+        println("Ashcraft -> ", soundex("Ashcraft", false), " / ", soundex("Ashcraft", true));
+        println("Tymczak  -> ", soundex("Tymczak", false), " / ", soundex("Tymczak", true));
+    }
+    ret;
+}

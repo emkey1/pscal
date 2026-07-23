@@ -1,0 +1,14 @@
+@pure
+fn calculateArea(length: Real, width: Real) -> Real {
+    ret length * width;
+}
+
+fn main() -> Void {
+    let dimensions: Real[] = [3.5, 2.0];
+    fx { println("Dimensions:", dimensions); }
+
+    let area: Real = calculateArea(dimensions[0], dimensions[1]);
+
+    fx { println("Calculated Area:", area); }
+    ret;
+}

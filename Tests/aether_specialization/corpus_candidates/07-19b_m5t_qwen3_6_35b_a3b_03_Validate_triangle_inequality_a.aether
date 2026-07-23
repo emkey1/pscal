@@ -1,0 +1,22 @@
+@pure
+@pre a > 0 && b > 0 && c > 0
+@post result >= 0
+fn triangle_area(a: Real, b: Real, c: Real) -> Real {
+    let s: Real = (a + b + c) / 2.0;
+    let val: Real = s * (s - a) * (s - b) * (s - c);
+    if val <= 0.0 {
+        ret 0.0;
+    }
+    ret sqrt(val);
+}
+
+fn main() -> Void {
+    let area1: Real = triangle_area(3.0, 4.0, 5.0);
+    let area2: Real = triangle_area(1.0, 2.0, 10.0);
+
+    fx {
+        println("3-4-5 area: ", area1:0:2);
+        println("1-2-10 area: ", area2:0:2);
+    }
+    ret;
+}

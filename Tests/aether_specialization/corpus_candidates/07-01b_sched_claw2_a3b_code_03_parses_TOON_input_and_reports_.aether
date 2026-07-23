@@ -1,0 +1,34 @@
+@pure
+fn safeCode(row: ToonNode) -> Text {
+    let code: Text = "EMPTY";
+    if toon_has_key(row, "meta") {
+        let meta: ToonNode = toon_key(row, "meta");
+        code = toon_get_text_or(meta, "code", "EMPTY");
+    }
+    ret code;
+}
+
+fn main() -> Void {
+    let doc: ToonDoc = toon_parse("{\"jobs\":[{\"id\":1,\"meta\":{\"code\":\"A\"}},{\"id\":2,\"meta\":{}},{\"id\":3,\"broken\":true}]}");
+    let root: ToonNode = toon_root(doc);
+    let jobs: ToonNode = toon_key(root, "jobs");
+
+    let missing: Int = 0;
+    loop i in 0..toon_len(jobs) {
+        let job: ToonNode = toon_at(jobs, i);
+        let code: Text = safeCode(job);
+
+        if code == "EMPTY" { missing = missing + 1; }
+
+        fx {
+            println("job ", i, ": code = ", code);
+        }
+    }
+
+    fx {
+        println("missing codes = ", missing);
+    }
+
+    toon_close(doc);
+    ret;
+}

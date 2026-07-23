@@ -1,0 +1,32 @@
+@pure
+fn is_active(user: ToonNode) -> Bool {
+    let status: Text = toon_get_text_or(user, "status", "inactive");
+    ret status == "active";
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let json: Text = "{\"users\":[{\"id\":1, \"name\":\"Alice\", \"status\":\"active\"}, {\"id\":2, \"name\":\"Bob\", \"status\":\"inactive\"}]}";
+    let doc: ToonDoc = toon_parse(json);
+    let root: ToonNode = toon_root(doc);
+    let users: ToonNode = toon_key(root, "users");
+
+    fx {
+        println("Active users:");
+    }
+
+    loop i in 0..toon_len(users) {
+        let user: ToonNode = toon_at(users, i);
+        if is_active(user) {
+            let name: Text = toon_get_text(user, "name");
+            fx { println(" - ", name); }
+        }
+    }
+
+    toon_close(doc);
+    ret;
+}

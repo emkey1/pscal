@@ -1,0 +1,68 @@
+// Express a mass as a two-pan balance using powers of three.
+
+@pre value >= 0
+@post length(result) > 0
+fn balancedDigits(value: Int) -> Int[] {
+    let n: Int = value;
+    let digits: Int[] = [];
+
+    if n == 0 {
+        digits = digits + [0];
+        ret digits;
+    }
+
+    loop n > 0 {
+        let remainder: Int = n % 3;
+        if remainder == 2 {
+            digits = digits + [-1];
+            n = (n + 1) / 3;
+        } else {
+            digits = digits + [remainder];
+            n = n / 3;
+        }
+    }
+    ret digits;
+}
+
+fn main() -> Void {
+    let mass: Int = 83;
+    let digits: Int[] = balancedDigits(mass);
+    let representation: Text = "";
+    let index: Int = length(digits) - 1;
+
+    loop index >= 0 {
+        if digits[index] == 1 {
+            representation = representation + "+";
+        } else {
+            if digits[index] == -1 {
+                representation = representation + "-";
+            } else {
+                representation = representation + "0";
+            }
+        }
+        index = index - 1;
+    }
+
+    fx {
+        println(mass, " in balanced ternary is ", representation);
+        println("Place the object on one pan, then:");
+    }
+
+    let power: Int = 1;
+    let i: Int = 0;
+    loop i < length(digits) {
+        if digits[i] == 1 {
+            fx {
+                println("  put weight ", power, " on the opposite pan");
+            }
+        }
+        if digits[i] == -1 {
+            fx {
+                println("  put weight ", power, " beside the object");
+            }
+        }
+        power = power * 3;
+        i = i + 1;
+    }
+    ret;
+}

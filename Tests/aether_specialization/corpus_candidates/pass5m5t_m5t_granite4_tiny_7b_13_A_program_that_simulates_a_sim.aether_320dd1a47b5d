@@ -1,0 +1,25 @@
+type State {
+    current_state: Text;
+
+    fn start() -> Void {
+        self.current_state = "Running";
+        fx { println("State changed to", self.current_state); }
+    }
+
+    fn stop() -> Void {
+        self.current_state = "Stopped";
+        fx { println("State changed to", self.current_state); }
+    }
+
+    fn reset() -> Void {
+        self.current_state = "Idle";
+        fx { println("State changed to", self.current_state); }
+    }
+}
+
+fn main() -> Void {
+    let state_machine: State = new State { current_state: "Idle" };
+    state_machine.start();
+    state_machine.stop();
+    state_machine.reset();
+}

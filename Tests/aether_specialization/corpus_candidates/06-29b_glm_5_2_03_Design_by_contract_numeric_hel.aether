@@ -1,0 +1,83 @@
+@pure
+@pre lo <= hi
+@post result >= lo && result <= hi
+fn clampVal(x: Real, lo: Real, hi: Real) -> Real {
+    if x < lo {
+        ret lo;
+    }
+    if x > hi {
+        ret hi;
+    }
+    ret x;
+}
+
+@pure
+@pre n >= 0
+@post result >= 0
+@cost 1000 steps
+fn fib(n: Int) -> Int {
+    if n <= 1 {
+        ret n;
+    }
+    let a: Int = 0;
+    let b: Int = 1;
+    let upper: Int = n + 1;
+    loop i in 2..upper {
+        let temp: Int = a + b;
+        a = b;
+        b = temp;
+    }
+    ret b;
+}
+
+@pure
+@pre n > 1
+fn goldenRatioApprox(n: Int) -> Real {
+    let fn_: Int = fib(n);
+    let fn1: Int = fib(n - 1);
+    ret fn_ * 1.0 / fn1;
+}
+
+fn main() -> Void {
+    let vals: Real[] = [-5.0, 0.5, 3.0, 10.0];
+    fx {
+        println("Clamp tests (lo=0, hi=5):");
+    }
+    loop i in 0..length(vals) {
+        let v: Real = vals[i];
+        let c: Real = clampVal(v, 0.0, 5.0);
+        fx {
+            println("  ", v:0:2, " -> ", c:0:2);
+        }
+    }
+
+    fx {
+        println("");
+        println("Fibonacci sequence:");
+    }
+    loop i in 0..12 {
+        let f: Int = fib(i);
+        fx {
+            print(f, " ");
+        }
+    }
+
+    fx {
+        println("");
+        println("");
+        println("Golden ratio approximations:");
+    }
+    loop i in 5..15 {
+        let phi: Real = goldenRatioApprox(i);
+        fx {
+            println("  fib(", i, ")/fib(", i - 1, ") = ", phi:0:8);
+        }
+    }
+
+    let s: Real = sqrt(2.0);
+    fx {
+        println("");
+        println("sqrt(2) = ", s:0:8);
+    }
+    ret;
+}

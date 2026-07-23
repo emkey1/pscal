@@ -1,0 +1,27 @@
+fn prime_factors(n: Int) -> Int[] {
+    let factors: Int[] = [];
+    let divisor: Int = 2;
+    let remaining: Int = n;
+    loop remaining > 1 {
+        if remaining % divisor == 0 {
+            factors = factors + [divisor];
+            remaining = remaining / divisor;
+        } else {
+            divisor = divisor + 1;
+        }
+    }
+    ret factors;
+}
+
+fn main() -> Void {
+    let num: Int = 315;
+    let factors: Int[] = prime_factors(num);
+    fx {
+        print("Prime factors of ", num, ": ");
+        loop i in 0..length(factors) {
+            print(factors[i], " ");
+        }
+        println("");
+    }
+    ret;
+}

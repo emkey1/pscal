@@ -1,0 +1,55 @@
+type BankAccount {
+    account_number: Text;
+    balance: Real;
+}
+
+fn deposit(self: BankAccount, amount: Real) -> Void {
+    self.balance = self.balance + amount;
+}
+
+fn withdraw(self: BankAccount, amount: Real) -> Bool {
+    if self.balance >= amount {
+        self.balance = self.balance - amount;
+        ret true;
+    } else {
+        ret false;
+    }
+}
+
+fn get_balance(self: BankAccount) -> Real {
+    ret self.balance;
+}
+
+fn main() -> Void {
+    let account: BankAccount = new BankAccount {
+        account_number: "ACC-12345",
+        balance: 0.0,
+    };
+
+    fx {
+        println("Bank Account Simulation");
+        println("Account: ", account.account_number);
+
+        deposit(account, 1000.0);
+        println("After depositing $1000: ", account.account_number, " = ", formatfloat(get_balance(account), 2));
+
+        deposit(account, 500.0);
+        println("After depositing $500: ", get_balance(account), " balance");
+
+        if withdraw(account, 300.0) {
+            println("Withdrawal of $300: ", get_balance(account), " remaining");
+        } else {
+            println("Withdrawal failed - insufficient funds");
+        }
+
+        if withdraw(account, 200.0) {
+            println("Withdrawal of $200: ", get_balance(account), " remaining");
+        } else {
+            println("Second withdrawal failed - insufficient funds");
+        }
+
+        fx { println("Final balance: ", formatfloat(get_balance(account), 2)); }
+    }
+
+    ret;
+}

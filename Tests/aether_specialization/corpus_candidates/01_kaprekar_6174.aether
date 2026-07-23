@@ -1,0 +1,80 @@
+// Follow a four-digit number into Kaprekar's constant.
+
+@pre n >= 0
+@post length(result) == 4
+fn digits4(n: Int) -> Int[] {
+    let value: Int = n % 10000;
+    let digits: Int[] = [];
+    digits = digits + [value div 1000];
+    digits = digits + [(value div 100) % 10];
+    digits = digits + [(value div 10) % 10];
+    digits = digits + [value % 10];
+    ret digits;
+}
+
+@pre length(digits) == 4
+@post length(result) == 4
+fn sort4(digits: Int[]) -> Int[] {
+    let sorted: Int[] = digits;
+    let pass: Int = 0;
+    loop pass < 4 {
+        let j: Int = 0;
+        loop j < 3 {
+            if sorted[j] > sorted[j + 1] {
+                let temp: Int = sorted[j];
+                sorted[j] = sorted[j + 1];
+                sorted[j + 1] = temp;
+            }
+            j = j + 1;
+        }
+        pass = pass + 1;
+    }
+    ret sorted;
+}
+
+@pre length(digits) == 4
+fn ascendingNumber(digits: Int[]) -> Int {
+    ret digits[0] * 1000 + digits[1] * 100 + digits[2] * 10 + digits[3];
+}
+
+@pre length(digits) == 4
+fn descendingNumber(digits: Int[]) -> Int {
+    ret digits[3] * 1000 + digits[2] * 100 + digits[1] * 10 + digits[0];
+}
+
+@pre n >= 0 && n <= 9999
+@post result >= 0
+fn kaprekarStep(n: Int) -> Int {
+    let ordered: Int[] = sort4(digits4(n));
+    ret descendingNumber(ordered) - ascendingNumber(ordered);
+}
+
+fn main() -> Void {
+    let value: Int = 3524;
+    let steps: Int = 0;
+
+    fx {
+        println("Kaprekar walk from ", value);
+    }
+
+    loop value != 6174 && steps < 12 {
+        let next: Int = kaprekarStep(value);
+        fx {
+            println(value, " -> ", next);
+        }
+        value = next;
+        steps = steps + 1;
+        if value == 0 {
+            break;
+        }
+    }
+
+    fx {
+        if value == 6174 {
+            println("Reached 6174 in ", steps, " steps.");
+        } else {
+            println("Stopped at ", value, " after ", steps, " steps.");
+        }
+    }
+    ret;
+}

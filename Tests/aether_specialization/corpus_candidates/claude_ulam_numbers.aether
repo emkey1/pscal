@@ -1,0 +1,55 @@
+// Ulam numbers (OEIS A002858): u(1)=1, u(2)=2. Each subsequent term is
+// the smallest integer greater than the previous term that can be
+// written as the sum of two DISTINCT earlier terms in EXACTLY ONE way.
+// No formula is known, and whether lim u(n)/n exists is an open problem.
+
+@pure
+fn countRepresentations(ulam: Int[], m: Int) -> Int {
+    let count: Int = 0;
+    let k: Int = length(ulam);
+    let i: Int = 0;
+    loop i < k {
+        let j: Int = i + 1;
+        loop j < k {
+            let s: Int = ulam[i] + ulam[j];
+            if s == m {
+                count = count + 1;
+            }
+            if s > m {
+                break;          // sums grow with j since ulam is sorted
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    ret count;
+}
+
+fn main() -> Void {
+    let ulam: Int[] = [1, 2];
+    let wanted: Int = 20;
+
+    loop length(ulam) < wanted {
+        let last: Int = ulam[length(ulam) - 1];
+        let candidate: Int = last + 1;
+        let found: Bool = false;
+        loop !found {
+            if countRepresentations(ulam, candidate) == 1 {
+                ulam = ulam + [candidate];
+                found = true;
+            } else {
+                candidate = candidate + 1;
+            }
+        }
+    }
+
+    fx {
+        println("Ulam numbers, u(1)..u(20):");
+        loop i in 0..length(ulam) {
+            print(ulam[i], " ");
+        }
+        println("");
+        println("No formula is known; even the existence of lim u(n)/n is unproven.");
+    }
+    ret;
+}

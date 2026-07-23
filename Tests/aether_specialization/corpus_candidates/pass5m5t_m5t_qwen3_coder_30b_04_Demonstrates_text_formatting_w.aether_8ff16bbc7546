@@ -1,0 +1,17 @@
+@pure
+fn convert(usd: Real, rate: Real) -> Real {
+    ret usd * rate;
+}
+
+fn main() -> Void {
+    let exchangeRate: Real = 0.85; // USD to EUR
+    let amounts: Real[] = [10.0, 25.50, 99.99, 123.45];
+    fx {
+        println("Currency conversion (USD to EUR):");
+        loop i in 0..length(amounts) {
+            let eur: Real = convert(amounts[i], exchangeRate);
+            println(amounts[i]:0:2, " USD = ", eur:0:2, " EUR");
+        }
+    }
+    ret;
+}

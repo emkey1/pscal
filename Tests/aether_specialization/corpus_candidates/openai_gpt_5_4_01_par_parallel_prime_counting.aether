@@ -1,0 +1,53 @@
+type Box {
+    count: Int;
+}
+
+@pure
+fn isPrime(n: Int) -> Bool {
+    if n < 2 {
+        ret false;
+    }
+
+    let d: Int = 2;
+    loop d * d <= n {
+        if n % d == 0 {
+            ret false;
+        }
+        d = d + 1;
+    }
+
+    ret true;
+}
+
+fn countPrimes(lo: Int, hi: Int, out: Box) -> Void {
+    let total: Int = 0;
+
+    loop n in lo..hi {
+        if isPrime(n) {
+            total = total + 1;
+        }
+    }
+
+    out.count = total;
+    ret;
+}
+
+fn main() -> Void {
+    let a: Box = new Box();
+    let b: Box = new Box();
+    let c: Box = new Box();
+
+    par {
+        countPrimes(2, 3000, a);
+        countPrimes(3000, 6000, b);
+        countPrimes(6000, 9000, c);
+    }
+
+    let total: Int = a.count + b.count + c.count;
+
+    fx {
+        println("primes in [2, 9000) = ", total);
+        println("segment counts = ", a.count, ", ", b.count, ", ", c.count);
+    }
+    ret;
+}

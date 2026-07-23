@@ -1,0 +1,17 @@
+@pure
+@pre n >= 0
+@post result.0 <= result.1
+fn range10(n: Int) -> (Int, Int) {
+    ret (n, n + 10);
+}
+
+fn main() -> Void {
+    let (lo, hi) = range10(5);
+    fx {
+        println("range10(5) = (", lo, ", ", hi, ")");
+        println("(the @post contract on a TUPLE-returning function reaches");
+        println(" INSIDE the tuple via result.0 / result.1 -- 'result' isn't");
+        println(" just for scalar returns.)");
+    }
+    ret;
+}

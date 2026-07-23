@@ -1,0 +1,85 @@
+type WordEntry {
+    wtext: Text;
+    count: Int;
+}
+
+fn countWords(text: Text) -> WordEntry[] {
+    let words: Text[] = split(text, " ");
+    let entries: WordEntry[] = [];
+    let idx: Int = 0;
+    let wcount: Int = length(words);
+    loop idx < wcount {
+        let w: Text = trim(words[idx]);
+        if string_len(w) > 0 {
+            let found: Bool = false;
+            let j: Int = 0;
+            let elen: Int = length(entries);
+            loop j < elen {
+                if entries[j].wtext == w {
+                    entries[j].count = entries[j].count + 1;
+                    found = true;
+                }
+                j = j + 1;
+            }
+            if !found {
+                let entry: WordEntry = new WordEntry();
+                entry.wtext = w;
+                entry.count = 1;
+                entries = entries + [entry];
+            }
+        }
+        idx = idx + 1;
+    }
+    ret entries;
+}
+
+fn sortByCount(entries: WordEntry[]) -> WordEntry[] {
+    let n: Int = length(entries);
+    let sorted: WordEntry[] = [];
+    let k: Int = 0;
+    loop k < n {
+        sorted = sorted + [entries[k]];
+        k = k + 1;
+    }
+    let i: Int = 0;
+    loop i < n - 1 {
+        let maxIdx: Int = i;
+        let j: Int = i + 1;
+        loop j < n {
+            if sorted[j].count > sorted[maxIdx].count {
+                maxIdx = j;
+            }
+            j = j + 1;
+        }
+        if maxIdx != i {
+            let tmp: WordEntry = sorted[i];
+            sorted[i] = sorted[maxIdx];
+            sorted[maxIdx] = tmp;
+        }
+        i = i + 1;
+    }
+    ret sorted;
+}
+
+fn main() -> Void {
+    let sentence: Text = "the cat sat on the mat the cat ate the rat";
+    let entries: WordEntry[] = countWords(sentence);
+    let sorted: WordEntry[] = sortByCount(entries);
+    let n: Int = length(sorted);
+    fx {
+        println("Rank | Word       | Count");
+        println("-----|------------|------");
+    }
+    let i: Int = 0;
+    loop i < n {
+        let pad: Int = 11 - string_len(sorted[i].wtext);
+        if pad < 1 {
+            pad = 1;
+        }
+        fx {
+            println(i + 1, "    | ", sorted[i].wtext, stringofchar(" ", pad), "| ", sorted[i].count);
+        }
+        i = i + 1;
+    }
+    ret;
+}

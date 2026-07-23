@@ -1,0 +1,77 @@
+// Search four number ranges concurrently without sharing mutable records.
+
+type ScanResult {
+    startValue: Int = 0;
+    stopValue: Int = 0;
+    checked: Int = 0;
+    found: Int[] = [];
+}
+
+@pre n >= 0
+fn properDivisorSum(n: Int) -> Int {
+    if n <= 1 {
+        ret 0;
+    }
+
+    let sum: Int = 1;
+    let divisor: Int = 2;
+    loop divisor * divisor <= n {
+        if n % divisor == 0 {
+            let partner: Int = n / divisor;
+            sum = sum + divisor;
+            if partner != divisor {
+                sum = sum + partner;
+            }
+        }
+        divisor = divisor + 1;
+    }
+    ret sum;
+}
+
+fn scanRange(out: ScanResult, startValue: Int, stopValue: Int) -> Void {
+    out.startValue = startValue;
+    out.stopValue = stopValue;
+    let value: Int = startValue;
+
+    loop value <= stopValue {
+        if properDivisorSum(value) == value {
+            out.found = out.found + [value];
+        }
+        out.checked = out.checked + 1;
+        value = value + 1;
+    }
+    ret;
+}
+
+fn printResult(label: Text, scan: ScanResult) -> Void {
+    fx {
+        println(label, " checked ", scan.checked, " values in ", scan.startValue, "..", scan.stopValue);
+    }
+
+    loop i in 0..length(scan.found) {
+        fx {
+            println("  perfect number: ", scan.found[i]);
+        }
+    }
+    ret;
+}
+
+fn main() -> Void {
+    let first: ScanResult = new ScanResult();
+    let second: ScanResult = new ScanResult();
+    let third: ScanResult = new ScanResult();
+    let fourth: ScanResult = new ScanResult();
+
+    par {
+        scanRange(first, 2, 2500);
+        scanRange(second, 2501, 5000);
+        scanRange(third, 5001, 7500);
+        scanRange(fourth, 7501, 10000);
+    }
+
+    printResult("first", first);
+    printResult("second", second);
+    printResult("third", third);
+    printResult("fourth", fourth);
+    ret;
+}

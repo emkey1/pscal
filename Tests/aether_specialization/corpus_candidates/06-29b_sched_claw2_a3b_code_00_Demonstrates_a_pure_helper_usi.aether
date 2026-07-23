@@ -1,0 +1,33 @@
+@pure
+@pre n >= 0
+fn fibonacci(n: Int) -> Int {
+    let a: Int = 0;
+    let b: Int = 1;
+
+    loop i in 0..n {
+        let next: Int = a + b;
+        a = b;
+        b = next;
+    }
+
+    ret a;
+}
+
+@pure
+@pre score >= 0 && score <= 100
+@post result == "fail" || result == "pass"
+fn classify(score: Int) -> Text {
+    if score >= 70 { ret "pass"; }
+    ret "fail";
+}
+
+fn main() -> Void {
+    let fib10: Int = fibonacci(10);
+    let status: Text = classify(fib10);
+
+    fx {
+        println("fibonacci(10) = ", fib10, ", grade = ", status);
+    }
+
+    ret;
+}

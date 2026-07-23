@@ -1,0 +1,24 @@
+// Narrow tuple returns — destructured directly, positional @post slots
+
+@pure
+fn divmod(a: Int, b: Int) -> (Int, Int) {
+    ret (a / b, a % b);
+}
+
+@post result.0 <= result.1
+fn ordered(a: Int, b: Int) -> (Int, Int) {
+    if a <= b {
+        ret (a, b);
+    }
+    ret (b, a);
+}
+
+fn main() -> Void {
+    let (q, r) = divmod(17, 5);
+    let (lo, hi) = ordered(9, 4);
+    fx {
+        println("17 / 5 = ", q, " remainder ", r);
+        println("ordered(9, 4) = (", lo, ", ", hi, ")");
+    }
+    ret;
+}

@@ -1,0 +1,50 @@
+type LogEntry {
+    timestamp: Text;
+    level: Text;
+    message: Text;
+}
+
+type Logger {
+    entries: LogEntry[];
+}
+
+fn log(logger: Logger, level: Text, message: Text) -> Void {
+    let h: Int;
+    let m: Int;
+    let s: Int;
+    let s100: Int;
+    fx {
+        gettime(h, m, s, s100);
+    }
+    let timestamp: Text = itoa(h) + ":" + itoa(m) + ":" + itoa(s);
+    logger.entries = logger.entries + [new LogEntry { timestamp: timestamp, level: level, message: message }];
+    ret;
+}
+
+fn save_logs(logger: Logger, filename: Text) -> Void {
+    fx {
+        let f: File;
+        assign(f, filename);
+        rewrite(f);
+        loop i in 0..length(logger.entries) {
+            let entry: LogEntry = logger.entries[i];
+            writeln(f, entry.timestamp + " [" + entry.level + "] " + entry.message);
+        }
+        close(f);
+    }
+    ret;
+}
+
+fn main() -> Void {
+    let logger: Logger = new Logger { entries: [] };
+    log(logger, "INFO", "Application started");
+    log(logger, "WARN", "Low memory detected");
+    save_logs(logger, "/tmp/aether_app_demo.log");
+    fx {
+        loop i in 0..length(logger.entries) {
+            let entry: LogEntry = logger.entries[i];
+            println(entry.timestamp, " [", entry.level, "] ", entry.message);
+        }
+    }
+    ret;
+}

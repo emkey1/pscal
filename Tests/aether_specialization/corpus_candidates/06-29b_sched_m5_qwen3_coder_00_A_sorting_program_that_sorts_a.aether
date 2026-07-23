@@ -1,0 +1,51 @@
+@pure
+fn insertion_sort(arr: Int[]) -> Int[] {
+    let n: Int = length(arr);
+    if n <= 1 {
+        ret arr;
+    }
+
+    let result: Int[] = [];
+    loop i in 0..n {
+        let v: Int = arr[i];
+        let j: Int = length(result);
+        result = result + [v];
+
+        loop while j > 0 && result[j - 1] > v {
+            result[j] = result[j - 1];
+            result[j - 1] = v;
+            j = j - 1;
+        }
+    }
+
+    ret result;
+}
+
+@pure
+fn format_array(arr: Int[]) -> Text {
+    if length(arr) == 0 {
+        ret "[]";
+    }
+
+    let s: Text = "[";
+    loop i in 0..length(arr) {
+        if i > 0 {
+            s = s + ", ";
+        }
+        s = s + itoa(arr[i]);
+    }
+    s = s + "]";
+    ret s;
+}
+
+fn main() -> Void {
+    let data: Int[] = [64, 34, 25, 12, 22, 11, 90];
+    let sorted: Int[] = insertion_sort(data);
+
+    fx {
+        println("Original: ", format_array(data));
+        println("Sorted:   ", format_array(sorted));
+    }
+
+    ret;
+}

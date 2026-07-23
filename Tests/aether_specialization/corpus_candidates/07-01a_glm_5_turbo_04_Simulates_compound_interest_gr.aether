@@ -1,0 +1,44 @@
+@pure
+fn compoundBalance(principal: Real, rate: Real, years: Int) -> Real {
+    let balance: Real = principal;
+    let i: Int = 0;
+    loop i < years {
+        balance = balance * (1.0 + rate);
+        i = i + 1;
+    }
+    ret balance;
+}
+
+@pure
+fn barOf(len: Int) -> Text {
+    if len <= 0 {
+        ret "";
+    }
+    ret stringofchar("#", len);
+}
+
+fn main() -> Void {
+    let principal: Real = 1000.0;
+    let rate: Real = 0.07;
+    let maxYears: Int = 20;
+    let maxBar: Int = 40;
+    let finalBal: Real = compoundBalance(principal, rate, maxYears);
+
+    fx {
+        println("Compound Growth: $", principal:0:2, " at ", rate * 100.0:0:1, "%");
+        println("");
+    }
+
+    let y: Int = 0;
+    loop y <= maxYears {
+        let bal: Real = compoundBalance(principal, rate, y);
+        let barLen: Int = trunc(bal / finalBal * maxBar);
+        let bar: Text = barOf(barLen);
+        let label: Text = int_to_text(y);
+        fx {
+            println(label, " | ", bar, " $", bal:0:2);
+        }
+        y = y + 1;
+    }
+    ret;
+}

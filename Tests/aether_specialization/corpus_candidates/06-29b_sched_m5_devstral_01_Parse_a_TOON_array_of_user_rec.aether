@@ -1,0 +1,34 @@
+@pure
+fn classifyUser(score: Int) -> Text {
+    if score >= 90 {
+        ret "high";
+    }
+    if score >= 70 {
+        ret "medium";
+    }
+    ret "low";
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("[{\"name\":\"Alice\",\"score\":85},{\"name\":\"Bob\",\"score\":60},{\"name\":\"CAROL\",\"score\":95}]");
+    let root: ToonNode = toon_root(doc);
+
+    loop i in 0..toon_len(root) {
+        let user: ToonNode = toon_at(root, i);
+        let name: Text = toon_get_text(user, "name");
+        let score: Int = toon_get_int_or(user, "score", 0);
+        let level: Text = classifyUser(score);
+
+        fx {
+            println(name, " (", score, ") -> ", level);
+        }
+    }
+
+    toon_close(doc);
+    ret;
+}

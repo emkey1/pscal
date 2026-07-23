@@ -1,0 +1,61 @@
+// Decode a rover black-box packet held in an opaque memory stream.
+
+@pre risk >= 0
+@pure
+fn verdictLabel(risk: Int) -> Text {
+    if risk >= 7 {
+        ret "abort and phone home";
+    }
+    if risk >= 4 {
+        ret "hold position";
+    }
+    ret "continue mission";
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let packetText: Text = "{\"mission\":\"Asterion-4\",\"battery_pct\":21,\"temperature_c\":-47.5,\"tilt_deg\":18.2,\"wheel_slip\":true}";
+    let packet: MStream = mstreamfromstring(packetText);
+    let wireText: Text = mstreambuffer(packet);
+    let doc: ToonDoc = toon_parse(wireText);
+    let root: ToonNode = toon_root(doc);
+
+    let mission: Text = toon_get_text(root, "mission");
+    let battery: Int = toon_get_int_or(root, "battery_pct", 0);
+    let temperature: Real = toon_get_real_or(root, "temperature_c", 0.0);
+    let tilt: Real = toon_get_real_or(root, "tilt_deg", 0.0);
+    let wheelSlip: Bool = toon_get_bool_or(root, "wheel_slip", false);
+    let risk: Int = 0;
+
+    if battery < 25 {
+        risk = risk + 3;
+    }
+    if temperature < -40.0 {
+        risk = risk + 2;
+    }
+    if tilt > 15.0 {
+        risk = risk + 2;
+    }
+    if wheelSlip {
+        risk = risk + 2;
+    }
+
+    let verdict: Text = verdictLabel(risk);
+    fx {
+        println("mission = ", mission);
+        println("battery = ", battery, "%");
+        println("temperature = ", temperature:0:1, " C");
+        println("tilt = ", tilt:0:1, " degrees");
+        println("risk = ", risk, " -> ", verdict);
+    }
+
+    toon_close(doc);
+    mstreamfree(packet);
+    ret;
+}

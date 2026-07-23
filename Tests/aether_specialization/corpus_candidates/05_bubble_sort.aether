@@ -1,0 +1,41 @@
+fn bubble_sort(xs: Int[]) -> Int[] {
+    let result: Int[] = xs;
+    let n: Int = length(result);
+    let swapped: Bool = true;
+    loop while swapped {
+        swapped = false;
+        loop i in 0..n - 1 {
+            if result[i] > result[i + 1] {
+                let temp: Int = result[i];
+                result[i] = result[i + 1];
+                result[i + 1] = temp;
+                swapped = true;
+            }
+        }
+    }
+    ret result;
+}
+
+fn main() -> Void {
+    let data: Int[] = [64, 34, 25, 12, 22, 11, 90];
+
+    fx {
+        println("Original: ");
+        loop i in 0..length(data) {
+            println(data[i], " ");
+        }
+        println("");
+    }
+
+    data = bubble_sort(data);
+
+    fx {
+        println("Sorted:   ");
+        loop i in 0..length(data) {
+            println(data[i], " ");
+        }
+        println("");
+    }
+
+    ret;
+}

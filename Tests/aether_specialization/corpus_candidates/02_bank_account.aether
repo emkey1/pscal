@@ -1,0 +1,56 @@
+type Account {
+    id: Int;
+    owner: Text;
+    balance: Real;
+
+    fn deposit(amount: Real) -> Bool {
+        if amount <= 0.0 {
+            ret false;
+        }
+        self.balance = self.balance + amount;
+        ret true;
+    }
+
+    fn withdraw(amount: Real) -> Bool {
+        if amount <= 0.0 || amount > self.balance {
+            ret false;
+        }
+        self.balance = self.balance - amount;
+        ret true;
+    }
+
+    fn transfer(to: Account, amount: Real) -> Bool {
+        if !self.withdraw(amount) {
+            ret false;
+        }
+        if !to.deposit(amount) {
+            self.deposit(amount);
+            ret false;
+        }
+        ret true;
+    }
+
+    fn print() -> Void {
+        fx {
+            println("Account ", self.id, " (", self.owner, "): ", formatfloat(self.balance, 2));
+        }
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let alice: Account = new Account { id: 1, owner: "Alice", balance: 1000.0 };
+    let bob: Account = new Account { id: 2, owner: "Bob", balance: 500.0 };
+
+    alice.print();
+    bob.print();
+
+    alice.deposit(200.0);
+    bob.withdraw(100.0);
+
+    alice.transfer(bob, 300.0);
+
+    alice.print();
+    bob.print();
+    ret;
+}

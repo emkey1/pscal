@@ -1,0 +1,44 @@
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("TOON unavailable"); }
+        ret;
+    }
+    
+    let payload: Text = "{\"employees\":[{\"name\":\"Alice\",\"active\":true,\"salary\":85000},{\"name\":\"Bob\",\"active\":false,\"salary\":60000},{\"name\":\"Charlie\",\"active\":true,\"salary\":92000}]}";
+    let doc: ToonDoc = toon_parse(payload);
+    let root: ToonNode = toon_root(doc);
+    let employees: ToonNode = toon_key(root, "employees");
+
+    let activeCount: Int = 0;
+    let totalSalary: Int = 0;
+
+    loop i in 0..toon_len(employees) {
+        let emp: ToonNode = toon_at(employees, i);
+        let active: Bool = toon_get_bool_or(emp, "active", false);
+        
+        if active {
+            let name: Text = toon_get_text(emp, "name");
+            let salary: Int = toon_get_int_or(emp, "salary", 0);
+            
+            activeCount = activeCount + 1;
+            totalSalary = totalSalary + salary;
+            
+            fx {
+                println("Active: ", name, " (", salary, ")");
+            }
+        }
+    }
+
+    let avgSalary: Real = 0.0;
+    if activeCount > 0 {
+        avgSalary = totalSalary * 1.0 / activeCount;
+    }
+
+    fx {
+        println("Total Active: ", activeCount);
+        println("Average Active Salary: ", avgSalary:0:2);
+    }
+
+    toon_close(doc);
+    ret;
+}

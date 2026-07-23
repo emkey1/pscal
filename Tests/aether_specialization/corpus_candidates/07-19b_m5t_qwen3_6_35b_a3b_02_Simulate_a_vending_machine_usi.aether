@@ -1,0 +1,44 @@
+type VendingMachine {
+    stock: Int;
+    balance: Int;
+    price: Int;
+
+    fn add_stock(amount: Int) -> Void {
+        self.stock = self.stock + amount;
+        ret;
+    }
+
+    fn insert_coin(amount: Int) -> Void {
+        self.balance = self.balance + amount;
+        ret;
+    }
+
+    fn purchase() -> Text {
+        if self.stock <= 0 {
+            ret "Out of stock";
+        }
+        if self.balance < self.price {
+            ret "Insufficient funds";
+        }
+        self.stock = self.stock - 1;
+        self.balance = self.balance - self.price;
+        ret "Dispensed";
+    }
+}
+
+fn main() -> Void {
+    let vm: VendingMachine = new VendingMachine { stock: 5, balance: 0, price: 100 };
+    
+    fx { println("Inserting 200 coins..."); }
+    vm.insert_coin(200);
+    
+    fx { println("Trying purchase..."); }
+    let result: Text = vm.purchase();
+    fx { println("Result: ", result); }
+
+    fx { println("Trying purchase again..."); }
+    let result2: Text = vm.purchase();
+    fx { println("Result: ", result2); }
+
+    ret;
+}

@@ -1,0 +1,18 @@
+fn main() -> Void {
+    fx {
+        let session: Int = httpsession();
+        let out: MStream = mstreamcreate();
+        let status: Int = httprequest(session, "GET", "http://localhost:8000/", "", out);
+
+        if status == 200 {
+            let body: Text = mstreambuffer(out);
+            println("Response (", status, "): ", body);
+        } else {
+            println("HTTP error: ", status);
+        }
+
+        mstreamfree(out);
+        httpclose(session);
+    }
+    ret;
+}

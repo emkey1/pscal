@@ -1,0 +1,58 @@
+type UserSummary {
+    totalUsers: Int;
+    youngUsers: Int;    // Age < 30
+    adultUsers: Int;    // Age 30-60
+    seniorUsers: Int;   // Age > 60
+
+    fn classifyAndRecord(age: Int) -> Void {
+        self.totalUsers = self.totalUsers + 1;
+        if age < 30 {
+            self.youngUsers = self.youngUsers + 1;
+            ret;
+        }
+        if age <= 60 { // Covers 30-60 inclusive
+            self.adultUsers = self.adultUsers + 1;
+            ret;
+        }
+        self.seniorUsers = self.seniorUsers + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let usersJson: Text = "[{\"name\":\"Alice\",\"age\":25},{\"name\":\"Bob\",\"age\":45},{\"name\":\"Charlie\",\"age\":68},{\"name\":\"David\",\"age\":30}]";
+    let doc: ToonDoc = toon_parse(usersJson);
+    let root: ToonNode = toon_root(doc);
+
+    let summary: UserSummary = new UserSummary(); // All fields default to 0
+
+    loop i in 0..toon_len(root) {
+        let userNode: ToonNode = toon_at(root, i);
+        let name: Text = toon_get_text(userNode, "name");
+        let age: Int = toon_get_int_or(userNode, "age", 0);
+
+        summary.classifyAndRecord(age);
+
+        fx {
+            println("Processed user: ", name, ", age: ", age);
+        }
+        toon_free(userNode); // Free transient node handles
+    }
+
+    fx {
+        println("\n--- User Summary ---");
+        println("Total Users: ", summary.totalUsers);
+        println("Young Users (<30): ", summary.youngUsers);
+        println("Adult Users (30-60): ", summary.adultUsers);
+        println("Senior Users (>60): ", summary.seniorUsers);
+    }
+
+    toon_free(root); // Free root node handle
+    toon_close(doc);
+    ret;
+}

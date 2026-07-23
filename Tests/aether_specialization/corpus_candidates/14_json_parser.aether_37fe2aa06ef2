@@ -1,0 +1,49 @@
+type Json {
+    kind: Text;  // "object", "array", "string", "number", "bool", "null"
+    value: Text;
+    children: Json[];
+}
+
+@pure
+fn is_digit(ch: Text) -> Bool {
+    let code: Int = ord(ch);
+    ret code >= 48 && code <= 57;
+}
+
+@pure
+fn is_number(text: Text) -> Bool {
+    loop i in 0..string_len(text) {
+        let c: Text = copy(text, i + 1, 1);
+        if !is_digit(c) && c != "." && c != "-" {
+            ret false;
+        }
+    }
+    ret true;
+}
+
+fn parse_json(text: Text) -> Json {
+    if text == "null" {
+        ret new Json { kind: "null", value: "null", children: [] };
+    }
+    if text == "true" || text == "false" {
+        ret new Json { kind: "bool", value: text, children: [] };
+    }
+    if is_number(text) {
+        ret new Json { kind: "number", value: text, children: [] };
+    }
+    let len: Int = string_len(text);
+    if len >= 2 && copy(text, 1, 1) == "\"" && copy(text, len, 1) == "\"" {
+        ret new Json { kind: "string", value: copy(text, 2, len - 2), children: [] };
+    }
+    ret new Json { kind: "unknown", value: "", children: [] };
+}
+
+fn main() -> Void {
+    let json_text: Text = "\"Alice\"";
+    let json: Json = parse_json(json_text);
+    fx {
+        println("Parsed JSON kind: ", json.kind);
+        println("Parsed JSON value: ", json.value);
+    }
+    ret;
+}

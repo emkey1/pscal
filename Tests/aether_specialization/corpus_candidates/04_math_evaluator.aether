@@ -1,0 +1,32 @@
+@pure
+fn compute_row(deg: Int) -> (Real, Real, Real) {
+    let rad: Real = deg * 3.14159265359 / 180.0;
+    let s: Real = sin(rad);
+    let c: Real = cos(rad);
+    let t: Real = tan(rad);
+    ret (s, c, t);
+}
+
+fn main() -> Void {
+    fx {
+        println("Angle | Sin | Cos | Tan");
+        println("------------------------");
+    }
+
+    let angle: Int = 0;
+    loop angle < 90 {
+        let (s, c, t) = compute_row(angle);
+        fx {
+            println(angle, " | ", s:0:4, " | ", c:0:4, " | ", t:0:4);
+        }
+        angle = angle + 15;
+    }
+
+    fx {
+        println("------------------------");
+        println("Natural Log of 2.0: ", ln(2.0):0:6);
+        println("Square root of 2.0: ", sqrt(2.0):0:6);
+    }
+
+    ret;
+}

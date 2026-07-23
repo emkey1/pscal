@@ -1,0 +1,19 @@
+fn main() -> Void {
+    let nums: Int[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let odds: Int[] = [];
+    
+    loop i in 0..length(nums) {
+        if odd(nums[i]) {
+            odds = odds + [nums[i]];
+        }
+    }
+    
+    fx {
+        print("Odd numbers: ");
+        loop i in 0..length(odds) {
+            print(odds[i], " ");
+        }
+        println("");
+    }
+    ret;
+}

@@ -1,0 +1,42 @@
+type Account {
+    owner: Text;
+    balance: Int;
+    transactions: Int;
+
+    fn deposit(amount: Int) -> Void {
+        self.balance = self.balance + amount;
+        self.transactions = self.transactions + 1;
+        ret;
+    }
+
+    fn withdraw(amount: Int) -> Bool {
+        if amount > self.balance {
+            ret false;
+        }
+        self.balance = self.balance - amount;
+        self.transactions = self.transactions + 1;
+        ret true;
+    }
+
+    fn summary() -> Text {
+        let s: Text = self.owner + " | balance=" + int_to_text(self.balance) + " | txns=" + int_to_text(self.transactions);
+        ret s;
+    }
+}
+
+fn main() -> Void {
+    let acc: Account = Account { owner: "Alice", balance: 1000, transactions: 0 };
+    acc.deposit(500);
+    let ok1: Bool = acc.withdraw(200);
+    let ok2: Bool = acc.withdraw(5000);
+    acc.deposit(300);
+    let ok3: Bool = acc.withdraw(100);
+    let report: Text = acc.summary();
+    fx {
+        println(report);
+        println("withdraw  200: ", ok1);
+        println("withdraw 5000: ", ok2);
+        println("withdraw  100: ", ok3);
+    }
+    ret;
+}

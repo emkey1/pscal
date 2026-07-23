@@ -1,0 +1,33 @@
+@pure
+@pre n > 0
+@post length(result) > 0
+fn factorize(n: Int) -> Int[] {
+    let factors: Int[] = [];
+    let current: Int = n;
+    let d: Int = 2;
+    loop current > 1 {
+        if current % d == 0 {
+            factors = factors + [d];
+            current = current / d;
+        } else {
+            d = d + 1;
+        }
+    }
+    if length(factors) == 0 {
+        factors = factors + [n];
+    }
+    ret factors;
+}
+
+fn main() -> Void {
+    let num: Int = 84;
+    let factors: Int[] = factorize(num);
+    fx {
+        print("Factors of ", num, ": ");
+        loop i in 0..length(factors) {
+            print(factors[i], " ");
+        }
+        println("");
+    }
+    ret;
+}

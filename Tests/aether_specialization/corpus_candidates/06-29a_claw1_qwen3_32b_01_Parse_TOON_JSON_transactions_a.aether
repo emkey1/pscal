@@ -1,0 +1,32 @@
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("TOON parser unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc;
+    fx {
+        if !fileexists("transactions.json") {
+            println("Error: transactions.json not found.");
+            ret;
+        }
+        doc = toon_parse_file("transactions.json");
+    }
+    let root: ToonNode = toon_root(doc);
+    let txs: ToonNode = toon_key(root, "transactions");
+
+    let total: Real = 0.0;
+    loop i in 0..toon_len(txs) {
+        let tx: ToonNode = toon_at(txs, i);
+        if toon_has_key(tx, "amount") {
+            let amount: Real = toon_get_real(tx, "amount");
+            total = total + amount;
+        }
+    }
+
+    fx {
+        println("Total transaction amount: ", total:0:2);
+    }
+    toon_close(doc);
+    ret;
+}

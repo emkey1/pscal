@@ -1,0 +1,32 @@
+fn main() -> Void {
+    let filename: Text = "my_log.txt";
+    let f: File; // Declare a file variable
+
+    fx {
+        // Write to the file
+        assign(f, filename);
+        rewrite(f); // Truncate or create the file for writing
+        writeln(f, "Log entry 1: System started.");
+        writeln(f, "Log entry 2: Processing data...");
+        writeln(f, "Log entry 3: System shutting down.");
+        close(f); // Close the file after writing
+
+        println("Successfully wrote to ", filename);
+
+        // Read from the file
+        assign(f, filename);
+        reset(f); // Open the file for reading
+        println("Reading from ", filename, ":");
+
+        loop {
+            if eof(f) { // Check for end of file
+                break;
+            }
+            let line: Text;
+            readln(f, line); // Read a line into the 'line' variable
+            println("  ", line);
+        }
+        close(f); // Close the file after reading
+    }
+    ret;
+}

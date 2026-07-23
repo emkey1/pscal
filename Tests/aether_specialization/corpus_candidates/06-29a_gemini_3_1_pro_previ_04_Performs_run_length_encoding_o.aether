@@ -1,0 +1,36 @@
+@pure
+fn compress(input: Text) -> Text {
+    let n: Int = string_len(input);
+    if n == 0 {
+        ret "";
+    }
+
+    let result: Text = "";
+    let currentChar: Text = copy(input, 1, 1);
+    let count: Int = 1;
+
+    loop i in 1..n {
+        let ch: Text = copy(input, i + 1, 1);
+        if ch == currentChar {
+            count = count + 1;
+        } else {
+            result = result + currentChar + int_to_text(count);
+            currentChar = ch;
+            count = 1;
+        }
+    }
+    
+    result = result + currentChar + int_to_text(count);
+    ret result;
+}
+
+fn main() -> Void {
+    let original: Text = "AAABBBCCDAA";
+    let compressed: Text = compress(original);
+    
+    fx {
+        println("Original:   ", original);
+        println("Compressed: ", compressed);
+    }
+    ret;
+}

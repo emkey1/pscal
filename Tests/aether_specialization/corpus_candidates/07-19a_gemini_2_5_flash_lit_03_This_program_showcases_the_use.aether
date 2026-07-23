@@ -1,0 +1,35 @@
+@pure
+@pre n >= 0
+@post result == factorial_helper(n, 1) // Verifies result against a helper
+fn factorial(n: Int) -> Int {
+    if n == 0 {
+        ret 1;
+    }
+    ret n * factorial(n - 1);
+}
+
+// Helper function for @post contract verification
+@pure
+fn factorial_helper(n: Int, acc: Int) -> Int {
+    if n == 0 {
+        ret acc;
+    }
+    ret factorial_helper(n - 1, acc * n);
+}
+
+fn main() -> Void {
+    fx {
+        let num: Int = 5;
+        let fact: Int = factorial(num);
+        println("Factorial of ", num, " is ", fact);
+
+        // Example of a call that would violate @pre (if not handled by compiler)
+        // let invalid_fact: Int = factorial(-1);
+        // println("Factorial of -1 is ", invalid_fact);
+
+        // Example of a call that would violate @post (if not handled by compiler)
+        // For demonstration, let's imagine factorial had a bug and returned wrong value
+        // For a real scenario, the compiler would catch this if the logic was wrong.
+    }
+    ret;
+}

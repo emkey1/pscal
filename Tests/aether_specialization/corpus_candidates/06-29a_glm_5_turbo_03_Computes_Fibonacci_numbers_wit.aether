@@ -1,0 +1,56 @@
+@pre n >= 0
+@post result >= 0
+@cost 1000 ns
+fn fibonacci(n: Int) -> Int {
+    if n <= 1 {
+        ret n;
+    }
+    let a: Int = 0;
+    let b: Int = 1;
+    let i: Int = 2;
+    loop i <= n {
+        let temp: Int = a + b;
+        a = b;
+        b = temp;
+        i = i + 1;
+    }
+    ret b;
+}
+
+@pre n > 0
+@post result > 1.0
+fn goldenRatioApprox(n: Int) -> Real {
+    let fibN: Int = fibonacci(n);
+    let fibN1: Int = fibonacci(n - 1);
+    let ratio: Real = fibN * 1.0 / fibN1;
+    ret ratio;
+}
+
+fn main() -> Void {
+    fx { println("Fibonacci sequence (first 20 terms):"); }
+    let i: Int = 0;
+    loop i < 20 {
+        fx { print(fibonacci(i), " "); }
+        i = i + 1;
+    }
+    fx { println(""); }
+    fx { println(""); }
+
+    fx { println("Golden ratio convergence (fib(n)/fib(n-1)):"); }
+    let j: Int = 5;
+    loop j <= 25 {
+        let ratio: Real = goldenRatioApprox(j);
+        fx { println("fib(", j, ")/fib(", j - 1, ") = ", ratio:0:10); }
+        j = j + 5;
+    }
+    fx { println(""); }
+
+    let phi: Real = (1.0 + sqrt(5.0)) / 2.0;
+    fx { println("True phi = ", phi:0:10); }
+
+    let finalApprox: Real = goldenRatioApprox(25);
+    let error: Real = abs(finalApprox - phi);
+    fx { println("Error at n=25: ", error:0:12); }
+
+    ret;
+}

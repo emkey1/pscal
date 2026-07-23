@@ -1,0 +1,99 @@
+// Erdos-Straus conjecture: for every integer n >= 2, 4/n = 1/x + 1/y + 1/z
+// has a solution in positive integers. Proven for several residue
+// classes mod small numbers (e.g. n = 3 mod 4, via the identity
+// 1/k = 1/(k+1) + 1/(k(k+1))) but open in general. Each n races
+// independently via par (PAR-001); the search is bounded, so a
+// "not found" result is a search-limit failure, not a disproof.
+
+type FractionSearch {
+    n: Int;
+    found: Bool;
+    x: Int;
+    y: Int;
+    z: Int;
+}
+
+fn searchErdosStraus(out: FractionSearch, n: Int, xBound: Int, yBound: Int) -> Void {
+    let x: Int = n / 4 + 1;
+    let resultFound: Bool = false;
+    let resultX: Int = 0;
+    let resultY: Int = 0;
+    let resultZ: Int = 0;
+    loop x <= xBound {
+        if !resultFound {
+            let num1: Int = 4 * x - n;
+            if num1 > 0 {
+                let den1: Int = n * x;
+                let y: Int = x;
+                loop y <= yBound {
+                    if !resultFound {
+                        let denomZ: Int = num1 * y - den1;
+                        if denomZ > 0 {
+                            let numerZ: Int = den1 * y;
+                            if numerZ % denomZ == 0 {
+                                let z: Int = numerZ / denomZ;
+                                if z > 0 {
+                                    resultFound = true;
+                                    resultX = x;
+                                    resultY = y;
+                                    resultZ = z;
+                                }
+                            }
+                        }
+                    }
+                    y = y + 1;
+                }
+            }
+        }
+        x = x + 1;
+    }
+    out.n = n;
+    out.found = resultFound;
+    out.x = resultX;
+    out.y = resultY;
+    out.z = resultZ;
+    ret;
+}
+
+fn describe(r: FractionSearch) -> Void {
+    fx {
+        if r.found {
+            println("n=", r.n, ": 4/", r.n, " = 1/", r.x, " + 1/", r.y, " + 1/", r.z);
+        } else {
+            println("n=", r.n, ": no solution within bounds (not a disproof)");
+        }
+    }
+    ret;
+}
+
+fn main() -> Void {
+    let xBound: Int = 200;
+    let yBound: Int = 20000;
+
+    let r5: FractionSearch = new FractionSearch();
+    let r7: FractionSearch = new FractionSearch();
+    let r11: FractionSearch = new FractionSearch();
+    let r13: FractionSearch = new FractionSearch();
+    let r19: FractionSearch = new FractionSearch();
+
+    par {
+        searchErdosStraus(r5, 5, xBound, yBound);
+        searchErdosStraus(r7, 7, xBound, yBound);
+        searchErdosStraus(r11, 11, xBound, yBound);
+        searchErdosStraus(r13, 13, xBound, yBound);
+        searchErdosStraus(r19, 19, xBound, yBound);
+    }
+
+    describe(r5);
+    describe(r7);
+    describe(r11);
+    describe(r13);
+    describe(r19);
+
+    fx {
+        println("");
+        println("Verified by computer search for enormous n; a general proof or");
+        println("counterexample is still unknown.");
+    }
+    ret;
+}

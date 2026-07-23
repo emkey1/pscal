@@ -1,0 +1,56 @@
+type VM {
+    stack: Int[];
+
+    fn push(val: Int) -> Void {
+        self.stack = self.stack + [val];
+        ret;
+    }
+
+    fn pop() -> Int {
+        let n: Int = length(self.stack);
+        if n == 0 {
+            ret 0;
+        }
+
+        let val: Int = self.stack[n - 1];
+        let newStack: Int[] = [];
+
+        loop i in 0..(n - 1) {
+            newStack = newStack + [self.stack[i]];
+        }
+
+        self.stack = newStack;
+        ret val;
+    }
+
+    fn add() -> Void {
+        let b: Int = self.pop();
+        let a: Int = self.pop();
+        self.push(a + b);
+        ret;
+    }
+
+    fn multiply() -> Void {
+        let b: Int = self.pop();
+        let a: Int = self.pop();
+        self.push(a * b);
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let machine: VM = new VM();
+
+    machine.push(3);
+    machine.push(4);
+    machine.add();
+    machine.push(5);
+    machine.multiply();
+
+    let result: Int = machine.pop();
+
+    fx {
+        println("VM Execution Result: ", result);
+    }
+    ret;
+}

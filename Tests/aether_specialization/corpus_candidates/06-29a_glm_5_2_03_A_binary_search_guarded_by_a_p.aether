@@ -1,0 +1,60 @@
+@pure
+@post result >= -1
+fn binarySearch(xs: Int[], target: Int) -> Int {
+    let lo: Int = 0;
+    let hi: Int = length(xs) - 1;
+    loop lo <= hi {
+        let mid: Int = (lo + hi) / 2;
+        if xs[mid] == target {
+            ret mid;
+        }
+        if xs[mid] < target {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    ret -1;
+}
+
+@pure
+fn insertSorted(xs: Int[], v: Int) -> Int[] {
+    let result: Int[] = [];
+    let inserted: Bool = false;
+    loop i in 0..length(xs) {
+        if !inserted && xs[i] > v {
+            result = result + [v];
+            inserted = true;
+        }
+        result = result + [xs[i]];
+    }
+    if !inserted {
+        result = result + [v];
+    }
+    ret result;
+}
+
+fn main() -> Void {
+    let xs: Int[] = [];
+    let values: Int[] = [5, 2, 8, 1, 9, 3, 7, 4, 6];
+    loop i in 0..length(values) {
+        xs = insertSorted(xs, values[i]);
+    }
+    fx {
+        println("Sorted array:");
+        loop i in 0..length(xs) {
+            print(xs[i], " ");
+        }
+        println("");
+    }
+    let target: Int = 7;
+    let idx: Int = binarySearch(xs, target);
+    fx {
+        if idx >= 0 {
+            println("Found ", target, " at index ", idx);
+        } else {
+            println(target, " not found");
+        }
+    }
+    ret;
+}

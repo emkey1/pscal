@@ -1,0 +1,77 @@
+type Grid {
+    width: Int;
+    height: Int;
+    cells: Bool[];
+}
+
+fn create_grid(width: Int, height: Int) -> Grid {
+    let cells: Bool[] = [];
+    fx {
+        loop y in 0..height {
+            loop x in 0..width {
+                cells = cells + [random() > 0.7];
+            }
+        }
+    }
+    ret new Grid { width: width, height: height, cells: cells };
+}
+
+fn count_neighbors(grid: Grid, x: Int, y: Int) -> Int {
+    let count: Int = 0;
+    loop dy in -1..2 {
+        loop dx in -1..2 {
+            if dx == 0 && dy == 0 {
+                continue;
+            }
+            let nx: Int = x + dx;
+            let ny: Int = y + dy;
+            if nx >= 0 && nx < grid.width && ny >= 0 && ny < grid.height {
+                let index: Int = ny * grid.width + nx;
+                if grid.cells[index] {
+                    count = count + 1;
+                }
+            }
+        }
+    }
+    ret count;
+}
+
+fn next_generation(grid: Grid) -> Grid {
+    let new_cells: Bool[] = [];
+    loop y in 0..grid.height {
+        loop x in 0..grid.width {
+            let index: Int = y * grid.width + x;
+            let neighbors: Int = count_neighbors(grid, x, y);
+            if grid.cells[index] {
+                new_cells = new_cells + [neighbors == 2 || neighbors == 3];
+            } else {
+                new_cells = new_cells + [neighbors == 3];
+            }
+        }
+    }
+    ret new Grid { width: grid.width, height: grid.height, cells: new_cells };
+}
+
+fn print_grid(grid: Grid) -> Void {
+    fx {
+        loop y in 0..grid.height {
+            let row: Text = "";
+            loop x in 0..grid.width {
+                let index: Int = y * grid.width + x;
+                row = row + (if grid.cells[index] { "X" } else { "." });
+            }
+            println(row);
+        }
+    }
+    ret;
+}
+
+fn main() -> Void {
+    fx { randomize(); }
+    let grid: Grid = create_grid(20, 10);
+    loop i in 0..3 {
+        print_grid(grid);
+        grid = next_generation(grid);
+    }
+    ret;
+}

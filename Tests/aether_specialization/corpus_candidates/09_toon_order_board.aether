@@ -1,0 +1,58 @@
+// Order board — object root, guarded nested lookups, key fidelity
+
+type Board {
+    shipped: Int = 0;
+    pending: Int = 0;
+    revenue: Real = 0.0;
+
+    fn record(state: Text, amount: Real) -> Void {
+        if state == "shipped" {
+            self.shipped = self.shipped + 1;
+            self.revenue = self.revenue + amount;
+            ret;
+        }
+        self.pending = self.pending + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("{\"orders\":[{\"id\":\"A1\",\"state\":\"shipped\",\"amount\":49.5,\"customer\":{\"tier\":\"gold\"}},{\"id\":\"B2\",\"state\":\"pending\",\"amount\":12.0},{\"id\":\"C3\",\"state\":\"shipped\",\"amount\":8.25,\"customer\":{}}]}");
+    let root: ToonNode = toon_root(doc);
+    let orders: ToonNode = toon_key(root, "orders");
+    let board: Board = new Board();
+
+    loop i in 0..toon_len(orders) {
+        let order: ToonNode = toon_at(orders, i);
+        let id: Text = toon_get_text_or(order, "id", "?");
+        let state: Text = toon_get_text_or(order, "state", "pending");
+        let amount: Real = toon_get_real_or(order, "amount", 0.0);
+
+        let tier: Text = "standard";
+        if toon_has_key(order, "customer") {
+            let customer: ToonNode = toon_key(order, "customer");
+            tier = toon_get_text_or(customer, "tier", "standard");
+            toon_free(customer);
+        }
+
+        board.record(state, amount);
+
+        fx {
+            println(id, " ", state, " ", amount:0:2, " tier=", tier);
+        }
+        toon_free(order);
+    }
+
+    fx {
+        println("shipped=", board.shipped, " pending=", board.pending, " revenue=", board.revenue:0:2);
+    }
+
+    toon_free(orders);
+    toon_close(doc);
+    ret;
+}

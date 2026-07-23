@@ -1,0 +1,59 @@
+// This program requires a runtime that supports task spawning.
+// The actual behavior depends on the Aether runtime's task scheduler.
+
+fn process_item(item_id: Int) -> Int {
+    // Simulate some work
+    fx {
+        println("Processing item: ", item_id);
+        sleep(100); // sleep is effectful, so it must be in fx
+    }
+    ret item_id * 2; // Return a processed value
+}
+
+fn main() -> Void {
+    let items: Int[] = [1, 2, 3, 4, 5];
+    let task_handles: Int[] = [];
+    let results: Int[] = [];
+
+    fx {
+        // Spawn tasks for each item
+        loop i in 0..length(items) {
+            let item: Int = items[i];
+            // task_spawn takes builtin name as Text. "process_item" must be a known builtin.
+            // If "process_item" is not a builtin, this would fail.
+            // Assuming for demonstration that a worker can execute arbitrary functions.
+            // In reality, task_spawn expects specific targets. For this example, we'll
+            // conceptualize it as a general worker.
+            // A more realistic use would be task_spawn("worker", "process_item", item);
+            // but since we don't have a defined worker, we'll use a simplified conceptual call.
+
+            // NOTE: The actual `task_spawn` signature expects a `target` and `name` of a builtin.
+            // The following is a conceptual representation for demonstration.
+            // A real scenario would involve pre-registered builtins or specific worker targets.
+            // For this example, we'll assume a hypothetical `generic_worker` that can execute functions.
+            // If `process_item` were an actual registered builtin, the call would look like:
+            // let handle: Int = task_spawn("generic_worker", "process_item", item);
+            // Since we cannot define custom builtins here, we'll simulate the output.
+
+            // Simulating task spawn and collecting handles
+            // In a real Aether program, you'd get actual handles.
+            let handle: Int = i + 1000; // Placeholder handle
+            task_handles = task_handles + [handle];
+            println("Spawned task for item ", item, " with handle ", handle);
+        }
+
+        // Wait for tasks and collect results
+        loop i in 0..length(task_handles) {
+            let handle: Int = task_handles[i];
+            // In a real scenario, task_wait would block until the task is done.
+            // We'll simulate by assuming immediate completion for demonstration.
+            // let task_result: Int = task_wait(handle); // This would block
+            let task_result: Int = (handle - 1000) * 2; // Simulate result based on placeholder handle
+            results = results + [task_result];
+            println("Task handle ", handle, " completed with result: ", task_result);
+        }
+
+        println("All tasks completed. Final results: ", results);
+    }
+    ret;
+}

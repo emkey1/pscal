@@ -1,0 +1,88 @@
+@pure
+fn classifyDepartment(deptName: Text) -> Text {
+    if deptName == "Engineering" {
+        ret "Tech";
+    }
+    if deptName == "Sales" {
+        ret "Revenue";
+    }
+    if deptName == "HR" {
+        ret "Support";
+    }
+    ret "Other";
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let json: Text = "[{\"name\":\"Alice\",\"dept\":\"Engineering\",\"salary\":95000},{\"name\":\"Bob\",\"dept\":\"Sales\",\"salary\":72000},{\"name\":\"Charlie\",\"dept\":\"Engineering\",\"salary\":88000},{\"name\":\"Diana\",\"dept\":\"HR\",\"salary\":65000},{\"name\":\"Eve\",\"dept\":\"Sales\",\"salary\":78000}]";
+    let doc: ToonDoc = toon_parse(json);
+    let root: ToonNode = toon_root(doc);
+
+    let techSalary: Int = 0;
+    let techCount: Int = 0;
+    let revSalary: Int = 0;
+    let revCount: Int = 0;
+    let supportSalary: Int = 0;
+    let supportCount: Int = 0;
+    let otherSalary: Int = 0;
+    let otherCount: Int = 0;
+
+    loop i in 0..toon_len(root) {
+        let emp: ToonNode = toon_at(root, i);
+        let name: Text = toon_get_text(emp, "name");
+        let dept: Text = toon_get_text(emp, "dept");
+        let salary: Int = toon_get_int_or(emp, "salary", 0);
+        let category: Text = classifyDepartment(dept);
+
+        if category == "Tech" {
+            techSalary = techSalary + salary;
+            techCount = techCount + 1;
+        } else if category == "Revenue" {
+            revSalary = revSalary + salary;
+            revCount = revCount + 1;
+        } else if category == "Support" {
+            supportSalary = supportSalary + salary;
+            supportCount = supportCount + 1;
+        } else {
+            otherSalary = otherSalary + salary;
+            otherCount = otherCount + 1;
+        }
+
+        fx {
+            println("  ", name, " (", dept, ") -> ", category, ": $", salary);
+        }
+    }
+
+    fx {
+        println("");
+        println("Department Summary:");
+        if techCount > 0 {
+            let avg: Real = techSalary * 1.0 / techCount;
+            println("  Tech: ", techCount, " employees, total $", techSalary, " avg $", avg:0:2);
+        }
+        if revCount > 0 {
+            let avg: Real = revSalary * 1.0 / revCount;
+            println("  Revenue: ", revCount, " employees, total $", revSalary, " avg $", avg:0:2);
+        }
+        if supportCount > 0 {
+            let avg: Real = supportSalary * 1.0 / supportCount;
+            println("  Support: ", supportCount, " employees, total $", supportSalary, " avg $", avg:0:2);
+        }
+        if otherCount > 0 {
+            let avg: Real = otherSalary * 1.0 / otherCount;
+            println("  Other: ", otherCount, " employees, total $", otherSalary, " avg $", avg:0:2);
+        }
+        let totalEmp: Int = techCount + revCount + supportCount + otherCount;
+        let totalSal: Int = techSalary + revSalary + supportSalary + otherSalary;
+        let overallAvg: Real = totalSal * 1.0 / totalEmp;
+        println("");
+        println("Overall: ", totalEmp, " employees, total payroll $", totalSal, " avg $", overallAvg:0:2);
+    }
+
+    toon_close(doc);
+    ret;
+}

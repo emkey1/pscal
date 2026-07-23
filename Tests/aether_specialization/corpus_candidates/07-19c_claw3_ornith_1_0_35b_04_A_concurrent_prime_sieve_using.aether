@@ -1,0 +1,61 @@
+type PrimeBox {
+    count: Int;
+    lastFound: Int;
+}
+
+@pure
+fn isPrime(n: Int) -> Bool {
+    if n < 2 {
+        ret false;
+    }
+    if n == 2 {
+        ret true;
+    }
+    if n % 2 == 0 {
+        ret false;
+    }
+    let limit: Int = sqrt(n * 1.0);
+    loop i in 3..limit + 1 {
+        if n % i == 0 {
+            ret false;
+        }
+    }
+    ret true;
+}
+
+fn checkRange(start: Int, end: Int, out: PrimeBox) -> Void {
+    let localCount: Int = 0;
+    let localLast: Int = 0;
+    loop n in start..end {
+        if isPrime(n) {
+            localCount = localCount + 1;
+            localLast = n;
+        }
+    }
+    out.count = localCount;
+    out.lastFound = localLast;
+    ret;
+}
+
+fn main() -> Void {
+    let limit: Int = 10000;
+    let half: Int = limit / 2;
+
+    let boxA: PrimeBox = new PrimeBox();
+    let boxB: PrimeBox = new PrimeBox();
+
+    par {
+        checkRange(2, half, boxA);
+        checkRange(half, limit, boxB);
+    }
+
+    let total: Int = boxA.count + boxB.count;
+
+    fx {
+        println("Primes in [2, ", limit, "): ");
+        println("Range [2, ", half, "): count=", boxA.count, " last=", boxA.lastFound);
+        println("Range [", half, ", ", limit, "): count=", boxB.count, " last=", boxB.lastFound);
+        println("Total primes: ", total);
+    }
+    ret;
+}

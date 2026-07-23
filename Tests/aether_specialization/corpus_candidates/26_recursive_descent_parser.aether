@@ -1,0 +1,94 @@
+type Parser {
+    input: Text;
+    pos: Int;
+
+    fn init(s: Text) -> Void {
+        self.input = s;
+        self.pos = 0;
+        ret;
+    }
+
+    fn peek() -> Text {
+        if self.pos >= string_len(self.input) {
+            ret "";
+        }
+        ret copy(self.input, self.pos + 1, 1);
+    }
+
+    fn consume() -> Text {
+        let ch: Text = self.peek();
+        self.pos = self.pos + 1;
+        ret ch;
+    }
+
+    fn skip_whitespace() -> Void {
+        loop self.peek() == " " {
+            self.pos = self.pos + 1;
+        }
+        ret;
+    }
+
+    fn parse_number() -> Int {
+        self.skip_whitespace();
+        let result: Int = 0;
+        loop self.peek() >= "0" && self.peek() <= "9" {
+            let digit: Int = parse_int(self.consume());
+            result = result * 10 + digit;
+        }
+        ret result;
+    }
+
+    fn parse_factor() -> Int {
+        self.skip_whitespace();
+        if self.peek() == "(" {
+            self.consume();
+            let val: Int = self.parse_expr();
+            if self.peek() == ")" {
+                self.consume();
+            }
+            ret val;
+        }
+        ret self.parse_number();
+    }
+
+    fn parse_term() -> Int {
+        let left: Int = self.parse_factor();
+        self.skip_whitespace();
+        loop self.peek() == "*" || self.peek() == "/" {
+            let op: Text = self.consume();
+            let right: Int = self.parse_factor();
+            if op == "*" {
+                left = left * right;
+            } else {
+                left = left / right;
+            }
+            self.skip_whitespace();
+        }
+        ret left;
+    }
+
+    fn parse_expr() -> Int {
+        let left: Int = self.parse_term();
+        self.skip_whitespace();
+        loop self.peek() == "+" || self.peek() == "-" {
+            let op: Text = self.consume();
+            let right: Int = self.parse_term();
+            if op == "+" {
+                left = left + right;
+            } else {
+                left = left - right;
+            }
+            self.skip_whitespace();
+        }
+        ret left;
+    }
+}
+
+fn main() -> Void {
+    let p: Parser = new Parser {};
+    p.init("3 + 5 * (10 - 4) / 2");
+    fx {
+        println("Result: ", p.parse_expr());
+    }
+    ret;
+}

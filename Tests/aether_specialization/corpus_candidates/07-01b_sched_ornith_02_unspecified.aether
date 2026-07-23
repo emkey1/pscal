@@ -1,0 +1,74 @@
+@pure
+fn classify(score: Int) -> Text {
+    if score >= 90 {
+        ret "excellent";
+    }
+    if score >= 70 {
+        ret "good";
+    }
+    if score >= 50 {
+        ret "passing";
+    }
+    ret "failing";
+}
+
+type Stats {
+    total: Int;
+    excellent: Int;
+    good: Int;
+    passing: Int;
+    failing: Int;
+
+    fn record(status: Text) -> Void {
+        self.total = self.total + 1;
+        if status == "excellent" {
+            self.excellent = self.excellent + 1;
+            ret;
+        }
+        if status == "good" {
+            self.good = self.good + 1;
+            ret;
+        }
+        if status == "passing" {
+            self.passing = self.passing + 1;
+            ret;
+        }
+        self.failing = self.failing + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let payload: Text = "[{\"name\":\"Alice\",\"score\":95},{\"name\":\"Bob\",\"score\":72},{\"name\":\"Carol\",\"score\":48},{\"name\":\"Dan\",\"score\":88},{\"name\":\"Eve\",\"score\":61}]";
+    let doc: ToonDoc = toon_parse(payload);
+    let root: ToonNode = toon_root(doc);
+    let stats: Stats = new Stats();
+
+    loop i in 0..toon_len(root) {
+        let row: ToonNode = toon_at(root, i);
+        let name: Text = toon_get_text(row, "name");
+        let score: Int = toon_get_int_or(row, "score", 0);
+        let status: Text = classify(score);
+        stats.record(status);
+        fx {
+            println(name, " scored ", score, " -> ", status);
+        }
+    }
+
+    fx {
+        println("----");
+        println("total: ", stats.total);
+        println("excellent: ", stats.excellent);
+        println("good: ", stats.good);
+        println("passing: ", stats.passing);
+        println("failing: ", stats.failing);
+    }
+
+    toon_close(doc);
+    ret;
+}

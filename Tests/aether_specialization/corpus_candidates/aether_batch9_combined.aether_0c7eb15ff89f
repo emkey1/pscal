@@ -1,0 +1,193 @@
+fn clamp01(x: Real) -> Real {
+    if x < 0.0 {
+        ret 0.0;
+    }
+    if x > 1.0 {
+        ret 1.0;
+    }
+    ret x;
+}
+
+fn split_csv_line(line: Text) -> Text[] {
+    let parts: Text[] = [];
+    let current: Text = "";
+    let i: Int = 0;
+    loop i < string_len(line) {
+        let ch: Text = copy(line, i + 1, 1);
+        if ch == "," {
+            parts = parts + [current];
+            current = "";
+        } else {
+            current = current + ch;
+        }
+        i = i + 1;
+    }
+    parts = parts + [current];
+    ret parts;
+}
+
+type Stats {
+    seen: Int = 0;
+    total: Real = 0.0;
+    minValue: Real = 0.0;
+    maxValue: Real = 0.0;
+    initialized: Bool = false;
+
+    fn observe(value: Real) -> Void {
+        if !self.initialized {
+            self.minValue = value;
+            self.maxValue = value;
+            self.initialized = true;
+        } else {
+            if value < self.minValue {
+                self.minValue = value;
+            }
+            if value > self.maxValue {
+                self.maxValue = value;
+            }
+        }
+        self.seen = self.seen + 1;
+        self.total = self.total + value;
+        ret;
+    }
+
+    fn mean() -> Real {
+        if self.seen == 0 {
+            ret 0.0;
+        }
+        ret self.total / self.seen;
+    }
+}
+
+type BitGrid {
+    cells: Int[] = [];
+
+    fn flip(index: Int) -> Void {
+        self.cells[index] = self.cells[index] xor 1;
+        ret;
+    }
+
+    fn bitCount() -> Int {
+        let total: Int = 0;
+        loop i in 0..length(self.cells) {
+            total = total + self.cells[i];
+        }
+        ret total;
+    }
+}
+
+fn makePoint(x: Int, y: Int) -> Point {
+    ret new Point { x: x, y: y };
+}
+
+type Point {
+    x: Int;
+    y: Int;
+
+    fn manhattan() -> Int {
+        ret abs(self.x) + abs(self.y);
+    }
+}
+
+fn makePolar(radius: Real, angle: Real) -> Point {
+    let px: Int = round(radius * cos(angle));
+    let py: Int = round(radius * sin(angle));
+    ret new Point { x: px, y: py };
+}
+
+fn parseScore(line: Text) -> Int {
+    let pieces: Text[] = split_csv_line(line);
+    if length(pieces) < 2 {
+        ret 0;
+    }
+    ret parse_int(trim(pieces[1]));
+}
+
+fn pairSquares(n: Int) -> (Int, Int) {
+    ret (n * n, n * n * n);
+}
+
+fn fibAndOdd(n: Int) -> (Int, Bool) {
+    ret (fibonacci(n), odd(n));
+}
+
+fn classifyStatus(score: Int) -> Text {
+    if score >= 90 {
+        ret "ready";
+    }
+    if score >= 70 {
+        ret "review";
+    }
+    if score >= 40 {
+        ret "watch";
+    }
+    ret "blocked";
+}
+
+fn countSetBits(n: Int) -> Int {
+    let value: Int = n;
+    let count: Int = 0;
+    loop value > 0 {
+        count = count + (value & 1);
+        value = value >> 1;
+    }
+    ret count;
+}
+
+fn accumEvenSquares(limit: Int) -> Int {
+    let total: Int = 0;
+    loop i in 0..limit {
+        if !odd(i) {
+            total = total + sqr(i);
+        }
+    }
+    ret total;
+}
+
+fn main() -> Void {
+    let p: Point = makePoint(3, -4);
+    let q: Point = makePolar(10.0, 0.78539816339);
+    let grid: BitGrid = new BitGrid { cells: [0, 1, 0, 1, 1] };
+    let stats: Stats = new Stats();
+    let lines: Text[] = ["12.5,alpha", "7.25,beta", "99.0,gamma"];
+    let flags: Int[] = [1, 0, 1, 1, 0, 1];
+    let sample: Text = "  42, ignored  ";
+    let score: Int = parseScore(sample);
+    let pairA: Int = 0;
+    let pairB: Bool = false;
+    let evenSum: Int = accumEvenSquares(10);
+    let setBits: Int = countSetBits(0xF0F0);
+
+    loop i in 0..length(lines) {
+        let fields: Text[] = split_csv_line(lines[i]);
+        let value: Real = parse_float(fields[0]);
+        stats.observe(value);
+    }
+
+    let (square, cube) = pairSquares(6);
+    let (fibValue, isOddValue) = fibAndOdd(11);
+
+    grid.flip(0);
+    grid.flip(3);
+
+    pairA = square + cube;
+    pairB = isOddValue;
+
+    fx {
+        println("point manhattan = ", p.manhattan());
+        println("polar point = ", q.x, ", ", q.y);
+        println("score = ", score, " -> ", classifyStatus(score));
+        println("stats seen = ", stats.seen);
+        println("stats mean = ", stats.mean():0:2);
+        println("stats range = ", stats.minValue:0:2, " .. ", stats.maxValue:0:2);
+        println("bit grid count = ", grid.bitCount());
+        println("pair total = ", pairA);
+        println("fib = ", fibValue, " odd = ", pairB);
+        println("even square sum = ", evenSum);
+        println("set bits = ", setBits);
+        println("clamped score ratio = ", clamp01(stats.mean() / 100.0):0:3);
+        println("first line pieces = ", split_csv_line(lines[0])[1]);
+    }
+
+    ret;
+}

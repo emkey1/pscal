@@ -1,0 +1,24 @@
+@pure
+fn fib(n: Int) -> Int {
+    if n <= 1 {
+        ret n;
+    }
+    let a: Int = 0;
+    let b: Int = 1;
+    loop i in 2..n+1 {
+        let temp: Int = a + b;
+        a = b;
+        b = temp;
+    }
+    ret b;
+}
+
+fn main() -> Void {
+    fx {
+        println("Fibonacci numbers:");
+        loop i in 0..10 {
+            println(i, ": ", fib(i));
+        }
+    }
+    ret;
+}

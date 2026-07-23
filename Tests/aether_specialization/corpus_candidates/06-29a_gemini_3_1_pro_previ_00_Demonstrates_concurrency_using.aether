@@ -1,0 +1,34 @@
+type Box {
+    sum: Real;
+}
+
+fn integrate(out: Box, start: Int, end: Int, steps: Int) -> Void {
+    let stepSize: Real = 1.0 / steps;
+    let localSum: Real = 0.0;
+    
+    loop i in start..end {
+        let x: Real = (i + 0.5) * stepSize;
+        localSum = localSum + 4.0 / (1.0 + x * x);
+    }
+    
+    out.sum = localSum * stepSize;
+    ret;
+}
+
+fn main() -> Void {
+    let steps: Int = 100_000;
+    let b1: Box = new Box();
+    let b2: Box = new Box();
+    
+    par {
+        integrate(b1, 0, steps / 2, steps);
+        integrate(b2, steps / 2, steps, steps);
+    }
+    
+    let pi: Real = b1.sum + b2.sum;
+    
+    fx {
+        println("Approximated Pi: ", pi:0:6);
+    }
+    ret;
+}

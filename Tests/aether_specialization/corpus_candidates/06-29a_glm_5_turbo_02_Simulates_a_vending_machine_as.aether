@@ -1,0 +1,86 @@
+type VendingMachine {
+    balance: Int;
+    state: Text;
+    dispensed: Text;
+
+    fn insertCoin(amount: Int) -> Void {
+        if self.state == "idle" {
+            self.state = "has_balance";
+        }
+        self.balance = self.balance + amount;
+        ret;
+    }
+
+    fn selectItem(item: Text, cost: Int) -> Text {
+        if self.state != "has_balance" {
+            ret "ERROR: insert coins first";
+        }
+        if self.balance < cost {
+            ret "ERROR: insufficient balance";
+        }
+        self.balance = self.balance - cost;
+        self.state = "dispensing";
+        self.dispensed = item;
+        ret "OK";
+    }
+
+    fn dispense() -> Text {
+        if self.state != "dispensing" {
+            ret "ERROR: no pending dispensation";
+        }
+        let item: Text = self.dispensed;
+        self.dispensed = "";
+        if self.balance > 0 {
+            self.state = "has_balance";
+        } else {
+            self.state = "idle";
+        }
+        ret item;
+    }
+
+    fn returnChange() -> Int {
+        let change: Int = self.balance;
+        self.balance = 0;
+        self.state = "idle";
+        ret change;
+    }
+}
+
+fn main() -> Void {
+    let vm: VendingMachine = new VendingMachine();
+    vm.state = "idle";
+
+    fx { println("=== Vending Machine Simulation ==="); }
+
+    fx { println("Insert 50 cents..."); }
+    vm.insertCoin(50);
+
+    fx { println("Select Soda (cost 40)..."); }
+    let result: Text = vm.selectItem("Soda", 40);
+    fx { println(result); }
+
+    fx { println("Dispense..."); }
+    let item: Text = vm.dispense();
+    fx { println("Got: ", item); }
+
+    let change: Int = vm.returnChange();
+    fx { println("Change returned: ", change, " cents"); }
+
+    fx { println(""); }
+    fx { println("Buy another item with exact change..."); }
+    vm.insertCoin(25);
+    vm.insertCoin(15);
+    let r2: Text = vm.selectItem("Chips", 40);
+    fx { println(r2); }
+    let item2: Text = vm.dispense();
+    fx { println("Got: ", item2); }
+    let change2: Int = vm.returnChange();
+    fx { println("Change returned: ", change2, " cents"); }
+
+    fx { println(""); }
+    fx { println("Try selecting without coins..."); }
+    let r3: Text = vm.selectItem("Candy", 30);
+    fx { println(r3); }
+
+    ret;
+}

@@ -1,0 +1,62 @@
+type CategoryTotal {
+    category: Text;
+    total: Real;
+    count: Int;
+}
+
+@pure
+fn findIndex(totals: CategoryTotal[], cat: Text) -> Int {
+    let i: Int = 0;
+    loop i < length(totals) {
+        if totals[i].category == cat {
+            ret i;
+        }
+        i = i + 1;
+    }
+    ret -1;
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("[{\"category\":\"food\",\"amount\":12.50},{\"category\":\"transport\",\"amount\":5.00},{\"category\":\"food\",\"amount\":8.75},{\"category\":\"entertainment\",\"amount\":15.00},{\"category\":\"transport\",\"amount\":3.25},{\"category\":\"food\",\"amount\":22.00},{\"category\":\"entertainment\",\"amount\":9.99}]");
+    let root: ToonNode = toon_root(doc);
+    let totals: CategoryTotal[] = [];
+
+    let i: Int = 0;
+    loop i < toon_len(root) {
+        let tx: ToonNode = toon_at(root, i);
+        let cat: Text = toon_get_text(tx, "category");
+        let amt: Real = toon_get_real(tx, "amount");
+
+        let idx: Int = findIndex(totals, cat);
+        if idx >= 0 {
+            totals[idx].total = totals[idx].total + amt;
+            totals[idx].count = totals[idx].count + 1;
+        } else {
+            let entry: CategoryTotal = CategoryTotal { category: cat, total: amt, count: 1 };
+            totals = totals + [entry];
+        }
+
+        toon_free(tx);
+        i = i + 1;
+    }
+
+    fx {
+        println("Category         | Txns | Total");
+        println("-----------------|------|----------");
+    }
+    let j: Int = 0;
+    loop j < length(totals) {
+        fx {
+            println(totals[j].category, " | ", totals[j].count, "    | $", totals[j].total:0:2);
+        }
+        j = j + 1;
+    }
+
+    toon_close(doc);
+    ret;
+}

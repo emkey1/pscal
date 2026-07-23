@@ -1,0 +1,32 @@
+// Collatz steps — condition loop, pure helper, tracking a maximum
+
+@pure
+fn collatzSteps(start: Int) -> Int {
+    let n: Int = start;
+    let steps: Int = 0;
+    loop n != 1 {
+        if n % 2 == 0 {
+            n = n / 2;
+        } else {
+            n = 3 * n + 1;
+        }
+        steps = steps + 1;
+    }
+    ret steps;
+}
+
+fn main() -> Void {
+    let bestStart: Int = 1;
+    let bestSteps: Int = 0;
+    loop i in 1..100 {
+        let steps: Int = collatzSteps(i);
+        if steps > bestSteps {
+            bestSteps = steps;
+            bestStart = i;
+        }
+    }
+    fx {
+        println("longest chain under 100 starts at ", bestStart, " with ", bestSteps, " steps");
+    }
+    ret;
+}

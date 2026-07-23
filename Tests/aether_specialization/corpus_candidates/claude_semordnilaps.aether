@@ -1,0 +1,53 @@
+// A semordnilap is a word whose reversal is itself a different valid word
+// (as opposed to a palindrome, whose reversal is ITSELF). Named by reversing
+// the word "palindromes" -- which is not actually a semordnilap of anything,
+// making the term a little joke about itself.
+
+@pure
+fn reverseWord(w: Text) -> Text {
+    let result: Text = "";
+    let i: Int = length(w) - 1;
+    loop i >= 0 {
+        result = result + copy(w, i + 1, 1);
+        i = i - 1;
+    }
+    ret result;
+}
+
+@pure
+fn containsWord(list: Text[], target: Text) -> Bool {
+    loop i in 0..length(list) {
+        if list[i] == target {
+            ret true;
+        }
+    }
+    ret false;
+}
+
+fn main() -> Void {
+    let words: Text[] = ["stressed", "desserts", "drawer", "reward", "diaper",
+                          "repaid", "deified", "level", "dog", "god", "straw",
+                          "warts", "lager", "regal", "bard", "drab"];
+
+    fx {
+        println("Semordnilaps found:");
+    }
+    let reportedPairs: Text[] = [];
+    loop i in 0..length(words) {
+        let w: Text = words[i];
+        let rev: Text = reverseWord(w);
+        if rev != w && containsWord(words, rev) {
+            let pairKey: Text = w;
+            if rev < w {
+                pairKey = rev;
+            }
+            if !containsWord(reportedPairs, pairKey) {
+                reportedPairs = reportedPairs + [pairKey];
+                fx {
+                    println(w, " <-> ", rev);
+                }
+            }
+        }
+    }
+    ret;
+}

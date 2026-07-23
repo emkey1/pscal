@@ -1,0 +1,30 @@
+type BankAccount {
+    balance: Int;
+
+    fn deposit(amount: Int) -> Void {
+        self.balance = self.balance + amount;
+    }
+
+    fn withdraw(amount: Int) -> Bool {
+        if amount > self.balance {
+            ret false;
+        }
+        self.balance = self.balance - amount;
+        ret true;
+    }
+}
+
+fn main() -> Void {
+    fx {
+        let account = new BankAccount { balance: 100 };
+        println("Initial balance:", account.balance);
+        account.deposit(50);
+        println("Balance after depositing 50:", account.balance);
+        if account.withdraw(30) {
+            println("Withdrawal successful. New balance:", account.balance);
+        } else {
+            println("Insufficient funds.");
+        }
+    }
+    ret;
+}

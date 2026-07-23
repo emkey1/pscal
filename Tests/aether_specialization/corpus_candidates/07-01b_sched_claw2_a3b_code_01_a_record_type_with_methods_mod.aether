@@ -1,0 +1,29 @@
+type Counter {
+    value: Int;
+    limit: Int;
+
+    fn bump() -> Void {
+        if self.value < self.limit { self.value = self.value + 1; }
+        ret;
+    }
+
+    fn overLimit() -> Bool {
+        ret self.value > self.limit;
+    }
+}
+
+fn main() -> Void {
+    let c: Counter = new Counter();
+    c.limit = 5;
+
+    loop i in 0..8 { c.bump(); }
+    let isOver: Bool = c.overLimit();
+
+    fx {
+        println("final count = ", c.value);
+        if isOver { println("over limit"); ret; }
+        println("within limits");
+    }
+
+    ret;
+}

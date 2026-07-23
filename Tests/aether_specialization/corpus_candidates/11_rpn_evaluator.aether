@@ -1,0 +1,67 @@
+type Stack {
+    items: Int[];
+
+    fn push(val: Int) -> Void {
+        self.items = self.items + [val];
+        ret;
+    }
+
+    fn pop() -> Int {
+        let top: Int = self.items[length(self.items) - 1];
+        let newItems: Int[] = [];
+        loop i in 0..length(self.items) - 1 {
+            newItems = newItems + [self.items[i]];
+        }
+        self.items = newItems;
+        ret top;
+    }
+
+    fn peek() -> Int {
+        ret self.items[length(self.items) - 1];
+    }
+
+    fn size() -> Int {
+        ret length(self.items);
+    }
+}
+
+@pure
+fn isOp(ch: Text) -> Bool {
+    if ch == "+" { ret true; }
+    if ch == "-" { ret true; }
+    if ch == "*" { ret true; }
+    if ch == "/" { ret true; }
+    ret false;
+}
+
+fn evalRPN(tokens: Text[]) -> Int {
+    let stack: Stack = new Stack { items: [] };
+
+    loop i in 0..length(tokens) {
+        let tok: Text = tokens[i];
+        if isOp(tok) {
+            let b: Int = stack.pop();
+            let a: Int = stack.pop();
+            let result: Int = 0;
+            if tok == "+" { result = a + b; }
+            if tok == "-" { result = a - b; }
+            if tok == "*" { result = a * b; }
+            if tok == "/" { result = a / b; }
+            stack.push(result);
+        } else {
+            stack.push(parse_int(tok));
+        }
+    }
+    ret stack.pop();
+}
+
+fn main() -> Void {
+    let expr1: Text[] = ["2", "3", "+", "4", "*"];
+    let expr2: Text[] = ["5", "1", "2", "+", "4", "*", "+", "3", "-"];
+
+    fx {
+        println("Expression: 2 3 + 4 * => ", evalRPN(expr1));
+        println("Expression: 5 1 2 + 4 * + 3 - => ", evalRPN(expr2));
+    }
+    ret;
+}

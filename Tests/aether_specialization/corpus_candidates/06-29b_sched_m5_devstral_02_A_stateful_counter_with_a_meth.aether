@@ -1,0 +1,25 @@
+type Counter {
+    value: Int;
+
+    fn increment() -> Int {
+        self.value = self.value + 1;
+        ret self.value;
+    }
+
+    fn reset() -> Void {
+        self.value = 0;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let counter: Counter = new Counter();
+    fx {
+        println("Initial value:", counter.value);
+        println("After increment:", counter.increment());
+        println("After another increment:", counter.increment());
+        counter.reset();
+        println("After reset:", counter.value);
+    }
+    ret;
+}

@@ -1,0 +1,36 @@
+type Dict {
+    keys: Text[];
+    values: Text[];
+
+    fn put(key: Text, value: Text) -> Void {
+        self.keys = self.keys + [key];
+        self.values = self.values + [value];
+        ret;
+    }
+
+    fn get(key: Text) -> Text {
+        let index: Int = -1;
+        loop i in 0..length(self.keys) {
+            if self.keys[i] == key {
+                index = i;
+                break;
+            }
+        }
+        if index != -1 {
+            ret self.values[index];
+        }
+        ret "";
+    }
+}
+
+fn main() -> Void {
+    let dict: Dict = new Dict {};
+    dict.put("name", "Aether");
+    dict.put("version", "1.0");
+
+    fx {
+        println(dict.get("name"));
+        println(dict.get("version"));
+    }
+    ret;
+}

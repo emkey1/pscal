@@ -1,0 +1,34 @@
+@pure
+fn isPassing(score: Int) -> Bool {
+    ret score >= 60;
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("{\"students\":[{\"name\":\"Alice\",\"score\":85},{\"name\":\"Bob\",\"score\":42},{\"name\":\"Charlie\",\"score\":92}]}");
+    let root: ToonNode = toon_root(doc);
+    let students: ToonNode = toon_key(root, "students");
+
+    let count: Int = 0;
+    loop i in 0..toon_len(students) {
+        let student: ToonNode = toon_at(students, i);
+        let name: Text = toon_get_text(student, "name");
+        let score: Int = toon_get_int_or(student, "score", 0);
+
+        if isPassing(score) {
+            fx { println("Pass: ", name, " (", score, ")"); }
+            count = count + 1;
+        }
+    }
+
+    fx {
+        println("Total students passed: ", count);
+    }
+
+    toon_close(doc);
+    ret;
+}

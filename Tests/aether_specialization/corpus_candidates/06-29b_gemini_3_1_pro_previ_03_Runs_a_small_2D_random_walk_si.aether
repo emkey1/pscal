@@ -1,0 +1,56 @@
+@pure
+@post result.0 <= result.1
+fn orderPair(a: Int, b: Int) -> (Int, Int) {
+    if a > b {
+        ret (b, a);
+    }
+    ret (a, b);
+}
+
+type BoundingBox {
+    minX: Int;
+    maxX: Int;
+    minY: Int;
+    maxY: Int;
+
+    fn expand(x: Int, y: Int) -> Void {
+        if x < self.minX { self.minX = x; }
+        if x > self.maxX { self.maxX = x; }
+        if y < self.minY { self.minY = y; }
+        if y > self.maxY { self.maxY = y; }
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let box: BoundingBox = new BoundingBox();
+    box.minX = 1000; box.maxX = -1000;
+    box.minY = 1000; box.maxY = -1000;
+
+    let x: Int = 0;
+    let y: Int = 0;
+
+    fx { randomize(); }
+
+    loop i in 0..50 {
+        box.expand(x, y);
+        
+        let step: Int = 0;
+        fx { step = random(4); }
+        
+        if step == 0 { x = x + 1; }
+        if step == 1 { x = x - 1; }
+        if step == 2 { y = y + 1; }
+        if step == 3 { y = y - 1; }
+    }
+
+    let (orderedMinX, orderedMaxX) = orderPair(box.minX, box.maxX);
+    let (orderedMinY, orderedMaxY) = orderPair(box.minY, box.maxY);
+
+    fx {
+        println("Random walk bounding box after 50 steps:");
+        println("X range: [", orderedMinX, ", ", orderedMaxX, "]");
+        println("Y range: [", orderedMinY, ", ", orderedMaxY, "]");
+    }
+    ret;
+}

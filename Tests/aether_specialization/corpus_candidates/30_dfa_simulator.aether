@@ -1,0 +1,55 @@
+type DFA {
+    states: Int;
+    transitions: Int[][];
+    accepting: Bool[];
+    current: Int;
+
+    fn init() -> Void {
+        self.states = 3;
+        self.transitions = [[0, 1], [2, 0], [1, 2]];
+        self.accepting = [true, false, false];
+        self.current = 0;
+        ret;
+    }
+
+    fn reset_dfa() -> Void {
+        self.current = 0;
+        ret;
+    }
+
+    fn step(input_symbol: Int) -> Void {
+        self.current = self.transitions[self.current][input_symbol];
+        ret;
+    }
+
+    fn is_accepting() -> Bool {
+        ret self.accepting[self.current];
+    }
+
+    fn test(input_str: Text) -> Bool {
+        self.reset_dfa();
+        loop i in 0..string_len(input_str) {
+            let symbol: Int = parse_int(copy(input_str, i + 1, 1));
+            self.step(symbol);
+        }
+        ret self.is_accepting();
+    }
+}
+
+fn main() -> Void {
+    let dfa: DFA = new DFA {};
+    dfa.init();
+
+    let tests: Text[] = ["0", "11", "110", "111", "1001", "10101"];
+
+    fx {
+        println("Binary strings divisible by 3:");
+    }
+    loop i in 0..length(tests) {
+        let accepted: Bool = dfa.test(tests[i]);
+        fx {
+            println(tests[i], " -> ", accepted);
+        }
+    }
+    ret;
+}

@@ -1,0 +1,55 @@
+type Neuron {
+    weights: Real[];
+    bias: Real;
+}
+
+type Layer {
+    neurons: Neuron[];
+}
+
+type Network {
+    layers: Layer[];
+}
+
+@pure
+fn sigmoid(x: Real) -> Real {
+    ret 1.0 / (1.0 + exp(-x));
+}
+
+fn forward(network: Network, input: Real[]) -> Real[] {
+    let output: Real[] = input;
+    loop l in 0..length(network.layers) {
+        let layer: Layer = network.layers[l];
+        let new_output: Real[] = [];
+        loop n in 0..length(layer.neurons) {
+            let neuron: Neuron = layer.neurons[n];
+            let sum: Real = 0.0;
+            loop i in 0..length(output) {
+                sum = sum + output[i] * neuron.weights[i];
+            }
+            sum = sum + neuron.bias;
+            new_output = new_output + [sigmoid(sum)];
+        }
+        output = new_output;
+    }
+    ret output;
+}
+
+fn main() -> Void {
+    let network: Network = new Network { layers: [
+        new Layer { neurons: [
+            new Neuron { weights: [0.5, -0.5], bias: 0.1 },
+            new Neuron { weights: [0.3, 0.7], bias: -0.2 }
+        ]}
+    ]};
+    let input: Real[] = [1.0, 2.0];
+    let output: Real[] = forward(network, input);
+    fx {
+        print("Output: ");
+        loop i in 0..length(output) {
+            print(output[i]:0:4, " ");
+        }
+        println("");
+    }
+    ret;
+}

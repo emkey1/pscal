@@ -1,0 +1,16 @@
+@post result >= 0
+fn fib(n: Int) -> Int {
+    if n <= 1 {
+        ret n;
+    }
+    ret fib(n - 1) + fib(n - 2);
+}
+
+fn main() -> Void {
+    fx {
+        loop i in 0..10 {
+            println("Fib(", i, ") = ", fib(i));
+        }
+    }
+    ret;
+}

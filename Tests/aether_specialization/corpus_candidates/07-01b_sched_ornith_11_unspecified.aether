@@ -1,0 +1,46 @@
+type Card {
+    rank: Int;
+    suit: Int;
+
+    fn label() -> Text {
+        let ranks: Text[] = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
+        let suits: Text[] = ["Spades", "Hearts", "Diamonds", "Clubs"];
+        ret ranks[self.rank] + " of " + suits[self.suit];
+    }
+}
+
+fn main() -> Void {
+    let deck: Card[] = [];
+    loop s in 0..4 {
+        loop r in 0..13 {
+            let c: Card = new Card();
+            c.rank = r;
+            c.suit = s;
+            deck = deck + [c];
+        }
+    }
+
+    fx {
+        randomize();
+        let n: Int = length(deck);
+        loop i in 0..n {
+            let j: Int = random(n - i) + i;
+            if j != i {
+                let tmp: Card = deck[i];
+                deck[i] = deck[j];
+                deck[j] = tmp;
+            }
+        }
+
+        println("Hand A:");
+        loop i in 0..5 {
+            println("  ", deck[i].label());
+        }
+        println("Hand B:");
+        loop i in 5..10 {
+            println("  ", deck[i].label());
+        }
+    }
+
+    ret;
+}

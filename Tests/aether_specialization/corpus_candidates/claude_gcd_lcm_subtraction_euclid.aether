@@ -1,0 +1,40 @@
+@pure
+fn gcd(a: Int, b: Int) -> Int {
+    if a == b {
+        ret a;
+    }
+    if a > b {
+        ret gcd(a - b, b);
+    }
+    ret gcd(a, b - a);
+}
+
+@pure
+fn exactDivide(n: Int, d: Int) -> Int {
+    let limit: Int = n + 1;
+    loop i in 1..limit {
+        if i * d == n {
+            ret i;
+        }
+        if i * d > n {
+            ret 0;
+        }
+    }
+    ret 0;
+}
+
+@pure
+fn lcm(a: Int, b: Int) -> Int {
+    let g: Int = gcd(a, b);
+    ret a * exactDivide(b, g);
+}
+
+fn main() -> Void {
+    fx {
+        println("gcd of 48 and 18 -> ", gcd(48, 18));
+        println("gcd of 1071 and 462 -> ", gcd(1071, 462));
+        println("lcm of 21 and 6 -> ", lcm(21, 6));
+        println("lcm of 7 and 13 -> ", lcm(7, 13));
+    }
+    ret;
+}

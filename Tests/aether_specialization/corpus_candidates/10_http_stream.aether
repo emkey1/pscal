@@ -1,0 +1,24 @@
+fn main() -> Void {
+    fx {
+        let session: Int = httpsession();
+        if session == -1 {
+            println("Session failed (networking disabled?)");
+            ret;
+        }
+
+        let stream: MStream = mstreamcreate();
+        let status: Int = httprequest(session, "GET", "https://httpbin.org/get", "", stream);
+
+        if status == 200 {
+            let body: Text = mstreambuffer(stream);
+            println("Success! Response length: ", string_len(body));
+            println("First 100 chars: ", copy(body, 1, 100));
+        } else {
+            println("Request failed with status: ", status);
+        }
+
+        mstreamfree(stream);
+        httpclose(session);
+    }
+    ret;
+}

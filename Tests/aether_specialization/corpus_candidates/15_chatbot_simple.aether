@@ -1,0 +1,19 @@
+@pure
+fn chatbot(message: Text) -> Text {
+    if message == "hello" {
+        ret "hi";
+    } else if message == "goodbye" {
+        ret "bye";
+    } else {
+        ret "I didn't understand that.";
+    }
+}
+
+fn main() -> Void {
+    fx {
+        println(chatbot("hello"));
+        println(chatbot("goodbye"));
+        println(chatbot("help"));
+    }
+    ret;
+}

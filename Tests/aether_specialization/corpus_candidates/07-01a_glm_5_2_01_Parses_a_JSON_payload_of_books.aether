@@ -1,0 +1,34 @@
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let payload: Text = "{\"orders\":[{\"title\":\"Aether Guide\",\"price\":15.0,\"qty\":2},{\"title\":\"PSCAL Ref\",\"price\":25.5,\"qty\":1},{\"title\":\"VM Internals\",\"price\":42.0,\"qty\":3}]}";
+    let doc: ToonDoc = toon_parse(payload);
+    let root: ToonNode = toon_root(doc);
+    let orders: ToonNode = toon_key(root, "orders");
+
+    let total_revenue: Real = 0.0;
+    let total_books: Int = 0;
+
+    loop i in 0..toon_len(orders) {
+        let order: ToonNode = toon_at(orders, i);
+        let price: Real = toon_get_real_or(order, "price", 0.0);
+        let qty: Int = toon_get_int_or(order, "qty", 0);
+        
+        total_revenue = total_revenue + (price * qty);
+        total_books = total_books + qty;
+        
+        toon_free(order);
+    }
+
+    fx {
+        println("Total books sold: ", total_books);
+        println("Total revenue: ", total_revenue:0:2);
+    }
+
+    toon_free(orders);
+    toon_close(doc);
+    ret;
+}

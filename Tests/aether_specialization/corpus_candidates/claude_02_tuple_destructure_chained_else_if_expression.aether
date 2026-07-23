@@ -1,0 +1,17 @@
+fn minMax(a: Int, b: Int) -> (Int, Int) {
+    if a < b {
+        ret (a, b);
+    }
+    ret (b, a);
+}
+
+fn main() -> Void {
+    let (lo, hi) = minMax(37, 12);
+    let verdict: Text = if hi - lo > 20 { "wide spread" } else if hi - lo > 5 { "moderate spread" } else { "tight" };
+    fx {
+        println("min=", lo, " max=", hi, " -> ", verdict);
+        println("(the spread classification above is a 3-way chained");
+        println(" else-if used as an EXPRESSION, not a statement.)");
+    }
+    ret;
+}

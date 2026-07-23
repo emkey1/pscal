@@ -1,0 +1,80 @@
+type HashEntry {
+    key: Text;
+    value: Text;
+    next: HashEntry;
+}
+
+fn makeHashEntry(k: Text, v: Text) -> HashEntry {
+    ret new HashEntry { key: k, value: v, next: nil };
+}
+
+type HashMap {
+    buckets: HashEntry[];
+    capacity: Int;
+
+    fn hash(key: Text) -> Int {
+        let h: Int = 0;
+        let len: Int = string_len(key);
+        loop i in 0..len {
+            h = h * 31 + ord(copy(key, i + 1, 1));
+        }
+        if h < 0 { h = -h; }
+        ret h % self.capacity;
+    }
+
+    fn put(key: Text, value: Text) -> Void {
+        let idx: Int = self.hash(key);
+        let entry: HashEntry = self.buckets[idx];
+        loop entry != nil {
+            if entry.key == key {
+                entry.value = value;
+                ret;
+            }
+            entry = entry.next;
+        }
+        let newEntry: HashEntry = makeHashEntry(key, value);
+        newEntry.next = self.buckets[idx];
+        self.buckets[idx] = newEntry;
+        ret;
+    }
+
+    fn get(key: Text) -> Text {
+        let idx: Int = self.hash(key);
+        let entry: HashEntry = self.buckets[idx];
+        loop entry != nil {
+            if entry.key == key {
+                ret entry.value;
+            }
+            entry = entry.next;
+        }
+        ret "";
+    }
+
+    fn contains(key: Text) -> Bool {
+        ret self.get(key) != "";
+    }
+}
+
+fn makeHashMap(cap: Int) -> HashMap {
+    let buckets: HashEntry[] = [];
+    loop i in 0..cap {
+        buckets = buckets + [nil];
+    }
+    ret new HashMap { buckets: buckets, capacity: cap };
+}
+
+fn main() -> Void {
+    let map: HashMap = makeHashMap(16);
+
+    map.put("name", "Alice");
+    map.put("city", "Wonderland");
+    map.put("age", "30");
+
+    fx {
+        println("name: ", map.get("name"));
+        println("city: ", map.get("city"));
+        println("contains 'age'? ", map.contains("age"));
+        println("contains 'email'? ", map.contains("email"));
+    }
+    ret;
+}

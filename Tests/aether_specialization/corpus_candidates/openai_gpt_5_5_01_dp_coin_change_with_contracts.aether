@@ -1,0 +1,43 @@
+@pure
+@pre amount >= 0
+@pre length(coins) > 0
+@post result >= -1
+fn minCoins(amount: Int, coins: Int[]) -> Int {
+    let inf: Int = amount + 1;
+    let dp: Int[] = [];
+
+    loop i in 0..(amount + 1) {
+        dp = dp + [inf];
+    }
+    dp[0] = 0;
+
+    loop value in 1..(amount + 1) {
+        loop j in 0..length(coins) {
+            let coin: Int = coins[j];
+            if coin > 0 && coin <= value {
+                let candidate: Int = dp[value - coin] + 1;
+                if candidate < dp[value] {
+                    dp[value] = candidate;
+                }
+            }
+        }
+    }
+
+    if dp[amount] > amount {
+        ret -1;
+    }
+    ret dp[amount];
+}
+
+fn main() -> Void {
+    let coins: Int[] = [1, 3, 4];
+    let target: Int = 27;
+    let answer: Int = minCoins(target, coins);
+
+    fx {
+        println("coin set: 1, 3, 4");
+        println("target: ", target);
+        println("minimum coins: ", answer);
+    }
+    ret;
+}

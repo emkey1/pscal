@@ -1,0 +1,79 @@
+type Student {
+    name: Text;
+    scores: Int[];
+}
+
+@pure
+fn letterGrade(score: Real) -> Text {
+    if score >= 90.0 {
+        ret "A";
+    }
+    if score >= 80.0 {
+        ret "B";
+    }
+    if score >= 70.0 {
+        ret "C";
+    }
+    if score >= 60.0 {
+        ret "D";
+    }
+    ret "F";
+}
+
+@pure
+fn average(scores: Int[], count: Int) -> Real {
+    if count == 0 {
+        ret 0.0;
+    }
+    let sum: Int = 0;
+    loop i in 0..count {
+        sum = sum + scores[i];
+    }
+    ret sum * 1.0 / count * 1.0;
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let json: Text = "{\"students\":[{\"name\":\"Alice\",\"scores\":[92,87,95,88]},{\"name\":\"Bob\",\"scores\":[78,82,75,90]},{\"name\":\"Carol\",\"scores\":[95,98,92,96]}]}";
+
+    let doc: ToonDoc = toon_parse(json);
+    let root: ToonNode = toon_root(doc);
+    let studentsNode: ToonNode = toon_key(root, "students");
+
+    fx {
+        println("Grade Report");
+        println("============");
+    }
+
+    loop i in 0..toon_len(studentsNode) {
+        let studentNode: ToonNode = toon_at(studentsNode, i);
+        let name: Text = toon_get_text(studentNode, "name");
+        let scoresNode: ToonNode = toon_key(studentNode, "scores");
+
+        let scores: Int[] = [];
+        loop j in 0..toon_len(scoresNode) {
+            let scoreNode: ToonNode = toon_at(scoresNode, j);
+            let score: Int = toon_int_value(scoreNode);
+            scores = scores + [score];
+            toon_free(scoreNode);
+        }
+
+        let avg: Real = average(scores, length(scores));
+        let grade: Text = letterGrade(avg);
+
+        fx {
+            println(name, ": avg=", avg:0:1, " grade=", grade);
+        }
+
+        toon_free(scoresNode);
+        toon_free(studentNode);
+    }
+
+    toon_free(studentsNode);
+    toon_close(doc);
+    ret;
+}

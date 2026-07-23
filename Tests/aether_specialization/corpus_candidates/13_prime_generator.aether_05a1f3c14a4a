@@ -1,0 +1,36 @@
+@pure
+fn is_prime(n: Int) -> Bool {
+    if n <= 1 { ret false; }
+    if n == 2 { ret true; }
+    if n % 2 == 0 { ret false; }
+    let max: Int = int(sqrt(real(n)));
+    let i: Int = 3;
+    loop i <= max {
+        if n % i == 0 { ret false; }
+        i = i + 2;
+    }
+    ret true;
+}
+
+fn generate_primes(limit: Int) -> Int[] {
+    let primes: Int[] = [];
+    loop i in 2..limit {
+        if is_prime(i) {
+            primes = primes + [i];
+        }
+    }
+    ret primes;
+}
+
+fn main() -> Void {
+    let limit: Int = 50;
+    let primes: Int[] = generate_primes(limit);
+    fx {
+        print("Primes up to ", limit, ": ");
+        loop i in 0..length(primes) {
+            print(primes[i], " ");
+        }
+        println("");
+    }
+    ret;
+}

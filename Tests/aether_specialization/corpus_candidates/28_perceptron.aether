@@ -1,0 +1,66 @@
+type Perceptron {
+    weights: Real[];
+    bias: Real;
+    lr: Real;
+
+    fn init(n_inputs: Int) -> Void {
+        self.weights = [];
+        self.lr = 0.1;
+        fx {
+            randomize();
+            loop i in 0..n_inputs {
+                self.weights = self.weights + [random(100) / 100.0];
+            }
+            self.bias = random(100) / 100.0;
+        }
+        ret;
+    }
+
+    fn activate(x: Real) -> Int {
+        if x >= 0.0 {
+            ret 1;
+        }
+        ret 0;
+    }
+
+    fn predict(inputs: Real[]) -> Int {
+        let sum: Real = self.bias;
+        loop i in 0..length(inputs) {
+            sum = sum + inputs[i] * self.weights[i];
+        }
+        ret self.activate(sum);
+    }
+
+    fn train(inputs: Real[], target: Int) -> Void {
+        let prediction: Int = self.predict(inputs);
+        let error: Int = target - prediction;
+        loop i in 0..length(inputs) {
+            self.weights[i] = self.weights[i] + self.lr * real(error) * inputs[i];
+        }
+        self.bias = self.bias + self.lr * real(error);
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let p: Perceptron = new Perceptron {};
+    p.init(2);
+
+    let training_in: Real[][] = [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]];
+    let training_out: Int[] = [0, 0, 0, 1];
+
+    loop epoch in 0..1000 {
+        loop i in 0..length(training_in) {
+            p.train(training_in[i], training_out[i]);
+        }
+    }
+
+    fx {
+        println("AND gate predictions:");
+        println("0,0 -> ", p.predict([0.0, 0.0]));
+        println("0,1 -> ", p.predict([0.0, 1.0]));
+        println("1,0 -> ", p.predict([1.0, 0.0]));
+        println("1,1 -> ", p.predict([1.0, 1.0]));
+    }
+    ret;
+}

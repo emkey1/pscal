@@ -1,0 +1,23 @@
+@pre value >= -100
+@post result >= 0 && result <= 100
+fn clamp(value: Int) -> Int {
+    if value < 0 {
+        ret 0;
+    }
+    if value > 100 {
+        ret 100;
+    }
+    ret value;
+}
+
+fn main() -> Void {
+    let values: Int[] = [ -50, 42, 150, 75 ];
+    let len: Int = length(values);
+    fx {
+        loop i in 0..len {
+            let v: Int = values[i];
+            println(clamp(v));
+        }
+    }
+    ret;
+}

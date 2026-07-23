@@ -1,0 +1,41 @@
+type InventoryItem {
+    name: Text;
+    stock: Int;
+
+    fn add_stock(amount: Int) -> Void {
+        self.stock = self.stock + amount;
+        ret;
+    }
+
+    fn remove_stock(amount: Int) -> Bool {
+        if self.stock >= amount {
+            self.stock = self.stock - amount;
+            ret true;
+        }
+        ret false;
+    }
+
+    fn get_stock() -> Int {
+        ret self.stock;
+    }
+}
+
+fn main() -> Void {
+    let item: InventoryItem = new InventoryItem { name: "Widget", stock: 100 };
+    fx {
+        println("Initial stock for ", item.name, ": ", item.get_stock());
+        item.add_stock(50);
+        println("Stock after adding 50: ", item.get_stock());
+        let success: Bool = item.remove_stock(75);
+        if success {
+            println("Stock after removing 75: ", item.get_stock());
+        } else {
+            println("Failed to remove 75 items.");
+        }
+        let fail_success: Bool = item.remove_stock(100);
+        if !fail_success {
+            println("Failed to remove 100 items (stock: ", item.get_stock(), ").");
+        }
+    }
+    ret;
+}

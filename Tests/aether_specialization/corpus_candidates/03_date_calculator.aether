@@ -1,0 +1,62 @@
+@pure
+fn isLeapYear(year: Int) -> Bool {
+    if year % 400 == 0 { ret true; }
+    if year % 100 == 0 { ret false; }
+    if year % 4 == 0 { ret true; }
+    ret false;
+}
+
+@pure
+fn daysInMonth(year: Int, month: Int) -> Int {
+    if month == 2 {
+        if isLeapYear(year) { ret 29; }
+        ret 28;
+    }
+    if month == 4 || month == 6 || month == 9 || month == 11 {
+        ret 30;
+    }
+    ret 31;
+}
+
+@pure
+fn dayOfYear(year: Int, month: Int, day: Int) -> Int {
+    let total: Int = 0;
+    loop m in 1..month + 1 {
+        if m < month {
+            total = total + daysInMonth(year, m);
+        } else {
+            total = total + day;
+        }
+    }
+    ret total;
+}
+
+@pure
+fn addDays(year: Int, month: Int, day: Int, days: Int) -> Text {
+    let d: Int = day + days;
+    let m: Int = month;
+    let y: Int = year;
+    loop d > daysInMonth(y, m) {
+        d = d - daysInMonth(y, m);
+        m = m + 1;
+        if m > 12 {
+            m = 1;
+            y = y + 1;
+        }
+    }
+    ret itoa(y) + "-" + itoa(m) + "-" + itoa(d);
+}
+
+fn main() -> Void {
+    let year: Int = 2024;
+    let month: Int = 3;
+    let day: Int = 15;
+
+    fx {
+        println("Date: ", year, "-", month, "-", day);
+        println("Day of year: ", dayOfYear(year, month, day));
+        println("100 days later: ", addDays(year, month, day, 100));
+        println("Is 2024 leap? ", isLeapYear(2024));
+    }
+    ret;
+}

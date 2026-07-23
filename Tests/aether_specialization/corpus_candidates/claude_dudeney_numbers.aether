@@ -1,0 +1,38 @@
+// Dudeney numbers: n such that digitSum(n)^3 == n. Named for Henry
+// Dudeney, the puzzle-maker. Unlike the last four examples, this one
+// is fully resolved: exactly seven exist (including the two trivial
+// cases 0 and 1), and it's an easy pigeonhole argument to show no
+// others can exist beyond a small bound -- digit sums grow far slower
+// than cubes.
+
+@pure
+fn digitSum(n: Int) -> Int {
+    let value: Int = n;
+    let total: Int = 0;
+    loop value > 0 {
+        total = total + (value % 10);
+        value = value / 10;
+    }
+    ret total;
+}
+
+@pre n >= 0
+@pure
+fn cube(n: Int) -> Int {
+    ret n * n * n;
+}
+
+fn main() -> Void {
+    let limit: Int = 20000;
+    fx {
+        println("Dudeney numbers up to ", limit, ":");
+    }
+    loop n in 0..(limit + 1) {
+        if cube(digitSum(n)) == n {
+            fx {
+                println(n, "  (digit sum ", digitSum(n), ", cubed)");
+            }
+        }
+    }
+    ret;
+}

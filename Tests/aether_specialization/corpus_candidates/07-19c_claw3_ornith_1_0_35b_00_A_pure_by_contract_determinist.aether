@@ -1,0 +1,37 @@
+type RNG {
+    state: Int;
+
+    @pre self.state > 0
+    @post result >= 0 and result < 2147483647
+    fn nextInt() -> Int {
+        self.state = 16807 * self.state % 2147483647;
+        ret self.state;
+    }
+
+    fn nextReal() -> Real {
+        let n: Int = self.nextInt();
+        ret n * 1.0 / 2147483647.0;
+    }
+}
+
+fn computeMean(rng: RNG, n: Int) -> Real {
+    let sum: Real = 0.0;
+    loop i in 0..n {
+        let v: Real = rng.nextReal();
+        sum = sum + v;
+    }
+    ret sum / n * 1.0;
+}
+
+fn main() -> Void {
+    let rng: RNG = new RNG { state: 12345 };
+    let iterations: Int = 10000;
+    let mean: Real = computeMean(rng, iterations);
+
+    fx {
+        println("Park-Miller mean over ", iterations, " samples: ", mean:0:6);
+        println("Expected ~= 0.500000");
+        println("Final state: ", rng.state);
+    }
+    ret;
+}

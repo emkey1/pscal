@@ -1,0 +1,41 @@
+type Sieve {
+    limit: Int;
+    composite: Bool[];
+
+    fn run() -> Int[] {
+        let n: Int = self.limit;
+        let primes: Int[] = [];
+        loop i in 2..n + 1 {
+            if !self.composite[i] {
+                primes = primes + [i];
+                let j: Int = i * i;
+                if j <= n {
+                    loop k in j..n + 1 {
+                        self.composite[k] = true;
+                    }
+                }
+            }
+        }
+        ret primes;
+    }
+}
+
+fn main() -> Void {
+    let n: Int = 100;
+    let sieve: Sieve = new Sieve();
+    sieve.limit = n;
+    sieve.composite = [];
+    loop i in 0..n + 1 {
+        sieve.composite = sieve.composite + [false];
+    }
+    let primes: Int[] = sieve.run();
+    fx {
+        println("primes up to ", n, " (count: ", length(primes), ")");
+        loop i in 0..length(primes) {
+            if i > 0 { print(", "); }
+            print(primes[i]);
+        }
+        println();
+    }
+    ret;
+}

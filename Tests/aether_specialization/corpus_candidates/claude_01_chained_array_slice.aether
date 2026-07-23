@@ -1,0 +1,13 @@
+fn main() -> Void {
+    let xs: Int[] = [10, 20, 30, 40, 50, 60, 70];
+    // Slicing a slice: xs[1..6] = [20,30,40,50,60], then [1..3] of THAT = [30,40].
+    let inner: Int[] = xs[1..6][1..3];
+    fx {
+        println("chained slice xs[1..6][1..3] has length ", length(inner));
+        println("  [0]=", inner[0], " [1]=", inner[1]);
+        println("(slicing lowers to a fresh temp array + copy loop, so the");
+        println(" result of one slice is just another ordinary array --");
+        println(" nothing special stops you from slicing it again.)");
+    }
+    ret;
+}

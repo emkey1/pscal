@@ -1,0 +1,60 @@
+// Zipf's Law: in natural-language text, word frequency is roughly
+// inversely proportional to rank -- the 2nd most common word appears
+// about half as often as the most common, the 3rd about a third as
+// often, etc., so rank*frequency is roughly constant. Oddly, Miller's
+// "monkey-typing" model shows even RANDOMLY generated text obeys a
+// Zipf-like law -- so whether the pattern reveals anything deep about
+// language, or is just a near-inevitable statistical artifact, is a
+// genuinely unsettled linguistics debate.
+
+fn main() -> Void {
+    let text: Text[] = [
+        "the", "quick", "fox", "runs", "and", "the", "dog", "sits", "and", "the",
+        "cat", "watches", "the", "quick", "fox", "and", "the", "dog", "the", "cat",
+        "and", "the", "fox", "the", "dog", "watches", "and", "the", "quick", "cat",
+        "runs", "and", "sits", "the", "fox", "the", "dog", "the", "cat", "and"
+    ];
+
+    let uniqueWords: Text[] = [];
+    let counts: Int[] = [];
+
+    loop i in 0..length(text) {
+        let w: Text = text[i];
+        let idx: Int = -1;
+        loop j in 0..length(uniqueWords) {
+            if uniqueWords[j] == w {
+                idx = j;
+                break;
+            }
+        }
+        if idx == -1 {
+            uniqueWords = uniqueWords + [w];
+            counts = counts + [1];
+        } else {
+            counts[idx] = counts[idx] + 1;
+        }
+    }
+
+    let n: Int = length(uniqueWords);
+    loop pass in 0..n {
+        loop k in 0..(n - 1) {
+            if counts[k] < counts[k + 1] {
+                let tempCount: Int = counts[k];
+                counts[k] = counts[k + 1];
+                counts[k + 1] = tempCount;
+                let tempWord: Text = uniqueWords[k];
+                uniqueWords[k] = uniqueWords[k + 1];
+                uniqueWords[k + 1] = tempWord;
+            }
+        }
+    }
+
+    fx {
+        println("Zipf's Law check on a short sample text:");
+        println("rank  word       freq   rank*freq");
+        loop r in 0..n {
+            println(r + 1, "     ", uniqueWords[r], "     ", counts[r], "      ", (r + 1) * counts[r]);
+        }
+    }
+    ret;
+}

@@ -1,0 +1,19 @@
+type Counter {
+    value: Int = 0;
+
+    fn increment(amount: Int) -> Void {
+        self.value = self.value + amount;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    let c: Counter = new Counter();
+    loop i in 0..5 {
+        c.increment(i);
+    }
+    fx {
+        println("Final counter value: ", c.value);
+    }
+    ret;
+}

@@ -1,0 +1,77 @@
+type ProductStats {
+    count: Int;
+    total: Real;
+    min_price: Real;
+    max_price: Real;
+    
+    fn record(price: Real) -> Void {
+        self.count = self.count + 1;
+        self.total = self.total + price;
+        
+        if self.count == 1 {
+            self.min_price = price;
+            self.max_price = price;
+        } else {
+            if price < self.min_price {
+                self.min_price = price;
+            }
+            if price > self.max_price {
+                self.max_price = price;
+            }
+        }
+        ret;
+    }
+}
+
+@pure
+fn categorize(price: Real) -> Text {
+    if price < 50.0 {
+        ret "budget";
+    }
+    if price < 200.0 {
+        ret "mid-range";
+    }
+    ret "premium";
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+    
+    let json_text: Text = "{\"products\":[{\"name\":\"Pen\",\"price\":2.50},{\"name\":\"Laptop\",\"price\":1299.99},{\"name\":\"Book\",\"price\":15.00},{\"name\":\"Tablet\",\"price\":499.00}]}";
+    let doc: ToonDoc = toon_parse(json_text);
+    let root: ToonNode = toon_root(doc);
+    let products: ToonNode = toon_key(root, "products");
+    
+    let stats: ProductStats = new ProductStats();
+    fx {
+        println("Product Analysis:");
+        loop i in 0..toon_len(products) {
+            let item: ToonNode = toon_at(products, i);
+            let name: Text = toon_get_text(item, "name");
+            let price: Real = toon_get_real_or(item, "price", 0.0);
+            let category: Text = categorize(price);
+            
+            stats.record(price);
+            
+            println("  ", name, ": $", price:0:2, " (", category, ")");
+        }
+        
+        println("");
+        println("Summary:");
+        if stats.count > 0 {
+            let avg: Real = stats.total / (stats.count * 1.0);
+            println("  Count: ", stats.count);
+            println("  Average price: $", avg:0:2);
+            println("  Min price: $", stats.min_price:0:2);
+            println("  Max price: $", stats.max_price:0:2);
+        } else {
+            println("  No products found");
+        }
+    }
+    
+    toon_close(doc);
+    ret;
+}

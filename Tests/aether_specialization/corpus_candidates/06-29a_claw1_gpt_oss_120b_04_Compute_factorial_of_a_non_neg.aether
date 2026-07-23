@@ -1,0 +1,22 @@
+@pre n >= 0
+@post result >= 1
+@pure
+fn factorial(n: Int) -> Int {
+    if n == 0 {
+        ret 1;
+    }
+    let acc: Int = 1;
+    let i: Int = 1;
+    loop (i <= n) {
+        acc = acc * i;
+        i = i + 1;
+    }
+    ret acc;
+}
+
+fn main() -> Void {
+    let value: Int = 5;
+    let fact: Int = factorial(value);
+    fx { println("Factorial of ", value, " is ", fact); }
+    ret;
+}

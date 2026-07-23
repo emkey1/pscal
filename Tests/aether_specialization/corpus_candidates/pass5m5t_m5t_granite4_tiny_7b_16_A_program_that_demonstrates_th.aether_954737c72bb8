@@ -1,0 +1,22 @@
+type TrafficLight {
+    current_light: Text;
+
+    fn next_light() -> Void {
+        if self.current_light == "Red" {
+            self.current_light = "Green";
+        } else if self.current_light == "Green" {
+            self.current_light = "Yellow";
+        } else if self.current_light == "Yellow" {
+            self.current_light = "Red";
+        }
+    }
+}
+
+fn main() -> Void {
+    fx {
+        let traffic_light: TrafficLight = new TrafficLight { current_light: "Red" };
+        for _ in 0..3 {
+            traffic_light.next_light();
+        }
+    }
+}

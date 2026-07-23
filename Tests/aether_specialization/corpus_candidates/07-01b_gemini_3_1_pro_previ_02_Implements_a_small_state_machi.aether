@@ -1,0 +1,43 @@
+@pure
+fn nextCell(left: Bool, right: Bool) -> Bool {
+    if left && !right { ret true; }
+    if !left && right { ret true; }
+    ret false;
+}
+
+fn main() -> Void {
+    let width: Int = 31;
+    let state: Bool[] = [];
+    
+    loop i in 0..width {
+        if i == 15 {
+            state = state + [true];
+        } else {
+            state = state + [false];
+        }
+    }
+
+    loop step in 0..16 {
+        fx {
+            loop i in 0..width {
+                if state[i] {
+                    print("*");
+                } else {
+                    print(" ");
+                }
+            }
+            println("");
+        }
+
+        let nextState: Bool[] = [];
+        loop i in 0..width {
+            let left: Bool = false;
+            let right: Bool = false;
+            if i > 0 { left = state[i - 1]; }
+            if i < width - 1 { right = state[i + 1]; }
+            nextState = nextState + [nextCell(left, right)];
+        }
+        state = nextState;
+    }
+    ret;
+}

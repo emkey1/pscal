@@ -1,0 +1,37 @@
+type CartItem {
+    name: Text;
+    price: Int;
+
+    fn total_cost() -> Int {
+        ret self.price;
+    }
+}
+
+type ShoppingCart {
+    items: CartItem[];
+    
+    fn add_item(name: Text, price: Int) -> Void {
+        let new_item: CartItem = new CartItem { name: name, price: price };
+        self.items = self.items + [new_item];
+    }
+
+    fn grand_total() -> Int {
+        let total: Int = 0;
+        loop i in 0..length(self.items) {
+            let item: CartItem = self.items[i];
+            total = total + item.total_cost();
+        }
+        ret total;
+    }
+}
+
+fn main() -> Void {
+    let cart: ShoppingCart = new ShoppingCart { items: [] };
+    cart.add_item("Aether Book", 45);
+    cart.add_item("Compiler License", 120);
+    let total: Int = cart.grand_total();
+    fx {
+        println("Total cost: ", total);
+    }
+    ret;
+}

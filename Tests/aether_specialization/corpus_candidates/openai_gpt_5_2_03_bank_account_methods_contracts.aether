@@ -1,0 +1,43 @@
+type BankAccount {
+    owner: Text = "";
+    balance: Int = 0;
+
+    @pre amount > 0
+    @post self.balance >= 0
+    fn deposit(amount: Int) -> Void {
+        self.balance = self.balance + amount;
+        ret;
+    }
+
+    @pre amount > 0 && amount <= self.balance
+    @post self.balance >= 0
+    fn withdraw(amount: Int) -> Void {
+        self.balance = self.balance - amount;
+        ret;
+    }
+
+    fn canAfford(cost: Int) -> Bool {
+        ret cost >= 0 && self.balance >= cost;
+    }
+}
+
+fn main() -> Void {
+    let acct: BankAccount = new BankAccount { owner: "Rin", balance: 125 };
+
+    acct.deposit(40);
+    acct.withdraw(55);
+
+    let coffee: Int = 6;
+    let laptop: Int = 300;
+
+    let coffeeOk: Bool = acct.canAfford(coffee);
+    let laptopOk: Bool = acct.canAfford(laptop);
+
+    fx {
+        println("owner=", acct.owner);
+        println("balance=", acct.balance);
+        println("coffee ", coffee, ": ", if coffeeOk { "ok" } else { "nope" });
+        println("laptop ", laptop, ": ", if laptopOk { "ok" } else { "nope" });
+    }
+    ret;
+}

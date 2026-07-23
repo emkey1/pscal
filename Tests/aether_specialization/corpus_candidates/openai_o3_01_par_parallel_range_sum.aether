@@ -1,0 +1,28 @@
+type Box {
+    sum: Int;
+}
+
+fn sumRange(out: Box, start: Int, finish: Int) -> Void {
+    let acc: Int = 0;
+    let i: Int = start;
+    loop i <= finish {
+        acc = acc + i;
+        i = i + 1;
+    }
+    out.sum = acc;
+    ret;
+}
+
+fn main() -> Void {
+    let a: Box = new Box();
+    let b: Box = new Box();
+    par {
+        sumRange(a, 1, 50000);
+        sumRange(b, 50001, 100000);
+    }
+    let total: Int = a.sum + b.sum;
+    fx {
+        println("Sum 1..100000 = ", total);
+    }
+    ret;
+}

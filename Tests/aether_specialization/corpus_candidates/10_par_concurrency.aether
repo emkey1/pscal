@@ -1,0 +1,45 @@
+// Parallel partial sums — each par branch owns its own record
+
+type Partial {
+    total: Int = 0;
+}
+
+fn sumRange(out: Partial, lo: Int, hi: Int) -> Void {
+    let acc: Int = 0;
+    loop i in lo..hi {
+        acc = acc + i;
+    }
+    out.total = acc;
+    ret;
+}
+
+fn squareRange(out: Partial, lo: Int, hi: Int) -> Void {
+    let acc: Int = 0;
+    loop i in lo..hi {
+        acc = acc + i * i;
+    }
+    out.total = acc;
+    ret;
+}
+
+fn main() -> Void {
+    let a: Partial = new Partial();
+    let b: Partial = new Partial();
+    let c: Partial = new Partial();
+    let d: Partial = new Partial();
+
+    par {
+        sumRange(a, 0, 1000);
+        sumRange(b, 1000, 2000);
+        squareRange(c, 0, 100);
+        squareRange(d, 100, 200);
+    }
+
+    let grand: Int = a.total + b.total;
+    let squares: Int = c.total + d.total;
+    fx {
+        println("sum 0..2000        = ", grand);
+        println("squares 0..200     = ", squares);
+    }
+    ret;
+}

@@ -1,0 +1,74 @@
+type AgeStats {
+    young: Int;   // age < 30
+    middle: Int;  // 30 <= age < 60
+    senior: Int;  // age >= 60
+
+    fn recordAgeGroup(age: Int) -> Void {
+        if age < 30 {
+            self.young = self.young + 1;
+            ret;
+        }
+        if age < 60 { // Implies 30 <= age < 60
+            self.middle = self.middle + 1;
+            ret;
+        }
+        self.senior = self.senior + 1; // Implies age >= 60
+        ret;
+    }
+}
+
+@pure
+@pre age >= 0
+fn classifyAge(age: Int) -> Text {
+    if age < 30 {
+        ret "Young";
+    }
+    if age < 60 {
+        ret "Middle";
+    }
+    ret "Senior";
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("[{\"id\": 1, \"age\": 25}, {\"id\": 2, \"age\": 60}, {\"id\": 3, \"age\": 15}, {\"id\": 4, \"age\": 40}, {\"id\": 5, \"age\": 75}]");
+    let root: ToonNode = toon_root(doc);
+
+    let stats: AgeStats = new AgeStats();
+    let totalUsers: Int = 0;
+
+    loop i in 0..toon_len(root) {
+        let userNode: ToonNode = toon_at(root, i);
+        let userId: Int = toon_get_int_or(userNode, "id", 0);
+        let userAge: Int = toon_get_int_or(userNode, "age", -1); // Use -1 as a sentinel for missing/invalid age
+
+        if userAge >= 0 { // Only process valid ages
+            stats.recordAgeGroup(userAge);
+            let ageGroup: Text = classifyAge(userAge);
+            fx {
+                println("User ID: ", userId, ", Age: ", userAge, " -> Group: ", ageGroup);
+            }
+            totalUsers = totalUsers + 1;
+        } else {
+            fx {
+                println("Skipping user ID: ", userId, " due to invalid age.");
+            }
+        }
+        toon_free(userNode); // Free transient node
+    }
+
+    fx {
+        println("\n--- Age Group Summary ---");
+        println("Total Processed Users: ", totalUsers);
+        println("Young (<30): ", stats.young);
+        println("Middle (30-59): ", stats.middle);
+        println("Senior (60+): ", stats.senior);
+    }
+
+    toon_close(doc);
+    ret;
+}

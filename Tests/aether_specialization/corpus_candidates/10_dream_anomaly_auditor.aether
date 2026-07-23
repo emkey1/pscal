@@ -1,0 +1,83 @@
+// Score a dream diary for signs that reality has misplaced its paperwork.
+
+type DreamAudit {
+    total: Int = 0;
+    highRisk: Int = 0;
+    scoreSum: Int = 0;
+
+    fn record(index: Int, title: Text, score: Int) -> Void {
+        self.total = self.total + 1;
+        self.scoreSum = self.scoreSum + score;
+        if score >= 7 {
+            self.highRisk = self.highRisk + 1;
+        }
+        fx {
+            println("dream ", index, ": ", title, " -> anomaly score ", score);
+        }
+        ret;
+    }
+}
+
+fn scoreDream(dream: ToonNode) -> Int {
+    let score: Int = 0;
+    let lucidity: Int = toon_get_int_or(dream, "lucidity", 0);
+    let impossibleGeometry: Bool = toon_get_bool_or(dream, "impossible_geometry", false);
+    let clockCount: Int = toon_get_int_or(dream, "repeating_clocks", 0);
+
+    if lucidity >= 8 {
+        score = score + 2;
+    }
+    if impossibleGeometry {
+        score = score + 3;
+    }
+    if clockCount >= 3 {
+        score = score + 2;
+    }
+
+    if toon_has_key(dream, "meta") {
+        let meta: ToonNode = toon_key(dream, "meta");
+        let shared: Bool = toon_get_bool_or(meta, "shared_with_someone_else", false);
+        if shared {
+            score = score + 4;
+        }
+        toon_free(meta);
+    }
+    ret score;
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let payload: Text = "{\"dreams\":[{\"title\":\"Library of Rain\",\"lucidity\":9,\"impossible_geometry\":true,\"repeating_clocks\":4,\"meta\":{\"shared_with_someone_else\":true}},{\"title\":\"Bus to Tuesday\",\"lucidity\":5,\"impossible_geometry\":false,\"repeating_clocks\":1},{\"title\":\"The Staircase That Remembered\",\"lucidity\":8,\"impossible_geometry\":true,\"repeating_clocks\":0,\"meta\":{\"shared_with_someone_else\":false}}]}";
+    let doc: ToonDoc = toon_parse(payload);
+    let root: ToonNode = toon_root(doc);
+    let dreams: ToonNode = toon_key(root, "dreams");
+    let audit: DreamAudit = new DreamAudit();
+
+    loop i in 0..toon_len(dreams) {
+        let dream: ToonNode = toon_at(dreams, i);
+        let title: Text = toon_get_text(dream, "title");
+        let score: Int = scoreDream(dream);
+        audit.record(i, title, score);
+        toon_free(dream);
+    }
+
+    let average: Real = 0.0;
+    if audit.total > 0 {
+        average = audit.scoreSum * 1.0 / audit.total;
+    }
+
+    fx {
+        println("high-risk dreams = ", audit.highRisk, "/", audit.total);
+        println("average anomaly score = ", average:0:2);
+    }
+
+    toon_free(dreams);
+    toon_close(doc);
+    ret;
+}

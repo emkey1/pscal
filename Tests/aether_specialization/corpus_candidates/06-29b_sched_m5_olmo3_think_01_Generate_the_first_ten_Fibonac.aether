@@ -1,0 +1,19 @@
+@pure
+fn fibonacci(n: Int) -> Int {
+    if n == 0 { ret 0; }
+    if n == 1 { ret 1; }
+    let a = fibonacci(n - 1);
+    let b = fibonacci(n - 2);
+    ret a + b;
+}
+
+fn main() -> Void {
+    fx {
+        println("Fibonacci sequence (first 10 numbers):");
+        loop i in 0..10 {
+            let num: Int = fibonacci(i);
+            print(num :0, " "); // format as integer width
+        }
+    }
+    ret;
+}

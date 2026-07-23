@@ -1,0 +1,40 @@
+fn main() -> Void {
+    let numbers: Int[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let evenNumbers: Int[] = [];
+    let squaredEvens: Int[] = [];
+
+    // Filter for even numbers
+    loop i in 0..length(numbers) {
+        let num: Int = numbers[i];
+        if num % 2 == 0 {
+            evenNumbers = evenNumbers + [num];
+        }
+    }
+
+    // Transform by squaring the even numbers
+    loop i in 0..length(evenNumbers) {
+        let evenNum: Int = evenNumbers[i];
+        squaredEvens = squaredEvens + [evenNum * evenNum];
+    }
+
+    fx {
+        println("Original numbers: ");
+        loop i in 0..length(numbers) {
+            print(numbers[i], " ");
+        }
+        println(""); // Newline
+
+        println("Even numbers: ");
+        loop i in 0..length(evenNumbers) {
+            print(evenNumbers[i], " ");
+        }
+        println(""); // Newline
+
+        println("Squared even numbers: ");
+        loop i in 0..length(squaredEvens) {
+            print(squaredEvens[i], " ");
+        }
+        println(""); // Newline
+    }
+    ret;
+}

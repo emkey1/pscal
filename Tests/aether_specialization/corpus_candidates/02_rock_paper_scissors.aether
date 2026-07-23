@@ -1,0 +1,43 @@
+@pure
+fn beats(a: Text, b: Text) -> Bool {
+    if a == "rock" && b == "scissors" { ret true; }
+    if a == "paper" && b == "rock" { ret true; }
+    if a == "scissors" && b == "paper" { ret true; }
+    ret false;
+}
+
+fn main() -> Void {
+    let choices: Text[] = ["rock", "paper", "scissors"];
+    let wins: Int = 0;
+    let losses: Int = 0;
+    let draws: Int = 0;
+    let rounds: Int = 10;
+
+    loop i in 0..rounds {
+        let playerPick: Int = i % 3;
+        let cpuPick: Int = ((i * 7 + 2) % 9) % 3;
+        let player: Text = choices[playerPick];
+        let cpu: Text = choices[cpuPick];
+
+        fx {
+            print("Round ", i + 1, ": You=", player, " CPU=", cpu, " -> ");
+        }
+
+        if player == cpu {
+            draws = draws + 1;
+            fx { println("Draw"); }
+        } else if beats(player, cpu) {
+            wins = wins + 1;
+            fx { println("You win!"); }
+        } else {
+            losses = losses + 1;
+            fx { println("CPU wins"); }
+        }
+    }
+
+    fx {
+        println("");
+        println("Final: ", wins, "W / ", losses, "L / ", draws, "D");
+    }
+    ret;
+}

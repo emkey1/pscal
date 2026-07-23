@@ -1,0 +1,92 @@
+type KVStore {
+    keys: Text[];
+    values: Text[];
+
+    fn init() -> Void {
+        self.keys = [];
+        self.values = [];
+        ret;
+    }
+
+    fn put(key: Text, value: Text) -> Void {
+        let found: Bool = false;
+        loop i in 0..length(self.keys) {
+            if self.keys[i] == key {
+                self.values[i] = value;
+                found = true;
+            }
+        }
+        if !found {
+            self.keys = self.keys + [key];
+            self.values = self.values + [value];
+        }
+        ret;
+    }
+
+    fn get(key: Text) -> Text {
+        loop i in 0..length(self.keys) {
+            if self.keys[i] == key {
+                ret self.values[i];
+            }
+        }
+        ret "";
+    }
+
+    fn save(path: Text) -> Bool {
+        fx {
+            let f: File;
+            assign(f, path);
+            rewrite(f);
+            loop i in 0..length(self.keys) {
+                writeln(f, self.keys[i] + "=" + self.values[i]);
+            }
+            close(f);
+        }
+        ret true;
+    }
+
+    fn load(path: Text) -> Bool {
+        fx {
+            let f: File;
+            assign(f, path);
+            reset(f);
+            loop {
+                if eof(f) { break; }
+                let line: Text;
+                readln(f, line);
+                if string_len(line) > 0 {
+                    let eqpos: Int = pos("=", line);
+                    if eqpos > 0 {
+                        let k: Text = copy(line, 1, eqpos - 1);
+                        let v: Text = copy(line, eqpos + 1, string_len(line) - eqpos);
+                        self.put(k, v);
+                    }
+                }
+            }
+            close(f);
+        }
+        ret true;
+    }
+}
+
+fn main() -> Void {
+    let store: KVStore = new KVStore {};
+    store.init();
+    store.put("username", "admin");
+    store.put("role", "superuser");
+    store.put("timeout", "300");
+
+    fx {
+        println("Before save: role=", store.get("role"));
+    }
+    store.save("/tmp/aether_kvstore_demo.db");
+
+    let store2: KVStore = new KVStore {};
+    store2.init();
+    store2.load("/tmp/aether_kvstore_demo.db");
+    fx {
+        println("After load: role=", store2.get("role"));
+        println("After load: timeout=", store2.get("timeout"));
+    }
+    ret;
+}

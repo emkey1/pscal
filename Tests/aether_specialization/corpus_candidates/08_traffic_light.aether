@@ -1,0 +1,64 @@
+type TrafficLight {
+    state: Text;
+    timers: Int[];
+
+    fn currentColor() -> Text {
+        ret self.state;
+    }
+
+    fn nextState() -> Void {
+        if self.state == "red" {
+            self.state = "green";
+            ret;
+        }
+        if self.state == "green" {
+            self.state = "yellow";
+            ret;
+        }
+        self.state = "red";
+        ret;
+    }
+
+    fn tick() -> Void {
+        self.nextState();
+        ret;
+    }
+}
+
+fn makeTrafficLight() -> TrafficLight {
+    ret new TrafficLight { state: "red", timers: [30, 5, 25] };
+}
+
+fn main() -> Void {
+    let light: TrafficLight = makeTrafficLight();
+
+    fx {
+        println("Traffic Light Simulation");
+        println("========================");
+    }
+
+    let cycles: Int = 6;
+    loop i in 0..cycles {
+        let color: Text = light.currentColor();
+        fx {
+            print("Cycle ", i + 1, ": ");
+        }
+
+        if color == "red" {
+            fx { println("STOP"); }
+        }
+        if color == "yellow" {
+            fx { println("CAUTION"); }
+        }
+        if color == "green" {
+            fx { println("GO"); }
+        }
+
+        light.tick();
+    }
+
+    fx {
+        println("Simulation complete");
+    }
+    ret;
+}

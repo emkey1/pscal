@@ -1,0 +1,35 @@
+type Counter {
+    value: Int;
+    max: Int;
+
+    fn bump() -> Int {
+        if self.value < self.max {
+            self.value = self.value + 1;
+        }
+        ret self.value;
+    }
+
+    fn reset() -> Void {
+        self.value = 0;
+        ret;
+    }
+
+    fn getValue() -> Int {
+        ret self.value;
+    }
+}
+
+fn main() -> Void {
+    let counter: Counter = new Counter { value: 0, max: 5 };
+    
+    fx {
+        println("Initial value: ", counter.getValue());
+        counter.bump();
+        println("After bump: ", counter.getValue());
+        counter.bump();
+        println("After bump: ", counter.getValue());
+        counter.reset();
+        println("After reset: ", counter.getValue());
+    }
+    ret;
+}

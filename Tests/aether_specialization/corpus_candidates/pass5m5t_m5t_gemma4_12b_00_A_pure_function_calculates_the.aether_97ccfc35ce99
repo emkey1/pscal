@@ -1,0 +1,22 @@
+@pure
+fn fibonacci(n: Int) -> Int {
+    if n <= 0 { ret 0; }
+    if n == 1 { ret 1; }
+    let mut a: Int = 0;
+    let mut b: Int = 1;
+    loop i in 1..n {
+        let temp: Int = a + b;
+        a = b;
+        b = temp;
+    }
+    ret b;
+}
+
+fn main() -> Void {
+    let n: Int = 50;
+    let result: Int = fibonacci(n);
+    fx {
+        println("Fibonacci of ", n, " is ", result);
+    }
+    ret;
+}

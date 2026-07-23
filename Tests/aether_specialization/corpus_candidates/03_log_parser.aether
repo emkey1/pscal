@@ -1,0 +1,43 @@
+// Log-line parsing with split, trim, pos, copy
+
+@pure
+fn levelOf(line: Text) -> Text {
+    let parts: Text[] = split(line, "|");
+    if length(parts) < 2 {
+        ret "UNKNOWN";
+    }
+    ret trim(parts[0]);
+}
+
+@pure
+fn messageOf(line: Text) -> Text {
+    let at: Int = pos("|", line);
+    if at == 0 {
+        ret line;
+    }
+    ret trim(copy(line, at + 1, string_len(line) - at));
+}
+
+fn main() -> Void {
+    let lines: Text[] = [
+        "INFO  | worker started",
+        "WARN  | queue depth 80%",
+        "ERROR | disk full",
+        "malformed line"
+    ];
+    let errors: Int = 0;
+    loop i in 0..length(lines) {
+        let level: Text = levelOf(lines[i]);
+        let message: Text = messageOf(lines[i]);
+        if level == "ERROR" {
+            errors = errors + 1;
+        }
+        fx {
+            println("[", level, "] ", message);
+        }
+    }
+    fx {
+        println("error count = ", errors);
+    }
+    ret;
+}

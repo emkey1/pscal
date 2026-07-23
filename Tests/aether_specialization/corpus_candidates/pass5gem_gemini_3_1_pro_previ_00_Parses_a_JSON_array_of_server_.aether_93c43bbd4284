@@ -1,0 +1,41 @@
+type ClusterStats {
+    activeNodes: Int = 0;
+    totalConnections: Int = 0;
+
+    fn record(connections: Int) -> Void {
+        self.activeNodes = self.activeNodes + 1;
+        self.totalConnections = self.totalConnections + connections;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let payload: Text = "[{\"status\":\"active\",\"connections\":150},{\"status\":\"offline\",\"connections\":0},{\"status\":\"active\",\"connections\":350}]";
+    let doc: ToonDoc = toon_parse(payload);
+    let root: ToonNode = toon_root(doc);
+    
+    let stats: ClusterStats = new ClusterStats();
+
+    loop i in 0..toon_len(root) {
+        let node: ToonNode = toon_at(root, i);
+        let status: Text = toon_get_text_or(node, "status", "offline");
+        let connections: Int = toon_get_int_or(node, "connections", 0);
+
+        if status == "active" {
+            stats.record(connections);
+        }
+    }
+
+    fx {
+        println("Active nodes: ", stats.activeNodes);
+        println("Total connections: ", stats.totalConnections);
+    }
+
+    toon_close(doc);
+    ret;
+}

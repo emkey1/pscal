@@ -1,0 +1,12 @@
+@pure
+fn is_even(n: Int) -> Bool {
+    ret n % 2 == 0;
+}
+
+fn main() -> Void {
+    let num: Int = 10;
+    fx {
+        println(num, " is even: ", is_even(num));
+    }
+    ret;
+}

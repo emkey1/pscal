@@ -1,0 +1,92 @@
+type InventoryItem {
+    name: Text;
+    quantity: Int;
+    price: Real;
+
+    fn addStock(amount: Int) -> Int {
+        self.quantity = self.quantity + amount;
+        ret self.quantity;
+    }
+
+    fn removeStock(amount: Int) -> Int {
+        if amount > self.quantity {
+            ret 0;
+        }
+        self.quantity = self.quantity - amount;
+        ret self.quantity;
+    }
+
+    fn value() -> Real {
+        ret self.price * self.quantity;
+    }
+
+    fn isLowStock() -> Bool {
+        ret self.quantity < 5;
+    }
+}
+
+type Inventory {
+    items: InventoryItem[];
+
+    fn addItem(name: Text, qty: Int, price: Real) -> Void {
+        let item: InventoryItem = new InventoryItem { name: name, quantity: qty, price: price };
+        self.items = self.items + [item];
+        ret;
+    }
+
+    fn totalValue() -> Real {
+        let total: Real = 0.0;
+        loop i in 0..length(self.items) {
+            total = total + self.items[i].value();
+        }
+        ret total;
+    }
+
+    fn lowStockItems() -> Int {
+        let count: Int = 0;
+        loop i in 0..length(self.items) {
+            if self.items[i].isLowStock() {
+                count = count + 1;
+            }
+        }
+        ret count;
+    }
+}
+
+fn main() -> Void {
+    let store: Inventory = new Inventory();
+    store.addItem("Widget A", 100, 9.99);
+    store.addItem("Widget B", 3, 24.50);
+    store.addItem("Gadget C", 50, 49.95);
+
+    fx {
+        println("Initial inventory:");
+        loop i in 0..length(store.items) {
+            let item: InventoryItem = store.items[i];
+            println(" ", item.name, ": qty=", item.quantity, " price=", item.price:0:2, " value=", item.value():0:2);
+        }
+        println("");
+        println("Total value: ", store.totalValue():0:2);
+        println("Low stock items: ", store.lowStockItems());
+        println("");
+
+        println("Selling 5 of Widget A...");
+        let newQty: Int = store.items[0].removeStock(5);
+        println("Widget A quantity now: ", newQty);
+
+        println("Restocking Widget B with 10...");
+        let newQtyB: Int = store.items[1].addStock(10);
+        println("Widget B quantity now: ", newQtyB);
+
+        println("");
+        println("Final inventory:");
+        loop i in 0..length(store.items) {
+            let item: InventoryItem = store.items[i];
+            println(" ", item.name, ": qty=", item.quantity, " price=", item.price:0:2, " value=", item.value():0:2);
+        }
+        println("");
+        println("Final total value: ", store.totalValue():0:2);
+        println("Final low stock items: ", store.lowStockItems());
+    }
+    ret;
+}

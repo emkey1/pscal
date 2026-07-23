@@ -1,0 +1,51 @@
+// Dynamic-array statistics with real division and clamp
+
+@pure
+fn sumOf(xs: Int[]) -> Int {
+    let total: Int = 0;
+    loop i in 0..length(xs) {
+        total = total + xs[i];
+    }
+    ret total;
+}
+
+@pure
+fn minOf(xs: Int[]) -> Int {
+    let best: Int = xs[0];
+    loop i in 1..length(xs) {
+        best = min(best, xs[i]);
+    }
+    ret best;
+}
+
+@pure
+fn maxOf(xs: Int[]) -> Int {
+    let best: Int = xs[0];
+    loop i in 1..length(xs) {
+        best = max(best, xs[i]);
+    }
+    ret best;
+}
+
+fn main() -> Void {
+    let scores: Int[] = [88, 42, 97, 65, 73, 55, 91];
+    let total: Int = sumOf(scores);
+    let mean: Real = total * 1.0 / length(scores);
+    let clampedMean: Int = clamp(round(mean), 0, 100);
+
+    let squares: Int[] = [];
+    loop i in 0..length(scores) {
+        squares = squares + [scores[i] * scores[i]];
+    }
+
+    fx {
+        println("count   = ", length(scores));
+        println("sum     = ", total);
+        println("min     = ", minOf(scores));
+        println("max     = ", maxOf(scores));
+        println("mean    = ", mean:0:2);
+        println("clamped = ", clampedMean);
+        println("squares length = ", length(squares));
+    }
+    ret;
+}

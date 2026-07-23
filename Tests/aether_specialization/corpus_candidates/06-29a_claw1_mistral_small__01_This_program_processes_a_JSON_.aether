@@ -1,0 +1,30 @@
+@pure
+fn classify(score: Int) -> Text {
+    if score >= 90 {
+        ret "Excellent";
+    }
+    if score >= 70 {
+        ret "Good";
+    }
+    if score >= 50 {
+        ret "Average";
+    }
+    ret "Below Average";
+}
+
+fn main() -> Void {
+    let doc: ToonDoc = toon_parse("[{\"name\":\"Alice\",\"score\":92},{\"name\":\"Bob\",\"score\":68},{\"name\":\"Charlie\",\"score\":47}]");
+    let root: ToonNode = toon_root(doc);
+    loop i in 0..toon_len(root) {
+        let row: ToonNode = toon_at(root, i);
+        let name: Text = toon_get_text(row, "name");
+        let score: Int = toon_get_int_or(row, "score", 0);
+
+        fx {
+            println(name, ": ", classify(score));
+        }
+    }
+
+    toon_close(doc);
+    ret;
+}

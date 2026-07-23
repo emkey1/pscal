@@ -1,0 +1,12 @@
+@post result >= 0
+fn my_abs(x: Int) -> Int {
+    ret abs(x);
+}
+
+fn main() -> Void {
+    let x: Int = my_abs(-5);
+    fx {
+        println("abs = ", x);
+    }
+    ret;
+}

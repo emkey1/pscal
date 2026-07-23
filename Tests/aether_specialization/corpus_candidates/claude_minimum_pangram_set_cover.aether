@@ -1,0 +1,74 @@
+// A pangram uses every letter of the alphabet at least once. Finding the
+// SMALLEST set of words (from some list) that together form a pangram is
+// mathematically identical to Minimum Set Cover over a 26-element universe
+// -- NP-hard in general. Here, brute force over all 2^8 subsets of the
+// classic sentence's words is trivial, but it reveals something neat: this
+// particular sentence has zero slack.
+
+@pure
+fn wordMask(word: Text) -> Int {
+    let mask: Int = 0;
+    loop i in 0..length(word) {
+        let c: Int = ord(copy(word, i + 1, 1));
+        mask = mask | (1 << (c - 97));
+    }
+    ret mask;
+}
+
+@pure
+fn popcount(x: Int) -> Int {
+    let value: Int = x;
+    let count: Int = 0;
+    loop value != 0 {
+        count = count + (value & 1);
+        value = value >> 1;
+    }
+    ret count;
+}
+
+fn main() -> Void {
+    let words: Text[] = ["the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog"];
+    let n: Int = length(words);
+    let masks: Int[] = [];
+    loop i in 0..n {
+        masks = masks + [wordMask(words[i])];
+    }
+
+    let fullMask: Int = (1 << 26) - 1;
+    let bestCount: Int = n + 1;
+    let bestSubset: Int = 0;
+
+    let subset: Int = 0;
+    loop subset < (1 << n) {
+        let combined: Int = 0;
+        let bit: Int = 0;
+        loop bit < n {
+            if (subset & (1 << bit)) != 0 {
+                combined = combined | masks[bit];
+            }
+            bit = bit + 1;
+        }
+        if combined == fullMask {
+            let c: Int = popcount(subset);
+            if c < bestCount {
+                bestCount = c;
+                bestSubset = subset;
+            }
+        }
+        subset = subset + 1;
+    }
+
+    fx {
+        println("Minimum pangram-covering subset of {the, quick, brown, fox, jumps, over, lazy, dog}:");
+        let bit2: Int = 0;
+        loop bit2 < n {
+            if (bestSubset & (1 << bit2)) != 0 {
+                print(words[bit2], " ");
+            }
+            bit2 = bit2 + 1;
+        }
+        println("");
+        println("Words used: ", bestCount, " out of ", n);
+    }
+    ret;
+}

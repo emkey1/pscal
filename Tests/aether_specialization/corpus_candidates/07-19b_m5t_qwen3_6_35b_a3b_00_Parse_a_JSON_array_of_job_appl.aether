@@ -1,0 +1,37 @@
+@pure
+fn classify(score: Int) -> Text {
+    if score >= 90 {
+        ret "Ready";
+    }
+    if score >= 70 {
+        ret "Review";
+    }
+    ret "Blocked";
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("TOON unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("[{\"id\":\"A\",\"tech\":8,\"soft\":9},{\"id\":\"B\",\"tech\":4,\"soft\":5}]");
+    let root: ToonNode = toon_root(doc);
+
+    fx { println("Applicant Scorecard:"); }
+
+    loop i in 0..toon_len(root) {
+        let app: ToonNode = toon_at(root, i);
+        let tech: Int = toon_get_int_or(app, "tech", 0);
+        let soft: Int = toon_get_int_or(app, "soft", 0);
+        let total: Int = tech * 2 + soft;
+        let status: Text = classify(total);
+
+        fx {
+            println("ID: ", toon_get_text(app, "id"), " | Score: ", total, " | ", status);
+        }
+    }
+
+    toon_close(doc);
+    ret;
+}

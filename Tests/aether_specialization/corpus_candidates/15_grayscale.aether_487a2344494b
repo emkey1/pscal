@@ -1,0 +1,46 @@
+// Grayscale conversion over an in-memory Image. Aether's real file I/O
+// (assign/reset/rewrite/readln/writeln) is text-line-oriented, not
+// byte-level, so there is no way to parse a binary BMP file from Aether
+// source -- this demonstrates the pixel-transform logic on synthetic data
+// instead of pretending to load/save a real image file.
+type Pixel {
+    r: Int;
+    g: Int;
+    b: Int;
+}
+
+type Image {
+    width: Int;
+    height: Int;
+    pixels: Pixel[];
+}
+
+fn make_test_image(width: Int, height: Int) -> Image {
+    let pixels: Pixel[] = [];
+    loop i in 0..width * height {
+        pixels = pixels + [new Pixel { r: (i * 37) % 256, g: (i * 59) % 256, b: (i * 83) % 256 }];
+    }
+    ret new Image { width: width, height: height, pixels: pixels };
+}
+
+fn grayscale(image: Image) -> Image {
+    let gray_pixels: Pixel[] = [];
+    loop i in 0..length(image.pixels) {
+        let p: Pixel = image.pixels[i];
+        let gray: Int = int(0.299 * real(p.r) + 0.587 * real(p.g) + 0.114 * real(p.b));
+        gray_pixels = gray_pixels + [new Pixel { r: gray, g: gray, b: gray }];
+    }
+    ret new Image { width: image.width, height: image.height, pixels: gray_pixels };
+}
+
+fn main() -> Void {
+    let image: Image = make_test_image(2, 2);
+    let gray: Image = grayscale(image);
+    fx {
+        loop i in 0..length(gray.pixels) {
+            let p: Pixel = gray.pixels[i];
+            println("pixel ", i, ": r=", p.r, " g=", p.g, " b=", p.b);
+        }
+    }
+    ret;
+}

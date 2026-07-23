@@ -1,0 +1,75 @@
+type ReleaseTotals {
+    count: Int = 0;
+    stableCount: Int = 0;
+    totalDownloads: Int = 0;
+    maxDownloads: Int = 0;
+    maxName: Text = "";
+
+    fn record(name: Text, downloads: Int, stable: Bool) -> Void {
+        self.count = self.count + 1;
+        self.totalDownloads = self.totalDownloads + downloads;
+        if stable { self.stableCount = self.stableCount + 1; }
+        if downloads > self.maxDownloads {
+            self.maxDownloads = downloads;
+            self.maxName = name;
+        }
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let payload: Text =
+        "{\"releases\":["
+        + "{\"name\":\"Aether\",\"version\":\"1.2.0\",\"downloads\":1200,\"meta\":{\"stable\":true}},"
+        + "{\"name\":\"Zephyr\",\"version\":\"0.9.5\",\"downloads\":450,\"meta\":{\"stable\":false}},"
+        + "{\"name\":\"Nimbus\",\"version\":\"2.0.1\",\"downloads\":5000,\"meta\":{\"stable\":true}},"
+        + "{\"name\":\"Cinder\",\"version\":\"1.1.0\",\"downloads\":800,\"meta\":{}}"
+        + "]}";
+
+    let doc: ToonDoc = toon_parse(payload);
+    let root: ToonNode = toon_root(doc);
+    let releases: ToonNode = toon_key(root, "releases");
+
+    let totals: ReleaseTotals = new ReleaseTotals();
+
+    loop i in 0..toon_len(releases) {
+        let rel: ToonNode = toon_at(releases, i);
+        let name: Text = toon_get_text_or(rel, "name", "UNKNOWN");
+        let ver: Text = toon_get_text_or(rel, "version", "?");
+        let downloads: Int = toon_get_int_or(rel, "downloads", 0);
+
+        let stable: Bool = false;
+        if toon_has_key(rel, "meta") {
+            let meta: ToonNode = toon_key(rel, "meta");
+            stable = toon_get_bool_or(meta, "stable", false);
+            toon_free(meta);
+        }
+
+        totals.record(name, downloads, stable);
+
+        fx {
+            println(i, ": ", name, " v", ver, " downloads=", downloads, " stable=", stable);
+        }
+
+        toon_free(rel);
+    }
+
+    let stablePct: Real = if totals.count == 0 { 0.0 } else { totals.stableCount * 100.0 / totals.count };
+
+    fx {
+        println("");
+        println("releases: ", totals.count);
+        println("stable:   ", totals.stableCount, " (", stablePct:0:1, "%)");
+        println("downloads total: ", totals.totalDownloads);
+        println("top: ", totals.maxName, " (", totals.maxDownloads, ")");
+    }
+
+    toon_free(releases);
+    toon_close(doc);
+    ret;
+}

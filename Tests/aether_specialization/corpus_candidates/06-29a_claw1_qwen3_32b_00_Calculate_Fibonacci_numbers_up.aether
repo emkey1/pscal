@@ -1,0 +1,24 @@
+@pure
+fn fibonacci(limit: Int) -> Int[] {
+    let result: Int[] = [];
+    let a: Int = 0;
+    let b: Int = 1;
+    loop a < limit {
+        result = result + [a];
+        let next: Int = a + b;
+        a = b;
+        b = next;
+    }
+    ret result;
+}
+
+fn main() -> Void {
+    let fibs: Int[] = fibonacci(100);
+    fx {
+        println("Fibonacci sequence under 100:");
+        loop i in 0..length(fibs) {
+            println(fibs[i]:0:0);
+        }
+    }
+    ret;
+}

@@ -1,0 +1,27 @@
+const N_FIB: Int = 10;
+
+fn main() -> Void {
+    let a: Int = 0;
+    let b: Int = 1;
+
+    fx {
+        println("Fibonacci Sequence up to ", N_FIB, " terms:");
+    }
+
+    if N_FIB >= 1 {
+        fx { println("0: ", a); }
+    }
+    if N_FIB >= 2 {
+        fx { println("1: ", b); }
+    }
+
+    loop i in 2..N_FIB {
+        let next: Int = a + b;
+        a = b;
+        b = next;
+        fx {
+            println(i, ": ", next);
+        }
+    }
+    ret;
+}

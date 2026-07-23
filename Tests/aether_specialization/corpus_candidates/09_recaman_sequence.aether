@@ -1,0 +1,61 @@
+// Build Recaman's sequence and count terms that revisit an earlier value.
+
+@pure
+fn seenBefore(values: Int[], stop: Int, target: Int) -> Bool {
+    let i: Int = 0;
+    loop i < stop {
+        if values[i] == target {
+            ret true;
+        }
+        i = i + 1;
+    }
+    ret false;
+}
+
+@pre count > 0
+@post length(result) == count
+fn buildRecaman(count: Int) -> Int[] {
+    let values: Int[] = [0];
+    let n: Int = 1;
+
+    loop n < count {
+        let previous: Int = values[n - 1];
+        let backward: Int = previous - n;
+        let next: Int = previous + n;
+
+        if backward > 0 && !seenBefore(values, n, backward) {
+            next = backward;
+        }
+
+        values = values + [next];
+        n = n + 1;
+    }
+    ret values;
+}
+
+fn main() -> Void {
+    let sequence: Int[] = buildRecaman(60);
+    let repeatedTerms: Int = 0;
+    let i: Int = 0;
+
+    loop i < length(sequence) {
+        if seenBefore(sequence, i, sequence[i]) {
+            repeatedTerms = repeatedTerms + 1;
+        }
+
+        fx {
+            print(sequence[i]);
+            if (i + 1) % 10 == 0 {
+                println("");
+            } else {
+                print(" ");
+            }
+        }
+        i = i + 1;
+    }
+
+    fx {
+        println("repeated terms among the first 60 = ", repeatedTerms);
+    }
+    ret;
+}

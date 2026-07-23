@@ -1,0 +1,23 @@
+@pure
+@pre n >= 0
+@post result >= 0
+fn fib(n: Int) -> Int {
+    if n <= 1 {
+        ret n;
+    }
+    let a: Int = 0;
+    let b: Int = 1;
+    loop i in 2..n {
+        let temp: Int = a + b;
+        a = b;
+        b = temp;
+    }
+    ret b;
+}
+
+fn main() -> Void {
+    fx {
+        println("Fibonacci(10) = ", fib(10));
+    }
+    ret;
+}
