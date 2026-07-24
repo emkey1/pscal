@@ -2,13 +2,17 @@ import UIKit
 
 // MARK: - Helper Class for Self-Sizing Accessory View
 
-final class TerminalAccessoryView: UIView {
+final class TerminalAccessoryView: UIView, UIInputViewAudioFeedback {
     var targetHeight: CGFloat = 44 {
         didSet { invalidateIntrinsicContentSize() }
     }
 
     override var intrinsicContentSize: CGSize {
         CGSize(width: UIView.noIntrinsicMetric, height: targetHeight)
+    }
+
+    var enableInputClicksWhenVisible: Bool {
+        return true
     }
 }
 
@@ -124,6 +128,7 @@ final class NativeTerminalView: UITextView {
                 btn.accessibilityLabel = key
             }
 
+            btn.addTarget(self, action: #selector(playClick), for: .touchDown)
             btn.addTarget(self, action: #selector(keyTapped(_:)), for: .touchUpInside)
             keysStack.addArrangedSubview(btn)
         }
@@ -187,6 +192,10 @@ final class NativeTerminalView: UITextView {
     }
 
     // MARK: Actions
+
+    @objc private func playClick() {
+        UIDevice.current.playInputClick()
+    }
 
     @objc private func keyTapped(_ sender: UIButton) {
         guard let title = sender.title(for: .normal) else { return }
