@@ -27,7 +27,7 @@ jobs:
           submodules: recursive
       - name: Compute changed files
         id: changed-files
-        uses: tj-actions/changed-files@v46
+        uses: tj-actions/changed-files@v44
       - name: Determine build plan
         id: plan
         env:
