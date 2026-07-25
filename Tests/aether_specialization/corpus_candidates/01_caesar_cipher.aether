@@ -3,7 +3,7 @@ fn encrypt(plaintext: Text, shift: Int) -> Text {
     let result: Text = "";
     let len: Int = string_len(plaintext);
     loop i in 0..len {
-        let ch: Text = copy(plaintext, i + 1, 1);
+        let ch: Text = copy(plaintext, i, 1);
         let code: Int = ord(ch);
         if code >= 65 && code <= 90 {
             let shifted: Int = ((code - 65 + shift) % 26) + 65;

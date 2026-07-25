@@ -75,7 +75,7 @@ fn main() -> Void {
     let bot: Robot = new Robot { x: 0, y: 0, dir: "N" };
     let program: Text = "FFRFFLFFRFFF";
 
-    loop i in 1..(string_len(program) + 1) {
+    loop i in 0..string_len(program) {
         let command: Text = copy(program, i, 1);
         bot.apply(command);
     }

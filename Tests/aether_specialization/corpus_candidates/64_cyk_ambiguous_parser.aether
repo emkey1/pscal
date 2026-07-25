@@ -36,7 +36,7 @@ fn main() -> Void {
     // Length-one spans come directly from terminal productions.
     let terminalCount: Int = length(terminalLeftSide);
     loop start in 0..wordLength {
-        let ch: Text = copy(word, start + 1, 1);
+        let ch: Text = copy(word, start, 1);
         loop p in 0..terminalCount {
             if terminalText[p] == ch {
                 let symbol: Int = terminalLeftSide[p];

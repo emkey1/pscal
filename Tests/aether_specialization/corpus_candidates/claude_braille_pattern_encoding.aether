@@ -87,7 +87,7 @@ fn hexOfInt(n: Int) -> Text {
     }
     loop v > 0 {
         let d: Int = v % 16;
-        out = copy(digits, d + 1, 1) + out;
+        out = copy(digits, d, 1) + out;
         v = v / 16;
     }
     loop length(out) < 2 {
@@ -104,20 +104,20 @@ fn main() -> Void {
         println("");
         print("Plain:     ");
         loop i in 0..length(message) {
-            print(copy(message, i + 1, 1), " ");
+            print(copy(message, i, 1), " ");
         }
         println("");
 
         print("Braille:   ");
         loop i in 0..length(message) {
-            let c: Text = copy(message, i + 1, 1);
+            let c: Text = copy(message, i, 1);
             print(brailleChar(c), " ");
         }
         println("");
 
         print("Patterns:  ");
         loop i in 0..length(message) {
-            let c: Text = copy(message, i + 1, 1);
+            let c: Text = copy(message, i, 1);
             let pat: Int = braillePattern(c);
             print(hexOfInt(pat), " ");
         }
@@ -128,7 +128,7 @@ fn main() -> Void {
     }
     let decoded: Text = "";
     loop i in 0..length(message) {
-        let c: Text = copy(message, i + 1, 1);
+        let c: Text = copy(message, i, 1);
         let pat: Int = braillePattern(c);
         decoded = decoded + letterFromPattern(pat);
     }

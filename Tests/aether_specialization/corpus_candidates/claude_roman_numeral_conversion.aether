@@ -40,9 +40,9 @@ fn fromRoman(s: Text) -> Int {
     let total: Int = 0;
     let i: Int = 0;
     loop i < length(s) {
-        let cur: Int = romanValue(copy(s, i + 1, 1));
+        let cur: Int = romanValue(copy(s, i, 1));
         if i + 1 < length(s) {
-            let next: Int = romanValue(copy(s, i + 2, 1));
+            let next: Int = romanValue(copy(s, i + 1, 1));
             if cur < next {
                 total = total + (next - cur);
                 i = i + 2;

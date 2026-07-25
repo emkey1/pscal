@@ -9,7 +9,7 @@
 fn wordMask(word: Text) -> Int {
     let mask: Int = 0;
     loop i in 0..length(word) {
-        let c: Int = ord(copy(word, i + 1, 1));
+        let c: Int = ord(copy(word, i, 1));
         mask = mask | (1 << (c - 97));
     }
     ret mask;

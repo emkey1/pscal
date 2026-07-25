@@ -4,10 +4,10 @@ fn vigenereEncrypt(text: Text, key: Text) -> Text {
     let keyLen: Int = string_len(key);
     let keyIndex: Int = 0;
     loop i in 0..string_len(text) {
-        let ch: Text = copy(text, i + 1, 1);
+        let ch: Text = copy(text, i, 1);
         let code: Int = ord(ch);
         if (code >= ord("A") && code <= ord("Z")) || (code >= ord("a") && code <= ord("z")) {
-            let keyChar: Text = copy(key, (keyIndex % keyLen) + 1, 1);
+            let keyChar: Text = copy(key, (keyIndex % keyLen), 1);
             let shift: Int = ord(keyChar) - ord("a");
             if code >= ord("A") && code <= ord("Z") {
                 result = result + chr(((code - ord("A") + shift) % 26) + ord("A"));
@@ -27,10 +27,10 @@ fn vigenereDecrypt(text: Text, key: Text) -> Text {
     let keyLen: Int = string_len(key);
     let keyIndex: Int = 0;
     loop i in 0..string_len(text) {
-        let ch: Text = copy(text, i + 1, 1);
+        let ch: Text = copy(text, i, 1);
         let code: Int = ord(ch);
         if (code >= ord("A") && code <= ord("Z")) || (code >= ord("a") && code <= ord("z")) {
-            let keyChar: Text = copy(key, (keyIndex % keyLen) + 1, 1);
+            let keyChar: Text = copy(key, (keyIndex % keyLen), 1);
             let shift: Int = ord(keyChar) - ord("a");
             if code >= ord("A") && code <= ord("Z") {
                 result = result + chr(((code - ord("A") - shift + 26) % 26) + ord("A"));

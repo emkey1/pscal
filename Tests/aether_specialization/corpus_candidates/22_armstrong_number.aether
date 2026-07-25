@@ -3,7 +3,7 @@ fn is_armstrong(n: Int) -> Bool {
     let power: Int = string_len(num_str);
     let sum: Int = 0;
     loop i in 0..string_len(num_str) {
-        let digit: Int = parse_int(copy(num_str, i + 1, 1));
+        let digit: Int = parse_int(copy(num_str, i, 1));
         sum = sum + pow(digit, power);
     }
     ret sum == n;

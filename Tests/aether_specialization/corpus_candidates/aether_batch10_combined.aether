@@ -130,7 +130,7 @@ fn main() -> Void {
         println("ramp pick = ", rampPick);
         println("parity = ", parity);
         println("flags total = ", summarizeFlags(flags));
-        println("copy demo = ", copy("Aether", 2, 3));
+        println("copy demo = ", copy("Aether", 1, 3));
         println("pos demo = ", pos("th", "Aether"));
         println("stringofchar demo = ", stringofchar("*", 5));
     }

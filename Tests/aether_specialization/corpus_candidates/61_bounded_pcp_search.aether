@@ -12,11 +12,11 @@ fn isPrefixOf(a: Text, b: Text) -> Bool {
     let la: Int = string_len(a);
     if la > string_len(b) { ret false; }
     if la == 0 { ret true; }
-    ret copy(b, 1, la) == a;
+    ret copy(b, 0, la) == a;
 }
 
 fn suffixFrom(s: Text, start: Int) -> Text {
-    ret copy(s, start + 1, string_len(s) - start);
+    ret copy(s, start, string_len(s) - start);
 }
 
 // Rebuild both strings from a solution (sequence of 1-based domino digits)
@@ -25,7 +25,7 @@ fn verifySolution(tops: Text[], bottoms: Text[], seq: Text) -> Bool {
     let topStr: Text = "";
     let botStr: Text = "";
     loop i in 0..string_len(seq) {
-        let idx: Int = ord(copy(seq, i + 1, 1)) - ord("1");
+        let idx: Int = ord(copy(seq, i, 1)) - ord("1");
         topStr = topStr + tops[idx];
         botStr = botStr + bottoms[idx];
     }
@@ -127,7 +127,7 @@ fn main() -> Void {
             println("SOLUTION found at depth ", string_len(solution), ":");
             print("  sequence: ");
             loop i in 0..string_len(solution) {
-                print(copy(solution, i + 1, 1), " ");
+                print(copy(solution, i, 1), " ");
             }
             println();
         }

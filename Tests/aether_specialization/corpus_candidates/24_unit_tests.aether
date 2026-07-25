@@ -26,7 +26,7 @@ fn main() -> Void {
     let r2: Int[] = report("5 > 3", 5 > 3, passCount, failCount);
     passCount = r2[0]; failCount = r2[1];
 
-    let r3: Int[] = report("Hello starts with H", copy("Hello", 1, 1) == "H", passCount, failCount);
+    let r3: Int[] = report("Hello starts with H", copy("Hello", 0, 1) == "H", passCount, failCount);
     passCount = r3[0]; failCount = r3[1];
 
     fx {
