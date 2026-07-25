@@ -1,0 +1,61 @@
+// Rolling window statistics using array slices.
+// Every window is materialized with xs[i..i+w], so the window-scoring
+// helpers take a plain Int[] and never need index arithmetic against the
+// source array. Reports each window's min/max/mean-numerator and the widest
+// swing seen, then verifies the window count.
+
+fn windowMin(xs: Int[]) -> Int {
+    let best: Int = xs[0];
+    loop i in 1..length(xs) {
+        if xs[i] < best { best = xs[i]; }
+    }
+    ret best;
+}
+
+fn windowMax(xs: Int[]) -> Int {
+    let best: Int = xs[0];
+    loop i in 1..length(xs) {
+        if xs[i] > best { best = xs[i]; }
+    }
+    ret best;
+}
+
+fn windowSum(xs: Int[]) -> Int {
+    let total: Int = 0;
+    loop i in 0..length(xs) {
+        total = total + xs[i];
+    }
+    ret total;
+}
+
+fn main() -> Void {
+    let series: Int[] = [12, 15, 11, 20, 19, 25, 14, 13];
+    let width: Int = 3;
+    let n: Int = length(series);
+    let lastStart: Int = n - width + 1;
+
+    let widestSwing: Int = 0;
+    let windows: Int = 0;
+
+    loop start in 0..lastStart {
+        // Half-open: start .. start+width-1, copied out of the series.
+        let window: Int[] = series[start..(start + width)];
+        let lo: Int = windowMin(window);
+        let hi: Int = windowMax(window);
+        let swing: Int = hi - lo;
+        if swing > widestSwing { widestSwing = swing; }
+        windows = windows + 1;
+
+        fx {
+            println("window ", start, ": min=", lo, " max=", hi,
+                    " swing=", swing, " sum=", windowSum(window));
+        }
+    }
+
+    fx {
+        println("windows      = ", windows);
+        println("widest swing = ", widestSwing);
+        println("count ok     = ", windows == lastStart);
+    }
+    ret;
+}

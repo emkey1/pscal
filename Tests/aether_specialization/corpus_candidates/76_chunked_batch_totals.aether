@@ -1,0 +1,53 @@
+// Chunked batch processing with array slices.
+// Splits a reading log into fixed-size batches using the xs[a..b] slice
+// form -- half-open, so it copies elements a through b-1 -- then reports
+// each batch total and cross-checks the grand total against a whole-array
+// sum. Slicing yields a COPY, so mutating a batch never disturbs the source.
+
+fn sumOf(xs: Int[]) -> Int {
+    let total: Int = 0;
+    loop i in 0..length(xs) {
+        total = total + xs[i];
+    }
+    ret total;
+}
+
+fn main() -> Void {
+    let readings: Int[] = [4, 8, 15, 16, 23, 42, 7, 3, 99, 1];
+    let batchSize: Int = 3;
+    let n: Int = length(readings);
+
+    let grand: Int = 0;
+    let batchIndex: Int = 0;
+    let start: Int = 0;
+
+    loop start < n {
+        let stop: Int = start + batchSize;
+        if stop > n { stop = n; }
+
+        // Half-open slice: elements start .. stop-1.
+        let batch: Int[] = readings[start..stop];
+        let batchTotal: Int = sumOf(batch);
+        grand = grand + batchTotal;
+
+        fx {
+            print("batch ", batchIndex, " [", start, "..", stop, ") size=", length(batch), " values=");
+            loop j in 0..length(batch) {
+                if j > 0 { print(","); }
+                print(batch[j]);
+            }
+            println(" total=", batchTotal);
+        }
+
+        batchIndex = batchIndex + 1;
+        start = stop;
+    }
+
+    let wholeArray: Int = sumOf(readings);
+    fx {
+        println("batches   = ", batchIndex);
+        println("grand     = ", grand);
+        println("verified  = ", grand == wholeArray);
+    }
+    ret;
+}

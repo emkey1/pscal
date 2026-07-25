@@ -1,0 +1,58 @@
+// Array rotation expressed as slice concatenation.
+// Rotating left by k is the tail xs[k..n] followed by the head xs[0..k] --
+// no index juggling, no manual copy loop. Slices produce COPIES, so the
+// source array is never disturbed; the checks below confirm the original
+// survives intact and that rotating by a full length is a no-op.
+
+fn rotateLeft(xs: Int[], k: Int) -> Int[] {
+    let n: Int = length(xs);
+    if n == 0 { ret xs; }
+    let shift: Int = k % n;
+    if shift == 0 { ret xs[0..n]; }
+    let tail: Int[] = xs[shift..n];
+    let head: Int[] = xs[0..shift];
+    let rotated: Int[] = tail + head;
+    ret rotated;
+}
+
+fn sameContents(a: Int[], b: Int[]) -> Bool {
+    if length(a) != length(b) { ret false; }
+    loop i in 0..length(a) {
+        if a[i] != b[i] { ret false; }
+    }
+    ret true;
+}
+
+fn render(xs: Int[]) -> Text {
+    let out: Text = "[";
+    loop i in 0..length(xs) {
+        if i > 0 { out = out + " "; }
+        out = out + IntToStr(xs[i]);
+    }
+    let closed: Text = out + "]";
+    ret closed;
+}
+
+fn main() -> Void {
+    let base: Int[] = [10, 20, 30, 40, 50, 60, 70];
+    let n: Int = length(base);
+
+    fx { println("original      ", render(base)); }
+
+    loop k in 1..4 {
+        let rotated: Int[] = rotateLeft(base, k);
+        fx { println("rotateLeft ", k, "  ", render(rotated)); }
+    }
+
+    let fullCircle: Int[] = rotateLeft(base, n);
+    let wrapped: Int[] = rotateLeft(base, n + 2);
+    let byTwo: Int[] = rotateLeft(base, 2);
+
+    fx {
+        println("full circle   ", render(fullCircle));
+        println("source intact = ", sameContents(base, [10, 20, 30, 40, 50, 60, 70]));
+        println("k=n restores  = ", sameContents(fullCircle, base));
+        println("k=n+2 == k=2  = ", sameContents(wrapped, byTwo));
+    }
+    ret;
+}
