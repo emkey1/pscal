@@ -881,6 +881,8 @@ struct AppDiagnosticsView: View {
                     Button(copiedReport ? "Copied" : "Copy Report") {
                         runner.copyReportToPasteboard()
                         copiedReport = true
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        UIAccessibility.post(notification: .announcement, argument: "Diagnostics report copied")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                             copiedReport = false
                         }
