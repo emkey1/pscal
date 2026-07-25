@@ -26,7 +26,7 @@ fn isHOrW(c: Int) -> Bool {
 fn soundex(name: Text, hwAreSeparators: Bool) -> Text {
     let upper: Int[] = [];
     loop i in 0..length(name) {
-        let ch: Text = copy(name, i + 1, 1);
+        let ch: Text = copy(name, i, 1);
         let c: Int = ord(ch);
         if c >= 97 && c <= 122 {
             c = c - 32;

@@ -29,7 +29,7 @@ type DFA {
     fn test(input_str: Text) -> Bool {
         self.reset_dfa();
         loop i in 0..string_len(input_str) {
-            let symbol: Int = parse_int(copy(input_str, i + 1, 1));
+            let symbol: Int = parse_int(copy(input_str, i, 1));
             self.step(symbol);
         }
         ret self.is_accepting();

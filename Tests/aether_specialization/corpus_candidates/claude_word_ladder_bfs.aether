@@ -17,7 +17,7 @@ fn oneLetterApart(a: Text, b: Text) -> Bool {
     }
     let diff: Int = 0;
     loop i in 0..length(a) {
-        if ord(copy(a, i + 1, 1)) != ord(copy(b, i + 1, 1)) {
+        if ord(copy(a, i, 1)) != ord(copy(b, i, 1)) {
             diff = diff + 1;
         }
     }

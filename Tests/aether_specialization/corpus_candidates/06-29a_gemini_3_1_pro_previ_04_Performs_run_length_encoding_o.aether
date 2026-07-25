@@ -6,11 +6,11 @@ fn compress(input: Text) -> Text {
     }
 
     let result: Text = "";
-    let currentChar: Text = copy(input, 1, 1);
+    let currentChar: Text = copy(input, 0, 1);
     let count: Int = 1;
 
     loop i in 1..n {
-        let ch: Text = copy(input, i + 1, 1);
+        let ch: Text = copy(input, i, 1);
         if ch == currentChar {
             count = count + 1;
         } else {

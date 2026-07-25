@@ -56,9 +56,9 @@ type KVStore {
                 readln(f, line);
                 if string_len(line) > 0 {
                     let eqpos: Int = pos("=", line);
-                    if eqpos > 0 {
-                        let k: Text = copy(line, 1, eqpos - 1);
-                        let v: Text = copy(line, eqpos + 1, string_len(line) - eqpos);
+                    if eqpos >= 0 {
+                        let k: Text = copy(line, 0, eqpos);
+                        let v: Text = copy(line, eqpos + 1, string_len(line) - eqpos - 1);
                         self.put(k, v);
                     }
                 }

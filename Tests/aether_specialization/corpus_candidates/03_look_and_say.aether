@@ -5,13 +5,13 @@
 fn nextTerm(source: Text) -> Text {
     let total: Int = string_len(source);
     let output: Text = "";
-    let i: Int = 1;
+    let i: Int = 0;
 
-    loop i <= total {
+    loop i < total {
         let symbol: Text = copy(source, i, 1);
         let run: Int = 1;
 
-        loop i + run <= total {
+        loop i + run < total {
             let candidate: Text = copy(source, i + run, 1);
             if candidate != symbol {
                 break;

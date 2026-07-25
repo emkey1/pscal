@@ -10,7 +10,7 @@ fn railFenceEncrypt(text: Text, rails: Int) -> Text {
     let currentRail: Int = 0;
     let direction: Int = 1;
     loop i in 0..string_len(text) {
-        let ch: Text = copy(text, i + 1, 1);
+        let ch: Text = copy(text, i, 1);
         fence[currentRail] = fence[currentRail] + ch;
         if currentRail == 0 {
             direction = 1;
@@ -49,7 +49,7 @@ fn railFenceDecrypt(text: Text, rails: Int) -> Text {
     let railData: Text[] = [];
     let index: Int = 0;
     loop i in 0..rails {
-        railData = railData + [copy(text, index + 1, railLengths[i])];
+        railData = railData + [copy(text, index, railLengths[i])];
         index = index + railLengths[i];
     }
     let railIndices: Int[] = [];
@@ -61,7 +61,7 @@ fn railFenceDecrypt(text: Text, rails: Int) -> Text {
     direction = 1;
     loop i in 0..n {
         let railText: Text = railData[currentRail];
-        let pos: Int = railIndices[currentRail] + 1;
+        let pos: Int = railIndices[currentRail];
         result = result + copy(railText, pos, 1);
         railIndices[currentRail] = railIndices[currentRail] + 1;
         if currentRail == 0 {

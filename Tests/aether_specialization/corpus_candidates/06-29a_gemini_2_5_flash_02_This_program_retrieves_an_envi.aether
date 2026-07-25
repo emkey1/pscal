@@ -12,8 +12,8 @@ fn main() -> Void {
         println("Trimmed message: \"", trimmedMessage, "\" (Length: ", msgLen, ")");
 
         if msgLen >= 5 {
-            let firstFive: Text = copy(trimmedMessage, 1, 5); // 1-based start, 5 characters
-            let remainingPart: Text = copy(trimmedMessage, 6, msgLen - 5);
+            let firstFive: Text = copy(trimmedMessage, 0, 5); // 1-based start, 5 characters
+            let remainingPart: Text = copy(trimmedMessage, 5, msgLen - 5);
             println("First 5 chars: \"", firstFive, "\"");
             println("Remaining part: \"", remainingPart, "\"");
             println("Concatenated: \"", firstFive + remainingPart, "\"");

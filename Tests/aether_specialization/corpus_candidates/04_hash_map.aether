@@ -16,7 +16,7 @@ type HashMap {
         let h: Int = 0;
         let len: Int = string_len(key);
         loop i in 0..len {
-            h = h * 31 + ord(copy(key, i + 1, 1));
+            h = h * 31 + ord(copy(key, i, 1));
         }
         if h < 0 { h = -h; }
         ret h % self.capacity;

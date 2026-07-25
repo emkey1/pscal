@@ -12,7 +12,7 @@ fn analyzeText(text: Text) -> (Int, Int, Int) {
     loop {
         if i >= length { break; }
 
-        let ch: Text = copy(text, i+1, 1);
+        let ch: Text = copy(text, i, 1);
         if ch == " " || ch == "\t" {
             words = words + 1;
         }

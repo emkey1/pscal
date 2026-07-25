@@ -12,7 +12,7 @@ type Parser {
         if self.pos >= string_len(self.input) {
             ret "";
         }
-        ret copy(self.input, self.pos + 1, 1);
+        ret copy(self.input, self.pos, 1);
     }
 
     fn consume() -> Text {

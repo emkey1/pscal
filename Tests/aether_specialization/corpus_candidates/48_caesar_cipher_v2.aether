@@ -13,7 +13,7 @@ fn shiftChar(ch: Text, shift: Int) -> Text {
 fn caesarEncrypt(text: Text, shift: Int) -> Text {
     let result: Text = "";
     loop i in 0..string_len(text) {
-        let ch: Text = copy(text, i + 1, 1);
+        let ch: Text = copy(text, i, 1);
         result = result + shiftChar(ch, shift);
     }
     ret result;

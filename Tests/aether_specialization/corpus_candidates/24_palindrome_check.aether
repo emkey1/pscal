@@ -1,8 +1,8 @@
 @pure
 fn is_palindrome(s: Text) -> Bool {
     let reversed: Text = "";
-    let i: Int = string_len(s);
-    loop i >= 1 {
+    let i: Int = string_len(s) - 1;
+    loop i >= 0 {
         reversed = reversed + s[i];
         i = i - 1;
     }
