@@ -12,10 +12,10 @@ fn levelOf(line: Text) -> Text {
 @pure
 fn messageOf(line: Text) -> Text {
     let at: Int = pos("|", line);
-    if at == 0 {
+    if at < 0 {
         ret line;
     }
-    ret trim(copy(line, at + 1, string_len(line) - at));
+    ret trim(copy(line, at + 1, string_len(line) - at - 1));
 }
 
 fn main() -> Void {

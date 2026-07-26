@@ -13,7 +13,7 @@ fn split_csv_line(line: Text) -> Text[] {
     let current: Text = "";
     let i: Int = 0;
     loop i < string_len(line) {
-        let ch: Text = copy(line, i + 1, 1);
+        let ch: Text = copy(line, i, 1);
         if ch == "," {
             parts = parts + [current];
             current = "";

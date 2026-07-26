@@ -18,17 +18,17 @@ fn extract_links(html: Text) -> Text[] {
     let remaining: Text = html;
     loop true {
         let marker_pos: Int = pos("<a href=\"", remaining);
-        if marker_pos == 0 {
+        if marker_pos < 0 {
             break;
         }
-        let after_marker: Text = copy(remaining, marker_pos + 9, string_len(remaining) - (marker_pos + 9) + 1);
+        let after_marker: Text = copy(remaining, marker_pos + 9, string_len(remaining) - (marker_pos + 9));
         let end_pos: Int = pos("\"", after_marker);
-        if end_pos == 0 {
+        if end_pos < 0 {
             break;
         }
-        let link: Text = copy(after_marker, 1, end_pos - 1);
+        let link: Text = copy(after_marker, 0, end_pos);
         links = links + [link];
-        remaining = copy(after_marker, end_pos + 1, string_len(after_marker) - end_pos);
+        remaining = copy(after_marker, end_pos + 1, string_len(after_marker) - (end_pos + 1));
     }
     ret links;
 }

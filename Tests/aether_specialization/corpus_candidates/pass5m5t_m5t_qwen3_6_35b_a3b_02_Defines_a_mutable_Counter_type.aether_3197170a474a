@@ -24,7 +24,7 @@ fn main() -> Void {
     let n: Int = count_chars(msg);
 
     loop i in 0..n {
-        let ch: Text = copy(msg, i + 1, 1);
+        let ch: Text = copy(msg, i, 1);
         c.bump();
         fx { println("Char ", i + 1, ": ", ch); }
     }
