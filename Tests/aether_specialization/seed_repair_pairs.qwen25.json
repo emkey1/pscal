@@ -227,9 +227,9 @@
     },
     {
       "id": "repair_array_slice",
-      "diagnostic": "[SYN-001] Aether parser rewrite error: expected ']' to close index expression (opened at line 3).",
-      "broken_source": "fn main() -> Void {\n    let vals: Int[] = [5, 8, 13, 21];\n    let mid: Int[] = vals[1..3];\n    fx {\n        loop i in 0..length(mid) {\n            println(mid[i]);\n        }\n    }\n    ret;\n}\n",
-      "fixed_source": "fn main() -> Void {\n    let vals: Int[] = [5, 8, 13, 21];\n    let mid: Int[] = [];\n    loop i in 1..3 {\n        mid = mid + [vals[i]];\n    }\n    fx {\n        loop i in 0..length(mid) {\n            println(mid[i]);\n        }\n    }\n    ret;\n}\n",
+      "diagnostic": "[TYPE-001] Aether array-copy parser error: copy() is the substring builtin for Text; it does not take an array.",
+      "broken_source": "fn main() -> Void {\n    let vals: Int[] = [5, 8, 13, 21];\n    let mid: Int[] = copy(vals, 1, 2);\n    fx {\n        loop i in 0..length(mid) {\n            println(mid[i]);\n        }\n    }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let vals: Int[] = [5, 8, 13, 21];\n    let mid: Int[] = vals[1..3];\n    fx {\n        loop i in 0..length(mid) {\n            println(mid[i]);\n        }\n    }\n    ret;\n}\n",
       "expected_stdout": "8\n13\n"
     },
     {
@@ -247,10 +247,10 @@
       "expected_stdout": "0\n1\n4\n9\n"
     },
     {
-      "id": "repair_string_zero_index",
-      "diagnostic": "Runtime Error: String index 0 out of bounds for UnicodeString length 5.",
-      "broken_source": "fn main() -> Void {\n    let word: Text = \"lumen\";\n    fx {\n        loop i in 0..length(word) {\n            println(word[i]);\n        }\n    }\n    ret;\n}\n",
-      "fixed_source": "fn main() -> Void {\n    let word: Text = \"lumen\";\n    fx {\n        loop i in 1..length(word) + 1 {\n            println(word[i]);\n        }\n    }\n    ret;\n}\n",
+      "id": "repair_string_one_based_index",
+      "diagnostic": "Runtime Error: String index 5 out of bounds for UnicodeString length 5.",
+      "broken_source": "fn main() -> Void {\n    let word: Text = \"lumen\";\n    fx {\n        loop i in 1..length(word) + 1 {\n            println(word[i]);\n        }\n    }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let word: Text = \"lumen\";\n    fx {\n        loop i in 0..length(word) {\n            println(word[i]);\n        }\n    }\n    ret;\n}\n",
       "expected_stdout": "l\nu\nm\ne\nn\n"
     },
     {
