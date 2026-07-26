@@ -12,7 +12,7 @@ fn main() -> Void {
         if status == 200 {
             let body: Text = mstreambuffer(stream);
             println("Success! Response length: ", string_len(body));
-            println("First 100 chars: ", copy(body, 1, 100));
+            println("First 100 chars: ", copy(body, 0, 100));
         } else {
             println("Request failed with status: ", status);
         }

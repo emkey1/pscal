@@ -28,7 +28,7 @@ fn runDfa(bits: Text, transitions: Int[], startState: Int, alphabetSize: Int) ->
     let state: Int = startState;
     let bitCount: Int = string_len(bits);
     loop i in 0..bitCount {
-        let ch: Text = copy(bits, i + 1, 1);
+        let ch: Text = copy(bits, i, 1);
         let symbol: Int = if ch == "0" { 0 } else { 1 };
         state = transitions[state * alphabetSize + symbol];
     }

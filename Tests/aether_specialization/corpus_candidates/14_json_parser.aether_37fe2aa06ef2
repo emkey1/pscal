@@ -13,7 +13,7 @@ fn is_digit(ch: Text) -> Bool {
 @pure
 fn is_number(text: Text) -> Bool {
     loop i in 0..string_len(text) {
-        let c: Text = copy(text, i + 1, 1);
+        let c: Text = copy(text, i, 1);
         if !is_digit(c) && c != "." && c != "-" {
             ret false;
         }
@@ -32,8 +32,8 @@ fn parse_json(text: Text) -> Json {
         ret new Json { kind: "number", value: text, children: [] };
     }
     let len: Int = string_len(text);
-    if len >= 2 && copy(text, 1, 1) == "\"" && copy(text, len, 1) == "\"" {
-        ret new Json { kind: "string", value: copy(text, 2, len - 2), children: [] };
+    if len >= 2 && copy(text, 0, 1) == "\"" && copy(text, len - 1, 1) == "\"" {
+        ret new Json { kind: "string", value: copy(text, 1, len - 2), children: [] };
     }
     ret new Json { kind: "unknown", value: "", children: [] };
 }

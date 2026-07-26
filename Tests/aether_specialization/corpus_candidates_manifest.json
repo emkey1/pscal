@@ -5999,7 +5999,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_000",
       "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_000",
-      "sha256": "7739b827a319d78ebfaa822f60ed5ead43f97322e3c8ec654a3d02d9439ddefe",
+      "sha256": "5ba6c76af20d1ff662823eb0fda5012a44b2b8e94b27bd31e6a67b6fb9c46e0a",
       "stdout": "word: mississippi\nreversed: ippississim\nis_palindrome = false\nvowel_count = 4\nfreq('s') = 4\n",
       "metadata": {
         "canonical": true,
@@ -6013,13 +6013,18 @@
           "character",
           "indexing"
         ],
-        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_001",
       "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_001",
-      "sha256": "3e2b5f676292c06db204f67c0031f902a0371d708e77863b7f5b0ef94aa32887",
+      "sha256": "a4b9ad6ec72975aed4595507d55715b17db2e05bc2ff015edd26261a3129810b",
       "stdout": "word: stats\nreversed: stats\nis_palindrome = true\nvowel_count = 1\nfreq('w') = 0\n",
       "metadata": {
         "canonical": true,
@@ -6033,13 +6038,18 @@
           "character",
           "indexing"
         ],
-        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_002",
       "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_002",
-      "sha256": "682fe5fd82d2add276a8e13047d4cd93569ed0853cafc43ad0d8eb07cba1ca78",
+      "sha256": "3ebeeee2b1e81cbcb0de2ec7d658a9a7bae9610b37443cdb3453aff5c4f6272e",
       "stdout": "word: civic\nreversed: civic\nis_palindrome = true\nvowel_count = 2\nfreq('i') = 2\n",
       "metadata": {
         "canonical": true,
@@ -6053,13 +6063,18 @@
           "character",
           "indexing"
         ],
-        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_003",
       "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_003",
-      "sha256": "3a9295f9d4bd129de1e34e7d9ae09caced63415b92abab47085985edc80ea4ae",
+      "sha256": "756af49dc2b29323395ae7144d1740af4f6a4d9f8ff08421d499327efe7ce5ff",
       "stdout": "word: alphabet\nreversed: tebahpla\nis_palindrome = false\nvowel_count = 3\nfreq('p') = 1\n",
       "metadata": {
         "canonical": true,
@@ -6073,13 +6088,18 @@
           "character",
           "indexing"
         ],
-        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_004",
       "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_004",
-      "sha256": "3d58dad368ff675afb99b39b6e3ee856c4dfa6393ee7944d2e2679102dceac79",
+      "sha256": "14c1a7d86069d4741051592b689827745e1abc58b9f5aab0cf4a44fd5a4a70ca",
       "stdout": "word: kayak\nreversed: kayak\nis_palindrome = true\nvowel_count = 2\nfreq('w') = 0\n",
       "metadata": {
         "canonical": true,
@@ -6093,13 +6113,18 @@
           "character",
           "indexing"
         ],
-        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_005",
       "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_005",
-      "sha256": "b17cef3f712c06e88414c447ccf1a21abce2af9d512bfdc25e0c659d495bd53f",
+      "sha256": "6c0b6ed03538f4dfbdcbc59d069e43aa9e59c6d0fb0d72f473cab99a92ea0872",
       "stdout": "word: rhythm\nreversed: mhtyhr\nis_palindrome = false\nvowel_count = 0\nfreq('w') = 0\n",
       "metadata": {
         "canonical": true,
@@ -6113,13 +6138,18 @@
           "character",
           "indexing"
         ],
-        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_006",
       "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_006",
-      "sha256": "24a3306c9eed69c91e15c25830e4b579385abc67bad6ff06ebc290e9882c21a7",
+      "sha256": "a069c72a42744560a1a4983bc938963ab3a50bf6f66fc76e47cbc999447ec504",
       "stdout": "word: deed\nreversed: deed\nis_palindrome = true\nvowel_count = 2\nfreq('e') = 2\n",
       "metadata": {
         "canonical": true,
@@ -6133,13 +6163,18 @@
           "character",
           "indexing"
         ],
-        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_007",
       "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_007",
-      "sha256": "3f13c03b7f80f9bbb8a201835811d6bc56ac36d59bb83edfdeb4f32020f65e0f",
+      "sha256": "07de9f8862a2994be8625d97415ef59b9b4421bcbf1c1ef50def25b0b8154d7a",
       "stdout": "word: banana\nreversed: ananab\nis_palindrome = false\nvowel_count = 3\nfreq('y') = 0\n",
       "metadata": {
         "canonical": true,
@@ -6153,13 +6188,18 @@
           "character",
           "indexing"
         ],
-        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/312_strings_008",
       "repo_path": "Tests/aether_specialization/corpus_candidates/312_strings_008",
-      "sha256": "022c1c304aaeffe827f6787b3978cff5ae852730261195b90262b43dba7542c4",
+      "sha256": "b1f6aa65753cd30e3175e1f3569c012a30d1ca8f58b430e7d216dd9f93ac59a6",
       "stdout": "word: minim\nreversed: minim\nis_palindrome = true\nvowel_count = 2\nfreq('m') = 2\n",
       "metadata": {
         "canonical": true,
@@ -6173,7 +6213,12 @@
           "character",
           "indexing"
         ],
-        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally"
+        "notes": "Text processing with 1-based character indexing (s[1]..s[string_len(s)]) \u2014 reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -7853,7 +7898,7 @@
     {
       "source_path": "/tmp/aether_examples_verify/09_string_transformer.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/09_string_transformer.aether",
-      "sha256": "4c450424d5df9213828845f432541f40bbee74a8a8149984b149a681fcbf525e",
+      "sha256": "a59a8561e860e2698785a079b428b79e1f7bd08d9a5354d25093e5379f884a2a",
       "stdout": "Log Code Extraction:\nLine 0: A123\nLine 1: B99\nLine 2: C00\nLine 3: NONE\nLine 4: D01\n",
       "metadata": {
         "canonical": true,
@@ -7861,14 +7906,19 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/tmp/aether_examples_verify/10_http_stream.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/10_http_stream.aether",
-      "sha256": "ff708bafe6f111160033caf933410c85e65d933af41c5a264bda4e2386f7da8d",
-      "stdout": "Request failed with status: 503\n",
+      "sha256": "e2197b4cfbfcc96f8866f5fc864323313a31be4a4679a6e47a4d9e3de19ef5bc",
+      "stdout": "Success! Response length: 305\nFirst 100 chars: {\n  \"args\": {}, \n  \"headers\": {\n    \"Accept\": \"*/*\", \n    \"Accept-Encoding\": \"deflate, gzip\", \n    \"\n",
       "metadata": {
         "canonical": true,
         "fixture_required": false,
@@ -7877,7 +7927,12 @@
           "imported_2026-07-19"
         ],
         "environment_dependent": true,
-        "notes": "[2026-07-19 corpus audit] marked environment_dependent: makes a live HTTP request; output depends on remote server availability/response at run time."
+        "notes": "[2026-07-19 corpus audit] marked environment_dependent: makes a live HTTP request; output depends on remote server availability/response at run time.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -7941,7 +7996,7 @@
     {
       "source_path": "/tmp/aether_dozen_verify/aether_dozen_examples/03_look_and_say.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/03_look_and_say.aether",
-      "sha256": "2c57d350b806e3579f6b49e42de0b9aa08619facbb6df790a6446562afc13531",
+      "sha256": "2639d060e499e894f14240cdba711d60d921b9ab423b6d75311212339bc7a026",
       "stdout": "1: 1  length=1\n2: 11  length=2\n3: 21  length=2\n4: 1211  length=4\n5: 111221  length=6\n6: 312211  length=6\n7: 13112221  length=8\n8: 1113213211  length=10\n9: 31131211131221  length=14\n10: 13211311123113112211  length=20\n11: 11131221133112132113212221  length=26\n12: 3113112221232112111312211312113211  length=34\n",
       "metadata": {
         "canonical": true,
@@ -7949,7 +8004,12 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -8109,7 +8169,7 @@
     {
       "source_path": "/tmp/aether_miner_examples/03_log_parser.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/03_log_parser.aether",
-      "sha256": "b6b6a1c096e281a914e2fae7bf91f5a5946c423441f4c397363d7fc848f57363",
+      "sha256": "0c9b4eda8f029652fed03d9dfc944d456117131da549f854d273bb8df82ea3c6",
       "stdout": "[INFO] worker started\n[WARN] queue depth 80%\n[ERROR] disk full\n[UNKNOWN] malformed line\nerror count = 1\n",
       "metadata": {
         "canonical": true,
@@ -8117,7 +8177,12 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -8279,7 +8344,7 @@
     {
       "source_path": "/tmp/aether_batch3_examples/07_word_frequency.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/07_word_frequency.aether",
-      "sha256": "354fdf64d502a40b94bad4540dfb2022f09c973d5311cbd55166bb983980ce46",
+      "sha256": "3ffca0ca37dc4361430f32df4a64a678f72b2d7a6f6ff8ee4996aabd0636e207",
       "stdout": "Word frequency analysis:\nTotal words: 13\nUnique words: 9\n\nWord counts:\nthe: 3\nquick: 2\nbrown: 1\nfox: 2\njumps: 1\nover: 1\nlazy: 1\ndog: 1\nwas: 1\n",
       "metadata": {
         "canonical": true,
@@ -8287,7 +8352,12 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -8321,7 +8391,7 @@
     {
       "source_path": "/tmp/aether_batch4_examples/01_caesar_cipher.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/01_caesar_cipher.aether",
-      "sha256": "ebe148119b6b018d0cf535f658911da059b9994a7a2d054668abb6e90c5ac235",
+      "sha256": "f346e05d9db5b25a266af266a53189618c21e038377976206e48c1f36010ab09",
       "stdout": "Original:  Hello World\nEncrypted: Khoor Zruog\nDecrypted: Hello World\n",
       "metadata": {
         "canonical": true,
@@ -8329,7 +8399,12 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -8524,7 +8599,7 @@
     {
       "source_path": "/tmp/aether_batch5_examples/04_hash_map.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/04_hash_map.aether",
-      "sha256": "19341f3cd1b9ca49e5269732f0241d6c9a0ec15a9a59ce53dcc85ea5e2c221fa",
+      "sha256": "4e6be2ee558f9d58c44b1715a0eb8259527e550e88bbd25f5d4703cb75e97db7",
       "stdout": "name: Alice\ncity: Wonderland\ncontains 'age'? true\ncontains 'email'? false\n",
       "metadata": {
         "canonical": true,
@@ -8532,7 +8607,12 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -8598,7 +8678,7 @@
     {
       "source_path": "/tmp/aether_batch6_examples/14_json_parser.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/14_json_parser.aether_37fe2aa06ef2",
-      "sha256": "37fe2aa06ef209a66269d70a4374f3fd9586c3947b0d005baef6bc44b160f90d",
+      "sha256": "eee63274bd0f747c522a5a2e27f426c67534ada34149d09b1283167cdb18f682",
       "stdout": "Parsed JSON kind: string\nParsed JSON value: Alice\n",
       "metadata": {
         "canonical": true,
@@ -8606,7 +8686,12 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -8640,7 +8725,7 @@
     {
       "source_path": "/tmp/aether_batch6_examples/17_vigenere_cipher.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/17_vigenere_cipher.aether_fc1eaad3d705",
-      "sha256": "fc1eaad3d7055a864aeb5cbdcdf7ee3de302fa13742959ebed7d0070c05b194e",
+      "sha256": "55e967040d87efc4970c4cc16eaf29cb2f852e9109ed996f558c780fd1ba7272",
       "stdout": "Original: hello\nEncrypted: zincs\nDecrypted: hello\n",
       "metadata": {
         "canonical": true,
@@ -8648,7 +8733,12 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -8670,7 +8760,7 @@
     {
       "source_path": "/tmp/aether_batch6_examples/20_web_scraper.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/20_web_scraper.aether_27e2b770eecd",
-      "sha256": "27e2b770eecd9b9342589a0a28ba3c77c9ef323d2bb2cf4f62584c990a15c885",
+      "sha256": "913d31492b9412d2e2884ccf950dda919406924bb0ef7447a6c4c1154b3cc2ce",
       "stdout": "Links found: https://iana.org/domains/example \n",
       "metadata": {
         "canonical": false,
@@ -8679,7 +8769,13 @@
         "tags": [
           "imported_2026-07-19",
           "excluded_nondeterministic"
-        ]
+        ],
+        "environment_dependent": true,
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -8715,7 +8811,7 @@
     {
       "source_path": "/tmp/aether_batch6_examples/24_unit_tests.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/24_unit_tests.aether",
-      "sha256": "f35baa8805edd197c5e712f68d858d5f83b7436a8ea41109602a31d7c30717d5",
+      "sha256": "e20e8a1bb7255ba96cf645bb754fc7947939d598b32e95a52138db164af277e0",
       "stdout": "[PASS] 2 + 2 = 4\n[PASS] 5 > 3\n[PASS] Hello starts with H\nPassed: 3/3\n",
       "metadata": {
         "canonical": true,
@@ -8723,7 +8819,12 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -8960,7 +9061,7 @@
     {
       "source_path": "/tmp/aether_harvest/06-29a_gemini_2_5_flash_02_This_program_retrieves_an_envi.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_gemini_2_5_flash_02_This_program_retrieves_an_envi.aether",
-      "sha256": "1917d6b8741710c9ba0c4859560a859184274fd9db3a26e0a376d6cda5a80592",
+      "sha256": "cc7fb50d77ea2254347c3efeaf1024dd77d7d9f01f9b823b0e5bf8593653ab89",
       "stdout": "Original (from env or default): \" No message provided by env \"\nTrimmed message: \"No message provided by env\" (Length: 26)\nFirst 5 chars: \"No me\"\nRemaining part: \"ssage provided by env\"\nConcatenated: \"No message provided by env\"\n",
       "metadata": {
         "canonical": true,
@@ -8968,7 +9069,12 @@
         "assumption_bearing": false,
         "tags": [
           "harvested_idea_miner_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -9044,7 +9150,7 @@
     {
       "source_path": "/tmp/aether_harvest/06-29a_gemini_3_1_pro_previ_04_Performs_run_length_encoding_o.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_gemini_3_1_pro_previ_04_Performs_run_length_encoding_o.aether",
-      "sha256": "233093ffe8d5a1862ad2088493f21cfc6e6f692781d9c7f6264954e905231774",
+      "sha256": "c395b6b1c46ac820cb36d22c180c6a14a4dc403ce7ff7ccb058b2fa51db279bc",
       "stdout": "Original:   AAABBBCCDAA\nCompressed: A3B3C2D1A2\n",
       "metadata": {
         "canonical": true,
@@ -9052,7 +9158,12 @@
         "assumption_bearing": false,
         "tags": [
           "harvested_idea_miner_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -9424,7 +9535,7 @@
     {
       "source_path": "/tmp/aether_harvest/06-29b_sched_m5_devstral_03_A_text_processing_utility_to_s.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/06-29b_sched_m5_devstral_03_A_text_processing_utility_to_s.aether",
-      "sha256": "9f03d5fd82dcbb03e328e9090ac24c91004faf277716829e07dd6f550b641b37",
+      "sha256": "805ea606a1fad3034c4b1411ea60e3ef0cdc93c99fe595d5772319c6f4694925",
       "stdout": "Sentence:Hello World from Aether\nWord 'Hello':0 vowels\nWord 'World':0 vowels\nWord 'from':0 vowels\nWord 'Aether':0 vowels\nTotal vowels:0\n",
       "metadata": {
         "canonical": true,
@@ -9432,7 +9543,12 @@
         "assumption_bearing": false,
         "tags": [
           "harvested_idea_miner_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -9774,7 +9890,7 @@
     {
       "source_path": "/tmp/aether_harvest/07-01b_sched_m5_devstral_03_A_text_processing_utility_that.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_m5_devstral_03_A_text_processing_utility_that.aether",
-      "sha256": "b868d8f9447356111bfa7deb865f8a52596829f9d26b0eb1b49442fee5771eee",
+      "sha256": "5d593142180fd8a70dc1329b0d6322f261a7f55c360f81d4745f7f6550d0e72e",
       "stdout": "Analysis of 'Hello World from Aether!':\nLength: 24\nWords: 4\nUppercase letters: 3\nWord density: 16.67%\n",
       "metadata": {
         "canonical": true,
@@ -9782,7 +9898,12 @@
         "assumption_bearing": false,
         "tags": [
           "harvested_idea_miner_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -10394,7 +10515,7 @@
     {
       "source_path": "/tmp/aether_batch7_examples/22_armstrong_number.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/22_armstrong_number.aether",
-      "sha256": "e10fdcb4e3edb3794a3c41de6525a3c1c43b3b2eb31650dcfa0db92a616bcc88",
+      "sha256": "fc3b0ce78bd8fc0f9e44f6c95bf63733f2170d8a66287ceb91d0067697c59883",
       "stdout": "153 is armstrong: true\n",
       "metadata": {
         "canonical": true,
@@ -10402,7 +10523,12 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -10422,7 +10548,7 @@
     {
       "source_path": "/tmp/aether_batch7_examples/24_palindrome_check.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/24_palindrome_check.aether",
-      "sha256": "3757925bf2adca195a2342039d5f4890eecb3a354fdd273850bf54104b282a86",
+      "sha256": "cf3ee92708b1590c87f14eef1e246e1bd38b53d1b3e8f8737347e3e2a893559e",
       "stdout": "radar is palindrome: true\n",
       "metadata": {
         "canonical": true,
@@ -10430,13 +10556,18 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/tmp/aether_batch8_examples/25_kv_store_persistence.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/25_kv_store_persistence.aether",
-      "sha256": "d88e5374fcee7dd8c9fc70a6a2267c003eb39713fe31d4514fe36e1a11d75def",
+      "sha256": "3c204f73ca85483216bbe470267be024b2c796185164579cda525f4e44e2ea56",
       "stdout": "Before save: role=superuser\nAfter load: role=superuser\nAfter load: timeout=300\n",
       "metadata": {
         "canonical": true,
@@ -10444,13 +10575,18 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/tmp/aether_batch8_examples/26_recursive_descent_parser.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/26_recursive_descent_parser.aether",
-      "sha256": "43b35b75e4ff17d97005550d7f809e16643a108599aff2151dc2b2901fdb0cc9",
+      "sha256": "840eccd04d45b0ece904e526b46cd8dfc75f14ffe5695afc54992b818265b441",
       "stdout": "Result: 18\n",
       "metadata": {
         "canonical": true,
@@ -10458,7 +10594,12 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -10492,7 +10633,7 @@
     {
       "source_path": "/tmp/aether_batch8_examples/30_dfa_simulator.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/30_dfa_simulator.aether",
-      "sha256": "f0f78f398688044c0610aecbfee39aec6d8064b6aac0296ae3d285b2802c86b5",
+      "sha256": "458351984d1672dba321a897ac7eac457984b9fb563983d97faf01dadfea9ab2",
       "stdout": "Binary strings divisible by 3:\n0 -> true\n11 -> true\n110 -> true\n111 -> false\n1001 -> true\n10101 -> true\n",
       "metadata": {
         "canonical": true,
@@ -10500,7 +10641,12 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -10707,7 +10853,7 @@
     {
       "source_path": "/tmp/aether_harvest_pass5/pass5c13_claw3_ornith_1_0_35b_04_A_simple_text_based_cipher_tha.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/pass5c13_claw3_ornith_1_0_35b_04_A_simple_text_based_cipher_tha.aether_b188d0baa5f4",
-      "sha256": "b188d0baa5f4338945c6532322b5df5f5ea7099e7a6512f043ab1184f94ee95b",
+      "sha256": "1e95775e6fa26c29dfd9f8c7802bb843bc08b95ef31404dc419dd8f77cfb091b",
       "stdout": "Caesar Cipher Demonstration\n==========================\n\nOriginal:   Hello, World! 123\nShift:      7\nEncrypted:  Olssv, Dvysk! 123\nDecrypted:  Hello, World! 123\n\nRound-trip successful: decryption matches original!\n\nCharacter-by-character transformation:\n  H (72) -> O (79)\n  e (101) -> l (108)\n  l (108) -> s (115)\n  l (108) -> s (115)\n  o (111) -> v (118)\n  , (44) -> , (44)\n    (32) ->   (32)\n  W (87) -> D (68)\n  o (111) -> v (118)\n  r (114) -> y (121)\n  l (108) -> s (115)\n  d (100) -> k (107)\n  ! (33) -> ! (33)\n    (32) ->   (32)\n  1 (49) -> 1 (49)\n  2 (50) -> 2 (50)\n  3 (51) -> 3 (51)\n",
       "metadata": {
         "canonical": true,
@@ -10715,7 +10861,12 @@
         "assumption_bearing": false,
         "tags": [
           "harvested_idea_miner_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -11101,7 +11252,7 @@
     {
       "source_path": "/tmp/aether_harvest_pass5/pass5m5t_m5t_qwen3_6_35b_a3b_02_Defines_a_mutable_Counter_type.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/pass5m5t_m5t_qwen3_6_35b_a3b_02_Defines_a_mutable_Counter_type.aether_3197170a474a",
-      "sha256": "3197170a474aabcc6c8af41af7c67e7fc2af86a69bd94c5c206b027cda0ca39a",
+      "sha256": "85b4a4de504413266ebb21a20c5bee7d78746c67b56794b1020d8f76a5c09a22",
       "stdout": "Char 1: A\nChar 2: e\nChar 3: t\nChar 4: h\nChar 5: e\nChar 6: r\nChar 7:  \nChar 8: i\nChar 9: s\nChar 10:  \nChar 11: g\nChar 12: r\nChar 13: e\nChar 14: a\nChar 15: t\nTotal chars: 15\nAfter reset: 0\n",
       "metadata": {
         "canonical": true,
@@ -11109,7 +11260,12 @@
         "assumption_bearing": false,
         "tags": [
           "harvested_idea_miner_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -11213,7 +11369,7 @@
     {
       "source_path": "/tmp/aether_batch9_combined.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_batch9_combined.aether_0c7eb15ff89f",
-      "sha256": "0c7eb15ff89ff42fade57aa746d9cd70e71970e94cddd0ad8102751cb91510aa",
+      "sha256": "8c0f626253264590d7fad66bcc562739cf50d26df633859dab7032efb4e1955d",
       "stdout": "point manhattan = 7\npolar point = 7, 7\nscore = 0 -> blocked\nstats seen = 3\nstats mean = 39.58\nstats range = 7.25 .. 99.00\nbit grid count = 3\npair total = 252\nfib = 89 odd = true\neven square sum = 120\nset bits = 8\nclamped score ratio = 0.396\nfirst line pieces = alpha\n",
       "metadata": {
         "canonical": true,
@@ -11221,21 +11377,31 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/tmp/aether_batch10_combined.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_batch10_combined.aether",
-      "sha256": "1b2ea6c9eb6b20130de264dea33e96d2ea5b92f8db7dafb8778d7c25acdb3818",
-      "stdout": "meter name = dataset\ncount = 5\navg = 41.20\nspan = 101.25\nband = bronze\nchosen = alpha / 12.50 / true\nhits = 5\nramp pick = 16\nparity = true\nflags total = 5\ncopy demo = eth\npos demo = 3\nstringofchar demo = *****\n",
+      "sha256": "c4eb5f37028172fec7a9ca5a4aeb4bb0522cba1523e7fdb310c1cf65b2953ef5",
+      "stdout": "meter name = dataset\ncount = 5\navg = 41.20\nspan = 101.25\nband = bronze\nchosen = alpha / 12.50 / true\nhits = 5\nramp pick = 16\nparity = true\nflags total = 5\ncopy demo = eth\npos demo = 2\nstringofchar demo = *****\n",
       "metadata": {
         "canonical": true,
         "fixture_required": false,
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -11376,7 +11542,7 @@
     {
       "source_path": "/tmp/aether_openai_harvest/openai_gpt_5_5_00_turtle_robot_interpreter.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/openai_gpt_5_5_00_turtle_robot_interpreter.aether",
-      "sha256": "959fd2875b357ed1ab301206ab8fc1f6e100eee3d9627c6b9f6d8a8b990f2d0a",
+      "sha256": "14f0fe98af76a646d2a2257e3773efff4bf49dc84f0bd1184e00f35fec86b875",
       "stdout": "commands: FFRFFLFFRFFF\nfinal position: (5, 4) facing E\n",
       "metadata": {
         "canonical": true,
@@ -11385,7 +11551,12 @@
         "tags": [
           "harvested_idea_miner_2026-07-20",
           "openai"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -11761,7 +11932,7 @@
     {
       "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_somos4_laurent_phenomenon.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/claude_somos4_laurent_phenomenon.aether",
-      "sha256": "0c87d84a6374dc0edad28cf1c85bdc08f7da004e8cf4833378025c3d269f2648",
+      "sha256": "b56123f9157ef0fc82066cc2219f484255978b0f7d0c7f5b4c986d3f8d328770",
       "stdout": "Somos-4 sequence trace\nn=1..4: 1, 1, 1, 1 (seeds)\nn=5: -> 2\nn=6: -> 3\nn=7: -> 7\nn=8: -> 23\nn=9: -> 59\nn=10: -> 314\nn=11: -> 1529\nn=12: -> 8209\nn=13: -> 83313\n\nEvery division above came out exact -- the Laurent phenomenon holds.\n",
       "metadata": {
         "include_in_training": true,
@@ -11776,7 +11947,7 @@
         "notes": "Somos-4 recurrence (OEIS A006720): division at every step never leaves a remainder (the Laurent phenomenon, Fomin-Zelevinsky 2002), checked at runtime; trace log built via the real mstreamappendbyte(ms, byte) builtin (one byte per char, via copy+ord) -- this was already callable from Aether source (confirmed 2026-07-22 by a clean before/after rebuild), just previously undocumented in the LLM guide, now added there",
         "recaptured": {
           "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
-          "date": "2026-07-22",
+          "date": "2026-07-25",
           "source_rebaselined": true
         },
         "canonical": true,
@@ -11891,7 +12062,7 @@
     {
       "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_soundex_hw_ambiguity.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/claude_soundex_hw_ambiguity.aether",
-      "sha256": "7323d95db5f4f356c59618a537434f19c463ff0061ac2cbc74861cc074b04892",
+      "sha256": "4ce517d361c1a3644608ead8b11eedc9dd1d5acf63ddc99d8b64aab44600797d",
       "stdout": "Soundex, transparent-H/W vs. H/W-as-separator conventions:\nRobert   -> R163 / R163\nRupert   -> R163 / R163\nAshcraft -> A261 / A226\nTymczak  -> T522 / T522\n",
       "metadata": {
         "include_in_training": true,
@@ -11905,13 +12076,18 @@
         ],
         "notes": "American Soundex encoding via ord/chr ASCII arithmetic (no array-as-structure tricks); demonstrates the genuine H/W transparent-vs-separator ambiguity in the 1918 NARA rule -- Ashcraft encodes as A261 (official, H transparent) vs A226 (H as separator), a real disagreement between implementations",
         "canonical": true,
-        "include_in_supervised": true
+        "include_in_supervised": true,
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_word_ladder_bfs.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/claude_word_ladder_bfs.aether",
-      "sha256": "800747c7e41829064a13bbb914424022191b035a1dd1fb22b5d26bea9bca35d2",
+      "sha256": "0818966c30bc4ff23d7eac258936988338ac164d347df59e6260b707d84d3df9",
       "stdout": "Shortest ladder (length 5): hit -> hot -> dot -> dog -> cog\n",
       "metadata": {
         "include_in_training": true,
@@ -11926,13 +12102,18 @@
         ],
         "notes": "Word ladder shortest-transformation via BFS with implicit graph (edges computed on the fly via oneLetterApart), parent-pointer path reconstruction by walking backward then reversing; record-literal return form (no par, unlike the aliquot/erdos-straus out-param idiom)",
         "canonical": true,
-        "include_in_supervised": true
+        "include_in_supervised": true,
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_semordnilaps.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/claude_semordnilaps.aether",
-      "sha256": "1561927600c0af4348412bf27951c4fa89164d335be64fb74ea159d4efb96f0f",
+      "sha256": "2708b1a593b179544b6e1042583595962681a7f1d7a26cc82d982ab6556b2d25",
       "stdout": "Semordnilaps found:\nstressed <-> desserts\ndrawer <-> reward\ndiaper <-> repaid\ndog <-> god\nstraw <-> warts\nlager <-> regal\nbard <-> drab\n",
       "metadata": {
         "include_in_training": true,
@@ -11945,7 +12126,12 @@
         ],
         "notes": "Semordnilaps (word reversal producing a different valid word); reverseWord via copy() char-by-char, dedup-via-pairKey trick so each pair prints once regardless of scan order",
         "canonical": true,
-        "include_in_supervised": true
+        "include_in_supervised": true,
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -11972,7 +12158,7 @@
     {
       "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_minimum_pangram_set_cover.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/claude_minimum_pangram_set_cover.aether",
-      "sha256": "ffe51304d9c6bb8bea2a2e5e90b5a487eb5e37161548a651d9e1063939b7f671",
+      "sha256": "e555c25f1a0f6854f0dc6a458d454ace43f8d4762f4fc1dc86da1f8653fcb8a2",
       "stdout": "Minimum pangram-covering subset of {the, quick, brown, fox, jumps, over, lazy, dog}:\nthe quick brown fox jumps over lazy dog \nWords used: 8 out of 8\n",
       "metadata": {
         "include_in_training": true,
@@ -11987,7 +12173,12 @@
         ],
         "notes": "Minimum pangram-covering subset via brute-force subset enumeration; wordMask/popcount reuse the bitmask idiom from the weird-numbers subset-sum example but flip it to set-cover (union hits full mask) -- the NP-hard reduction made concrete; confirms the classic pangram sentence has zero redundancy (all 8 words required)",
         "canonical": true,
-        "include_in_supervised": true
+        "include_in_supervised": true,
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -12011,7 +12202,7 @@
     {
       "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_hangul_syllable_composition.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/claude_hangul_syllable_composition.aether",
-      "sha256": "4cb9e5c074f5f15e8f02e48c3e3dab52d737a8a00422500ce2cfe1ce65a4c097",
+      "sha256": "0032ab8401ff7e6093b1c8fbb90f960ed7d2b99b806e52261b38851dd2952f3e",
       "stdout": "Hangul syllable composition:\njamo      -> syllable (Unicode codepoint)\n----------------------------------------\n\u314e\u314f\u3134  ->  U+D55C  \ud55c\n\u3131\u3161\u3139  ->  U+AE00  \uae00\n\u3145\u314f\u3134  ->  U+C0B0  \uc0b0\n\u3141\u315c\u3134  ->  U+BB38  \ubb38\n\u3137\u3157  ->  U+B3C4  \ub3c4\n\u3142\u3153\u3142  ->  U+BC95  \ubc95\n\u3148\u314f\u3147  ->  U+C7A5  \uc7a5\n\u314b\u3163\u3141  ->  U+D0B4  \ud0b4\n\u3134\u314f\u3139  ->  U+B0A0  \ub0a0\n\u3131\u315c\u3131  ->  U+AD6D  \uad6d\n",
       "metadata": {
         "include_in_training": false,
@@ -12026,7 +12217,7 @@
         "notes": "Hangul syllable composition via the real Unicode formula (BASE + cho*588 + jung*28 + jong); rendering uses a literal glyph lookup keyed by the computed codepoint rather than codepoint synthesis, since chr()/ord() only cover byte range 0-255 in Aether -- caught and fixed two real bugs in the source material: an extra invalid jongseong table entry (\u3138 cannot be a syllable-final) that shifted several indices, and a wrong final consonant for \ubc95 (should be \u3142, not \u3139); all 10 codepoints verified against Python ord()",
         "recaptured": {
           "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
-          "date": "2026-07-22",
+          "date": "2026-07-25",
           "source_rebaselined": true
         }
       }
@@ -12052,7 +12243,7 @@
     {
       "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_braille_pattern_encoding.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/claude_braille_pattern_encoding.aether",
-      "sha256": "dc343bf895a2f7864edb10f828e6d16226f414a76f3e1717dfb2479c7ca59988",
+      "sha256": "abe250ea3931a8d6c5a5981a0ac34df57cd9eda06a1d9f3de611281a7d791266",
       "stdout": "Text to Braille pictograph encoding:\n\nPlain:     a e t h e r   p i c t o g r a p h \nBraille:   \u2801 \u2811 \u281e \u2813 \u2811 \u2817 \u2800 \u280f \u280a \u2809 \u281e \u2815 \u281b \u2817 \u2801 \u280f \u2813 \nPatterns:  01 11 1E 13 11 17 00 0F 0A 09 1E 15 1B 17 01 0F 13 \n\nDecoding back:\nDecoded: aether pictograph\n",
       "metadata": {
         "include_in_training": false,
@@ -12067,7 +12258,7 @@
         "notes": "Braille dot-pattern encode/decode; pattern arithmetic is real, but glyph rendering uses a literal lookup (not codepoint synthesis) for the same chr()/ord() byte-range-only reason as Hangul; all 26 letters cross-verified against Python chr(0x2800+pattern); binary literals (0b...) rewritten as decimal since Aether has no such literal syntax",
         "recaptured": {
           "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
-          "date": "2026-07-22",
+          "date": "2026-07-25",
           "source_rebaselined": true
         }
       }
@@ -12075,7 +12266,7 @@
     {
       "source_path": "/private/tmp/claude-501/-Users-mke-Dropbox-Projects-Training/7027f64d-57e8-401e-9657-a1b300914bf9/scratchpad/claude_roman_numeral_conversion.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/claude_roman_numeral_conversion.aether",
-      "sha256": "a8a966aa142dbfd46934ac08e11d2f67cb59de702f1ca86c081a90dfb1bdd9d8",
+      "sha256": "187fbd061f1dd5eb48d05ea9beef0c6d0a8f8595f977009a02cdbbe2022794ec",
       "stdout": "Decimal -> Roman -> Decimal (round-trip verification):\n dec   roman          back   match\n----------------------------------------\n   1  I                1  OK\n   4  IV               4  OK\n   9  IX               9  OK\n  14  XIV             14  OK\n  19  XIX             19  OK\n  49  XLIX            49  OK\n  99  XCIX            99  OK\n 499  CDXCIX         499  OK\n 999  CMXCIX         999  OK\n1499  MCDXCIX       1499  OK\n2026  MMXXVI        2026  OK\n3999  MMMCMXCIX     3999  OK\n",
       "metadata": {
         "include_in_training": false,
@@ -12087,67 +12278,102 @@
           "greedy_algorithm",
           "round_trip"
         ],
-        "notes": "Roman numeral bidirectional conversion (greedy descent + subtractive-pair detection); round-trip verified for all 12 test values including the classic IV/IX pitfalls"
+        "notes": "Roman numeral bidirectional conversion (greedy descent + subtractive-pair detection); round-trip verified for all 12 test values including the classic IV/IX pitfalls",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/tmp/corpus_new/47_baconian_cipher.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/47_baconian_cipher.aether",
-      "sha256": "847e1755c28ef144e9ef3d2d27685b197c736519afd05241cd4f9976eb6ca274",
+      "sha256": "2ea34cdae35b0cf6b14b4a8b884bee965f124892013319d4cae8fe5351eac7c0",
       "stdout": "Baconian Biliteral Cipher (1605):\nPlaintext:  BACON\nBacon bits: aaaab aaaaa aaaba abbba abbab\nDecoded:    BACON\n\nFull alphabet mapping:\n  A -> aaaaa\n  B -> aaaab\n  C -> aaaba\n  D -> aaabb\n  E -> aabaa\n  F -> aabab\n  G -> aabba\n  H -> aabbb\n  I -> abaaa\n  J -> abaab\n  K -> ababa\n  L -> ababb\n  M -> abbaa\n  N -> abbab\n  O -> abbba\n  P -> abbbb\n  Q -> baaaa\n  R -> baaab\n  S -> baaba\n  T -> baabb\n  U -> babaa\n  V -> babab\n  W -> babba\n  X -> babbb\n  Y -> bbaaa\n  Z -> bbaab\nRoundtrip verified for all 26 letters.\n",
       "metadata": {
         "include_in_training": false,
-        "lifecycle": "quarantine"
+        "lifecycle": "quarantine",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/tmp/corpus_new2/48_caesar_cipher_v2.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/48_caesar_cipher_v2.aether",
-      "sha256": "9ae28b4a4e1316fe5c73f80dda8395bb115c5b1ada1385244924271cf4c9b316",
+      "sha256": "2176fc79733ed7fa752e479f7fbbce607d0b3b8bbd07a706d770daecf7c6f624",
       "stdout": "Original: Hello World\nEncrypted: Khoor Zruog\nDecrypted: Hello World\n",
       "metadata": {
         "include_in_training": false,
-        "lifecycle": "quarantine"
+        "lifecycle": "quarantine",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/tmp/corpus_new2/49_vigenere_cipher_v2.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/49_vigenere_cipher_v2.aether",
-      "sha256": "3957ae1317fce99e9512ca9e673426f686b1985cbe9da5451e80b410bc76fecc",
+      "sha256": "507a3496e1da54aefd4b0986d22e0a248a40c984bc9001536d69e286461db0b3",
       "stdout": "Original: Attack at dawn\nEncrypted: Lxfopv ef rnhr\nDecrypted: Attack at dawn\n",
       "metadata": {
         "include_in_training": false,
-        "lifecycle": "quarantine"
+        "lifecycle": "quarantine",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/tmp/corpus_new2/50_substitution_cipher.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/50_substitution_cipher.aether",
-      "sha256": "0f86f679169c2cae05d048abbcd36fd4fcce430ebad9099ac1dd2e3738289b6f",
+      "sha256": "df8877db80913998b324277b94dd4131e98194400c74d79c82be95228faa74f6",
       "stdout": "Original: Hello World\nEncrypted: Itssg Vgksr\nDecrypted: Hello World\n",
       "metadata": {
         "include_in_training": false,
-        "lifecycle": "quarantine"
+        "lifecycle": "quarantine",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/tmp/corpus_new2/51_rail_fence_cipher.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/51_rail_fence_cipher.aether",
-      "sha256": "539ca6b57805fe823811726b4a40576cdc9cbef59b631fbd3be837f1fec3905b",
+      "sha256": "6201c264ddfea6d7a316b8cd35cb13ef2a51e8bba0ea8a262036a5806fbbc040",
       "stdout": "Original: HELLO WORLD\nEncrypted: HOREL OLLWD\nDecrypted: HELLO WORLD\n",
       "metadata": {
         "include_in_training": false,
-        "lifecycle": "quarantine"
+        "lifecycle": "quarantine",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
       "source_path": "/tmp/corpus_new2/52_xor_cipher.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/52_xor_cipher.aether",
-      "sha256": "cbfe64ebf3d88097e4ace93d5503e4da7e41d5b765bb7665e90a8188822f8802",
+      "sha256": "91e87b77bf00d146e4b422b2dccc9f73895eba76611968e2698d98c8def4e25a",
       "stdout": "Original: Secret Message\nEncrypted (first byte, decimal): 24\nDecrypted: Secret Message\n",
       "metadata": {
         "include_in_training": false,
-        "lifecycle": "quarantine"
+        "lifecycle": "quarantine",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -12238,11 +12464,16 @@
     {
       "source_path": "/tmp/corpus_new5/61_bounded_pcp_search.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/61_bounded_pcp_search.aether",
-      "sha256": "6b1d7a81c7a38cd0e5873090ce2de6f56587d464a976544f441801b450486f93",
+      "sha256": "607e629d33a915791b89564047f67a90223bbcf1d61f50079e4e6ff3a2a92a43",
       "stdout": "=== Bounded PCP Search ===\nDominoes (top/bottom):\n  1: a / baa\n  2: ab / aa\n  3: bba / bb\nDepth bound: 6\n\nDepth 1: 1 live state(s)\nDepth 2: 1 live state(s)\nDepth 3: 2 live state(s)\n\nSOLUTION found at depth 4:\n  sequence: 3 2 3 1 \n  top:    bbaabbbaa\n  bottom: bbaabbbaa\n  independently verified: true\n",
       "metadata": {
         "include_in_training": false,
-        "lifecycle": "quarantine"
+        "lifecycle": "quarantine",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -12268,11 +12499,16 @@
     {
       "source_path": "/tmp/corpus_new6/64_cyk_ambiguous_parser.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/64_cyk_ambiguous_parser.aether",
-      "sha256": "11552a021367c1f3103824c672150c320ebcdf66916e296d8d3e7efcdc95476d",
+      "sha256": "56aea57a76f141bc44fdf53aeeaa64bb51173c42c8b5fdc7bbe0a94f4932e84e",
       "stdout": "CYK word: baaba\nAccepted by the grammar: true\nDistinct S-rooted parse trees: 2\n",
       "metadata": {
         "include_in_training": false,
-        "lifecycle": "quarantine"
+        "lifecycle": "quarantine",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -12318,11 +12554,16 @@
     {
       "source_path": "/tmp/corpus_new6/68_dfa_partition_refinement.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/68_dfa_partition_refinement.aether",
-      "sha256": "3662aba8d3f036e6426cb9f9f5cf294f0d83381b91d1db790c0d2309abe73397",
+      "sha256": "9cf2a83277ccd399a40d025f014cf3104bc0553de03335c0d768f0818fb3c27d",
       "stdout": "Original state count: 6\nMinimal state count: 3\noriginal state 0 -> class 0\noriginal state 1 -> class 1\noriginal state 2 -> class 2\noriginal state 3 -> class 0\noriginal state 4 -> class 1\noriginal state 5 -> class 2\nMinimized transition table:\nclass 0: 0 -> 0, 1 -> 1, accepting = true\nclass 1: 0 -> 2, 1 -> 0, accepting = false\nclass 2: 0 -> 1, 1 -> 2, accepting = false\nSample bits 110110 finish in class 0, accepted = true\n",
       "metadata": {
         "include_in_training": false,
-        "lifecycle": "quarantine"
+        "lifecycle": "quarantine",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -12425,11 +12666,16 @@
     {
       "source_path": "/tmp/corpus_slices/78_rotate_via_slices.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/78_rotate_via_slices.aether",
-      "sha256": "157603384f3d203a8e3ef95f932fd208bc2779beae59cc5d50639b897f25ba67",
+      "sha256": "77f26d0825bd9c48ef819f786fb855a3accda187150a74ed261566273dfdafc8",
       "stdout": "original      [10 20 30 40 50 60 70]\nrotateLeft 1  [20 30 40 50 60 70 10]\nrotateLeft 2  [30 40 50 60 70 10 20]\nrotateLeft 3  [40 50 60 70 10 20 30]\nfull circle   [10 20 30 40 50 60 70]\nsource intact = true\nk=n restores  = true\nk=n+2 == k=2  = true\n",
       "metadata": {
         "include_in_training": false,
-        "lifecycle": "quarantine"
+        "lifecycle": "quarantine",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-07-20-1 (latest tag: V.1R29)",
+          "date": "2026-07-25",
+          "source_rebaselined": true
+        }
       }
     }
   ]

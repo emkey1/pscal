@@ -11,8 +11,7 @@ fn rotateLeft(xs: Int[], k: Int) -> Int[] {
     if shift == 0 { ret xs[0..n]; }
     let tail: Int[] = xs[shift..n];
     let head: Int[] = xs[0..shift];
-    let rotated: Int[] = tail + head;
-    ret rotated;
+    ret tail + head;
 }
 
 fn sameContents(a: Int[], b: Int[]) -> Bool {
