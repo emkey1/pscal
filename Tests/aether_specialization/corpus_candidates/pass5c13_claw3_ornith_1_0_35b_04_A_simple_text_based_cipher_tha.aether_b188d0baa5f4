@@ -18,7 +18,7 @@ fn caesarShift(char: Text, shift: Int) -> Text {
 @pure
 fn caesarEncrypt(text: Text, shift: Int) -> Text {
     let result: Text = "";
-    loop i in 1..string_len(text) + 1 {
+    loop i in 0..string_len(text) {
         let ch: Text = copy(text, i, 1);
         let shifted: Text = caesarShift(ch, shift);
         result = result + shifted;
@@ -54,7 +54,7 @@ fn main() -> Void {
         }
         println("");
         println("Character-by-character transformation:");
-        loop i in 1..string_len(original) + 1 {
+        loop i in 0..string_len(original) {
             let ch: Text = copy(original, i, 1);
             let enc: Text = caesarShift(ch, shift);
             if string_len(ch) == 1 {
