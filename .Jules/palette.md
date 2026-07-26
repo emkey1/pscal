@@ -25,6 +25,11 @@
 ## 2025-03-10 - Lack of Animation for Transient UI Feedback
 **Learning:** Transient UI feedback states (like "Copied!" text appearing for a few seconds) can feel abrupt and unpolished if they simply snap into existence and snap away. SwiftUI makes it extremely easy to add standard transitions and animations by wrapping state changes in `withAnimation`.
 **Action:** When adding transient text, icons, or visual feedback to buttons or other UI elements, always wrap the boolean state toggles in `withAnimation {}` to provide a graceful transition (fade/slide) instead of a harsh pop-in/pop-out.
+
 ## 2025-03-20 - Redundant Visual Values and Slider Accessibility
 **Learning:** SwiftUI Sliders often rely on separate text views (e.g., in an HStack) to display their current value. Screen readers will read the slider and then redundantly read the visual text label as a separate element, causing confusion.
 **Action:** When implementing Sliders with visual value labels, always add `.accessibilityValue(...)` to the Slider itself, and add `.accessibilityHidden(true)` to the redundant text element so it is hidden from VoiceOver.
+
+## 2025-03-24 - Accessibility Hints and Animations in Toolbar Buttons
+**Learning:** Toolbar buttons in SwiftUI, especially those executing complex or transient tasks (like diagnostics or copying reports), lack implicit context for VoiceOver users, and abrupt state changes look unpolished.
+**Action:** Always wrap boolean state changes triggering transient visual states (like a "Copied" text replacement) in `withAnimation {}`. Additionally, apply specific `accessibilityHint`s to toolbar buttons (e.g., "Closes the diagnostics view" or "Executes the in-app sanity checks") and dynamically update `accessibilityLabel` based on state.
