@@ -72,3 +72,7 @@ scratchpad/
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 .claude/worktrees/
+
+# Runtime artifact written by corpus program 07-19a_gemini_2_5_flash_lit_04
+# (rewrite/writeln); regenerated on every corpus run, trips the strict validator.
+Tests/aether_specialization/corpus_candidates/app_log.txt
