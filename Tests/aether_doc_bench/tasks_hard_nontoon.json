@@ -1,0 +1,85 @@
+{
+  "version": "2026-07-27-1",
+  "tasks": [
+    {
+      "id": "hard2_matrix_spiral",
+      "title": "Spiral fill of a square grid backed by a flat array",
+      "mechanisms": [
+        "hard",
+        "flat_2d_index",
+        "while_loop",
+        "array_mutate",
+        "text_build"
+      ],
+      "prompt": "Write an Aether program that builds a 4x4 grid of Int, stored as a single flat `Int[]` of length 16 where the cell at row `r` and column `c` lives at index `r * 4 + c`. Fill it with the numbers 1 through 16 in clockwise spiral order, starting at the top-left and moving right. Then print one line per row as `row <r>: <v0> <v1> <v2> <v3>` with single spaces between values, followed by a final line `total = <highest value written>`.",
+      "expected_stdout": "row 0: 1 2 3 4\nrow 1: 12 13 14 5\nrow 2: 11 16 15 6\nrow 3: 10 9 8 7\ntotal = 16\n",
+      "files": {},
+      "reference_solution": "fn buildGrid(n: Int) -> Int[] {\n    let grid: Int[] = [];\n    loop i in 0..(n * n) {\n        grid = grid + [0];\n    }\n    ret grid;\n}\n\nfn main() -> Void {\n    let n: Int = 4;\n    let grid: Int[] = buildGrid(n);\n    let top: Int = 0;\n    let bottom: Int = n - 1;\n    let left: Int = 0;\n    let right: Int = n - 1;\n    let v: Int = 1;\n    loop top <= bottom && left <= right {\n        loop c in left..(right + 1) {\n            grid[top * n + c] = v;\n            v = v + 1;\n        }\n        top = top + 1;\n        loop r in top..(bottom + 1) {\n            grid[r * n + right] = v;\n            v = v + 1;\n        }\n        right = right - 1;\n        if top <= bottom {\n            let c2: Int = right;\n            loop c2 >= left {\n                grid[bottom * n + c2] = v;\n                v = v + 1;\n                c2 = c2 - 1;\n            }\n            bottom = bottom - 1;\n        }\n        if left <= right {\n            let r2: Int = bottom;\n            loop r2 >= top {\n                grid[r2 * n + left] = v;\n                v = v + 1;\n                r2 = r2 - 1;\n            }\n            left = left + 1;\n        }\n    }\n    fx {\n        loop r in 0..n {\n            let line: Text = \"\";\n            loop c in 0..n {\n                line = line + int_to_text(grid[r * n + c]);\n                if c < n - 1 { line = line + \" \"; }\n            }\n            println(\"row \", r, \": \", line);\n        }\n        println(\"total = \", v - 1);\n    }\n    ret;\n}\n",
+      "achievability": "verified: reference_solution compiles and reproduces expected_stdout exactly on aether 2026-07-20-1 (c660b1b), run twice"
+    },
+    {
+      "id": "hard2_expr_eval",
+      "title": "Recursive-descent integer expression evaluator",
+      "mechanisms": [
+        "hard",
+        "type_method",
+        "recursion",
+        "text_index",
+        "precedence"
+      ],
+      "prompt": "Write an Aether program that evaluates integer arithmetic expressions given as Text, supporting `+`, `-`, `*`, `/` with standard precedence and parentheses. Division is integer division; treat division by zero as leaving the value unchanged. Input contains no spaces. Evaluate these four expressions in order: `2+3*4`, `(2+3)*4`, `100/5-7`, `2*(3+4)-(10-4)`. For each, print `expr <i>: <expression> = <result>` where `<i>` is the zero-based index.",
+      "expected_stdout": "expr 0: 2+3*4 = 14\nexpr 1: (2+3)*4 = 20\nexpr 2: 100/5-7 = 13\nexpr 3: 2*(3+4)-(10-4) = 8\n",
+      "files": {},
+      "reference_solution": "type Parser {\n    src: Text;\n    pos: Int = 0;\n\n    fn peek() -> Text {\n        if self.pos >= string_len(self.src) { ret \"\"; }\n        ret self.src[self.pos];\n    }\n\n    fn bump() -> Void {\n        self.pos = self.pos + 1;\n        ret;\n    }\n\n    fn parseNumber() -> Int {\n        let n: Int = 0;\n        loop true {\n            let c: Text = self.peek();\n            if c == \"\" { break; }\n            if c < \"0\" || c > \"9\" { break; }\n            n = n * 10 + (ord(c) - ord(\"0\"));\n            self.bump();\n        }\n        ret n;\n    }\n\n    fn parseFactor() -> Int {\n        if self.peek() == \"(\" {\n            self.bump();\n            let v: Int = self.parseExpr();\n            if self.peek() == \")\" { self.bump(); }\n            ret v;\n        }\n        ret self.parseNumber();\n    }\n\n    fn parseTerm() -> Int {\n        let v: Int = self.parseFactor();\n        loop true {\n            let c: Text = self.peek();\n            if c == \"*\" {\n                self.bump();\n                v = v * self.parseFactor();\n            } else {\n                if c == \"/\" {\n                    self.bump();\n                    let d: Int = self.parseFactor();\n                    if d != 0 { v = v / d; }\n                } else {\n                    break;\n                }\n            }\n        }\n        ret v;\n    }\n\n    fn parseExpr() -> Int {\n        let v: Int = self.parseTerm();\n        loop true {\n            let c: Text = self.peek();\n            if c == \"+\" {\n                self.bump();\n                v = v + self.parseTerm();\n            } else {\n                if c == \"-\" {\n                    self.bump();\n                    v = v - self.parseTerm();\n                } else {\n                    break;\n                }\n            }\n        }\n        ret v;\n    }\n}\n\nfn evalExpr(s: Text) -> Int {\n    let p: Parser = new Parser { src: s, pos: 0 };\n    ret p.parseExpr();\n}\n\nfn main() -> Void {\n    let exprs: Text[] = [\"2+3*4\", \"(2+3)*4\", \"100/5-7\", \"2*(3+4)-(10-4)\"];\n    fx {\n        loop i in 0..length(exprs) {\n            println(\"expr \", i, \": \", exprs[i], \" = \", evalExpr(exprs[i]));\n        }\n    }\n    ret;\n}\n",
+      "achievability": "verified: reference_solution compiles and reproduces expected_stdout exactly on aether 2026-07-20-1 (c660b1b), run twice"
+    },
+    {
+      "id": "hard2_inventory_rollup",
+      "title": "Group-by rollup over records with Real formatting",
+      "mechanisms": [
+        "hard",
+        "type_method",
+        "group_by",
+        "real_format",
+        "parallel_arrays"
+      ],
+      "prompt": "Write an Aether program with an `Item` type holding `name: Text`, `category: Text`, `qty: Int`, `unitPrice: Real`, and a method returning the line value `qty * unitPrice`. Build these six items in order: bolt/fastener/100/0.25, nut/fastener/250/0.1, hammer/tool/4/12.5, wrench/tool/7/9.75, screw/fastener/500/0.05, saw/tool/2/22.0. Roll them up by category, preserving first-seen category order. Print one line per category as `category <name>: items=<count> value=<total>` with the total to exactly two decimals, then `grand total = <sum>` to two decimals, then `categories = <n>`.",
+      "expected_stdout": "category fastener: items=3 value=75.00\ncategory tool: items=3 value=162.25\ngrand total = 237.25\ncategories = 2\n",
+      "files": {},
+      "reference_solution": "type Item {\n    name: Text;\n    category: Text;\n    qty: Int;\n    unitPrice: Real;\n\n    fn value() -> Real {\n        ret self.qty * self.unitPrice;\n    }\n}\n\nfn main() -> Void {\n    let names: Text[] = [\"bolt\", \"nut\", \"hammer\", \"wrench\", \"screw\", \"saw\"];\n    let cats: Text[] = [\"fastener\", \"fastener\", \"tool\", \"tool\", \"fastener\", \"tool\"];\n    let qtys: Int[] = [100, 250, 4, 7, 500, 2];\n    let prices: Real[] = [0.25, 0.1, 12.5, 9.75, 0.05, 22.0];\n\n    let catNames: Text[] = [];\n    let catTotals: Real[] = [];\n    let catCounts: Int[] = [];\n\n    loop i in 0..length(names) {\n        let it: Item = new Item { name: names[i], category: cats[i], qty: qtys[i], unitPrice: prices[i] };\n        let idx: Int = -1;\n        loop j in 0..length(catNames) {\n            if catNames[j] == it.category { idx = j; }\n        }\n        if idx < 0 {\n            catNames = catNames + [it.category];\n            catTotals = catTotals + [it.value()];\n            catCounts = catCounts + [1];\n        } else {\n            catTotals[idx] = catTotals[idx] + it.value();\n            catCounts[idx] = catCounts[idx] + 1;\n        }\n    }\n\n    let grand: Real = 0.0;\n    fx {\n        loop k in 0..length(catNames) {\n            println(\"category \", catNames[k], \": items=\", catCounts[k], \" value=\", formatfloat(catTotals[k], 2));\n            grand = grand + catTotals[k];\n        }\n        println(\"grand total = \", formatfloat(grand, 2));\n        println(\"categories = \", length(catNames));\n    }\n    ret;\n}\n",
+      "achievability": "verified: reference_solution compiles and reproduces expected_stdout exactly on aether 2026-07-20-1 (c660b1b), run twice"
+    },
+    {
+      "id": "hard2_rle_roundtrip",
+      "title": "Run-length encode and decode with round-trip verification",
+      "mechanisms": [
+        "hard",
+        "pure_fn",
+        "text_index",
+        "text_build",
+        "roundtrip_check"
+      ],
+      "prompt": "Write an Aether program with two pure functions: one that run-length encodes a Text as character-then-count pairs (so `aaab` becomes `a3b1`, and counts may be multi-digit), and one that decodes that format back. Run both over these four inputs in order: `aaabbbcccd`, `wwwwwwwwwwww`, `abc`, and 22 consecutive `z` characters. For each input print three lines: `case <i>: <input>`, then `  encoded = <encoded>`, then `  roundtrip_ok = <true|false>` where the flag reports whether decoding the encoded form reproduces the original exactly.",
+      "expected_stdout": "case 0: aaabbbcccd\n  encoded = a3b3c3d1\n  roundtrip_ok = true\ncase 1: wwwwwwwwwwww\n  encoded = w12\n  roundtrip_ok = true\ncase 2: abc\n  encoded = a1b1c1\n  roundtrip_ok = true\ncase 3: zzzzzzzzzzzzzzzzzzzzzz\n  encoded = z22\n  roundtrip_ok = true\n",
+      "files": {},
+      "reference_solution": "@pure\nfn encode(s: Text) -> Text {\n    let out: Text = \"\";\n    let n: Int = string_len(s);\n    if n == 0 { ret out; }\n    let cur: Text = s[0];\n    let run: Int = 1;\n    loop i in 1..n {\n        let c: Text = s[i];\n        if c == cur {\n            run = run + 1;\n        } else {\n            out = out + cur;\n            out = out + int_to_text(run);\n            cur = c;\n            run = 1;\n        }\n    }\n    out = out + cur;\n    out = out + int_to_text(run);\n    ret out;\n}\n\n@pure\nfn decode(s: Text) -> Text {\n    let out: Text = \"\";\n    let n: Int = string_len(s);\n    let i: Int = 0;\n    loop i < n {\n        let ch: Text = s[i];\n        i = i + 1;\n        let count: Int = 0;\n        loop i < n {\n            let d: Text = s[i];\n            if d < \"0\" || d > \"9\" { break; }\n            count = count * 10 + (ord(d) - ord(\"0\"));\n            i = i + 1;\n        }\n        loop k in 0..count {\n            out = out + ch;\n        }\n    }\n    ret out;\n}\n\nfn main() -> Void {\n    let cases: Text[] = [\"aaabbbcccd\", \"wwwwwwwwwwww\", \"abc\", \"zzzzzzzzzzzzzzzzzzzzzz\"];\n    fx {\n        loop i in 0..length(cases) {\n            let enc: Text = encode(cases[i]);\n            let dec: Text = decode(enc);\n            println(\"case \", i, \": \", cases[i]);\n            println(\"  encoded = \", enc);\n            println(\"  roundtrip_ok = \", dec == cases[i]);\n        }\n    }\n    ret;\n}\n",
+      "achievability": "verified: reference_solution compiles and reproduces expected_stdout exactly on aether 2026-07-20-1 (c660b1b), run twice"
+    },
+    {
+      "id": "hard2_heap_sort",
+      "title": "Binary min-heap built by sift-up, drained by sift-down",
+      "mechanisms": [
+        "hard",
+        "heap",
+        "array_mutate",
+        "helper_fn",
+        "invariant_check"
+      ],
+      "prompt": "Write an Aether program that implements a binary min-heap over an `Int[]`. Insert these values in order, sifting up after each: 42, 7, 19, 3, 88, 15, 4, 61, 23, 8. Then drain the heap by repeatedly taking the root, moving the last element to the root, shrinking the size, and sifting down. Print `sorted = <values>` space-separated in ascending order, then `min = <first>`, `max = <last>`, and `ordered = <true|false>` where the flag verifies the drained sequence is non-decreasing.",
+      "expected_stdout": "sorted = 3 4 7 8 15 19 23 42 61 88\nmin = 3\nmax = 88\nordered = true\n",
+      "files": {},
+      "reference_solution": "fn siftUp(heap: Int[], start: Int) -> Int[] {\n    let h: Int[] = heap;\n    let i: Int = start;\n    loop i > 0 {\n        let parent: Int = (i - 1) / 2;\n        if h[parent] <= h[i] { break; }\n        let tmp: Int = h[parent];\n        h[parent] = h[i];\n        h[i] = tmp;\n        i = parent;\n    }\n    ret h;\n}\n\nfn siftDown(heap: Int[], size: Int) -> Int[] {\n    let h: Int[] = heap;\n    let i: Int = 0;\n    loop true {\n        let l: Int = 2 * i + 1;\n        let r: Int = 2 * i + 2;\n        let small: Int = i;\n        if l < size && h[l] < h[small] { small = l; }\n        if r < size && h[r] < h[small] { small = r; }\n        if small == i { break; }\n        let tmp: Int = h[small];\n        h[small] = h[i];\n        h[i] = tmp;\n        i = small;\n    }\n    ret h;\n}\n\nfn main() -> Void {\n    let input: Int[] = [42, 7, 19, 3, 88, 15, 4, 61, 23, 8];\n    let heap: Int[] = [];\n    loop i in 0..length(input) {\n        heap = heap + [input[i]];\n        heap = siftUp(heap, length(heap) - 1);\n    }\n\n    let sorted: Int[] = [];\n    let size: Int = length(heap);\n    loop size > 0 {\n        sorted = sorted + [heap[0]];\n        heap[0] = heap[size - 1];\n        size = size - 1;\n        heap = siftDown(heap, size);\n    }\n\n    fx {\n        let line: Text = \"\";\n        loop i in 0..length(sorted) {\n            line = line + int_to_text(sorted[i]);\n            if i < length(sorted) - 1 { line = line + \" \"; }\n        }\n        println(\"sorted = \", line);\n        println(\"min = \", sorted[0]);\n        println(\"max = \", sorted[length(sorted) - 1]);\n        let ok: Bool = true;\n        loop i in 1..length(sorted) {\n            if sorted[i - 1] > sorted[i] { ok = false; }\n        }\n        println(\"ordered = \", ok);\n    }\n    ret;\n}\n",
+      "achievability": "verified: reference_solution compiles and reproduces expected_stdout exactly on aether 2026-07-20-1 (c660b1b), run twice"
+    }
+  ]
+}
