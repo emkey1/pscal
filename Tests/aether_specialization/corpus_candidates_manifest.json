@@ -12677,6 +12677,86 @@
           "source_rebaselined": true
         }
       }
+    },
+    {
+      "source_path": "corpus_gen/toon_coverage/toon_nested_org_rollup.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/toon_nested_org_rollup.aether",
+      "sha256": "4bd8689954b579c7cba09ccfc2cd7978916ca136369d068accc2faf9a29b6fa8",
+      "stdout": "org = acme\ndept eng: staff=3 remote=2 avg_lvl=5.00 top=grace(6)\ndept ops: staff=2 remote=1 avg_lvl=3.50 top=raj(4)\ntotal staff = 5\nremote pct = 60.0\norg avg lvl = 4.40\n",
+      "metadata": {
+        "canonical": false,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-28",
+          "toon_coverage"
+        ],
+        "notes": "Nested TOON object traversal: per-department staff rollup with averages, max-by-level selection, and percentage formatting."
+      }
+    },
+    {
+      "source_path": "corpus_gen/toon_coverage/toon_inventory_filter_sort.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/toon_inventory_filter_sort.aether",
+      "sha256": "6c28bddaf68015cbbb757791d9b1eb8551ef6dfd6ac5f9cb4d27b05348c3443a",
+      "stdout": "rank 0: D4 = 69.75\nrank 1: A1 = 54.00\nrank 2: E5 = 35.25\nrank 3: C3 = 0.00\nstocked lines = 4\nmissing price = 1\ntotal value = 159.00\n",
+      "metadata": {
+        "canonical": false,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-28",
+          "toon_coverage"
+        ],
+        "notes": "TOON array-of-objects: filter zero-quantity lines, _or fallback for a missing key, then selection-sort parallel arrays by computed value."
+      }
+    },
+    {
+      "source_path": "corpus_gen/toon_coverage/toon_type_dispatch_report.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/toon_type_dispatch_report.aether",
+      "sha256": "47dd7d8a6cc011d164abb546785c4a75a122d4fa78df51509acba62389f7d4c0",
+      "stdout": "field name -> text\nfield count -> int\nfield ratio -> real\nfield active -> bool\nfield tags -> array\nfield meta -> object\nfield missing -> null\ntags = x,y,z\nmeta.owner = ada\nmeta.depth = 3\narrays = 1 scalars = 4\n",
+      "metadata": {
+        "canonical": false,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-28",
+          "toon_coverage"
+        ],
+        "notes": "TOON type predicates (toon_is_*) dispatching per-kind handling, plus nested object descent and array joining."
+      }
+    },
+    {
+      "source_path": "corpus_gen/toon_coverage/toon_ledger_reconcile.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/toon_ledger_reconcile.aether",
+      "sha256": "6e84ac97d9a8b25192b81b5e405148fa36c2d715a8fde4e832212c3511f447d8",
+      "stdout": "acct ops: debit=165 credit=80 net=-85 deficit\nacct eng: debit=300 credit=300 net=0 flat\nacct mkt: debit=0 credit=210 net=210 surplus\naccounts = 3\nin surplus = 1\n",
+      "metadata": {
+        "canonical": false,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-28",
+          "toon_coverage"
+        ],
+        "notes": "Two-pass TOON reconciliation: discover distinct accounts, then tally debits and credits into a type with computed net/status methods."
+      }
+    },
+    {
+      "source_path": "corpus_gen/toon_coverage/toon_deep_path_walk.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/toon_deep_path_walk.aether",
+      "sha256": "ade8ff0f387198ec5f6138cbed71a83cb1b86bedeeee45764409cda30b72fd57",
+      "stdout": "int tree[0] = 1 depth=1\nint tree[1][0] = 2 depth=2\nint tree[1][1] = 3 depth=2\ntext tree[2] = top depth=1\narrays = 6\nints = 6\ntexts = 3\nint sum = 21\n",
+      "metadata": {
+        "canonical": false,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "imported_2026-07-28",
+          "toon_coverage"
+        ],
+        "notes": "Recursive descent over nested TOON arrays building index paths, tallying by node kind and summing integer leaves."
+      }
     }
   ]
 }

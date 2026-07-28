@@ -1,0 +1,41 @@
+// TOON: recursive descent over nested arrays with mixed scalar kinds, building
+// index paths and tallying by type. Exercises recursion + toon_is_* + toon_at.
+fn walk(node: ToonNode, path: Text, depth: Int, counts: Int[]) -> Int[] {
+    let c: Int[] = counts;
+    if toon_is_arr(node) {
+        c[0] = c[0] + 1;
+        loop i in 0..toon_len(node) {
+            let childPath: Text = path + "[" + int_to_text(i) + "]";
+            c = walk(toon_at(node, i), childPath, depth + 1, c);
+        }
+        ret c;
+    }
+    if toon_is_int(node) {
+        c[1] = c[1] + 1;
+        c[3] = c[3] + toon_int_value(node);
+        if depth <= 2 { fx { println("int ", path, " = ", toon_int_value(node), " depth=", depth); } }
+        ret c;
+    }
+    if toon_is_text(node) {
+        c[2] = c[2] + 1;
+        if depth <= 2 { fx { println("text ", path, " = ", toon_text_value(node), " depth=", depth); } }
+        ret c;
+    }
+    ret c;
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+    let doc: ToonDoc = toon_parse("{\"tree\":[1,[2,3,[\"deep\",4]],\"top\",[[5],[6,\"leaf\"]]]}");
+    let root: ToonNode = toon_root(doc);
+    let counts: Int[] = [0, 0, 0, 0];
+    counts = walk(toon_key(root, "tree"), "tree", 0, counts);
+    fx {
+        println("arrays = ", counts[0]);
+        println("ints = ", counts[1]);
+        println("texts = ", counts[2]);
+        println("int sum = ", counts[3]);
+    }
+    toon_close(doc);
+    ret;
+}
