@@ -9,6 +9,26 @@ For the cross-run narrative — which corpus change moved what, and why — see
 [`aether_specialization_findings.md`](../../components/aether/docs/aether_specialization_findings.md)
 in the aether repo. These files are the per-run record underneath it.
 
+## Archive — do this when a run finishes
+
+Full results live in the private repo **`emkey1/aether-bench-archive`**. These
+reports are derived; the raw per-case JSON is the durable record.
+
+**Archive every completed run there immediately, not at the end of a session.**
+Copy `results/<run-dir>/` (all `*_<suite>.json`, unmodified, plus `queue.log`)
+and the generated report.
+
+Why it matters: boards older than cs-aug19 — cs-aug2, cs-aug3, cs-aug4,
+cs-aug18 — lived only on `/storage` and are gone. Their numbers survive only as
+summary tables, so they cannot be re-scored or checked for the integrity
+problems later runs turned out to have. Several of their conclusions were
+afterwards found to be artifacts; without the raw data there is no way to
+establish which.
+
+Do not prune or summarise the JSON. First-attempt vs post-repair scoring,
+`generated_ok` checks, repair rescue rates and failure-fingerprint censuses were
+all recovered from per-case fields nobody thought to keep at capture time.
+
 ## Runs
 
 | report | corpus | models | repair | what it was for |
