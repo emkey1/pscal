@@ -1,0 +1,51 @@
+// TOON: array-of-objects filtering, in-place selection sort over parallel arrays,
+// and _or fallbacks for missing keys.
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+    fx {
+        let doc: ToonDoc = toon_parse("{\"items\":[{\"sku\":\"A1\",\"qty\":12,\"price\":4.5},{\"sku\":\"B2\",\"qty\":0,\"price\":19.0},{\"sku\":\"C3\",\"qty\":7},{\"sku\":\"D4\",\"qty\":31,\"price\":2.25},{\"sku\":\"E5\",\"qty\":3,\"price\":11.75}]}");
+        let root: ToonNode = toon_root(doc);
+        let items: ToonNode = toon_key(root, "items");
+
+        let skus: Text[] = [];
+        let values: Real[] = [];
+        let missing: Int = 0;
+
+        loop i in 0..toon_len(items) {
+            let it: ToonNode = toon_at(items, i);
+            let qty: Int = toon_get_int(it, "qty");
+            if qty == 0 { continue; }
+            let price: Real = toon_get_real_or(it, "price", 0.0);
+            if price == 0.0 { missing = missing + 1; }
+            skus = skus + [toon_get_text(it, "sku")];
+            values = values + [qty * price];
+        }
+
+        // selection sort, descending by value
+        loop i in 0..length(values) {
+            let best: Int = i;
+            loop j in (i + 1)..length(values) {
+                if values[j] > values[best] { best = j; }
+            }
+            if best != i {
+                let tv: Real = values[i];
+                values[i] = values[best];
+                values[best] = tv;
+                let ts: Text = skus[i];
+                skus[i] = skus[best];
+                skus[best] = ts;
+            }
+        }
+
+        let total: Real = 0.0;
+        loop i in 0..length(skus) {
+            println("rank ", i, ": ", skus[i], " = ", formatfloat(values[i], 2));
+            total = total + values[i];
+        }
+        println("stocked lines = ", length(skus));
+        println("missing price = ", missing);
+        println("total value = ", formatfloat(total, 2));
+        toon_close(doc);
+    }
+    ret;
+}

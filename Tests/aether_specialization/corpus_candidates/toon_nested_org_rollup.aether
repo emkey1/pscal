@@ -1,0 +1,55 @@
+// TOON: nested object traversal with per-department rollup and Real formatting.
+@pure
+fn pct(part: Int, whole: Int) -> Real {
+    if whole == 0 { ret 0.0; }
+    ret (part * 100.0) / whole;
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+    fx {
+        let doc: ToonDoc = toon_parse("{\"org\":\"acme\",\"departments\":[{\"name\":\"eng\",\"staff\":[{\"n\":\"ada\",\"lvl\":5,\"remote\":true},{\"n\":\"linus\",\"lvl\":4,\"remote\":false},{\"n\":\"grace\",\"lvl\":6,\"remote\":true}]},{\"name\":\"ops\",\"staff\":[{\"n\":\"kim\",\"lvl\":3,\"remote\":false},{\"n\":\"raj\",\"lvl\":4,\"remote\":true}]}]}");
+        let root: ToonNode = toon_root(doc);
+        println("org = ", toon_get_text(root, "org"));
+
+        let depts: ToonNode = toon_key(root, "departments");
+        let totalStaff: Int = 0;
+        let totalRemote: Int = 0;
+        let totalLevels: Int = 0;
+
+        loop d in 0..toon_len(depts) {
+            let dept: ToonNode = toon_at(depts, d);
+            let dname: Text = toon_get_text(dept, "name");
+            let staff: ToonNode = toon_key(dept, "staff");
+            let count: Int = toon_len(staff);
+            let remote: Int = 0;
+            let levels: Int = 0;
+            let topName: Text = "";
+            let topLvl: Int = -1;
+
+            loop s in 0..count {
+                let person: ToonNode = toon_at(staff, s);
+                let lvl: Int = toon_get_int(person, "lvl");
+                levels = levels + lvl;
+                if toon_get_bool(person, "remote") { remote = remote + 1; }
+                if lvl > topLvl {
+                    topLvl = lvl;
+                    topName = toon_get_text(person, "n");
+                }
+            }
+
+            println("dept ", dname, ": staff=", count, " remote=", remote,
+                    " avg_lvl=", formatfloat(levels * 1.0 / count, 2),
+                    " top=", topName, "(", topLvl, ")");
+            totalStaff = totalStaff + count;
+            totalRemote = totalRemote + remote;
+            totalLevels = totalLevels + levels;
+        }
+
+        println("total staff = ", totalStaff);
+        println("remote pct = ", formatfloat(pct(totalRemote, totalStaff), 1));
+        println("org avg lvl = ", formatfloat(totalLevels * 1.0 / totalStaff, 2));
+        toon_close(doc);
+    }
+    ret;
+}

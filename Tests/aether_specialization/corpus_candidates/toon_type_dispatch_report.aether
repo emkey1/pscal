@@ -1,0 +1,49 @@
+// TOON: type predicates driving per-kind formatting, plus nested descent.
+fn describe(node: ToonNode, key: Text) -> Text {
+    let child: ToonNode = toon_key(node, key);
+    if toon_is_arr(child) { ret "array"; }
+    if toon_is_obj(child) { ret "object"; }
+    if toon_is_text(child) { ret "text"; }
+    if toon_is_int(child) { ret "int"; }
+    if toon_is_real(child) { ret "real"; }
+    if toon_is_bool(child) { ret "bool"; }
+    if toon_is_null(child) { ret "null"; }
+    ret "unknown";
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+    fx {
+        let doc: ToonDoc = toon_parse("{\"name\":\"probe\",\"count\":42,\"ratio\":0.75,\"active\":true,\"tags\":[\"x\",\"y\",\"z\"],\"meta\":{\"owner\":\"ada\",\"depth\":3},\"missing\":null}");
+        let root: ToonNode = toon_root(doc);
+
+        let keys: Text[] = ["name", "count", "ratio", "active", "tags", "meta", "missing"];
+        let arrays: Int = 0;
+        let scalars: Int = 0;
+
+        loop i in 0..length(keys) {
+            let k: Text = keys[i];
+            let kind: Text = describe(root, k);
+            println("field ", k, " -> ", kind);
+            if kind == "array" { arrays = arrays + 1; }
+            if kind == "int" || kind == "real" || kind == "bool" || kind == "text" {
+                scalars = scalars + 1;
+            }
+        }
+
+        let tags: ToonNode = toon_key(root, "tags");
+        let joined: Text = "";
+        loop i in 0..toon_len(tags) {
+            joined = joined + toon_text_value(toon_at(tags, i));
+            if i < toon_len(tags) - 1 { joined = joined + ","; }
+        }
+        println("tags = ", joined);
+
+        let meta: ToonNode = toon_key(root, "meta");
+        println("meta.owner = ", toon_get_text(meta, "owner"));
+        println("meta.depth = ", toon_get_int(meta, "depth"));
+        println("arrays = ", arrays, " scalars = ", scalars);
+        toon_close(doc);
+    }
+    ret;
+}

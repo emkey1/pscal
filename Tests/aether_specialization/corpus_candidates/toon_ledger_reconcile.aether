@@ -1,0 +1,66 @@
+// TOON: two-pass reconciliation across two arrays, with a type holding running state.
+type Balance {
+    account: Text;
+    debits: Int = 0;
+    credits: Int = 0;
+
+    fn net() -> Int {
+        ret self.credits - self.debits;
+    }
+    fn status() -> Text {
+        if self.net() > 0 { ret "surplus"; }
+        if self.net() < 0 { ret "deficit"; }
+        ret "flat";
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+    fx {
+        let doc: ToonDoc = toon_parse("{\"entries\":[{\"acct\":\"ops\",\"kind\":\"debit\",\"amt\":120},{\"acct\":\"eng\",\"kind\":\"credit\",\"amt\":300},{\"acct\":\"ops\",\"kind\":\"credit\",\"amt\":80},{\"acct\":\"eng\",\"kind\":\"debit\",\"amt\":300},{\"acct\":\"ops\",\"kind\":\"debit\",\"amt\":45},{\"acct\":\"mkt\",\"kind\":\"credit\",\"amt\":210}]}");
+        let root: ToonNode = toon_root(doc);
+        let entries: ToonNode = toon_key(root, "entries");
+
+        let names: Text[] = [];
+        loop i in 0..toon_len(entries) {
+            let acct: Text = toon_get_text(toon_at(entries, i), "acct");
+            let seen: Bool = false;
+            loop j in 0..length(names) {
+                if names[j] == acct { seen = true; }
+            }
+            if !seen { names = names + [acct]; }
+        }
+
+        let debits: Int[] = [];
+        let credits: Int[] = [];
+        loop i in 0..length(names) {
+            debits = debits + [0];
+            credits = credits + [0];
+        }
+
+        loop i in 0..toon_len(entries) {
+            let e: ToonNode = toon_at(entries, i);
+            let acct: Text = toon_get_text(e, "acct");
+            let amt: Int = toon_get_int(e, "amt");
+            let kind: Text = toon_get_text(e, "kind");
+            loop j in 0..length(names) {
+                if names[j] == acct {
+                    if kind == "debit" { debits[j] = debits[j] + amt; }
+                    else { credits[j] = credits[j] + amt; }
+                }
+            }
+        }
+
+        let surplus: Int = 0;
+        loop j in 0..length(names) {
+            let b: Balance = new Balance { account: names[j], debits: debits[j], credits: credits[j] };
+            println("acct ", b.account, ": debit=", b.debits, " credit=", b.credits,
+                    " net=", b.net(), " ", b.status());
+            if b.net() > 0 { surplus = surplus + 1; }
+        }
+        println("accounts = ", length(names));
+        println("in surplus = ", surplus);
+        toon_close(doc);
+    }
+    ret;
+}
