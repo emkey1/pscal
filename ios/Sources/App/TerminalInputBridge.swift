@@ -6,6 +6,10 @@ extension Notification.Name {
     static let terminalInputFocusRequested = Notification.Name("terminalInputFocusRequested")
 }
 
+class TerminalAccessoryInputView: UIInputView, UIInputViewAudioFeedback {
+    var enableInputClicksWhenVisible: Bool { true }
+}
+
 @MainActor
 struct TerminalInputBridge: UIViewRepresentable {
     @Binding var focusAnchor: Int
@@ -136,7 +140,7 @@ final class TerminalKeyInputView: UITextView {
     }
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
-        self.accessoryBar = UIInputView(frame: .zero, inputViewStyle: .keyboard)
+        self.accessoryBar = TerminalAccessoryInputView(frame: .zero, inputViewStyle: .keyboard)
         self.repeatKeyCommands = []
         super.init(frame: frame, textContainer: textContainer)
         configureAccessoryBar()
@@ -146,7 +150,7 @@ final class TerminalKeyInputView: UITextView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        self.accessoryBar = UIInputView(frame: .zero, inputViewStyle: .keyboard)
+        self.accessoryBar = TerminalAccessoryInputView(frame: .zero, inputViewStyle: .keyboard)
         self.repeatKeyCommands = []
         super.init(coder: coder)
         configureAccessoryBar()
@@ -218,6 +222,7 @@ final class TerminalKeyInputView: UITextView {
             button.configuration = config
             button.titleLabel?.font = UIFontMetrics.default.scaledFont(for: .systemFont(ofSize: 15, weight: .semibold))
             button.addTarget(self, action: action, for: .touchUpInside)
+            button.addTarget(self, action: #selector(playInputClick), for: .touchDown)
             return button
         }
 
@@ -278,6 +283,10 @@ final class TerminalKeyInputView: UITextView {
         makeCommand(input: UIKeyCommand.inputRightArrow, output: "\u{1B}[C")
         makeCommand(input: "\r", output: "\r")
         return commands
+    }
+
+    @objc private func playInputClick() {
+        UIDevice.current.playInputClick()
     }
 
     override var canBecomeFirstResponder: Bool {

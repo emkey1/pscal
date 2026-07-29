@@ -2,7 +2,7 @@ import UIKit
 
 // MARK: - Helper Class for Self-Sizing Accessory View
 
-final class TerminalAccessoryView: UIView {
+final class TerminalAccessoryView: UIInputView, UIInputViewAudioFeedback {
     var targetHeight: CGFloat = 44 {
         didSet { invalidateIntrinsicContentSize() }
     }
@@ -10,6 +10,8 @@ final class TerminalAccessoryView: UIView {
     override var intrinsicContentSize: CGSize {
         CGSize(width: UIView.noIntrinsicMetric, height: targetHeight)
     }
+
+    var enableInputClicksWhenVisible: Bool { true }
 }
 
 // MARK: - Custom Native View with Expandable Settings Drawer
@@ -82,7 +84,7 @@ final class NativeTerminalView: UITextView {
     // MARK: Accessory View Construction
 
     private func setupAccessoryView() {
-        containerView = TerminalAccessoryView(frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: 44))
+        containerView = TerminalAccessoryView(frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: 44), inputViewStyle: .keyboard)
         containerView.backgroundColor = UIColor(white: 0.15, alpha: 1.0)
         containerView.autoresizingMask = .flexibleHeight
 
@@ -125,6 +127,7 @@ final class NativeTerminalView: UITextView {
             }
 
             btn.addTarget(self, action: #selector(keyTapped(_:)), for: .touchUpInside)
+            btn.addTarget(self, action: #selector(playInputClick), for: .touchDown)
             keysStack.addArrangedSubview(btn)
         }
 
@@ -187,6 +190,10 @@ final class NativeTerminalView: UITextView {
     }
 
     // MARK: Actions
+
+    @objc private func playInputClick() {
+        UIDevice.current.playInputClick()
+    }
 
     @objc private func keyTapped(_ sender: UIButton) {
         guard let title = sender.title(for: .normal) else { return }
