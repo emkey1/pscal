@@ -880,18 +880,28 @@ struct AppDiagnosticsView: View {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button(copiedReport ? "Copied" : "Copy Report") {
                         runner.copyReportToPasteboard()
-                        copiedReport = true
+                        withAnimation {
+                            copiedReport = true
+                        }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                            copiedReport = false
+                            withAnimation {
+                                copiedReport = false
+                            }
                         }
                     }
                     .disabled(runner.report.isEmpty)
+                    .accessibilityLabel(copiedReport ? "Copied diagnostics report" : "Copy diagnostics report")
+                    .accessibilityHint("Copies the diagnostics report to the clipboard")
 
                     Button(runner.isRunning ? "Running..." : (runner.checks.isEmpty ? "Run Diagnostics" : "Run Again")) {
-                        copiedReport = false
+                        withAnimation {
+                            copiedReport = false
+                        }
                         runner.run()
                     }
                     .disabled(runner.isRunning)
+                    .accessibilityLabel(runner.isRunning ? "Running diagnostics" : (runner.checks.isEmpty ? "Run Diagnostics" : "Run Diagnostics Again"))
+                    .accessibilityHint("Executes the in-app sanity checks")
                 }
             }
         }
