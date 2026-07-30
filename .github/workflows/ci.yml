@@ -117,10 +117,10 @@ jobs:
           PY
       - name: Install dependencies
         if: steps.plan.outputs.skip != 'true'
-        run: sudo apt-get update && sudo apt-get install -y build-essential cmake libcurl4-openssl-dev
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake libcurl4-openssl-dev pkg-config libsqlite3-dev
       - name: Configure
         if: steps.plan.outputs.skip != 'true'
-        run: cmake -S . -B build
+        run: cmake -S . -B build -DPSCAL_USE_BUNDLED_CURL=ON
       - name: Build selected targets
         if: steps.plan.outputs.skip != 'true'
         env:
