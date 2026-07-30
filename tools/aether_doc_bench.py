@@ -50,6 +50,7 @@ DEFAULT_AETHER_BIN = REPO_ROOT / "build" / "bin" / "aether"
 DEFAULT_DESTINATIONS_CONFIG = REPO_ROOT / "Tests" / "aether_doc_bench" / "destinations.template.json"
 DOC_VARIANTS: dict[str, pathlib.Path | None] = {
     "full": REPO_ROOT / "components" / "aether" / "docs" / "aether_for_llms_and_others.md",
+    "medium": REPO_ROOT / "components" / "aether" / "docs" / "aether_for_llms_medium_contexts.md",
     "small": REPO_ROOT / "components" / "aether" / "docs" / "aether_for_llms_with_small_contexts.md",
     "none": None,
 }
@@ -179,8 +180,11 @@ def normalize_usage(raw_usage: Any) -> dict[str, Any] | None:
         if total_tokens is None:
             total_tokens = _int_or_none(usage_metadata.get("totalTokenCount"))
 
-    input_details = raw_usage.get("input_tokens_details")
-    output_details = raw_usage.get("output_tokens_details")
+    # Responses API spells these *_tokens_details; chat completions spells them
+    # prompt_tokens_details / completion_tokens_details. Read both so cache and
+    # reasoning accounting survives whichever adapter produced the reply.
+    input_details = raw_usage.get("input_tokens_details") or raw_usage.get("prompt_tokens_details")
+    output_details = raw_usage.get("output_tokens_details") or raw_usage.get("completion_tokens_details")
     cached_tokens = None
     reasoning_tokens = None
     if isinstance(input_details, dict):
@@ -2307,7 +2311,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--docs",
         default="full,small",
-        help="comma-separated doc variants to benchmark (default: full,small; also supports none)",
+        help="comma-separated doc variants to benchmark (default: full,small; also supports medium, none)",
     )
     parser.add_argument("--task", action="append", default=[], help="restrict to one or more task ids")
     parser.add_argument("--list-tasks", action="store_true", help="list manifest task ids and exit")
