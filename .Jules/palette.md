@@ -28,3 +28,7 @@
 ## 2025-03-20 - Redundant Visual Values and Slider Accessibility
 **Learning:** SwiftUI Sliders often rely on separate text views (e.g., in an HStack) to display their current value. Screen readers will read the slider and then redundantly read the visual text label as a separate element, causing confusion.
 **Action:** When implementing Sliders with visual value labels, always add `.accessibilityValue(...)` to the Slider itself, and add `.accessibilityHidden(true)` to the redundant text element so it is hidden from VoiceOver.
+
+## 2026-07-29 - Missing Animation and Accessibility Hints on Diagnostic Actions
+**Learning:** The 'Copy Report' and 'Run Diagnostics' buttons in AppDiagnosticsView changed state abruptly without animation, creating a jarring UX. Additionally, they lacked dynamic accessibility labels and hints, meaning VoiceOver users were unaware of state changes or the explicit result of their actions.
+**Action:** Wrapped transient UI state changes (`copiedReport`, etc.) in `withAnimation {}` blocks for smooth transitions, and added `.accessibilityLabel` and `.accessibilityHint` to provide precise context to screen readers, aligning with established iOS accessibility patterns.
