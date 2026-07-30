@@ -31,8 +31,4 @@
 
 ## 2026-07-29 - Missing Animation and Accessibility Hints on Diagnostic Actions
 **Learning:** The 'Copy Report' and 'Run Diagnostics' buttons in AppDiagnosticsView changed state abruptly without animation, creating a jarring UX. Additionally, they lacked dynamic accessibility labels and hints, meaning VoiceOver users were unaware of state changes or the explicit result of their actions.
-**Action:** Wrapped transient UI state changes (, etc.) in  blocks for smooth transitions, and added  and  to provide precise context to screen readers, aligning with established iOS accessibility patterns.
-
-## 2026-07-29 - Missing Animation and Accessibility Hints on Diagnostic Actions
-**Learning:** The 'Copy Report' and 'Run Diagnostics' buttons in AppDiagnosticsView changed state abruptly without animation, creating a jarring UX. Additionally, they lacked dynamic accessibility labels and hints, meaning VoiceOver users were unaware of state changes or the explicit result of their actions.
 **Action:** Wrapped transient UI state changes (`copiedReport`, etc.) in `withAnimation {}` blocks for smooth transitions, and added `.accessibilityLabel` and `.accessibilityHint` to provide precise context to screen readers, aligning with established iOS accessibility patterns.
