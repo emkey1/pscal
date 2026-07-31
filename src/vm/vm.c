@@ -5834,20 +5834,30 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         Value result_val; \
         bool op_is_handled = false; \
         \
+        /* Optimization: Fast path for common integer arithmetic */ \
+        if ((current_instruction_code == ADD || current_instruction_code == SUBTRACT || current_instruction_code == MULTIPLY) && \
+            a_val_popped.type == TYPE_INT32 && b_val_popped.type == TYPE_INT32) { \
+             long long iresult; \
+             bool overflow = false; \
+             if (current_instruction_code == ADD) { \
+                 overflow = __builtin_add_overflow(a_val_popped.i_val, b_val_popped.i_val, &iresult); \
+             } else if (current_instruction_code == SUBTRACT) { \
+                 overflow = __builtin_sub_overflow(a_val_popped.i_val, b_val_popped.i_val, &iresult); \
+             } else { \
+                 overflow = __builtin_mul_overflow(a_val_popped.i_val, b_val_popped.i_val, &iresult); \
+             } \
+             if (overflow) { \
+                 runtimeError(vm, "Runtime Error: Integer overflow."); \
+                 freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                 return INTERPRET_RUNTIME_ERROR; \
+             } \
+             result_val = makeInt(iresult); \
+             op_is_handled = true; \
+        } \
+        \
         /* String/char concatenation for ADD */ \
-        if (current_instruction_code == ADD) { \
-            /* Optimization: Fast path for common integer arithmetic */ \
-            if (a_val_popped.type == TYPE_INT32 && b_val_popped.type == TYPE_INT32) { \
-                 long long iresult; \
-                 if (__builtin_add_overflow(a_val_popped.i_val, b_val_popped.i_val, &iresult)) { \
-                     runtimeError(vm, "Runtime Error: Integer overflow."); \
-                     freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                     return INTERPRET_RUNTIME_ERROR; \
-                 } \
-                 result_val = makeInt(iresult); \
-                 op_is_handled = true; \
-            } else { \
-                /* Optimization: Resolve pointers without deep copying for string/char operands */ \
+        if (!op_is_handled && current_instruction_code == ADD) { \
+            /* Optimization: Resolve pointers without deep copying for string/char operands */ \
                 Value* final_a = &a_val_popped; \
                 while (final_a->type == TYPE_POINTER && final_a->ptr_val) { \
                     final_a = (Value*)final_a->ptr_val; \
@@ -5934,7 +5944,6 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         b_val_popped = tmp; \
                     } \
                 } \
-            } \
         } \
         \
         /* Char +/- intlike handled as numeric ordinal operations */ \
