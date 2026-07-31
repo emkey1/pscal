@@ -878,13 +878,29 @@ struct AppDiagnosticsView: View {
                     }
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
-                    Button(copiedReport ? "Copied" : "Copy Report") {
+                    Button {
                         runner.copyReportToPasteboard()
-                        copiedReport = true
+                        withAnimation {
+                            copiedReport = true
+                        }
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        UIAccessibility.post(notification: .announcement, argument: "Report copied")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                            copiedReport = false
+                            withAnimation {
+                                copiedReport = false
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Text(copiedReport ? "Copied!" : "Copy Report")
+                            if copiedReport {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                            }
                         }
                     }
+                    .accessibilityLabel(copiedReport ? "Report copied" : "Copy Report")
+                    .accessibilityHint("Copies the diagnostic report to the clipboard")
                     .disabled(runner.report.isEmpty)
 
                     Button(runner.isRunning ? "Running..." : (runner.checks.isEmpty ? "Run Diagnostics" : "Run Again")) {
