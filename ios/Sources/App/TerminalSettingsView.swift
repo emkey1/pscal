@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct TerminalSettingsView: View {
     @ObservedObject private var appearanceSettings: TerminalTabAppearanceSettings
@@ -157,6 +158,8 @@ struct TerminalSettingsView: View {
                         withAnimation {
                             copiedColors = true
                         }
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        UIAccessibility.post(notification: .announcement, argument: "Copied first tab colors")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                             withAnimation {
                                 copiedColors = false
