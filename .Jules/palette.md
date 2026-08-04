@@ -27,4 +27,6 @@
 **Action:** When adding transient text, icons, or visual feedback to buttons or other UI elements, always wrap the boolean state toggles in `withAnimation {}` to provide a graceful transition (fade/slide) instead of a harsh pop-in/pop-out.
 ## 2025-03-20 - Redundant Visual Values and Slider Accessibility
 **Learning:** SwiftUI Sliders often rely on separate text views (e.g., in an HStack) to display their current value. Screen readers will read the slider and then redundantly read the visual text label as a separate element, causing confusion.
-**Action:** When implementing Sliders with visual value labels, always add `.accessibilityValue(...)` to the Slider itself, and add `.accessibilityHidden(true)` to the redundant text element so it is hidden from VoiceOver.
+## 2024-03-20 - Typing audio feedback for custom keyboard accessory bar
+**Learning:** Custom UIInputView keyboard accessory bars in iOS do not automatically play native keyboard click sounds when buttons are tapped.
+**Action:** Conformed the view to `UIInputViewAudioFeedback` with `enableInputClicksWhenVisible = true` and manually called `UIDevice.current.playInputClick()` on `.touchDown` for each button to restore expected auditory haptics.
