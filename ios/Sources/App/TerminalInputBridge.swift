@@ -218,6 +218,7 @@ final class TerminalKeyInputView: UITextView {
             button.configuration = config
             button.titleLabel?.font = UIFontMetrics.default.scaledFont(for: .systemFont(ofSize: 15, weight: .semibold))
             button.addTarget(self, action: action, for: .touchUpInside)
+            button.addTarget(self, action: #selector(playClick), for: .touchDown)
             return button
         }
 
@@ -892,6 +893,10 @@ final class TerminalKeyInputView: UITextView {
     }
 
     // MARK: - Accessory button actions
+    @objc private func playClick() {
+        UIDevice.current.playInputClick()
+    }
+
     @objc private func handleEsc() {
         onInput?("\u{1B}")
     }
@@ -1053,5 +1058,11 @@ final class TerminalKeyInputView: UITextView {
         } else {
             button.accessibilityTraits.remove(.selected)
         }
+    }
+}
+
+extension TerminalKeyInputView: UIInputViewAudioFeedback {
+    var enableInputClicksWhenVisible: Bool {
+        return true
     }
 }
