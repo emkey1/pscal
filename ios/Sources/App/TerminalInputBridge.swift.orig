@@ -129,7 +129,7 @@ final class TerminalKeyInputView: UITextView {
         let frameInWindow = window.convert(frameValue.cgRectValue, from: nil)
         return frameInWindow.height < hardwareKeyboardHeightEpsilon
     }
-    
+
     private struct RepeatCommand {
         let command: UIKeyCommand
         let output: String
@@ -218,7 +218,6 @@ final class TerminalKeyInputView: UITextView {
             button.configuration = config
             button.titleLabel?.font = UIFontMetrics.default.scaledFont(for: .systemFont(ofSize: 15, weight: .semibold))
             button.addTarget(self, action: action, for: .touchUpInside)
-            button.addTarget(self, action: #selector(playClick), for: .touchDown)
             return button
         }
 
@@ -893,14 +892,10 @@ final class TerminalKeyInputView: UITextView {
     }
 
     // MARK: - Accessory button actions
-    @objc private func playClick() {
-        UIDevice.current.playInputClick()
-    }
-
     @objc private func handleEsc() {
         onInput?("\u{1B}")
     }
-    
+
     @objc private func handleTab() {
         onInput?("\t")
     }
@@ -940,11 +935,11 @@ final class TerminalKeyInputView: UITextView {
     @objc private func handleMinus() {
         onInput?("-")
     }
-   
+
     @objc private func handlePipe() {
         onInput?("|")
     }
-    
+
     @objc private func handlePasteCommand() {
         guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
         clearLatchedModifiersForPaste()
