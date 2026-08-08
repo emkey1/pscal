@@ -1453,7 +1453,19 @@ def invoke_tra_queue(prompt: str, destination: Destination) -> dict[str, Any]:
         # No-op on models that don't think; default off for the miner (programs, not
         # traces), the bench config flips it on so reasoning tail models think.
         "disable_thinking": bool(eb.get("disable_thinking", True)),
+        # The same end-marker stop the chat-completions adapter sets. Its absence
+        # here was not a deliberate difference: a model that does not emit EOS on
+        # its own then ran to max_tokens on EVERY task. Measured on GLM-4.7-Flash:
+        # answer and marker landed at char 347, followed by 41,643 more characters
+        # of the guide being recited back -- ~13 minutes per case instead of
+        # seconds, while still scoring exact=1, so it read as "this model is slow"
+        # rather than as a harness bug. Opt out with "stop": null, which
+        # DeepSeek-V4-Flash needs: it names the marker mid-reasoning and would
+        # otherwise stop before answering at all.
+        "stop": eb.get("stop", [OUTPUT_END_MARKER]),
     }
+    if payload.get("stop") is None:
+        payload.pop("stop", None)
     if destination.model:
         payload["model"] = destination.model
     if destination.temperature is not None and destination.temperature >= 0:
@@ -1461,6 +1473,16 @@ def invoke_tra_queue(prompt: str, destination: Destination) -> dict[str, Any]:
     pref = eb.get("preferred_targets", destination.preferred_targets)
     if pref:
         payload["preferred_targets"] = pref
+    # Sampling knobs used to be dropped on the floor here -- only target_name/target
+    # were forwarded, so a destination carrying "top_p": 0.95 was silently served at
+    # the backend's own default. Forwarded explicitly rather than merging all of
+    # extra_body, because extra_body also carries harness-only keys (preferred_targets,
+    # submitter, priority, max_runtime_seconds, validate) that are not generation
+    # parameters and would confuse the queue.
+    for key in ("top_p", "top_k", "min_p", "repeat_penalty", "presence_penalty",
+                "frequency_penalty", "seed"):
+        if key in eb:
+            payload[key] = eb[key]
     for key in ("target_name", "target"):
         if key in eb:
             payload[key] = eb[key]
@@ -1472,11 +1494,33 @@ def invoke_tra_queue(prompt: str, destination: Destination) -> dict[str, Any]:
         "priority": int(eb.get("priority", destination.priority)),
         "submitter": eb.get("submitter", "aether_doc_bench"),
     }
-    # Stable idempotency key: a retry of the SAME prompt to the SAME destination reuses
-    # the existing job instead of creating a duplicate (the orphan trap under load).
-    idem = "aether-tra:" + hashlib.md5(
+    # Idempotency key. Stable across THIS call's internal submit retries -- which is
+    # the orphan trap it exists to prevent -- but distinct across separate logical
+    # requests.
+    #
+    # It was previously md5(destination_id|model|prompt) alone, i.e. stable across
+    # everything, which silently replayed stale results three different ways:
+    #   * --repeats N returned ONE job N times instead of N independent samples, so
+    #     any repeat column measured a single draw duplicated.
+    #   * a probe issuing the same prompt twice got one job back, and a control arm
+    #     that had errored stayed errored on every subsequent iteration.
+    #   * worst: after a SERVER-side config change (llama-server --reasoning off ->
+    #     on) the same destination id replayed the pre-change answers. A verification
+    #     request came back in 2s with the server log showing no request had arrived;
+    #     an entire reasoning-on board would have been a byte-identical copy of the
+    #     reasoning-off one, supporting a confident and completely wrong conclusion.
+    #
+    # The payload fingerprint covers request-side changes (sampling, stop, model,
+    # max_tokens). The per-call nonce covers repeats and server-side changes, which
+    # nothing in the payload can see. Computed once, before the submit loop, so the
+    # retries it guards still share it.
+    request_fingerprint = hashlib.md5(
+        json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()[:8]
+    call_nonce = os.urandom(6).hex()
+    idem = ("aether-tra:" + hashlib.md5(
         f"{destination.destination_id}|{destination.model}|{prompt}".encode("utf-8")
-    ).hexdigest()[:16]
+    ).hexdigest()[:16] + f":{request_fingerprint}:{call_nonce}")
 
     # 1) Dry-run (POST /jobs/explain). Bail early ONLY on a hard routing failure (model
     # not servable anywhere); transient busy/lock just means the job will queue.
