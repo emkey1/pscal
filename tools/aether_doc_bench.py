@@ -1452,20 +1452,19 @@ def invoke_tra_queue(prompt: str, destination: Destination) -> dict[str, Any]:
         "progress_idle_timeout_seconds": int(eb.get("progress_idle_timeout_seconds", 180)),
         # No-op on models that don't think; default off for the miner (programs, not
         # traces), the bench config flips it on so reasoning tail models think.
-        "disable_thinking": bool(eb.get("disable_thinking", True)),
-        # The same end-marker stop the chat-completions adapter sets. Its absence
-        # here was not a deliberate difference: a model that does not emit EOS on
-        # its own then ran to max_tokens on EVERY task. Measured on GLM-4.7-Flash:
-        # answer and marker landed at char 347, followed by 41,643 more characters
-        # of the guide being recited back -- ~13 minutes per case instead of
-        # seconds, while still scoring exact=1, so it read as "this model is slow"
-        # rather than as a harness bug. Opt out with "stop": null, which
-        # DeepSeek-V4-Flash needs: it names the marker mid-reasoning and would
-        # otherwise stop before answering at all.
-        "stop": eb.get("stop", [OUTPUT_END_MARKER]),
+        # Defaults to FALSE: a board should measure the model as it is actually
+        # served, not a quietly de-tuned version of it. This used to default True,
+        # which combined badly with the scheduler's own default -- T'Ra injected
+        # chat_template_kwargs={"enable_thinking": False} whenever this was not
+        # explicitly False and the model name contained "qwen3" or "ornith". The
+        # result was that an A/B of Ornith against llama-server's --reasoning flag
+        # ran with thinking suppressed in BOTH arms, and nothing said so. T'Ra now
+        # acts only on an explicit true (queue_server.py), and so does this.
+        #
+        # Set "disable_thinking": true on the destination when you genuinely want
+        # programs rather than traces -- the idea-miner is the case that wants it.
+        "disable_thinking": bool(eb.get("disable_thinking", False)),
     }
-    if payload.get("stop") is None:
-        payload.pop("stop", None)
     if destination.model:
         payload["model"] = destination.model
     if destination.temperature is not None and destination.temperature >= 0:
@@ -1473,19 +1472,48 @@ def invoke_tra_queue(prompt: str, destination: Destination) -> dict[str, Any]:
     pref = eb.get("preferred_targets", destination.preferred_targets)
     if pref:
         payload["preferred_targets"] = pref
-    # Sampling knobs used to be dropped on the floor here -- only target_name/target
-    # were forwarded, so a destination carrying "top_p": 0.95 was silently served at
-    # the backend's own default. Forwarded explicitly rather than merging all of
-    # extra_body, because extra_body also carries harness-only keys (preferred_targets,
-    # submitter, priority, max_runtime_seconds, validate) that are not generation
-    # parameters and would confuse the queue.
-    for key in ("top_p", "top_k", "min_p", "repeat_penalty", "presence_penalty",
-                "frequency_penalty", "seed"):
-        if key in eb:
-            payload[key] = eb[key]
     for key in ("target_name", "target"):
         if key in eb:
             payload[key] = eb[key]
+
+    # Generation params reach the backend only via a NESTED payload["extra_body"],
+    # which the queue merges straight into its chat/completions request. Anything
+    # set at payload top level other than model/temperature/max_tokens is dropped,
+    # which is why a destination carrying "top_p": 0.95 was previously served at
+    # the backend's own default.
+    #
+    # The end-marker stop is OPT-IN here, unlike the chat-completions adapter which
+    # sends it by default. It is incompatible with thinking models, and that is not
+    # a quirk of one of them -- it is structural. The prompt instructs the model to
+    # print __AETHER_BENCH_END__ after the program; a model that reasons first
+    # restates its own instructions while reasoning, names the marker, and trips the
+    # stop before writing any code. Observed on all three benchmarked so far:
+    #   DeepSeek-V4-Flash -- empty replies, every task
+    #   GLM-4.7-Flash     -- 559 chars of bulleted analysis, cut at "Constrain..."
+    #   Ornith-1.0-35B    -- 269 chars, cut at "end with `"
+    # Ornith only looked safe while two other bugs hid it: the scheduler was
+    # suppressing its thinking, and this adapter was not forwarding stop at all.
+    #
+    # The cost of leaving it off is that a model which never emits EOS runs to
+    # max_tokens (GLM: program at char 347, then 41,643 characters of the guide
+    # recited back). Bound that with max_output_tokens, sized above the longest
+    # legitimate program -- not by re-enabling stop, which trades a time problem for
+    # a correctness one. Set "stop": [...] explicitly for a non-thinking model.
+    backend_extra: dict[str, Any] = {}
+    stop_value = eb.get("stop")
+    if stop_value is not None:
+        backend_extra["stop"] = stop_value
+    for key in ("top_p", "top_k", "min_p", "repeat_penalty", "presence_penalty",
+                "frequency_penalty", "seed", "chat_template_kwargs"):
+        if key in eb:
+            backend_extra[key] = eb[key]
+    # A destination may also pass a nested extra_body through verbatim; it wins,
+    # so an explicit override is always available.
+    nested = eb.get("extra_body")
+    if isinstance(nested, dict):
+        backend_extra.update(nested)
+    if backend_extra:
+        payload["extra_body"] = backend_extra
 
     body = {
         "resource_group": "llm",
