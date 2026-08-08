@@ -674,6 +674,36 @@ def build_python_prompt(task: Task) -> str:
     )
 
 
+def build_rust_prompt(task: Task) -> str:
+    return textwrap.dedent(
+        f"""\
+        You are writing Rust code.
+
+        Write exactly one complete Rust program (a single `fn main()`, no external crates)
+        that solves the task below.
+
+        Requirements:
+        - Return only raw Rust source code.
+        - Do not wrap the answer in Markdown fences.
+        - Do not explain the code.
+        - After the full program, output a final line containing exactly `{OUTPUT_END_MARKER}`.
+        - Keep the program self-contained unless the task explicitly provides files.
+        - The program must compile with `rustc` (stable, no external crates) and run.
+        - The program must print exactly the expected output.
+
+        Task ID: {task.task_id}
+        Task Title: {task.title}
+        Task:
+        {task.prompt}
+
+        Expected stdout:
+        {task.expected_stdout}
+
+        Rust source:
+        """
+    )
+
+
 def build_batch_prompt(doc_name: str, doc_text: str, tasks: list[Task]) -> str:
     task_sections: list[str] = []
     for task in tasks:
@@ -827,6 +857,57 @@ def build_python_repair_prompt(
         {previous_source}
 
         Corrected Python source:
+        """
+    )
+
+
+def build_rust_repair_prompt(
+    task: Task,
+    previous_source: str,
+    attempt_number: int,
+    failure_summary: str,
+    observed_stdout: str,
+    observed_stderr: str,
+) -> str:
+    return textwrap.dedent(
+        f"""\
+        You are repairing a failed Rust program.
+
+        Return one full corrected Rust program.
+
+        Requirements:
+        - Return only raw Rust source code.
+        - Do not wrap the answer in Markdown fences.
+        - Do not explain the code.
+        - After the full program, output a final line containing exactly `{OUTPUT_END_MARKER}`.
+        - Keep the program self-contained unless the task explicitly provides files.
+        - The program must compile with `rustc` (stable, no external crates) and run.
+        - The program must print exactly the expected output.
+
+        Task ID: {task.task_id}
+        Task Title: {task.title}
+        Task:
+        {task.prompt}
+
+        Expected stdout:
+        {task.expected_stdout}
+
+        Repair attempt number:
+        {attempt_number}
+
+        Failure summary:
+        {failure_summary}
+
+        Observed stdout:
+        {observed_stdout}
+
+        Observed stderr:
+        {observed_stderr}
+
+        Previous source:
+        {previous_source}
+
+        Corrected Rust source:
         """
     )
 
@@ -1202,26 +1283,139 @@ def invoke_openai_chat_completions(prompt: str, destination: Destination) -> dic
     finish_reason = choices[0].get("finish_reason")
     message = choices[0].get("message") or {}
     output_text = flatten_chat_content(message.get("content"))
+    if not output_text and finish_reason != "length":
+        # Some reasoning-model chat templates (observed with GLM-4.7-Flash via
+        # llama-server) intermittently leave `content` empty and put the entire
+        # reply -- reasoning AND the actual answer -- in `reasoning_content`
+        # instead. sanitize_code() already knows how to pull a fenced code block
+        # or a post-</think> answer out of a raw reasoning blob, so fall back to
+        # it rather than discarding a real answer as a failure.
+        #
+        # Spelling is not portable: llama-server/GLM use `reasoning_content`,
+        # vLLM's deepseek_v4 reasoning parser uses plain `reasoning`. Check both,
+        # or the fallback silently never fires against one of them.
+        #
+        # Guarded on finish_reason: a reply truncated at max_tokens has no answer
+        # in it at all, so salvaging the partial reasoning would turn an honest
+        # infrastructure error into a bogus compile failure charged to the model.
+        output_text = flatten_chat_content(
+            message.get("reasoning_content")
+        ) or flatten_chat_content(message.get("reasoning"))
     if not output_text:
         if finish_reason == "length":
-            # A reasoning model that spends its whole budget thinking returns
-            # finish_reason=length with content=null -- there is no reply at all,
-            # not a reply we failed to read. Reported as "did not contain message
-            # content" it is indistinguishable from a broken chat template, which
-            # cost a full day on DeepSeek-V4-Flash-0731: 14 of 146 cases lost to
-            # repetition-loop runaways that read as an unexplained API fault.
-            #
-            # Raising max_output_tokens is usually NOT the fix (a runaway will
-            # burn whatever it is given); check the model card's sampling
-            # section first -- reasoning models specced for temperature=1.0 fall
-            # into repetition loops at the 0.2 this harness conventionally uses.
             raise RuntimeError(
                 "chat completions reply hit max_tokens "
                 f"({destination.max_output_tokens}) before emitting any content -- "
-                "the model was still reasoning when the budget ran out; check the "
-                "destination's temperature against the model card before raising it"
+                "the model was still reasoning when the budget ran out; "
+                "raise max_output_tokens for this destination"
             )
         raise RuntimeError("chat completions reply did not contain message content")
+
+    return {
+        "raw_text": output_text,
+        "response_id": payload.get("id"),
+        "usage": payload.get("usage"),
+    }
+
+
+def invoke_openai_chat_completions_messages(
+    messages: list[dict[str, str]], destination: Destination
+) -> dict[str, Any]:
+    """Like invoke_openai_chat_completions but takes a pre-built messages list
+    instead of a single flat prompt -- used by aether_doc_bench_session.py's
+    growing-transcript session mode. Same request/response handling otherwise."""
+    if not destination.model:
+        raise RuntimeError("destination model is required for openai_chat_completions")
+    base_url = (destination.base_url or "https://api.openai.com/v1").rstrip("/")
+    api_key = resolve_api_key(destination)
+
+    body = {
+        "model": destination.model,
+        "messages": messages,
+        "max_tokens": destination.max_output_tokens,
+        "stop": [OUTPUT_END_MARKER],
+    }
+    if destination.temperature >= 0:
+        body["temperature"] = destination.temperature
+    if destination.extra_body:
+        body.update(destination.extra_body)
+    if "max_completion_tokens" in body:
+        body.pop("max_tokens", None)
+    if body.get("stop") is None:
+        body.pop("stop", None)
+
+    payload = http_json_request(
+        f"{base_url}/chat/completions",
+        body,
+        api_key,
+        timeout_seconds=destination.request_timeout_seconds,
+        max_retries=destination.request_max_retries,
+        retry_backoff_seconds=destination.retry_backoff_seconds,
+        extra_headers=destination.extra_headers,
+    )
+    choices = payload.get("choices") or []
+    if not choices:
+        raise RuntimeError("chat completions reply did not contain choices")
+    message = choices[0].get("message") or {}
+    output_text = flatten_chat_content(message.get("content"))
+    if not output_text:
+        raise RuntimeError("chat completions reply did not contain message content")
+
+    return {
+        "raw_text": output_text,
+        "response_id": payload.get("id"),
+        "usage": payload.get("usage"),
+    }
+
+
+def invoke_openai_responses_session(
+    prompt: str, destination: Destination, previous_response_id: str | None = None
+) -> dict[str, Any]:
+    """Like invoke_openai_responses but threads previous_response_id for true
+    server-side conversation state -- used by aether_doc_bench_session.py.
+    When previous_response_id is set, `prompt` should be ONLY the new turn's
+    text (no guide re-inclusion); OpenAI resolves prior turns server-side."""
+    if not destination.model:
+        raise RuntimeError("destination model is required for openai_responses")
+    base_url = (destination.base_url or "https://api.openai.com/v1").rstrip("/")
+    api_key = resolve_api_key(destination)
+    if not api_key:
+        raise RuntimeError("an API key is required for openai_responses")
+
+    body = {
+        "model": destination.model,
+        "input": prompt,
+        "reasoning": {"effort": "medium"},
+        "text": {"verbosity": "low"},
+        "max_output_tokens": destination.max_output_tokens,
+    }
+    if previous_response_id:
+        body["previous_response_id"] = previous_response_id
+    if destination.temperature >= 0:
+        body["temperature"] = destination.temperature
+    if destination.extra_body:
+        body.update(destination.extra_body)
+
+    payload = http_json_request(
+        f"{base_url}/responses",
+        body,
+        api_key,
+        timeout_seconds=destination.request_timeout_seconds,
+        max_retries=destination.request_max_retries,
+        retry_backoff_seconds=destination.retry_backoff_seconds,
+    )
+    output_text = payload.get("output_text", "")
+    if not output_text:
+        parts: list[str] = []
+        for item in payload.get("output", []):
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            for chunk in item.get("content", []):
+                if isinstance(chunk, dict) and chunk.get("type") in ("output_text", "text"):
+                    parts.append(str(chunk.get("text", "")))
+        output_text = "".join(parts)
+    if not output_text:
+        raise RuntimeError("Responses API reply did not contain output_text")
 
     return {
         "raw_text": output_text,
@@ -1647,6 +1841,64 @@ def run_python_task(task: Task, source_code: str) -> dict[str, Any]:
         }
 
 
+def run_rust_task(task: Task, source_code: str) -> dict[str, Any]:
+    with tempfile.TemporaryDirectory(prefix="rust-doc-bench-") as tmp_name:
+        tmp_dir = pathlib.Path(tmp_name)
+        program_path = tmp_dir / f"{task.task_id}.rs"
+        binary_path = tmp_dir / f"{task.task_id}.bin"
+        work_dir = tmp_dir if task.cwd is None else tmp_dir / task.cwd
+        work_dir.mkdir(parents=True, exist_ok=True)
+        materialize_task_files(task, tmp_dir)
+        program_path.write_text(source_code, encoding="utf-8")
+
+        compile_cmd = ["rustc", "-O", "-o", str(binary_path), str(program_path)]
+        started = time.time()
+        compile_proc = subprocess.run(
+            compile_cmd,
+            cwd=str(work_dir),
+            text=True,
+            errors="replace",
+            capture_output=True,
+            timeout=task.timeout_seconds,
+        )
+        if compile_proc.returncode != 0:
+            elapsed = time.time() - started
+            return {
+                "command": compile_cmd,
+                "returncode": compile_proc.returncode,
+                "stdout": "",
+                "stderr": compile_proc.stderr,
+                "diagnostics": None,
+                "elapsed_seconds": round(elapsed, 3),
+                "exact_stdout_match": False,
+            }
+
+        run_cmd = [str(binary_path)]
+        run_proc = subprocess.run(
+            run_cmd,
+            cwd=str(work_dir),
+            text=True,
+            errors="replace",
+            capture_output=True,
+            timeout=task.timeout_seconds,
+        )
+        elapsed = time.time() - started
+
+        stdout = run_proc.stdout
+        stderr = run_proc.stderr
+        exact_match = run_proc.returncode == 0 and stdout == task.expected_stdout
+
+        return {
+            "command": run_cmd,
+            "returncode": run_proc.returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+            "diagnostics": None,
+            "elapsed_seconds": round(elapsed, 3),
+            "exact_stdout_match": exact_match,
+        }
+
+
 def build_attempt_from_source(
     *,
     task: Task,
@@ -1684,6 +1936,8 @@ def build_attempt_from_source(
     if attempt["generated_ok"]:
         if runner == "python":
             attempt["run"] = run_python_task(task, source_code)
+        elif runner == "rust":
+            attempt["run"] = run_rust_task(task, source_code)
         else:
             attempt["run"] = compile_and_run(task, source_code, args)
     else:
@@ -1822,6 +2076,8 @@ def evaluate_attempt(
     if attempt["generated_ok"]:
         if runner == "python":
             attempt["run"] = run_python_task(task, source_code)
+        elif runner == "rust":
+            attempt["run"] = run_rust_task(task, source_code)
         else:
             attempt["run"] = compile_and_run(task, source_code, args)
     else:
@@ -1969,6 +2225,34 @@ def print_text_summary(report: dict[str, Any]) -> None:
                 )
                 if py_bits:
                     print(f"       py use: {'  '.join(py_bits)}")
+
+            rust_summary = variant.get("rust_baseline_summary") or {}
+            rust_usage = variant.get("rust_baseline_usage_summary") or {}
+            rust_source_tokens = variant.get("rust_baseline_source_token_summary") or {}
+            rust_final_source_tokens = variant.get("rust_baseline_final_source_token_summary") or {}
+            rust_exact_final_source_tokens = variant.get("rust_baseline_exact_final_source_token_summary") or {}
+            if rust_summary:
+                rs_bits: list[str] = []
+                if rust_usage.get("prompt_tokens_total") is not None:
+                    rs_bits.append(f"workflow_prompt_tok={rust_usage['prompt_tokens_total']}")
+                if rust_usage.get("completion_tokens_total") is not None:
+                    rs_bits.append(f"workflow_completion_tok={rust_usage['completion_tokens_total']}")
+                if rust_usage.get("total_tokens_total") is not None:
+                    rs_bits.append(f"workflow_total_tok={rust_usage['total_tokens_total']}")
+                if rust_source_tokens.get("source_approx_tokens_total") is not None:
+                    rs_bits.append(f"all_attempt_answer_tok~={rust_source_tokens['source_approx_tokens_total']}")
+                if rust_final_source_tokens.get("source_approx_tokens_total") is not None:
+                    rs_bits.append(f"final_answer_tok~={rust_final_source_tokens['source_approx_tokens_total']}")
+                if rust_exact_final_source_tokens.get("source_approx_tokens_total") is not None:
+                    rs_bits.append(f"exact_final_answer_tok~={rust_exact_final_source_tokens['source_approx_tokens_total']}")
+                print(
+                    f"       rust  : generated={rust_summary['generated_ok']}/{rust_summary['total_cases']}  "
+                    f"run={rust_summary['run_ok']}/{rust_summary['total_cases']}  "
+                    f"exact={rust_summary['exact_stdout_match']}/{rust_summary['total_cases']}  "
+                    f"repaired={rust_summary['resolved_after_repair']}/{rust_summary['total_cases']}"
+                )
+                if rs_bits:
+                    print(f"       rs use: {'  '.join(rs_bits)}")
             for failure in variant.get("failure_patterns", [])[:3]:
                 print(
                     f"       fail x{failure['count']}: {failure['fingerprint']} "
@@ -2443,6 +2727,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="also ask for Python 3 for each case, run it locally, and record token usage for comparison",
     )
     parser.add_argument(
+        "--rust-baseline",
+        action="store_true",
+        help="also ask for Rust for each case, compile+run it locally with rustc, and record token usage for comparison",
+    )
+    parser.add_argument(
+        "--skip-aether",
+        action="store_true",
+        help="skip the Aether scoring pass entirely (useful with --python-baseline/--rust-baseline when only a "
+        "language-comparison re-run is needed and the destination's Aether score is already known/unchanged)",
+    )
+    parser.add_argument(
         "--shared-guide-batch-size",
         type=int,
         default=1,
@@ -2651,6 +2946,19 @@ def main() -> int:
             variant_report["python_baseline_exact_final_source_token_summary"] = summarize_final_source_tokens(python_results, "exact")
             variant_report["python_failure_patterns"] = summarize_failure_patterns(python_results)
 
+        if "rust_baseline_results" in variant_report:
+            rust_results = variant_report["rust_baseline_results"]
+            variant_report["rust_baseline_summary"] = summarize(rust_results)
+            variant_report["rust_baseline_usage_summary"] = summarize_usage(rust_results)
+            variant_report["rust_baseline_source_token_summary"] = summarize_source_tokens(rust_results)
+            variant_report["rust_baseline_final_usage_summary"] = summarize_final_usage(rust_results, "all")
+            variant_report["rust_baseline_run_ok_final_usage_summary"] = summarize_final_usage(rust_results, "run_ok")
+            variant_report["rust_baseline_exact_final_usage_summary"] = summarize_final_usage(rust_results, "exact")
+            variant_report["rust_baseline_final_source_token_summary"] = summarize_final_source_tokens(rust_results, "all")
+            variant_report["rust_baseline_run_ok_final_source_token_summary"] = summarize_final_source_tokens(rust_results, "run_ok")
+            variant_report["rust_baseline_exact_final_source_token_summary"] = summarize_final_source_tokens(rust_results, "exact")
+            variant_report["rust_failure_patterns"] = summarize_failure_patterns(rust_results)
+
     def append_case_and_checkpoint(variant_report: dict[str, Any], case_record: dict[str, Any]) -> None:
         variant_report["results"].append(case_record)
         refresh_variant_report(variant_report)
@@ -2690,42 +2998,97 @@ def main() -> int:
             }
             if args.python_baseline:
                 variant_report["python_baseline_results"] = []
+            if args.rust_baseline:
+                variant_report["rust_baseline_results"] = []
             destination_report["variants"].append(variant_report)
             persist_report_checkpoint()
 
             for repeat_index in range(args.repeats):
-                repeat_results, repeat_batch_runs = run_aether_cases_for_repeat(
-                    destination=destination,
-                    doc_name=doc_name,
-                    doc_text=doc_text,
-                    tasks=tasks,
-                    repeat_index=repeat_index,
-                    args=args,
-                    doc_token_reference=report["doc_token_reference"],
-                    on_case_complete=lambda case_record, variant_report=variant_report: append_case_and_checkpoint(
-                        variant_report,
-                        case_record,
-                    ),
-                )
-                variant_report["batch_runs"].extend(repeat_batch_runs)
+                if not args.skip_aether:
+                    repeat_results, repeat_batch_runs = run_aether_cases_for_repeat(
+                        destination=destination,
+                        doc_name=doc_name,
+                        doc_text=doc_text,
+                        tasks=tasks,
+                        repeat_index=repeat_index,
+                        args=args,
+                        doc_token_reference=report["doc_token_reference"],
+                        on_case_complete=lambda case_record, variant_report=variant_report: append_case_and_checkpoint(
+                            variant_report,
+                            case_record,
+                        ),
+                    )
+                    variant_report["batch_runs"].extend(repeat_batch_runs)
                 refresh_variant_report(variant_report)
                 persist_report_checkpoint()
 
                 if args.python_baseline:
                     for task in tasks:
-                        python_case = execute_case(
-                            initial_prompt=build_python_prompt(task),
-                            destination=destination,
-                            task=task,
-                            args=args,
-                            runner="python",
-                            repair_prompt_builder=lambda **kwargs: build_python_repair_prompt(**kwargs),
-                        )
+                        try:
+                            python_case = execute_case(
+                                initial_prompt=build_python_prompt(task),
+                                destination=destination,
+                                task=task,
+                                args=args,
+                                runner="python",
+                                repair_prompt_builder=lambda **kwargs: build_python_repair_prompt(**kwargs),
+                            )
+                        except Exception as exc:  # pragma: no cover - surfaced in JSON report
+                            python_case = {
+                                "attempts": [],
+                                "generated_ok": False,
+                                "generation_error": str(exc),
+                                "run": {
+                                    "returncode": -1,
+                                    "stdout": "",
+                                    "stderr": str(exc),
+                                    "elapsed_seconds": 0.0,
+                                    "exact_stdout_match": False,
+                                },
+                                "attempt_count": 0,
+                                "resolved_after_repair": False,
+                            }
+                            python_case["failure_fingerprint"] = derive_failure_fingerprint(python_case)
                         python_case["task_id"] = task.task_id
                         python_case["task_title"] = task.title
                         python_case["repeat_index"] = repeat_index
                         python_case["doc_token_reference"] = report["doc_token_reference"]
                         variant_report["python_baseline_results"].append(python_case)
+                        refresh_variant_report(variant_report)
+                        persist_report_checkpoint()
+
+                if args.rust_baseline:
+                    for task in tasks:
+                        try:
+                            rust_case = execute_case(
+                                initial_prompt=build_rust_prompt(task),
+                                destination=destination,
+                                task=task,
+                                args=args,
+                                runner="rust",
+                                repair_prompt_builder=lambda **kwargs: build_rust_repair_prompt(**kwargs),
+                            )
+                        except Exception as exc:  # pragma: no cover - surfaced in JSON report
+                            rust_case = {
+                                "attempts": [],
+                                "generated_ok": False,
+                                "generation_error": str(exc),
+                                "run": {
+                                    "returncode": -1,
+                                    "stdout": "",
+                                    "stderr": str(exc),
+                                    "elapsed_seconds": 0.0,
+                                    "exact_stdout_match": False,
+                                },
+                                "attempt_count": 0,
+                                "resolved_after_repair": False,
+                            }
+                            rust_case["failure_fingerprint"] = derive_failure_fingerprint(rust_case)
+                        rust_case["task_id"] = task.task_id
+                        rust_case["task_title"] = task.title
+                        rust_case["repeat_index"] = repeat_index
+                        rust_case["doc_token_reference"] = report["doc_token_reference"]
+                        variant_report["rust_baseline_results"].append(rust_case)
                         refresh_variant_report(variant_report)
                         persist_report_checkpoint()
 
