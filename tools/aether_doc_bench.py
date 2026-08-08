@@ -1199,9 +1199,28 @@ def invoke_openai_chat_completions(prompt: str, destination: Destination) -> dic
     choices = payload.get("choices") or []
     if not choices:
         raise RuntimeError("chat completions reply did not contain choices")
+    finish_reason = choices[0].get("finish_reason")
     message = choices[0].get("message") or {}
     output_text = flatten_chat_content(message.get("content"))
     if not output_text:
+        if finish_reason == "length":
+            # A reasoning model that spends its whole budget thinking returns
+            # finish_reason=length with content=null -- there is no reply at all,
+            # not a reply we failed to read. Reported as "did not contain message
+            # content" it is indistinguishable from a broken chat template, which
+            # cost a full day on DeepSeek-V4-Flash-0731: 14 of 146 cases lost to
+            # repetition-loop runaways that read as an unexplained API fault.
+            #
+            # Raising max_output_tokens is usually NOT the fix (a runaway will
+            # burn whatever it is given); check the model card's sampling
+            # section first -- reasoning models specced for temperature=1.0 fall
+            # into repetition loops at the 0.2 this harness conventionally uses.
+            raise RuntimeError(
+                "chat completions reply hit max_tokens "
+                f"({destination.max_output_tokens}) before emitting any content -- "
+                "the model was still reasoning when the budget ran out; check the "
+                "destination's temperature against the model card before raising it"
+            )
         raise RuntimeError("chat completions reply did not contain message content")
 
     return {
