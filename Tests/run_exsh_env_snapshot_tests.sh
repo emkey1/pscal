@@ -8,10 +8,10 @@ OUT="${BUILD_DIR}/exsh_env_snapshot_restore_test"
 mkdir -p "${BUILD_DIR}"
 
 cc -std=c11 -pthread \
-  -I"${ROOT}/src" \
+  -I"${ROOT}/components/pscal-core/src" \
   -I"${ROOT}" \
-  "${ROOT}/Tests/exsh/test_env_snapshot_restore.c" \
-  "${ROOT}/src/common/env_snapshot.c" \
+  "${ROOT}/components/exsh/tests/test_env_snapshot_restore.c" \
+  "${ROOT}/components/pscal-core/src/common/env_snapshot.c" \
   -o "${OUT}"
 
 "${OUT}"
