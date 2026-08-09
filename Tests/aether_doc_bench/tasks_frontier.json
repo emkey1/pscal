@@ -1,0 +1,216 @@
+{
+  "version": "2026-08-09-1",
+  "tasks": [
+    {
+      "id": "val_checked_ledger",
+      "title": "val checked ledger",
+      "mechanisms": [
+        "frontier",
+        "val_checked_parse",
+        "reject_invalid"
+      ],
+      "prompt": "Aether's `parse_int` cannot report failure -- it returns 0 for junk and the numeric prefix for partial input, so its result can never be used as its own validity check. Write an Aether program that uses the CHECKED parse instead to validate a fixed list of Text fields `[\"42\", \"7x\", \"\", \"-13\", \"100\", \"3.5\"]`. A field counts as valid only if the ENTIRE string is an integer (so \"7x\", \"\" and \"3.5\" are all rejected; a leading `-` is fine). For each rejected field print `reject: <field>` in list order. Then print `accepted=<n> rejected=<n>` and `sum=<total of the accepted values>`.",
+      "expected_stdout": "reject: 7x\nreject: \nreject: 3.5\naccepted=3 rejected=3\nsum=129\n",
+      "files": {},
+      "reference_solution": "@pure\nfn parseChecked(raw: Text) -> Int {\n    let n: Int = 0;\n    let code: Int = 0;\n    val(raw, n, code);\n    if code != 0 {\n        ret -1;\n    }\n    ret n;\n}\nfn main() -> Void {\n    let fields: Text[] = [\"42\", \"7x\", \"\", \"-13\", \"100\", \"3.5\"];\n    let good: Int = 0;\n    let bad: Int = 0;\n    let total: Int = 0;\n    loop i in 0..length(fields) {\n        let v: Int = parseChecked(fields[i]);\n        if v == -1 {\n            bad = bad + 1;\n            fx { println(\"reject: \", fields[i]); }\n        } else {\n            good = good + 1;\n            total = total + v;\n        }\n    }\n    fx {\n        println(\"accepted=\", good, \" rejected=\", bad);\n        println(\"sum=\", total);\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "par_shard_tally",
+      "title": "par shard tally",
+      "mechanisms": [
+        "frontier",
+        "par",
+        "record_ownership"
+      ],
+      "prompt": "Write an Aether program that sums the multiples of 3 in 0..50 (half-open) using TWO concurrent branches: one covering 0..25 and one covering 25..50. Each branch must accumulate into its OWN record -- sharing one record across branches races and is rejected. Combine the two records after the concurrent block. Print `shardA total=<t> count=<c>`, then `shardB total=<t> count=<c>`, then `combined total=<t> count=<c>`.",
+      "expected_stdout": "shardA total=108 count=9\nshardB total=300 count=8\ncombined total=408 count=17\n",
+      "files": {},
+      "reference_solution": "type Shard { total: Int = 0; count: Int = 0; }\n\nfn tallyRange(s: Shard, lo: Int, hi: Int) -> Void {\n    loop i in lo..hi {\n        if i % 3 == 0 {\n            s.total = s.total + i;\n            s.count = s.count + 1;\n        }\n    }\n    ret;\n}\n\nfn main() -> Void {\n    let a: Shard = new Shard { total: 0, count: 0 };\n    let b: Shard = new Shard { total: 0, count: 0 };\n    par {\n        tallyRange(a, 0, 25);\n        tallyRange(b, 25, 50);\n    }\n    let total: Int = a.total + b.total;\n    let count: Int = a.count + b.count;\n    fx {\n        println(\"shardA total=\", a.total, \" count=\", a.count);\n        println(\"shardB total=\", b.total, \" count=\", b.count);\n        println(\"combined total=\", total, \" count=\", count);\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "file_csv_roundtrip",
+      "title": "file csv roundtrip",
+      "mechanisms": [
+        "frontier",
+        "file_io",
+        "readln_out_param"
+      ],
+      "prompt": "Write an Aether program that writes three lines `alpha,10`, `beta,25`, `gamma,7` to a file named `ledger_tmp.txt`, closes it, then reopens and reads the three lines back. Note the read helper writes its result INTO a variable you pass in -- Aether has no general by-ref, but the file readers work this way. Split each line on the comma, then print `<name>=<value>` per line in file order, then `total=<sum>`. Delete the file before exiting.",
+      "expected_stdout": "alpha=10\nbeta=25\ngamma=7\ntotal=42\n",
+      "files": {},
+      "reference_solution": "fn main() -> Void {\n    let f: File;\n    let path: Text = \"ledger_tmp.txt\";\n    fx {\n        assign(f, path);\n        rewrite(f);\n        writeln(f, \"alpha,10\");\n        writeln(f, \"beta,25\");\n        writeln(f, \"gamma,7\");\n        close(f);\n    }\n    let names: Text[] = [];\n    let vals: Int[] = [];\n    fx {\n        assign(f, path);\n        reset(f);\n        loop i in 0..3 {\n            let line: Text = \"\";\n            readln(f, line);\n            let comma: Int = pos(\",\", line);\n            let nm: Text = line[0..comma];\n            let rest: Text = line[comma + 1..string_len(line)];\n            names = names + [nm];\n            vals = vals + [parse_int(rest)];\n        }\n        close(f);\n        erase(f);\n    }\n    let total: Int = 0;\n    loop i in 0..length(vals) { total = total + vals[i]; }\n    fx {\n        loop i in 0..length(names) { println(names[i], \"=\", vals[i]); }\n        println(\"total=\", total);\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "contract_guarded_spread",
+      "title": "contract guarded spread",
+      "mechanisms": [
+        "frontier",
+        "contracts",
+        "pre_post"
+      ],
+      "prompt": "Write an Aether program with a pure helper `spread(xs: Int[]) -> Int` returning max minus min. Guard it with a precondition that every element is positive, and a postcondition that the result is non-negative. Contract annotations go ABOVE the function, never inside the body. Call it with `[4, 19, 7, 2, 11]` and print `spread=<n>`, then with the single-element array `[5]` and print `single=<n>`.",
+      "expected_stdout": "spread=17\nsingle=0\n",
+      "files": {},
+      "reference_solution": "@pure\nfn allPositive(xs: Int[]) -> Bool {\n    loop i in 0..length(xs) {\n        if xs[i] <= 0 { ret false; }\n    }\n    ret true;\n}\n@pre allPositive(xs)\n@post result >= 0\n@pure\nfn spread(xs: Int[]) -> Int {\n    let lo: Int = xs[0];\n    let hi: Int = xs[0];\n    loop i in 1..length(xs) {\n        if xs[i] < lo { lo = xs[i]; }\n        if xs[i] > hi { hi = xs[i]; }\n    }\n    ret hi - lo;\n}\nfn main() -> Void {\n    let a: Int[] = [4, 19, 7, 2, 11];\n    fx { println(\"spread=\", spread(a)); }\n    let b: Int[] = [5];\n    fx { println(\"single=\", spread(b)); }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "concat_chain_partition",
+      "title": "concat chain partition",
+      "mechanisms": [
+        "frontier",
+        "array_concat_chain"
+      ],
+      "prompt": "Write an Aether program that splits `[5, 2, 9, 4, 7, 6]` into evens and odds (each preserving original order, built by two pure helpers), then builds ONE array in a single expression that concatenates: the evens, then `[0]`, then the odds, then `[99]`. Print `merged:` followed by each value preceded by a space, then on the next line `len=<n>`.",
+      "expected_stdout": "merged: 2 4 6 0 5 9 7 99\nlen=8\n",
+      "files": {},
+      "reference_solution": "@pure\nfn evens(xs: Int[]) -> Int[] {\n    let out: Int[] = [];\n    loop i in 0..length(xs) { if xs[i] % 2 == 0 { out = out + [xs[i]]; } }\n    ret out;\n}\n@pure\nfn odds(xs: Int[]) -> Int[] {\n    let out: Int[] = [];\n    loop i in 0..length(xs) { if xs[i] % 2 != 0 { out = out + [xs[i]]; } }\n    ret out;\n}\nfn main() -> Void {\n    let src: Int[] = [5, 2, 9, 4, 7, 6];\n    let merged: Int[] = evens(src) + [0] + odds(src) + [99];\n    fx {\n        print(\"merged:\");\n        loop i in 0..length(merged) { print(\" \", merged[i]); }\n        println(\"\");\n        println(\"len=\", length(merged));\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "method_self_state",
+      "title": "method self state",
+      "mechanisms": [
+        "frontier",
+        "type_method",
+        "self_state"
+      ],
+      "prompt": "Write an Aether program with a type `Counter` having fields `hits: Int` and `label: Text`, and two methods: one that adds an amount to `hits`, and one that takes a `prefix: Text` and returns `<prefix><label>=<hits>`. Methods do not capture outer locals, so anything a method needs must be a field or a parameter. Construct it with label `clicks`, apply the amounts `[3, 1, 4, 1, 5]` one at a time, then print the described string using prefix `counter ` and then `final=<hits>`.",
+      "expected_stdout": "counter clicks=14\nfinal=14\n",
+      "files": {},
+      "reference_solution": "type Counter {\n    hits: Int = 0;\n    label: Text = \"\";\n    fn bump(amount: Int) -> Void {\n        self.hits = self.hits + amount;\n        ret;\n    }\n    fn describe(prefix: Text) -> Text {\n        ret prefix + self.label + \"=\" + int_to_text(self.hits);\n    }\n}\nfn main() -> Void {\n    let c: Counter = new Counter { hits: 0, label: \"clicks\" };\n    let weights: Int[] = [3, 1, 4, 1, 5];\n    loop i in 0..length(weights) {\n        c.bump(weights[i]);\n    }\n    fx {\n        println(c.describe(\"counter \"));\n        println(\"final=\", c.hits);\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "array_value_semantics",
+      "title": "array value semantics",
+      "mechanisms": [
+        "frontier",
+        "array_value_copy",
+        "return_idiom"
+      ],
+      "prompt": "In Aether arrays are value types at the call boundary: a function that mutates an array parameter in place has NO effect visible to the caller. Write an Aether program with a pure helper that returns a NEW array with every element multiplied by k. Start from `[1, 2, 3]`, produce a scaled-by-10 array, then scale THAT by 3. Print `scaled:` then each value of the first result preceded by a space; then `twice:` and the second result the same way; then `original:` and the starting array, which must be unchanged.",
+      "expected_stdout": "scaled: 10 20 30\ntwice: 30 60 90\noriginal: 1 2 3\n",
+      "files": {},
+      "reference_solution": "@pure\nfn scaled(xs: Int[], k: Int) -> Int[] {\n    let out: Int[] = [];\n    loop i in 0..length(xs) { out = out + [xs[i] * k]; }\n    ret out;\n}\nfn main() -> Void {\n    let base: Int[] = [1, 2, 3];\n    let big: Int[] = scaled(base, 10);\n    let bigger: Int[] = scaled(big, 3);\n    fx {\n        print(\"scaled:\");\n        loop i in 0..length(big) { print(\" \", big[i]); }\n        println(\"\");\n        print(\"twice:\");\n        loop i in 0..length(bigger) { print(\" \", bigger[i]); }\n        println(\"\");\n        print(\"original:\");\n        loop i in 0..length(base) { print(\" \", base[i]); }\n        println(\"\");\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "jagged_nested_grid",
+      "title": "jagged nested grid",
+      "mechanisms": [
+        "frontier",
+        "nested_arrays",
+        "jagged"
+      ],
+      "prompt": "Aether has real nested arrays; a one-dimensional array indexed twice is a compile-time error, so declare the rank you actually want. Write an Aether program that builds a JAGGED `Int[][]` with 3 rows where row `r` has `r + 2` entries and the entry at column `c` is `(r + 1) * (c + 1)`. Bound every inner loop by that row's own length. Print one line per row as `row <r> len=<n>:` followed by each value preceded by a space, then `total=<sum of all values>`.",
+      "expected_stdout": "row 0 len=2: 1 2\nrow 1 len=3: 2 4 6\nrow 2 len=4: 3 6 9 12\ntotal=45\n",
+      "files": {},
+      "reference_solution": "fn main() -> Void {\n    let rows: Int = 3;\n    let grid: Int[][] = [];\n    loop r in 0..rows {\n        let row: Int[] = [];\n        loop c in 0..(r + 2) { row = row + [(r + 1) * (c + 1)]; }\n        grid = grid + [row];\n    }\n    let total: Int = 0;\n    fx {\n        loop r in 0..length(grid) {\n            print(\"row \", r, \" len=\", length(grid[r]), \":\");\n            loop c in 0..length(grid[r]) { print(\" \", grid[r][c]); }\n            println(\"\");\n        }\n    }\n    loop r in 0..length(grid) {\n        loop c in 0..length(grid[r]) { total = total + grid[r][c]; }\n    }\n    fx { println(\"total=\", total); }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "text_slice_tokenize",
+      "title": "text slice tokenize",
+      "mechanisms": [
+        "frontier",
+        "text_zero_based",
+        "half_open_slice"
+      ],
+      "prompt": "Aether Text is 0-based and `s[a..b]` is a half-open substring. There is no `replace`, and the case helpers change a SINGLE character, not a whole string. Write an Aether program that splits `red-green-blue` on `-` using your own scan (not a library splitter), then for each part prints `<i>:<Part> len=<n>` where `<Part>` is the part with only its first character upper-cased. Finally print `count=<n>`.",
+      "expected_stdout": "0:Red len=3\n1:Green len=5\n2:Blue len=4\ncount=3\n",
+      "files": {},
+      "reference_solution": "@pure\nfn splitOn(s: Text, sep: Text) -> Text[] {\n    let out: Text[] = [];\n    let start: Int = 0;\n    loop i in 0..string_len(s) {\n        if s[i..i + 1] == sep {\n            out = out + [s[start..i]];\n            start = i + 1;\n        }\n    }\n    out = out + [s[start..string_len(s)]];\n    ret out;\n}\n@pure\nfn upperFirst(s: Text) -> Text {\n    if string_len(s) == 0 { ret s; }\n    ret upcase(s[0]) + s[1..string_len(s)];\n}\nfn main() -> Void {\n    let parts: Text[] = splitOn(\"red-green-blue\", \"-\");\n    fx {\n        loop i in 0..length(parts) {\n            println(i, \":\", upperFirst(parts[i]), \" len=\", string_len(parts[i]));\n        }\n        println(\"count=\", length(parts));\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "bitwise_permission_flags",
+      "title": "bitwise permission flags",
+      "mechanisms": [
+        "frontier",
+        "bitwise",
+        "precedence_trap"
+      ],
+      "prompt": "In Aether the bitwise operators bind LOOSER than the comparisons, so a mask test needs explicit parentheses or it silently yields an Int instead of a Bool. Write an Aether program with constants READ=1, WRITE=2, EXEC=4 and a pure helper that turns a flags Int into a 3-character string using `r`, `w`, `x` where set and `-` where clear. For each of `[0, 1, 3, 5, 7, 6]` print `<flags> -> <string>`. Then print `union=<bitwise OR of all six>` and ` shifted=<union shifted left by 2>` on the same line, formatted exactly as `union=<n> shifted=<n>`.",
+      "expected_stdout": "0 -> ---\n1 -> r--\n3 -> rw-\n5 -> r-x\n7 -> rwx\n6 -> -wx\nunion=7 shifted=28\n",
+      "files": {},
+      "reference_solution": "const READ: Int = 1;\nconst WRITE: Int = 2;\nconst EXEC: Int = 4;\n@pure\nfn describe(flags: Int) -> Text {\n    let out: Text = \"\";\n    if (flags & READ) != 0 { out = out + \"r\"; } else { out = out + \"-\"; }\n    if (flags & WRITE) != 0 { out = out + \"w\"; } else { out = out + \"-\"; }\n    if (flags & EXEC) != 0 { out = out + \"x\"; } else { out = out + \"-\"; }\n    ret out;\n}\nfn main() -> Void {\n    let modes: Int[] = [0, 1, 3, 5, 7, 6];\n    let total: Int = 0;\n    fx {\n        loop i in 0..length(modes) {\n            println(modes[i], \" -> \", describe(modes[i]));\n        }\n    }\n    loop i in 0..length(modes) { total = total | modes[i]; }\n    fx { println(\"union=\", total, \" shifted=\", total << 2); }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "toon_fleet_rollup",
+      "title": "toon fleet rollup",
+      "mechanisms": [
+        "frontier",
+        "toon_file",
+        "missing_intermediate"
+      ],
+      "prompt": "Write an Aether program that reads `fleet.json` with the TOON reader and rolls up the `fleet` array. For each entry print `<id>: cores=<n> mem=<n> tags=<n>` where `mem` comes from a NESTED `spec.mem.gb` that is ABSENT on some entries -- a defaulted getter only protects the final lookup, not the path to it, so guard the intermediate and use 0 when it is missing. `tags` is the length of that entry's tags array. Then print `totals cores=<n> mem=<n> tagged=<count of entries with at least one tag>`.",
+      "expected_stdout": "a1: cores=8 mem=32 tags=1\nb2: cores=4 mem=0 tags=0\nc3: cores=16 mem=128 tags=2\ntotals cores=28 mem=160 tagged=2\n",
+      "files": {
+        "fleet.json": "{\"fleet\":[{\"id\":\"a1\",\"spec\":{\"cores\":8,\"mem\":{\"gb\":32}},\"tags\":[\"prod\"]},{\"id\":\"b2\",\"spec\":{\"cores\":4},\"tags\":[]},{\"id\":\"c3\",\"spec\":{\"cores\":16,\"mem\":{\"gb\":128}},\"tags\":[\"prod\",\"gpu\"]}]}\n"
+      },
+      "reference_solution": "fn main() -> Void {\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"fleet.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let fleet: ToonNode = toon_key(root, \"fleet\");\n    let totalCores: Int = 0;\n    let totalMem: Int = 0;\n    let tagged: Int = 0;\n    fx {\n        loop i in 0..toon_len(fleet) {\n            let node: ToonNode = toon_at(fleet, i);\n            let id: Text = toon_get_text_or(node, \"id\", \"?\");\n            let spec: ToonNode = toon_key(node, \"spec\");\n            let cores: Int = toon_get_int_or(spec, \"cores\", 0);\n            let memGb: Int = 0;\n            if toon_has_key(spec, \"mem\") {\n                let mem: ToonNode = toon_key(spec, \"mem\");\n                memGb = toon_get_int_or(mem, \"gb\", 0);\n            }\n            let tags: ToonNode = toon_key(node, \"tags\");\n            let ntags: Int = toon_len(tags);\n            totalCores = totalCores + cores;\n            totalMem = totalMem + memGb;\n            if ntags > 0 { tagged = tagged + 1; }\n            println(id, \": cores=\", cores, \" mem=\", memGb, \" tags=\", ntags);\n        }\n        println(\"totals cores=\", totalCores, \" mem=\", totalMem, \" tagged=\", tagged);\n        toon_close(doc);\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "tuple_stats_pipeline",
+      "title": "tuple stats pipeline",
+      "mechanisms": [
+        "frontier",
+        "tuple",
+        "real_division"
+      ],
+      "prompt": "Aether tuples are narrow: you may destructure a direct top-level call, or bind the call and read `.0`/`.1`, but not chain an index onto the call. Also note `/` is REAL division even between two Ints. Write an Aether program with two pure tuple-returning helpers over `[12, 5, 30, 8, 21]`: one returning (min, max) and one returning (sum, count). Destructure the first, bind the second and read its fields. Print `lo=<n> hi=<n> span=<hi-lo>`, then `sum=<n> n=<n> mean=<mean to 2 decimals>`, then `floorMean=<mean truncated to Int>`.",
+      "expected_stdout": "lo=5 hi=30 span=25\nsum=76 n=5 mean=15.20\nfloorMean=15\n",
+      "files": {},
+      "reference_solution": "@pure\nfn minMax(xs: Int[]) -> (Int, Int) {\n    let lo: Int = xs[0];\n    let hi: Int = xs[0];\n    loop i in 1..length(xs) {\n        if xs[i] < lo { lo = xs[i]; }\n        if xs[i] > hi { hi = xs[i]; }\n    }\n    ret (lo, hi);\n}\n@pure\nfn sumCount(xs: Int[]) -> (Int, Int) {\n    let s: Int = 0;\n    loop i in 0..length(xs) { s = s + xs[i]; }\n    ret (s, length(xs));\n}\nfn main() -> Void {\n    let data: Int[] = [12, 5, 30, 8, 21];\n    let (lo, hi) = minMax(data);\n    let t = sumCount(data);\n    let total: Int = t.0;\n    let n: Int = t.1;\n    let mean: Real = total / n;\n    fx {\n        println(\"lo=\", lo, \" hi=\", hi, \" span=\", hi - lo);\n        println(\"sum=\", total, \" n=\", n, \" mean=\", formatfloat(mean, 2));\n        println(\"floorMean=\", trunc(mean));\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "mstream_field_parse",
+      "title": "mstream field parse",
+      "mechanisms": [
+        "frontier",
+        "mstream",
+        "opaque_handle"
+      ],
+      "prompt": "`MStream` is an opaque memory-stream handle -- never an Int or Text. Write an Aether program that builds a stream from the text `id=17;name=widget;qty=240`, reads the body back out of the stream, splits it on `;`, and for each field splits on the first `=`. Print `bytes=<length of the body> fields=<n>` then `name=<value> qty=<value> doubled=<qty*2>`. Release the stream before printing.",
+      "expected_stdout": "bytes=25 fields=3\nname=widget qty=240 doubled=480\n",
+      "files": {},
+      "reference_solution": "fn main() -> Void {\n    let payload: Text = \"id=17;name=widget;qty=240\";\n    let ms: MStream = mstreamfromstring(payload);\n    let body: Text = mstreambuffer(ms);\n    let fields: Text[] = split(body, \";\");\n    let qty: Int = 0;\n    let name: Text = \"\";\n    loop i in 0..length(fields) {\n        let eq: Int = pos(\"=\", fields[i]);\n        let k: Text = fields[i][0..eq];\n        let v: Text = fields[i][eq + 1..string_len(fields[i])];\n        if string_eq(k, \"qty\") { qty = parse_int(v); }\n        if string_eq(k, \"name\") { name = v; }\n    }\n    mstreamfree(ms);\n    fx {\n        println(\"bytes=\", string_len(body), \" fields=\", length(fields));\n        println(\"name=\", name, \" qty=\", qty, \" doubled=\", qty * 2);\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "money_cents_report",
+      "title": "money cents report",
+      "mechanisms": [
+        "frontier",
+        "real_format",
+        "fixed_point"
+      ],
+      "prompt": "Write an Aether program that models money as integer cents to avoid float drift. Define a type with `label: Text` and `cents: Int`, build a list containing widget/1999, gadget/550, bolt/7, and print `<label>: <amount>` per item where amount is the cents rendered as a 2-decimal string. Then print `total=<amount>` for the summed cents, and finally `avg=<average cents as a 3-decimal currency amount> rounded=<average cents rounded to a whole Int>`.",
+      "expected_stdout": "widget: 19.99\ngadget: 5.50\nbolt: 0.07\ntotal=25.56\navg=8.520 rounded=852\n",
+      "files": {},
+      "reference_solution": "type Line { label: Text = \"\"; cents: Int = 0; }\n@pure\nfn asMoney(cents: Int) -> Text {\n    let whole: Int = cents / 100;\n    ret formatfloat(cents / 100.0, 2);\n}\nfn main() -> Void {\n    let items: Line[] = [];\n    items = items + [new Line { label: \"widget\", cents: 1999 }];\n    items = items + [new Line { label: \"gadget\", cents: 550 }];\n    items = items + [new Line { label: \"bolt\", cents: 7 }];\n    let total: Int = 0;\n    fx {\n        loop i in 0..length(items) {\n            println(items[i].label, \": \", asMoney(items[i].cents));\n        }\n    }\n    loop i in 0..length(items) { total = total + items[i].cents; }\n    let avg: Real = total / length(items);\n    fx {\n        println(\"total=\", asMoney(total));\n        println(\"avg=\", formatfloat(avg / 100.0, 3), \" rounded=\", round(avg));\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "parallel_array_wordcount",
+      "title": "parallel array wordcount",
+      "mechanisms": [
+        "frontier",
+        "no_map_type",
+        "linear_scan"
+      ],
+      "prompt": "Aether has no map, dict or set type -- the idiom is two parallel arrays and a linear scan. Write an Aether program that counts occurrences in `[\"ash\", \"birch\", \"ash\", \"cedar\", \"birch\", \"ash\"]`, keeping keys in first-seen order. Print `<key>=<count>` per key in that order, then `distinct=<n>`, then `most=<key> (<count>)` for the highest count (first-seen wins ties).",
+      "expected_stdout": "ash=3\nbirch=2\ncedar=1\ndistinct=3\nmost=ash (3)\n",
+      "files": {},
+      "reference_solution": "@pure\nfn indexOf(keys: Text[], key: Text) -> Int {\n    loop i in 0..length(keys) {\n        if string_eq(keys[i], key) { ret i; }\n    }\n    ret -1;\n}\nfn main() -> Void {\n    let keys: Text[] = [];\n    let counts: Int[] = [];\n    let words: Text[] = [\"ash\", \"birch\", \"ash\", \"cedar\", \"birch\", \"ash\"];\n    loop i in 0..length(words) {\n        let at: Int = indexOf(keys, words[i]);\n        if at == -1 {\n            keys = keys + [words[i]];\n            counts = counts + [1];\n        } else {\n            counts[at] = counts[at] + 1;\n        }\n    }\n    let bestAt: Int = 0;\n    loop i in 1..length(keys) {\n        if counts[i] > counts[bestAt] { bestAt = i; }\n    }\n    fx {\n        loop i in 0..length(keys) { println(keys[i], \"=\", counts[i]); }\n        println(\"distinct=\", length(keys));\n        println(\"most=\", keys[bestAt], \" (\", counts[bestAt], \")\");\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    }
+  ]
+}
