@@ -2094,6 +2094,23 @@ def first_differing_line(expected: str, observed: str) -> str:
     return f"line counts differ: expected {len(exp_lines)}, observed {len(got_lines)}"
 
 
+def append_trailing_newline_note(detail: str, expected_stdout: str, observed_stdout: str) -> str:
+    """Note a trailing-newline delta riding along with a content mismatch.
+
+    The token and diff branches both work on text with trailing newlines
+    stripped, so without this the delta stays invisible until the content is
+    fixed and the whitespace-only branch finally sees it a round later.
+    """
+    exp_count = count_trailing_newlines(expected_stdout)
+    got_count = count_trailing_newlines(observed_stdout)
+    if exp_count == got_count:
+        return detail
+    separator = "\n" if "\n" in detail else "; "
+    return detail + (
+        f"{separator}(also: trailing newlines differ — expected {exp_count}, observed {got_count})"
+    )
+
+
 def describe_stdout_mismatch(expected_stdout: str, observed_stdout: str) -> str:
     # Whitespace-only differences must be named explicitly before anything
     # strips or tokenizes the text: both sides render identically in a repair
@@ -2142,7 +2159,7 @@ def describe_stdout_mismatch(expected_stdout: str, observed_stdout: str) -> str:
             detail += f"; unexpected: {','.join(extra[:20])}"
         if not missing and not extra:
             detail += "; same tokens, different order/positions"
-        return detail
+        return append_trailing_newline_note(detail, expected_stdout, observed_stdout)
     diff_lines = list(
         difflib.unified_diff(
             expected.splitlines(),
@@ -2154,15 +2171,7 @@ def describe_stdout_mismatch(expected_stdout: str, observed_stdout: str) -> str:
     )
     if diff_lines:
         detail = "stdout_mismatch:\n" + "\n".join(diff_lines[:40])
-        # The diff above is computed on text with trailing newlines stripped, so
-        # note any trailing-newline delta that rides along with a content diff.
-        exp_count = count_trailing_newlines(expected_stdout)
-        got_count = count_trailing_newlines(observed_stdout)
-        if exp_count != got_count:
-            detail += (
-                f"\n(also: trailing newlines differ — expected {exp_count}, observed {got_count})"
-            )
-        return detail
+        return append_trailing_newline_note(detail, expected_stdout, observed_stdout)
     return "stdout_mismatch"
 
 
