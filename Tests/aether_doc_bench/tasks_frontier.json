@@ -1,5 +1,5 @@
 {
-  "version": "2026-08-09-1",
+  "version": "2026-08-10-2",
   "tasks": [
     {
       "id": "val_checked_ledger",
@@ -148,7 +148,7 @@
         "toon_file",
         "missing_intermediate"
       ],
-      "prompt": "Write an Aether program that reads `fleet.json` with the TOON reader and rolls up the `fleet` array. For each entry print `<id>: cores=<n> mem=<n> tags=<n>` where `mem` comes from a NESTED `spec.mem.gb` that is ABSENT on some entries -- a defaulted getter only protects the final lookup, not the path to it, so guard the intermediate and use 0 when it is missing. `tags` is the length of that entry's tags array. Then print `totals cores=<n> mem=<n> tagged=<count of entries with at least one tag>`.",
+      "prompt": "Write an Aether program that reads `fleet.json` with the TOON reader and rolls up the `fleet` array. The file is already present in the working directory and contains exactly:\n\n    {\"fleet\":[{\"id\":\"a1\",\"spec\":{\"cores\":8,\"mem\":{\"gb\":32}},\"tags\":[\"prod\"]},{\"id\":\"b2\",\"spec\":{\"cores\":4},\"tags\":[]},{\"id\":\"c3\",\"spec\":{\"cores\":16,\"mem\":{\"gb\":128}},\"tags\":[\"prod\",\"gpu\"]}]}\n\nFor each entry print `<id>: cores=<n> mem=<n> tags=<n>`. Note that BOTH `cores` and `mem` live under the entry's `spec` object -- `cores` is `spec.cores` and `mem` is `spec.mem.gb` -- and the `mem` intermediate is ABSENT on some entries. A defaulted getter only protects the final lookup, not the path to it, so make the path safe and use 0 when `mem` is missing. `tags` is the length of that entry's tags array. Then print `totals cores=<n> mem=<n> tagged=<count of entries with at least one tag>`.",
       "expected_stdout": "a1: cores=8 mem=32 tags=1\nb2: cores=4 mem=0 tags=0\nc3: cores=16 mem=128 tags=2\ntotals cores=28 mem=160 tagged=2\n",
       "files": {
         "fleet.json": "{\"fleet\":[{\"id\":\"a1\",\"spec\":{\"cores\":8,\"mem\":{\"gb\":32}},\"tags\":[\"prod\"]},{\"id\":\"b2\",\"spec\":{\"cores\":4},\"tags\":[]},{\"id\":\"c3\",\"spec\":{\"cores\":16,\"mem\":{\"gb\":128}},\"tags\":[\"prod\",\"gpu\"]}]}\n"
