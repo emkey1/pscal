@@ -58,10 +58,51 @@ with `--repeats 3` and report retry rate**, or the signal is invisible.
 `gemini-3.1-flash-lite` spec 11→12 and `gemini-2.5-flash-lite` spec 7→6. Only
 multi-task gaps are real.
 
-**`toon_fleet_rollup` is the most discriminating single task tested.** It failed
-for both lite models and is DeepSeek's only reproducible stumble on the surface
-suite. Nested TOON where the *intermediate* is missing (not the leaf) — worth
-checking whether the guide's guard-the-intermediate advice lands.
+**~~`toon_fleet_rollup` is the most discriminating single task tested.~~
+RETRACTED 2026-08-10 — the task was mis-authored and was measuring schema
+guessing.** Its prompt stated where `mem` lived (`spec.mem.gb`) but never where
+`cores` lived, and `build_prompt` does not put `task.files` in the prompt, so no
+model ever saw `fleet.json`. Singling out `mem` as "NESTED" further implied
+`cores` was top-level. **All 8 models across 3 vendors read `cores` off the entry
+node**, and 4 of them — gemini-3.5-flash, gpt-5-mini, gpt-5.4-nano and
+DeepSeek-V4-Flash — emitted byte-identical wrong output (`cores=0` on every row,
+`mem` correct). Convergence that tight is a prompt defect, not a capability
+signal.
+
+Note what this means for the guide: the nested-`mem` handling the task actually
+set out to test was **correct in every model that compiled**. The guard-the-
+intermediate advice landed. Fixed in manifest `2026-08-10-2` by inlining
+`fleet.json` into the prompt and naming `spec.cores` explicitly; expected_stdout
+and the other 14 tasks are unchanged, so earlier scores stay comparable.
+
+The task did still catch real errors as authored: three models put
+`toon_parse_file` outside an `fx` block (FX-001) and one produced SYN-001.
+
+`spec_league_table` was audited for the same defect and is **clean** — it names
+every field and its nesting, and two models solved it first try — so the spec
+suite's retry-rate findings below stand.
+
+### Verification: both fixes measured separately
+
+`components/aether` was still pinned to guide `2026-08-08-1`, which allowed the
+task fix and the guide fix to be separated instead of confounded. Three models
+that had all produced the identical `cores=0` output, 3 repeats each:
+
+| condition | attempt-0 `cores` right | used `toon_key_or` | attempt-0 exact | repairs |
+|---|---:|---:|---:|---:|
+| original task + old guide *(8 models, 1 each)* | **0/8** | 0/8 | 0/8 | 8 |
+| fixed task + old guide *(3 models × 3)* | **9/9** | 1/9 | 5/9 | 2 |
+| fixed task + new guide *(3 models × 3)* | **9/9** | **9/9** | **8/9** | **0** |
+
+The task fix alone eliminates the schema error outright (0/8 → 9/9). The guide
+fix then takes first-attempt exactness from 5/9 to 8/9 and repairs to zero, with
+every run adopting `toon_key_or` — a documentation change worth ~3 tasks in 9 on
+this one task, which is the size of gap that separated whole model tiers earlier
+in this table.
+
+The one surviving failure in each arm is the same gpt-5-mini habit: a trailing
+`println("")` adding a blank line (FMT-001). All values correct. Unrelated to
+TOON.
 
 ## Gotchas that cost real time
 
@@ -75,3 +116,15 @@ pscal `b80a7d6b9`, but T'Ra's payload cannot yet exploit it.
 
 **Check the model still exists.** `gemini-2.0-flash-lite` 404s; a dead model
 produces a clean-looking 0/12.
+
+**`task.files` is never shown to the model.** `build_prompt` materializes files
+on disk for the *run*, but does not put their contents in the prompt. Any task
+providing a file must therefore state its schema in prose, or the model is
+guessing — and a guess that fails looks exactly like a capability failure. 37 of
+191 tasks provide files; `toon_fleet_rollup` is the one confirmed to have been
+under-specified. When a task provides a file, either inline it (the `tasks_hard`
+convention) or name every field and its nesting.
+
+**Identical wrong output across vendors means the prompt, not the models.** The
+cheapest tell in the whole harness. If two independently-trained models emit the
+same wrong bytes, stop investigating the models.
