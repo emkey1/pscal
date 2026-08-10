@@ -94,11 +94,17 @@ that had all produced the identical `cores=0` output, 3 repeats each:
 | fixed task + old guide *(3 models × 3)* | **9/9** | 1/9 | 5/9 | 2 |
 | fixed task + new guide *(3 models × 3)* | **9/9** | **9/9** | **8/9** | **0** |
 
-The task fix alone eliminates the schema error outright (0/8 → 9/9). The guide
-fix then takes first-attempt exactness from 5/9 to 8/9 and repairs to zero, with
-every run adopting `toon_key_or` — a documentation change worth ~3 tasks in 9 on
-this one task, which is the size of gap that separated whole model tiers earlier
-in this table.
+The task fix alone eliminates the schema error outright and unanimously: 0/8 →
+9/9, every model, every repeat.
+
+For the guide fix the two solid numbers are **adoption 1/9 → 9/9** and **repairs
+2 → 0**. Treat the 5/9 → 8/9 exactness delta as directional only: all three
+recovered runs are the same model (gpt-5.4-nano, 0/3 → 3/3), and its arm-A
+failures were SYN-001 and FX-001 ×2 — syntax and fx-placement, which the NEST-001
+edit does not address. The plausible mechanism is indirect (its arm-A rep0
+*invented* `toon_key_or` unprompted and got SYN-001; the documented snippet gives
+it the real shape), but n=3 in one cell cannot separate that from noise. This
+doc's own "single-run deltas of one task are noise" applies here too.
 
 The one surviving failure in each arm is the same gpt-5-mini habit: a trailing
 `println("")` adding a blank line (FMT-001). All values correct. Unrelated to
