@@ -2068,7 +2068,66 @@ def truncate_for_prompt(text: str, limit: int) -> str:
     return text[:limit] + "\n...[truncated]..."
 
 
+def count_trailing_newlines(text: str) -> int:
+    return len(text) - len(text.rstrip("\n"))
+
+
+def visible_tail(text: str, width: int = 24) -> str:
+    """repr the tail of a string so trailing whitespace is legible in a prompt."""
+    if not text:
+        return "'' (empty)"
+    prefix = "..." if len(text) > width else ""
+    return prefix + repr(text[-width:])
+
+
+def first_differing_line(expected: str, observed: str) -> str:
+    """repr the first line that differs, keeping line endings visible."""
+    exp_lines = expected.splitlines(keepends=True)
+    got_lines = observed.splitlines(keepends=True)
+    for index in range(max(len(exp_lines), len(got_lines))):
+        exp_line = exp_lines[index] if index < len(exp_lines) else None
+        got_line = got_lines[index] if index < len(got_lines) else None
+        if exp_line != got_line:
+            exp_text = "<no such line>" if exp_line is None else repr(exp_line)
+            got_text = "<no such line>" if got_line is None else repr(got_line)
+            return f"first difference at line {index + 1}: expected {exp_text}, observed {got_text}"
+    return f"line counts differ: expected {len(exp_lines)}, observed {len(got_lines)}"
+
+
 def describe_stdout_mismatch(expected_stdout: str, observed_stdout: str) -> str:
+    # Whitespace-only differences must be named explicitly before anything
+    # strips or tokenizes the text: both sides render identically in a repair
+    # prompt, and a unified diff of the stripped strings comes back empty. A
+    # stray trailing println("") used to yield a bare "stdout_mismatch", which
+    # gave the repair round nothing at all to act on.
+    if expected_stdout.rstrip("\n") == observed_stdout.rstrip("\n") and expected_stdout != observed_stdout:
+        exp_count = count_trailing_newlines(expected_stdout)
+        got_count = count_trailing_newlines(observed_stdout)
+        if got_count > exp_count:
+            fix = (
+                f"delete {got_count - exp_count} trailing newline(s) — most likely a stray "
+                'final print/println("") emitting an extra blank line'
+            )
+        else:
+            fix = f"emit {exp_count - got_count} more trailing newline(s) at the end of the output"
+        return (
+            "stdout_mismatch: every character matches except TRAILING NEWLINES. "
+            f"Expected ends with {exp_count} newline character(s), observed ends with {got_count}. "
+            f"expected tail={visible_tail(expected_stdout)} "
+            f"observed tail={visible_tail(observed_stdout)}. "
+            f"Fix: {fix}."
+        )
+
+    if expected_stdout.split() == observed_stdout.split() and expected_stdout != observed_stdout:
+        return (
+            "stdout_mismatch: the non-whitespace content is identical; the ONLY differences are "
+            "WHITESPACE (trailing spaces, blank lines, indentation, or line endings). "
+            f"{first_differing_line(expected_stdout, observed_stdout)}. "
+            f"expected tail={visible_tail(expected_stdout)} "
+            f"observed tail={visible_tail(observed_stdout)}. "
+            "Fix: match the expected spacing exactly."
+        )
+
     expected = expected_stdout.rstrip("\n")
     observed = observed_stdout.rstrip("\n")
     exp_tokens = re.split(r"[,\s]+", expected.strip())
@@ -2094,7 +2153,16 @@ def describe_stdout_mismatch(expected_stdout: str, observed_stdout: str) -> str:
         )
     )
     if diff_lines:
-        return "stdout_mismatch:\n" + "\n".join(diff_lines[:40])
+        detail = "stdout_mismatch:\n" + "\n".join(diff_lines[:40])
+        # The diff above is computed on text with trailing newlines stripped, so
+        # note any trailing-newline delta that rides along with a content diff.
+        exp_count = count_trailing_newlines(expected_stdout)
+        got_count = count_trailing_newlines(observed_stdout)
+        if exp_count != got_count:
+            detail += (
+                f"\n(also: trailing newlines differ — expected {exp_count}, observed {got_count})"
+            )
+        return detail
     return "stdout_mismatch"
 
 
