@@ -1760,6 +1760,45 @@ def run_destination_cleanup(destination: Destination, task: Task, doc_name: str,
         time.sleep(destination.cooldown_seconds)
 
 
+def preflight_destination(destination: Destination) -> tuple[bool, str]:
+    """Confirm a destination can actually answer BEFORE scoring a suite against it.
+
+    Providers keep retired models in their listings, and per-model parameter
+    rules differ, so a misconfigured destination produces a full sweep of
+    failures that reads exactly like a bad model. Both happened in one session:
+
+      * gemini-2.0-flash-lite is retired and 404s -> 0/12
+      * gpt-5-nano/mini reject `stop`, which the chat adapter sends by default,
+        so every request 400'd -> 0/41
+
+    Neither measured anything, and both looked like scores. This sends ONE
+    trivial prompt through the SAME adapter the benchmark will use -- not a
+    hand-built approximation, which is the mistake that let the `stop` rejection
+    through in the first place -- so the model's existence AND the exact request
+    shape are both validated.
+
+    Returns (ok, detail). A failure should skip the destination rather than
+    record N task failures against it.
+
+    `command` destinations are exempt: they are local scripts, not remote
+    providers, so neither failure mode applies -- and the deterministic
+    self-test fake answers only its own known prompts, so probing it with
+    anything else fails by design.
+    """
+    if destination.kind == "command":
+        return True, "skipped (local command destination)"
+    try:
+        result = run_model_with_deadline(
+            "Reply with exactly the word: OK", destination
+        )
+    except Exception as exc:  # provider error, timeout, bad shape -- all disqualifying
+        return False, f"{type(exc).__name__}: {str(exc)[:200]}"
+    text = (result.get("raw_text") or "").strip()
+    if not text:
+        return False, "reply contained no content"
+    return True, text[:40]
+
+
 def run_model(prompt: str, destination: Destination) -> dict[str, Any]:
     if destination.kind == "openai_responses":
         return invoke_openai_responses(prompt=prompt, destination=destination)
@@ -3037,6 +3076,19 @@ def main() -> int:
         persist_report_checkpoint()
 
     for destination in destinations:
+        ok, detail = preflight_destination(destination)
+        if not ok:
+            print(
+                f"[preflight] SKIPPING {destination.destination_id} ({destination.model}): {detail}",
+                file=sys.stderr,
+            )
+            report.setdefault("preflight_failures", []).append({
+                "destination_id": destination.destination_id,
+                "model": destination.model,
+                "detail": detail,
+            })
+            continue
+
         destination_report = {
             "destination_id": destination.destination_id,
             "type": destination.kind,
