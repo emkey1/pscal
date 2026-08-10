@@ -1,0 +1,216 @@
+{
+  "version": "2026-08-10-1",
+  "tasks": [
+    {
+      "id": "algo_topo_sort_cycle",
+      "title": "algo topo sort cycle",
+      "mechanisms": [
+        "frontier",
+        "algo",
+        "graph",
+        "topological",
+        "cycle_detect"
+      ],
+      "prompt": "Write an Aether program that topologically sorts a 6-node DAG (nodes 0..5) whose directed edges are, as parallel from/to arrays, from=[5,5,2,3,3,1] to=[2,0,3,1,0,0]. Use in-degree counting, and when several nodes are simultaneously ready always take the LOWEST-numbered one so the output is deterministic. Print `order:` followed by each node preceded by a space, then on the next line `acyclic=<true|false> placed=<how many nodes were emitted>`.",
+      "expected_stdout": "order: 4 5 2 3 1 0\nacyclic=true placed=6\n",
+      "files": {},
+      "reference_solution": "fn main() -> Void {\n    let n: Int = 6;\n    let fromE: Int[] = [5, 5, 2, 3, 3, 1];\n    let toE: Int[] = [2, 0, 3, 1, 0, 0];\n    let indeg: Int[] = [];\n    loop i in 0..n { indeg = indeg + [0]; }\n    loop e in 0..length(fromE) { indeg[toE[e]] = indeg[toE[e]] + 1; }\n    let order: Int[] = [];\n    let done: Int[] = [];\n    loop i in 0..n { done = done + [0]; }\n    let placed: Int = 0;\n    loop pass in 0..n {\n        let pick: Int = -1;\n        loop v in 0..n {\n            if done[v] == 0 && indeg[v] == 0 {\n                if pick == -1 { pick = v; }\n            }\n        }\n        if pick == -1 {\n            pass = n;\n        } else {\n            done[pick] = 1;\n            order = order + [pick];\n            placed = placed + 1;\n            loop e in 0..length(fromE) {\n                if fromE[e] == pick { indeg[toE[e]] = indeg[toE[e]] - 1; }\n            }\n        }\n    }\n    fx {\n        print(\"order:\");\n        loop i in 0..length(order) { print(\" \", order[i]); }\n        println(\"\");\n        if placed == n { println(\"acyclic=true placed=\", placed); }\n        else { println(\"acyclic=false placed=\", placed); }\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "algo_lcs_reconstruct",
+      "title": "algo lcs reconstruct",
+      "mechanisms": [
+        "frontier",
+        "algo",
+        "dp",
+        "reconstruction"
+      ],
+      "prompt": "Write an Aether program that computes the longest common subsequence of `AGGTAB` and `GXTXAYB`. Report BOTH the length and the actual subsequence -- reconstruct it by walking the DP table back, not by guessing. When the two predecessor cells tie, prefer the one from the row above. Print `len=<n>` then `lcs=<subsequence>`.",
+      "expected_stdout": "len=4\nlcs=GTAB\n",
+      "files": {},
+      "reference_solution": "fn main() -> Void {\n    let a: Text = \"AGGTAB\";\n    let b: Text = \"GXTXAYB\";\n    let m: Int = string_len(a);\n    let n: Int = string_len(b);\n    let dp: Int[][] = [];\n    loop i in 0..(m + 1) {\n        let row: Int[] = [];\n        loop j in 0..(n + 1) { row = row + [0]; }\n        dp = dp + [row];\n    }\n    loop i in 1..(m + 1) {\n        loop j in 1..(n + 1) {\n            if a[i - 1] == b[j - 1] {\n                dp[i][j] = dp[i - 1][j - 1] + 1;\n            } else {\n                if dp[i - 1][j] >= dp[i][j - 1] { dp[i][j] = dp[i - 1][j]; }\n                else { dp[i][j] = dp[i][j - 1]; }\n            }\n        }\n    }\n    let out: Text = \"\";\n    let i: Int = m;\n    let j: Int = n;\n    loop step in 0..(m + n) {\n        if i > 0 && j > 0 {\n            if a[i - 1] == b[j - 1] {\n                out = a[i - 1..i] + out;\n                i = i - 1;\n                j = j - 1;\n            } else {\n                if dp[i - 1][j] >= dp[i][j - 1] { i = i - 1; } else { j = j - 1; }\n            }\n        }\n    }\n    fx {\n        println(\"len=\", dp[m][n]);\n        println(\"lcs=\", out);\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "algo_interval_merge_gaps",
+      "title": "algo interval merge gaps",
+      "mechanisms": [
+        "frontier",
+        "algo",
+        "sort",
+        "merge",
+        "edge_cases"
+      ],
+      "prompt": "Write an Aether program that merges overlapping intervals given as parallel arrays lo=[5,1,12,2,20,13] hi=[7,4,15,6,22,18]. Sort by start, merge overlapping or touching intervals, then report the gaps BETWEEN merged intervals. Print one `merged [<lo>,<hi>]` line per merged interval in order, then one `gap [<end>,<start>] size=<n>` line per gap, then `count=<merged count> covered=<total length covered by merged intervals>`.",
+      "expected_stdout": "merged [1,7]\nmerged [12,18]\nmerged [20,22]\ngap [7,12] size=5\ngap [18,20] size=2\ncount=3 covered=14\n",
+      "files": {},
+      "reference_solution": "fn main() -> Void {\n    let lo: Int[] = [5, 1, 12, 2, 20, 13];\n    let hi: Int[] = [7, 4, 15, 6, 22, 18];\n    loop i in 0..length(lo) {\n        loop j in 0..(length(lo) - 1 - i) {\n            if lo[j] > lo[j + 1] {\n                let tl: Int = lo[j]; lo[j] = lo[j + 1]; lo[j + 1] = tl;\n                let th: Int = hi[j]; hi[j] = hi[j + 1]; hi[j + 1] = th;\n            }\n        }\n    }\n    let ml: Int[] = [];\n    let mh: Int[] = [];\n    loop i in 0..length(lo) {\n        let k: Int = length(ml);\n        if k > 0 && lo[i] <= mh[k - 1] {\n            if hi[i] > mh[k - 1] { mh[k - 1] = hi[i]; }\n        } else {\n            ml = ml + [lo[i]];\n            mh = mh + [hi[i]];\n        }\n    }\n    let covered: Int = 0;\n    loop i in 0..length(ml) { covered = covered + (mh[i] - ml[i]); }\n    fx {\n        loop i in 0..length(ml) { println(\"merged [\", ml[i], \",\", mh[i], \"]\"); }\n        loop i in 1..length(ml) { println(\"gap [\", mh[i - 1], \",\", ml[i], \"] size=\", ml[i] - mh[i - 1]); }\n        println(\"count=\", length(ml), \" covered=\", covered);\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "algo_lru_eviction",
+      "title": "algo lru eviction",
+      "mechanisms": [
+        "frontier",
+        "algo",
+        "cache",
+        "eviction_order"
+      ],
+      "prompt": "Write an Aether program that simulates a capacity-3 LRU cache over the request sequence [1,2,3,1,4,2,5,1,3,4]. On a hit, refresh that key's recency. On a miss when full, evict the least-recently-used key and record it. Print `hits=<n> misses=<n>`, then `evicted:` followed by each evicted key preceded by a space in eviction order, then `resident=<how many keys remain>`.",
+      "expected_stdout": "hits=1 misses=9\nevicted: 2 3 1 4 2 5\nresident=3\n",
+      "files": {},
+      "reference_solution": "fn main() -> Void {\n    let cap: Int = 3;\n    let keys: Int[] = [];\n    let recency: Int[] = [];\n    let clock: Int = 0;\n    let hits: Int = 0;\n    let misses: Int = 0;\n    let evicted: Int[] = [];\n    let reqs: Int[] = [1, 2, 3, 1, 4, 2, 5, 1, 3, 4];\n    loop r in 0..length(reqs) {\n        clock = clock + 1;\n        let k: Int = reqs[r];\n        let at: Int = -1;\n        loop i in 0..length(keys) { if keys[i] == k { at = i; } }\n        if at != -1 {\n            hits = hits + 1;\n            recency[at] = clock;\n        } else {\n            misses = misses + 1;\n            if length(keys) == cap {\n                let victim: Int = 0;\n                loop i in 1..length(keys) { if recency[i] < recency[victim] { victim = i; } }\n                evicted = evicted + [keys[victim]];\n                keys[victim] = k;\n                recency[victim] = clock;\n            } else {\n                keys = keys + [k];\n                recency = recency + [clock];\n            }\n        }\n    }\n    fx {\n        println(\"hits=\", hits, \" misses=\", misses);\n        print(\"evicted:\");\n        loop i in 0..length(evicted) { print(\" \", evicted[i]); }\n        println(\"\");\n        println(\"resident=\", length(keys));\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "algo_union_find_components",
+      "title": "algo union find components",
+      "mechanisms": [
+        "frontier",
+        "algo",
+        "union_find",
+        "components"
+      ],
+      "prompt": "Write an Aether program that unions 10 elements (0..9) over the edge list given as parallel arrays a=[0,1,3,4,6,8,2] b=[1,2,4,5,7,9,0], always attaching the HIGHER root under the LOWER one so results are deterministic. Then report components. Print one `component root=<r> size=<n>` line per component ordered by the lowest member they contain, then `components=<n> merges=<how many unions actually joined two different sets>`, then `largest root=<r> size=<n>` (lowest root wins ties).",
+      "expected_stdout": "component root=0 size=3\ncomponent root=3 size=3\ncomponent root=6 size=2\ncomponent root=8 size=2\ncomponents=4 merges=6\nlargest root=0 size=3\n",
+      "files": {},
+      "reference_solution": "@pure\nfn findRoot(parent: Int[], x: Int) -> Int {\n    let cur: Int = x;\n    loop step in 0..length(parent) {\n        if parent[cur] != cur { cur = parent[cur]; }\n    }\n    ret cur;\n}\nfn main() -> Void {\n    let n: Int = 10;\n    let parent: Int[] = [];\n    loop i in 0..n { parent = parent + [i]; }\n    let ea: Int[] = [0, 1, 3, 4, 6, 8, 2];\n    let eb: Int[] = [1, 2, 4, 5, 7, 9, 0];\n    let merges: Int = 0;\n    loop e in 0..length(ea) {\n        let ra: Int = findRoot(parent, ea[e]);\n        let rb: Int = findRoot(parent, eb[e]);\n        if ra != rb {\n            if ra < rb { parent[rb] = ra; } else { parent[ra] = rb; }\n            merges = merges + 1;\n        }\n    }\n    let roots: Int[] = [];\n    let sizes: Int[] = [];\n    loop v in 0..n {\n        let r: Int = findRoot(parent, v);\n        let at: Int = -1;\n        loop i in 0..length(roots) { if roots[i] == r { at = i; } }\n        if at == -1 { roots = roots + [r]; sizes = sizes + [1]; }\n        else { sizes[at] = sizes[at] + 1; }\n    }\n    let biggest: Int = 0;\n    loop i in 1..length(roots) { if sizes[i] > sizes[biggest] { biggest = i; } }\n    fx {\n        loop i in 0..length(roots) { println(\"component root=\", roots[i], \" size=\", sizes[i]); }\n        println(\"components=\", length(roots), \" merges=\", merges);\n        println(\"largest root=\", roots[biggest], \" size=\", sizes[biggest]);\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "algo_dijkstra_path",
+      "title": "algo dijkstra path",
+      "mechanisms": [
+        "frontier",
+        "algo",
+        "graph",
+        "shortest_path",
+        "reconstruction"
+      ],
+      "prompt": "Write an Aether program that runs Dijkstra from node 0 on an UNDIRECTED 6-node graph whose edges are parallel arrays a=[0,0,1,1,2,2,3,4] b=[1,2,2,3,3,4,5,5] w=[7,9,10,15,11,2,6,9]. Print `dist[<v>]=<d>` for every node 0..5 in order, then reconstruct and print the actual shortest path to node 5 as `path:` followed by each node preceded by a space, then `cost=<d>`.",
+      "expected_stdout": "dist[0]=0\ndist[1]=7\ndist[2]=9\ndist[3]=20\ndist[4]=11\ndist[5]=20\npath: 0 2 4 5\ncost=20\n",
+      "files": {},
+      "reference_solution": "fn main() -> Void {\n    let n: Int = 6;\n    let ea: Int[] = [0, 0, 1, 1, 2, 2, 3, 4];\n    let eb: Int[] = [1, 2, 2, 3, 3, 4, 5, 5];\n    let ew: Int[] = [7, 9, 10, 15, 11, 2, 6, 9];\n    let INF: Int = 999999;\n    let dist: Int[] = [];\n    let prev: Int[] = [];\n    let seen: Int[] = [];\n    loop i in 0..n { dist = dist + [INF]; prev = prev + [-1]; seen = seen + [0]; }\n    dist[0] = 0;\n    loop pass in 0..n {\n        let u: Int = -1;\n        loop v in 0..n {\n            if seen[v] == 0 && dist[v] < INF {\n                if u == -1 { u = v; } else { if dist[v] < dist[u] { u = v; } }\n            }\n        }\n        if u != -1 {\n            seen[u] = 1;\n            loop e in 0..length(ea) {\n                let f: Int = -1;\n                let t: Int = -1;\n                if ea[e] == u { f = ea[e]; t = eb[e]; }\n                if eb[e] == u { f = eb[e]; t = ea[e]; }\n                if f != -1 {\n                    if dist[f] + ew[e] < dist[t] {\n                        dist[t] = dist[f] + ew[e];\n                        prev[t] = f;\n                    }\n                }\n            }\n        }\n    }\n    let path: Int[] = [];\n    let cur: Int = 5;\n    loop step in 0..n {\n        if cur != -1 { path = [cur] + path; cur = prev[cur]; }\n    }\n    fx {\n        loop v in 0..n { println(\"dist[\", v, \"]=\", dist[v]); }\n        print(\"path:\");\n        loop i in 0..length(path) { print(\" \", path[i]); }\n        println(\"\");\n        println(\"cost=\", dist[5]);\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "algo_edit_distance_script",
+      "title": "algo edit distance script",
+      "mechanisms": [
+        "frontier",
+        "algo",
+        "dp",
+        "reconstruction"
+      ],
+      "prompt": "Write an Aether program that computes the Levenshtein distance between `kitten` and `sitting` AND reconstructs the edit script. Print `distance=<n>`, then one line per operation as `<k>: <op>` numbered from 0, where op is `sub <from>-><to>`, `ins <char>` or `del <char>`. Walk the table back from the end; prefer substitution over insertion over deletion when costs tie.",
+      "expected_stdout": "distance=3\n0: sub k->s\n1: sub e->i\n2: ins g\n",
+      "files": {},
+      "reference_solution": "fn main() -> Void {\n    let a: Text = \"kitten\";\n    let b: Text = \"sitting\";\n    let m: Int = string_len(a);\n    let n: Int = string_len(b);\n    let dp: Int[][] = [];\n    loop i in 0..(m + 1) {\n        let row: Int[] = [];\n        loop j in 0..(n + 1) { row = row + [0]; }\n        dp = dp + [row];\n    }\n    loop i in 0..(m + 1) { dp[i][0] = i; }\n    loop j in 0..(n + 1) { dp[0][j] = j; }\n    loop i in 1..(m + 1) {\n        loop j in 1..(n + 1) {\n            if a[i - 1] == b[j - 1] {\n                dp[i][j] = dp[i - 1][j - 1];\n            } else {\n                let best: Int = dp[i - 1][j - 1];\n                if dp[i - 1][j] < best { best = dp[i - 1][j]; }\n                if dp[i][j - 1] < best { best = dp[i][j - 1]; }\n                dp[i][j] = best + 1;\n            }\n        }\n    }\n    let ops: Text[] = [];\n    let i: Int = m;\n    let j: Int = n;\n    loop step in 0..(m + n + 1) {\n        if i > 0 || j > 0 {\n            if i > 0 && j > 0 && a[i - 1] == b[j - 1] {\n                i = i - 1; j = j - 1;\n            } else {\n                if i > 0 && j > 0 && dp[i][j] == dp[i - 1][j - 1] + 1 {\n                    ops = [\"sub \" + a[i - 1..i] + \"->\" + b[j - 1..j]] + ops;\n                    i = i - 1; j = j - 1;\n                } else {\n                    if j > 0 && dp[i][j] == dp[i][j - 1] + 1 {\n                        ops = [\"ins \" + b[j - 1..j]] + ops;\n                        j = j - 1;\n                    } else {\n                        ops = [\"del \" + a[i - 1..i]] + ops;\n                        i = i - 1;\n                    }\n                }\n            }\n        }\n    }\n    fx {\n        println(\"distance=\", dp[m][n]);\n        loop k in 0..length(ops) { println(k, \": \", ops[k]); }\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "algo_sliding_window_max",
+      "title": "algo sliding window max",
+      "mechanisms": [
+        "frontier",
+        "algo",
+        "monotonic_queue"
+      ],
+      "prompt": "Write an Aether program that reports the maximum of every window of size 3 over [1,3,-1,-3,5,3,6,7]. Aether has no deque type, so maintain the monotonic index queue yourself in an array. Print `maxes:` followed by each window maximum preceded by a space, then `windows=<n>`.",
+      "expected_stdout": "maxes: 3 3 5 5 5 7\nwindows=6\n",
+      "files": {},
+      "reference_solution": "fn main() -> Void {\n    let xs: Int[] = [1, 3, -1, -3, 5, 3, 6, 7];\n    let k: Int = 3;\n    let maxes: Int[] = [];\n    let dq: Int[] = [];\n    loop i in 0..length(xs) {\n        loop t in 0..length(dq) {\n            let last: Int = length(dq) - 1;\n            if last >= 0 && xs[dq[last]] <= xs[i] {\n                let nd: Int[] = [];\n                loop z in 0..last { nd = nd + [dq[z]]; }\n                dq = nd;\n            }\n        }\n        dq = dq + [i];\n        if dq[0] <= i - k {\n            let nd2: Int[] = [];\n            loop z in 1..length(dq) { nd2 = nd2 + [dq[z]]; }\n            dq = nd2;\n        }\n        if i >= k - 1 { maxes = maxes + [xs[dq[0]]]; }\n    }\n    fx {\n        print(\"maxes:\");\n        loop i in 0..length(maxes) { print(\" \", maxes[i]); }\n        println(\"\");\n        println(\"windows=\", length(maxes));\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "algo_bracket_validate",
+      "title": "algo bracket validate",
+      "mechanisms": [
+        "frontier",
+        "algo",
+        "stack",
+        "error_position"
+      ],
+      "prompt": "Write an Aether program that validates bracket nesting for each of these strings in order: `([]{})`, `([)]`, `((`, the empty string, `{[()]}`. Handle `()`, `[]` and `{}`. For each input print `<index>: ok` if balanced, `<index>: bad at <position>` for the FIRST position where a closer does not match the innermost opener, or `<index>: unclosed <n>` when the string ends with n openers still unmatched.",
+      "expected_stdout": "0: ok\n1: bad at 2\n2: unclosed 2\n3: ok\n4: ok\n",
+      "files": {},
+      "reference_solution": "@pure\nfn openerFor(c: Text) -> Text {\n    if string_eq(c, \")\") { ret \"(\"; }\n    if string_eq(c, \"]\") { ret \"[\"; }\n    if string_eq(c, \"}\") { ret \"{\"; }\n    ret \"\";\n}\nfn main() -> Void {\n    let samples: Text[] = [\"([]{})\", \"([)]\", \"((\", \"\", \"{[()]}\"];\n    fx {\n        loop s in 0..length(samples) {\n            let str: Text = samples[s];\n            let stack: Text[] = [];\n            let bad: Int = -1;\n            loop i in 0..string_len(str) {\n                if bad == -1 {\n                    let c: Text = str[i..i + 1];\n                    if string_eq(c, \"(\") || string_eq(c, \"[\") || string_eq(c, \"{\") {\n                        stack = stack + [c];\n                    } else {\n                        let want: Text = openerFor(c);\n                        if string_len(want) > 0 {\n                            if length(stack) == 0 { bad = i; }\n                            else {\n                                let top: Text = stack[length(stack) - 1];\n                                if !string_eq(top, want) { bad = i; }\n                                else {\n                                    let ns: Text[] = [];\n                                    loop z in 0..(length(stack) - 1) { ns = ns + [stack[z]]; }\n                                    stack = ns;\n                                }\n                            }\n                        }\n                    }\n                }\n            }\n            if bad != -1 { println(s, \": bad at \", bad); }\n            else {\n                if length(stack) != 0 { println(s, \": unclosed \", length(stack)); }\n                else { println(s, \": ok\"); }\n            }\n        }\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "algo_knapsack_items",
+      "title": "algo knapsack items",
+      "mechanisms": [
+        "frontier",
+        "algo",
+        "dp",
+        "reconstruction"
+      ],
+      "prompt": "Write an Aether program that solves a 0/1 knapsack with capacity 8 over items given as parallel arrays weight=[3,4,5,2] value=[30,50,60,20]. Report the best value AND which items were chosen -- recover the choice by walking the DP table back. Print `best=<v>`, then `items:` followed by each chosen item INDEX preceded by a space in ascending order, then `weight=<used> of <capacity>`.",
+      "expected_stdout": "best=90\nitems: 0 2\nweight=8 of 8\n",
+      "files": {},
+      "reference_solution": "fn main() -> Void {\n    let wt: Int[] = [3, 4, 5, 2];\n    let vl: Int[] = [30, 50, 60, 20];\n    let cap: Int = 8;\n    let n: Int = length(wt);\n    let dp: Int[][] = [];\n    loop i in 0..(n + 1) {\n        let row: Int[] = [];\n        loop c in 0..(cap + 1) { row = row + [0]; }\n        dp = dp + [row];\n    }\n    loop i in 1..(n + 1) {\n        loop c in 0..(cap + 1) {\n            dp[i][c] = dp[i - 1][c];\n            if wt[i - 1] <= c {\n                let take: Int = dp[i - 1][c - wt[i - 1]] + vl[i - 1];\n                if take > dp[i][c] { dp[i][c] = take; }\n            }\n        }\n    }\n    let chosen: Int[] = [];\n    let c: Int = cap;\n    loop step in 0..n {\n        let i: Int = n - step;\n        if i > 0 {\n            if dp[i][c] != dp[i - 1][c] {\n                chosen = [i - 1] + chosen;\n                c = c - wt[i - 1];\n            }\n        }\n    }\n    let usedW: Int = 0;\n    loop k in 0..length(chosen) { usedW = usedW + wt[chosen[k]]; }\n    fx {\n        println(\"best=\", dp[n][cap]);\n        print(\"items:\");\n        loop k in 0..length(chosen) { print(\" \", chosen[k]); }\n        println(\"\");\n        println(\"weight=\", usedW, \" of \", cap);\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "algo_bignum_add",
+      "title": "algo bignum add",
+      "mechanisms": [
+        "frontier",
+        "algo",
+        "digit_array",
+        "carry"
+      ],
+      "prompt": "Aether Int cannot hold these values, so do the arithmetic on digit arrays. Write an Aether program that adds `987654321987654321` and `123456789123456789` digit by digit with carry, starting from the least significant end. Print `digits=<how many digits the sum has>` then `sum=<the sum as a string>`.",
+      "expected_stdout": "digits=19\nsum=1111111111111111110\n",
+      "files": {},
+      "reference_solution": "@pure\nfn digitsOf(s: Text) -> Int[] {\n    let out: Int[] = [];\n    loop i in 0..string_len(s) { out = out + [ord(s[i]) - 48]; }\n    ret out;\n}\n@pure\nfn addBig(a: Int[], b: Int[]) -> Int[] {\n    let out: Int[] = [];\n    let carry: Int = 0;\n    let ia: Int = length(a) - 1;\n    let ib: Int = length(b) - 1;\n    let steps: Int = length(a);\n    if length(b) > steps { steps = length(b); }\n    loop k in 0..steps {\n        let da: Int = 0;\n        let db: Int = 0;\n        if ia - k >= 0 { da = a[ia - k]; }\n        if ib - k >= 0 { db = b[ib - k]; }\n        let s: Int = da + db + carry;\n        carry = s / 10;\n        if s >= 10 { carry = 1; } else { carry = 0; }\n        out = [s % 10] + out;\n    }\n    if carry > 0 { out = [carry] + out; }\n    ret out;\n}\nfn main() -> Void {\n    let x: Int[] = digitsOf(\"987654321987654321\");\n    let y: Int[] = digitsOf(\"123456789123456789\");\n    let s: Int[] = addBig(x, y);\n    let txt: Text = \"\";\n    loop i in 0..length(s) { txt = txt + int_to_text(s[i]); }\n    fx {\n        println(\"digits=\", length(s));\n        println(\"sum=\", txt);\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "algo_binary_search_bounds",
+      "title": "algo binary search bounds",
+      "mechanisms": [
+        "frontier",
+        "algo",
+        "binary_search",
+        "duplicates"
+      ],
+      "prompt": "Write an Aether program with two pure helpers over the SORTED array [1,2,2,2,5,7,7,9]: one returning the first index where a target could be inserted keeping order, and one returning the index just past the last occurrence. Both must be binary searches, not linear scans. For each probe in [2,7,3,0,9] print `<target>: lb=<n> ub=<n> count=<ub-lb>`.",
+      "expected_stdout": "2: lb=1 ub=4 count=3\n7: lb=5 ub=7 count=2\n3: lb=4 ub=4 count=0\n0: lb=0 ub=0 count=0\n9: lb=7 ub=8 count=1\n",
+      "files": {},
+      "reference_solution": "@pure\nfn lowerBound(xs: Int[], target: Int) -> Int {\n    let lo: Int = 0;\n    let hi: Int = length(xs);\n    loop step in 0..length(xs) {\n        if lo < hi {\n            let mid: Int = lo + (hi - lo) / 2;\n            if xs[mid] < target { lo = mid + 1; } else { hi = mid; }\n        }\n    }\n    ret lo;\n}\n@pure\nfn upperBound(xs: Int[], target: Int) -> Int {\n    let lo: Int = 0;\n    let hi: Int = length(xs);\n    loop step in 0..length(xs) {\n        if lo < hi {\n            let mid: Int = lo + (hi - lo) / 2;\n            if xs[mid] <= target { lo = mid + 1; } else { hi = mid; }\n        }\n    }\n    ret lo;\n}\nfn main() -> Void {\n    let xs: Int[] = [1, 2, 2, 2, 5, 7, 7, 9];\n    let probes: Int[] = [2, 7, 3, 0, 9];\n    fx {\n        loop i in 0..length(probes) {\n            let t: Int = probes[i];\n            let lb: Int = lowerBound(xs, t);\n            let ub: Int = upperBound(xs, t);\n            println(t, \": lb=\", lb, \" ub=\", ub, \" count=\", ub - lb);\n        }\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "algo_merge_k_sorted",
+      "title": "algo merge k sorted",
+      "mechanisms": [
+        "frontier",
+        "algo",
+        "k_way_merge"
+      ],
+      "prompt": "Write an Aether program that merges THREE sorted arrays [1,4,9], [2,3,10,11] and [5,6] into one sorted array by repeatedly taking the smallest available head -- do not concatenate and sort. Print `merged:` followed by each value preceded by a space, then `len=<n> sorted=<true|false>` where the flag is computed by verifying the result is non-decreasing.",
+      "expected_stdout": "merged: 1 2 3 4 5 6 9 10 11\nlen=9 sorted=true\n",
+      "files": {},
+      "reference_solution": "fn main() -> Void {\n    let la: Int[] = [1, 4, 9];\n    let lb: Int[] = [2, 3, 10, 11];\n    let lc: Int[] = [5, 6];\n    let ia: Int = 0;\n    let ib: Int = 0;\n    let ic: Int = 0;\n    let out: Int[] = [];\n    let total: Int = length(la) + length(lb) + length(lc);\n    let BIG: Int = 999999;\n    loop step in 0..total {\n        let va: Int = BIG;\n        let vb: Int = BIG;\n        let vc: Int = BIG;\n        if ia < length(la) { va = la[ia]; }\n        if ib < length(lb) { vb = lb[ib]; }\n        if ic < length(lc) { vc = lc[ic]; }\n        if va <= vb && va <= vc { out = out + [va]; ia = ia + 1; }\n        else {\n            if vb <= vc { out = out + [vb]; ib = ib + 1; }\n            else { out = out + [vc]; ic = ic + 1; }\n        }\n    }\n    let sorted: Bool = true;\n    loop i in 1..length(out) { if out[i] < out[i - 1] { sorted = false; } }\n    fx {\n        print(\"merged:\");\n        loop i in 0..length(out) { print(\" \", out[i]); }\n        println(\"\");\n        println(\"len=\", length(out), \" sorted=\", sorted);\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "algo_record_pipeline",
+      "title": "algo record pipeline",
+      "mechanisms": [
+        "frontier",
+        "algo",
+        "multi_constraint",
+        "long_program"
+      ],
+      "prompt": "Write an Aether program that runs a full pipeline over parallel arrays names=[\"ada\",\"bob\",\"cy\",\"dee\",\"eve\"] and raw scores [\"93\",\"71\",\"x8\",\"60\",\"88\"]. Reject any score that is not entirely numeric (validate it -- a parse that returns 0 for junk cannot tell you). Build a record per surviving row with name, score and a band (A>=90, B>=75, C>=60, else D). Sort records by score DESCENDING. Then tally how many records fall in each band, in the order the bands first appear in the sorted list. Print `<i>: <name> <score> <band>` per record, then `band <B>=<count>` per band, then `kept=<n> rejected=<n> mean=<mean score to 2 decimals>`.",
+      "expected_stdout": "0: ada 93 A\n1: eve 88 B\n2: bob 71 C\n3: dee 60 C\nband A=1\nband B=1\nband C=2\nkept=4 rejected=1 mean=78.00\n",
+      "files": {},
+      "reference_solution": "type Rec { name: Text = \"\"; score: Int = 0; band: Text = \"\"; }\n\n@pure\nfn bandFor(score: Int) -> Text {\n    if score >= 90 { ret \"A\"; }\n    if score >= 75 { ret \"B\"; }\n    if score >= 60 { ret \"C\"; }\n    ret \"D\";\n}\n@pure\nfn parseScore(raw: Text) -> Int {\n    let n: Int = 0;\n    let code: Int = 0;\n    val(raw, n, code);\n    if code != 0 { ret -1; }\n    ret n;\n}\nfn main() -> Void {\n    let names: Text[] = [\"ada\", \"bob\", \"cy\", \"dee\", \"eve\"];\n    let raws: Text[] = [\"93\", \"71\", \"x8\", \"60\", \"88\"];\n    let recs: Rec[] = [];\n    let rejected: Int = 0;\n    loop i in 0..length(names) {\n        let s: Int = parseScore(raws[i]);\n        if s == -1 { rejected = rejected + 1; }\n        else { recs = recs + [new Rec { name: names[i], score: s, band: bandFor(s) }]; }\n    }\n    loop i in 0..length(recs) {\n        loop j in 0..(length(recs) - 1 - i) {\n            if recs[j].score < recs[j + 1].score {\n                let t: Rec = recs[j];\n                recs[j] = recs[j + 1];\n                recs[j + 1] = t;\n            }\n        }\n    }\n    let bands: Text[] = [];\n    let counts: Int[] = [];\n    loop i in 0..length(recs) {\n        let at: Int = -1;\n        loop k in 0..length(bands) { if string_eq(bands[k], recs[i].band) { at = k; } }\n        if at == -1 { bands = bands + [recs[i].band]; counts = counts + [1]; }\n        else { counts[at] = counts[at] + 1; }\n    }\n    let total: Int = 0;\n    loop i in 0..length(recs) { total = total + recs[i].score; }\n    fx {\n        loop i in 0..length(recs) {\n            println(i, \": \", recs[i].name, \" \", recs[i].score, \" \", recs[i].band);\n        }\n        loop k in 0..length(bands) { println(\"band \", bands[k], \"=\", counts[k]); }\n        println(\"kept=\", length(recs), \" rejected=\", rejected,\n                \" mean=\", formatfloat(total / length(recs), 2));\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    }
+  ]
+}

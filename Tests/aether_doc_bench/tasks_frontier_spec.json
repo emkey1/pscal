@@ -1,0 +1,186 @@
+{
+  "version": "2026-08-10-1",
+  "tasks": [
+    {
+      "id": "spec_league_table",
+      "title": "spec league table",
+      "mechanisms": [
+        "frontier",
+        "spec_density",
+        "toon",
+        "competition_rank"
+      ],
+      "prompt": "Write an Aether program that reads `league.json` with the TOON reader and produces a league table. For each team compute `pts = won * 3 + drawn`, and from the NESTED `stats` object take `gf` and `ga`, defaulting either to 0 when absent -- note the `stats` object itself is present on every team but `ga` is missing on one, and a defaulted getter only protects the final lookup, not the path to it. Goal difference is `gf - ga`.\n\nSort teams by: points descending, then goal difference descending, then goals-for descending, then name ascending (alphabetical).\n\nAssign COMPETITION ranks: teams identical on all three of points, goal difference and goals-for share a rank, and the next distinct team takes the rank equal to its 1-based position in the sorted list -- so two teams tied at rank 2 are followed by rank 4, not 3.\n\nPrint one line per team in sorted order as `<rank>. <name> pts=<p> gd=<d> gf=<f>`, then a final line `teams=<n> tiedPairs=<t> topRank=<r>` where tiedPairs counts adjacent pairs in the sorted list sharing a rank, and topRank is the rank of the first row.",
+      "expected_stdout": "1. delta pts=20 gd=7 gf=18\n2. alpha pts=20 gd=7 gf=15\n2. bravo pts=20 gd=7 gf=15\n4. echo pts=16 gd=12 gf=12\n5. charlie pts=9 gd=-13 gf=7\nteams=5 tiedPairs=1 topRank=1\n",
+      "files": {
+        "league.json": "{\"teams\":[\n{\"name\":\"delta\",\"played\":10,\"won\":6,\"drawn\":2,\"stats\":{\"gf\":18,\"ga\":11}},\n{\"name\":\"alpha\",\"played\":10,\"won\":6,\"drawn\":2,\"stats\":{\"gf\":15,\"ga\":8}},\n{\"name\":\"echo\",\"played\":10,\"won\":4,\"drawn\":4,\"stats\":{\"gf\":12}},\n{\"name\":\"bravo\",\"played\":10,\"won\":6,\"drawn\":2,\"stats\":{\"gf\":15,\"ga\":8}},\n{\"name\":\"charlie\",\"played\":10,\"won\":2,\"drawn\":3,\"stats\":{\"gf\":7,\"ga\":20}}\n]}\n"
+      },
+      "reference_solution": "type Row {\n    name: Text = \"\";\n    pts: Int = 0;\n    gd: Int = 0;\n    gf: Int = 0;\n    rank: Int = 0;\n}\nfn main() -> Void {\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"league.json\"); }\n    let root: ToonNode = toon_root(doc);\n    let teams: ToonNode = toon_key(root, \"teams\");\n    let rows: Row[] = [];\n    fx {\n        loop i in 0..toon_len(teams) {\n            let t: ToonNode = toon_at(teams, i);\n            let nm: Text = toon_get_text_or(t, \"name\", \"?\");\n            let won: Int = toon_get_int_or(t, \"won\", 0);\n            let drawn: Int = toon_get_int_or(t, \"drawn\", 0);\n            let gf: Int = 0;\n            let ga: Int = 0;\n            if toon_has_key(t, \"stats\") {\n                let st: ToonNode = toon_key(t, \"stats\");\n                gf = toon_get_int_or(st, \"gf\", 0);\n                ga = toon_get_int_or(st, \"ga\", 0);\n            }\n            rows = rows + [new Row { name: nm, pts: won * 3 + drawn, gd: gf - ga, gf: gf, rank: 0 }];\n        }\n        toon_close(doc);\n    }\n    loop i in 0..length(rows) {\n        loop j in 0..(length(rows) - 1 - i) {\n            let a: Row = rows[j];\n            let b: Row = rows[j + 1];\n            let swap: Bool = false;\n            if b.pts > a.pts { swap = true; }\n            if b.pts == a.pts {\n                if b.gd > a.gd { swap = true; }\n                if b.gd == a.gd {\n                    if b.gf > a.gf { swap = true; }\n                    if b.gf == a.gf {\n                        if b.name < a.name { swap = true; }\n                    }\n                }\n            }\n            if swap { rows[j] = b; rows[j + 1] = a; }\n        }\n    }\n    let rank: Int = 1;\n    loop i in 0..length(rows) {\n        if i > 0 {\n            let p: Row = rows[i - 1];\n            let c: Row = rows[i];\n            if c.pts != p.pts || c.gd != p.gd || c.gf != p.gf { rank = i + 1; }\n        }\n        rows[i].rank = rank;\n    }\n    fx {\n        loop i in 0..length(rows) {\n            println(rows[i].rank, \". \", rows[i].name, \" pts=\", rows[i].pts,\n                    \" gd=\", rows[i].gd, \" gf=\", rows[i].gf);\n        }\n    }\n    let tied: Int = 0;\n    loop i in 1..length(rows) { if rows[i].rank == rows[i - 1].rank { tied = tied + 1; } }\n    fx { println(\"teams=\", length(rows), \" tiedPairs=\", tied, \" topRank=\", rows[0].rank); }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "spec_tokenizer_positions",
+      "title": "spec tokenizer positions",
+      "mechanisms": [
+        "frontier",
+        "spec_density",
+        "tokenizer",
+        "one_based"
+      ],
+      "prompt": "Write an Aether program that tokenizes this exact source text, held in a single Text literal:\n\n    set x = 12; # note\\nsay \"hi there\"; say \"bad\n\n(that is, one embedded newline before `say`, and the final string is never closed).\n\nRules. Lines and columns are BOTH 1-based; column resets to 1 after a newline. Spaces separate tokens and advance the column. A `#` starts a comment that runs to the end of the line and emits nothing. A double quote starts a string token whose reported column is that of the OPENING QUOTE, whose value excludes both quotes, and which ends at the next double quote; a string that reaches end-of-input unclosed emits NO token but is counted. A `;` is its own token of kind `semi`. Any other run of characters up to a space, `;`, newline, `#` or quote is a token of kind `word`.\n\nPrint one line per emitted token as `<line>:<col> <kind> '<value>'` in source order, then `tokens=<n> unterminated=<n>`.",
+      "expected_stdout": "1:1 word 'set'\n1:5 word 'x'\n1:7 word '='\n1:9 word '12'\n1:11 semi ';'\n2:1 word 'say'\n2:5 str 'hi there'\n2:15 semi ';'\n2:17 word 'say'\ntokens=9 unterminated=1\n",
+      "files": {},
+      "reference_solution": "fn main() -> Void {\n    let src: Text = \"set x = 12; # note\\nsay \\\"hi there\\\"; say \\\"bad\";\n    let kinds: Text[] = [];\n    let vals: Text[] = [];\n    let cols: Int[] = [];\n    let lines: Int[] = [];\n    let line: Int = 1;\n    let col: Int = 1;\n    let i: Int = 0;\n    let unterminated: Int = 0;\n    loop guard in 0..string_len(src) {\n        if i < string_len(src) {\n            let c: Text = src[i..i + 1];\n            if string_eq(c, \"\\n\") { line = line + 1; col = 1; i = i + 1; }\n            else {\n                if string_eq(c, \" \") { col = col + 1; i = i + 1; }\n                else {\n                    if string_eq(c, \"#\") {\n                        loop k in i..string_len(src) {\n                            if i < string_len(src) && !string_eq(src[i..i + 1], \"\\n\") { i = i + 1; col = col + 1; }\n                        }\n                    } else {\n                        if string_eq(c, \"\\\"\") {\n                            let startCol: Int = col;\n                            let startLine: Int = line;\n                            let body: Text = \"\";\n                            let closed: Bool = false;\n                            i = i + 1; col = col + 1;\n                            loop k in i..string_len(src) {\n                                if !closed && i < string_len(src) {\n                                    let d: Text = src[i..i + 1];\n                                    if string_eq(d, \"\\\"\") { closed = true; i = i + 1; col = col + 1; }\n                                    else { body = body + d; i = i + 1; col = col + 1; }\n                                }\n                            }\n                            if closed {\n                                kinds = kinds + [\"str\"]; vals = vals + [body];\n                                cols = cols + [startCol]; lines = lines + [startLine];\n                            } else { unterminated = unterminated + 1; }\n                        } else {\n                            if string_eq(c, \";\") {\n                                kinds = kinds + [\"semi\"]; vals = vals + [\";\"];\n                                cols = cols + [col]; lines = lines + [line];\n                                i = i + 1; col = col + 1;\n                            } else {\n                                let startCol2: Int = col;\n                                let word: Text = \"\";\n                                loop k in i..string_len(src) {\n                                    if i < string_len(src) {\n                                        let e: Text = src[i..i + 1];\n                                        if !string_eq(e, \" \") && !string_eq(e, \";\") && !string_eq(e, \"\\n\") && !string_eq(e, \"#\") && !string_eq(e, \"\\\"\") {\n                                            word = word + e; i = i + 1; col = col + 1;\n                                        }\n                                    }\n                                }\n                                if string_len(word) > 0 {\n                                    kinds = kinds + [\"word\"]; vals = vals + [word];\n                                    cols = cols + [startCol2]; lines = lines + [line];\n                                }\n                            }\n                        }\n                    }\n                }\n            }\n        }\n    }\n    fx {\n        loop k in 0..length(kinds) {\n            println(lines[k], \":\", cols[k], \" \", kinds[k], \" '\", vals[k], \"'\");\n        }\n        println(\"tokens=\", length(kinds), \" unterminated=\", unterminated);\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "spec_ledger_rounding",
+      "title": "spec ledger rounding",
+      "mechanisms": [
+        "frontier",
+        "spec_density",
+        "rounding",
+        "fixed_point"
+      ],
+      "prompt": "Write an Aether program that posts a ledger whose amounts arrive in TENTHS of a cent: labels [\"open\",\"fee\",\"refund\",\"adj\",\"close\"] with values [125000, -3335, 22225, -1, -50005].\n\nRound each amount to whole cents using HALF-UP AWAY FROM ZERO: a remainder of exactly 5 tenths rounds away from zero in both directions, so -3335 becomes -334 cents and 22225 becomes 2223 cents. Do not use floating point -- these are exact integer amounts.\n\nMaintain a running balance in cents. Format every amount as a decimal with exactly two fractional digits, zero-padded (so 7 cents prints as `0.07`), and render NEGATIVE amounts in parentheses with no minus sign, e.g. `(3.34)`.\n\nPrint one line per entry as `<label> <amount> bal=<balance>`, then `posted=<n> of <total> final=<balance>` where posted counts entries whose ROUNDED amount is non-zero.",
+      "expected_stdout": "open 125.00 bal=125.00\nfee (3.34) bal=121.66\nrefund 22.23 bal=143.89\nadj 0.00 bal=143.89\nclose (50.01) bal=93.88\nposted=4 of 5 final=93.88\n",
+      "files": {},
+      "reference_solution": "@pure\nfn roundHalfUp(cents10: Int) -> Int {\n    let neg: Bool = cents10 < 0;\n    let v: Int = cents10;\n    if neg { v = 0 - v; }\n    let q: Int = v / 10;\n    let r: Int = v - q * 10;\n    if r >= 5 { q = q + 1; }\n    if neg { ret 0 - q; }\n    ret q;\n}\n@pure\nfn money(cents: Int) -> Text {\n    let neg: Bool = cents < 0;\n    let v: Int = cents;\n    if neg { v = 0 - v; }\n    let whole: Int = v / 100;\n    let frac: Int = v - whole * 100;\n    let fs: Text = int_to_text(frac);\n    if frac < 10 { fs = \"0\" + fs; }\n    let body: Text = int_to_text(whole) + \".\" + fs;\n    if neg { ret \"(\" + body + \")\"; }\n    ret body;\n}\nfn main() -> Void {\n    let labels: Text[] = [\"open\", \"fee\", \"refund\", \"adj\", \"close\"];\n    let tenths: Int[] = [125000, -3335, 22225, -1, -50005];\n    let bal: Int = 0;\n    let posted: Int = 0;\n    fx {\n        loop i in 0..length(labels) {\n            let c: Int = roundHalfUp(tenths[i]);\n            bal = bal + c;\n            if c != 0 { posted = posted + 1; }\n            println(labels[i], \" \", money(c), \" bal=\", money(bal));\n        }\n        println(\"posted=\", posted, \" of \", length(labels), \" final=\", money(bal));\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "spec_luhn_checksum",
+      "title": "spec luhn checksum",
+      "mechanisms": [
+        "frontier",
+        "spec_density",
+        "checksum",
+        "index_parity"
+      ],
+      "prompt": "Write an Aether program that validates card numbers with the Luhn checksum. Strip any character that is not a digit. Then, counting from the RIGHTMOST digit as position 0, double every digit at an ODD position; if a doubled value exceeds 9 subtract 9 from it. Sum all digits and the number is valid when the total is divisible by 10. Note the doubling starts from the right, not the left, so it depends on the length. Validate these four in order: `4539 1488 0343 6467`, `8273 1232 7352 0569`, `79927398713`, `79927398710`. Print `<index>: len=<digitcount> valid=<true|false>` per input.",
+      "expected_stdout": "0: len=16 valid=true\n1: len=16 valid=false\n2: len=11 valid=true\n3: len=11 valid=false\n",
+      "files": {},
+      "reference_solution": "@pure\nfn luhnValid(digits: Int[]) -> Bool {\n    let sum: Int = 0;\n    let n: Int = length(digits);\n    loop k in 0..n {\n        let idx: Int = n - 1 - k;\n        let d: Int = digits[idx];\n        if k % 2 == 1 {\n            d = d * 2;\n            if d > 9 { d = d - 9; }\n        }\n        sum = sum + d;\n    }\n    ret sum % 10 == 0;\n}\n@pure\nfn toDigits(s: Text) -> Int[] {\n    let out: Int[] = [];\n    loop i in 0..string_len(s) {\n        let c: Int = ord(s[i]);\n        if c >= 48 && c <= 57 { out = out + [c - 48]; }\n    }\n    ret out;\n}\nfn main() -> Void {\n    let cards: Text[] = [\"4539 1488 0343 6467\", \"8273 1232 7352 0569\", \"79927398713\", \"79927398710\"];\n    fx {\n        loop i in 0..length(cards) {\n            let d: Int[] = toDigits(cards[i]);\n            let ok: Bool = luhnValid(d);\n            println(i, \": len=\", length(d), \" valid=\", ok);\n        }\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "spec_histogram_bins",
+      "title": "spec histogram bins",
+      "mechanisms": [
+        "frontier",
+        "spec_density",
+        "half_open_bins",
+        "boundary"
+      ],
+      "prompt": "Write an Aether program that bins [0,5,10,15,20,25,30,9,10,29,30] into 3 bins of width 10 starting at 0. Bins are HALF-OPEN `[lo, lo+10)` so a value exactly on a boundary belongs to the UPPER bin -- except the final bin, which is CLOSED `[20,30]` so that 30 lands inside it rather than falling out. Count anything below 0 or above 30 as outside. Print one line per bin as `[<lo>,<hi><closer> <count> <bar>` where closer is `)` for every bin except the last, which uses `]`, and bar is that many `#` characters. Note there is a single space before the bar. Finish with `outside=<n> total=<n>`.",
+      "expected_stdout": "[0,10) 3 ###\n[10,20) 3 ###\n[20,30] 5 #####\noutside=0 total=11\n",
+      "files": {},
+      "reference_solution": "fn main() -> Void {\n    let vals: Int[] = [0, 5, 10, 15, 20, 25, 30, 9, 10, 29, 30];\n    let lo: Int = 0;\n    let width: Int = 10;\n    let nbins: Int = 3;\n    let counts: Int[] = [];\n    loop b in 0..nbins { counts = counts + [0]; }\n    let outside: Int = 0;\n    loop i in 0..length(vals) {\n        let v: Int = vals[i];\n        let b: Int = (v - lo) / width;\n        if v == lo + width * nbins { b = nbins - 1; }\n        if v < lo || v > lo + width * nbins { outside = outside + 1; }\n        else { counts[b] = counts[b] + 1; }\n    }\n    fx {\n        loop b in 0..nbins {\n            let a: Int = lo + b * width;\n            let z: Int = a + width;\n            let closer: Text = \")\";\n            if b == nbins - 1 { closer = \"]\"; }\n            print(\"[\", a, \",\", z, closer, \" \", counts[b], \" \");\n            loop k in 0..counts[b] { print(\"#\"); }\n            println(\"\");\n        }\n        println(\"outside=\", outside, \" total=\", length(vals));\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "spec_duration_phrase",
+      "title": "spec duration phrase",
+      "mechanisms": [
+        "frontier",
+        "spec_density",
+        "pluralization",
+        "list_join"
+      ],
+      "prompt": "Write an Aether program that renders these second counts as English durations: [0, 1, 61, 3661, 90061, 7200, 86400]. Break into days, hours, minutes and seconds. OMIT any unit whose value is zero -- except that zero seconds overall must render as exactly `0 seconds`. Pluralize each unit (`1 hour`, `2 hours`). Join the parts with `, ` except the final pair, which is joined with ` and ` -- and with exactly two parts that means only ` and `, no comma. Print `<seconds> -> <phrase>` per input.",
+      "expected_stdout": "0 -> 0 seconds\n1 -> 1 second\n61 -> 1 minute and 1 second\n3661 -> 1 hour, 1 minute and 1 second\n90061 -> 1 day, 1 hour, 1 minute and 1 second\n7200 -> 2 hours\n86400 -> 1 day\n",
+      "files": {},
+      "reference_solution": "@pure\nfn plural(n: Int, unit: Text) -> Text {\n    if n == 1 { ret int_to_text(n) + \" \" + unit; }\n    ret int_to_text(n) + \" \" + unit + \"s\";\n}\n@pure\nfn fmt(total: Int) -> Text {\n    if total == 0 { ret \"0 seconds\"; }\n    let d: Int = total / 86400;\n    let rem: Int = total - d * 86400;\n    let h: Int = rem / 3600;\n    rem = rem - h * 3600;\n    let m: Int = rem / 60;\n    let s: Int = rem - m * 60;\n    let parts: Text[] = [];\n    if d > 0 { parts = parts + [plural(d, \"day\")]; }\n    if h > 0 { parts = parts + [plural(h, \"hour\")]; }\n    if m > 0 { parts = parts + [plural(m, \"minute\")]; }\n    if s > 0 { parts = parts + [plural(s, \"second\")]; }\n    let out: Text = \"\";\n    loop i in 0..length(parts) {\n        if i == 0 { out = parts[i]; }\n        else {\n            if i == length(parts) - 1 { out = out + \" and \" + parts[i]; }\n            else { out = out + \", \" + parts[i]; }\n        }\n    }\n    ret out;\n}\nfn main() -> Void {\n    let secs: Int[] = [0, 1, 61, 3661, 90061, 7200, 86400];\n    fx {\n        loop i in 0..length(secs) { println(secs[i], \" -> \", fmt(secs[i])); }\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "spec_leap_year_rules",
+      "title": "spec leap year rules",
+      "mechanisms": [
+        "frontier",
+        "spec_density",
+        "calendar",
+        "divisibility_order"
+      ],
+      "prompt": "Write an Aether program that applies the Gregorian leap rule: a year is a leap year when divisible by 400, OR divisible by 4 but NOT by 100 -- so 1900 is not a leap year while 2000 is. The order of those tests matters. For each of [1900, 2000, 2024, 2023, 2100] print `<year>-03-01 leap=<true|false> feb=<days in February> doy=<day-of-year number for 1 March>`, where day-of-year counts 1 January as 1.",
+      "expected_stdout": "1900-03-01 leap=false feb=28 doy=60\n2000-03-01 leap=true feb=29 doy=61\n2024-03-01 leap=true feb=29 doy=61\n2023-03-01 leap=false feb=28 doy=60\n2100-03-01 leap=false feb=28 doy=60\n",
+      "files": {},
+      "reference_solution": "@pure\nfn isLeap(y: Int) -> Bool {\n    if y % 400 == 0 { ret true; }\n    if y % 100 == 0 { ret false; }\n    if y % 4 == 0 { ret true; }\n    ret false;\n}\n@pure\nfn daysInMonth(y: Int, m: Int) -> Int {\n    if m == 2 { if isLeap(y) { ret 29; } ret 28; }\n    if m == 4 || m == 6 || m == 9 || m == 11 { ret 30; }\n    ret 31;\n}\n@pure\nfn dayOfYear(y: Int, m: Int, d: Int) -> Int {\n    let n: Int = d;\n    loop k in 1..m { n = n + daysInMonth(y, k); }\n    ret n;\n}\nfn main() -> Void {\n    let ys: Int[] = [1900, 2000, 2024, 2023, 2100];\n    let ms: Int[] = [3, 3, 3, 3, 3];\n    let ds: Int[] = [1, 1, 1, 1, 1];\n    fx {\n        loop i in 0..length(ys) {\n            println(ys[i], \"-03-01 leap=\", isLeap(ys[i]),\n                    \" feb=\", daysInMonth(ys[i], 2),\n                    \" doy=\", dayOfYear(ys[i], ms[i], ds[i]));\n        }\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "spec_greedy_wrap",
+      "title": "spec greedy wrap",
+      "mechanisms": [
+        "frontier",
+        "spec_density",
+        "text_layout"
+      ],
+      "prompt": "Write an Aether program that greedily wraps the word list [\"the\",\"quick\",\"brown\",\"fox\",\"jumped\",\"over\",\"lazy\",\"dogs\",\"again\"] to a maximum line width of 16. Words are joined by a single space and never split. A word is added to the current line only when the line length INCLUDING the joining space would still be at most 16. Print each line as `<n>|<text>| len=<length>` with n starting at 1, then `lines=<n> width=16 longest=<longest line length>`.",
+      "expected_stdout": "1|the quick brown| len=15\n2|fox jumped over| len=15\n3|lazy dogs again| len=15\nlines=3 width=16 longest=15\n",
+      "files": {},
+      "reference_solution": "fn main() -> Void {\n    let words: Text[] = [\"the\", \"quick\", \"brown\", \"fox\", \"jumped\", \"over\", \"lazy\", \"dogs\", \"again\"];\n    let width: Int = 16;\n    let lines: Text[] = [];\n    let cur: Text = \"\";\n    loop i in 0..length(words) {\n        let w: Text = words[i];\n        if string_len(cur) == 0 { cur = w; }\n        else {\n            if string_len(cur) + 1 + string_len(w) <= width { cur = cur + \" \" + w; }\n            else { lines = lines + [cur]; cur = w; }\n        }\n    }\n    if string_len(cur) > 0 { lines = lines + [cur]; }\n    let longest: Int = 0;\n    loop i in 0..length(lines) { if string_len(lines[i]) > longest { longest = string_len(lines[i]); } }\n    fx {\n        loop i in 0..length(lines) { println(i + 1, \"|\", lines[i], \"| len=\", string_len(lines[i])); }\n        println(\"lines=\", length(lines), \" width=\", width, \" longest=\", longest);\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "spec_semver_order",
+      "title": "spec semver order",
+      "mechanisms": [
+        "frontier",
+        "spec_density",
+        "version_compare",
+        "precedence"
+      ],
+      "prompt": "Write an Aether program that sorts these version strings ascending: [\"1.2.10\",\"1.2.9\",\"1.3.0-alpha\",\"1.3.0\",\"1.3.0-beta\",\"0.9.9\"]. Compare major, minor and patch NUMERICALLY (so 1.2.9 sorts before 1.2.10, unlike a string comparison). A version carrying a pre-release suffix after `-` sorts BELOW the same version without one, and two pre-releases compare by their suffix text. Print `<index>: <version>` in sorted order starting at 0, then `lowest=<v> highest=<v>`.",
+      "expected_stdout": "0: 0.9.9\n1: 1.2.9\n2: 1.2.10\n3: 1.3.0-alpha\n4: 1.3.0-beta\n5: 1.3.0\nlowest=0.9.9 highest=1.3.0\n",
+      "files": {},
+      "reference_solution": "@pure\nfn cmpInt(a: Int, b: Int) -> Int {\n    if a < b { ret -1; }\n    if a > b { ret 1; }\n    ret 0;\n}\ntype Ver { major: Int = 0; minor: Int = 0; patch: Int = 0; pre: Text = \"\"; }\n@pure\nfn parseVer(s: Text) -> Ver {\n    let dash: Int = pos(\"-\", s);\n    let core: Text = s;\n    let pre: Text = \"\";\n    if dash != -1 { core = s[0..dash]; pre = s[dash + 1..string_len(s)]; }\n    let parts: Text[] = split(core, \".\");\n    let mj: Int = 0;\n    let mn: Int = 0;\n    let pt: Int = 0;\n    if length(parts) > 0 { mj = parse_int(parts[0]); }\n    if length(parts) > 1 { mn = parse_int(parts[1]); }\n    if length(parts) > 2 { pt = parse_int(parts[2]); }\n    ret new Ver { major: mj, minor: mn, patch: pt, pre: pre };\n}\n@pure\nfn cmpVer(a: Ver, b: Ver) -> Int {\n    let c: Int = cmpInt(a.major, b.major);\n    if c != 0 { ret c; }\n    c = cmpInt(a.minor, b.minor);\n    if c != 0 { ret c; }\n    c = cmpInt(a.patch, b.patch);\n    if c != 0 { ret c; }\n    let ap: Bool = string_len(a.pre) > 0;\n    let bp: Bool = string_len(b.pre) > 0;\n    if ap && !bp { ret -1; }\n    if !ap && bp { ret 1; }\n    if !ap && !bp { ret 0; }\n    if a.pre < b.pre { ret -1; }\n    if a.pre > b.pre { ret 1; }\n    ret 0;\n}\nfn main() -> Void {\n    let vs: Text[] = [\"1.2.10\", \"1.2.9\", \"1.3.0-alpha\", \"1.3.0\", \"1.3.0-beta\", \"0.9.9\"];\n    let parsed: Ver[] = [];\n    loop i in 0..length(vs) { parsed = parsed + [parseVer(vs[i])]; }\n    let order: Int[] = [];\n    loop i in 0..length(vs) { order = order + [i]; }\n    loop i in 0..length(order) {\n        loop j in 0..(length(order) - 1 - i) {\n            if cmpVer(parsed[order[j]], parsed[order[j + 1]]) > 0 {\n                let t: Int = order[j]; order[j] = order[j + 1]; order[j + 1] = t;\n            }\n        }\n    }\n    fx {\n        loop k in 0..length(order) { println(k, \": \", vs[order[k]]); }\n        println(\"lowest=\", vs[order[0]], \" highest=\", vs[order[length(order) - 1]]);\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "spec_csv_quoting",
+      "title": "spec csv quoting",
+      "mechanisms": [
+        "frontier",
+        "spec_density",
+        "csv",
+        "escaped_quotes"
+      ],
+      "prompt": "Write an Aether program that splits ONE csv line into fields. The line is exactly:\n\n    a,\"b,c\",\"say \"\"hi\"\"\", d ,,\"end\"\n\nA comma inside quotes does not separate fields. A doubled quote inside a quoted field is one literal quote character. Quotes are removed from the value. Spaces are significant and must be preserved, and an empty field between two commas is a real, zero-length field. Print `<index>: '<value>' len=<n>` per field starting at 0, then `fields=<n>`.",
+      "expected_stdout": "0: 'a' len=1\n1: 'b,c' len=3\n2: 'say \"hi\"' len=8\n3: ' d ' len=3\n4: '' len=0\n5: 'end' len=3\nfields=6\n",
+      "files": {},
+      "reference_solution": "fn main() -> Void {\n    let line: Text = \"a,\\\"b,c\\\",\\\"say \\\"\\\"hi\\\"\\\"\\\", d ,,\\\"end\\\"\";\n    let fields: Text[] = [];\n    let cur: Text = \"\";\n    let inQ: Bool = false;\n    let i: Int = 0;\n    loop guard in 0..(string_len(line) + 1) {\n        if i < string_len(line) {\n            let c: Text = line[i..i + 1];\n            if inQ {\n                if string_eq(c, \"\\\"\") {\n                    if i + 1 < string_len(line) && string_eq(line[i + 1..i + 2], \"\\\"\") {\n                        cur = cur + \"\\\"\"; i = i + 2;\n                    } else { inQ = false; i = i + 1; }\n                } else { cur = cur + c; i = i + 1; }\n            } else {\n                if string_eq(c, \"\\\"\") { inQ = true; i = i + 1; }\n                else {\n                    if string_eq(c, \",\") { fields = fields + [cur]; cur = \"\"; i = i + 1; }\n                    else { cur = cur + c; i = i + 1; }\n                }\n            }\n        }\n    }\n    fields = fields + [cur];\n    fx {\n        loop k in 0..length(fields) {\n            println(k, \": '\", fields[k], \"' len=\", string_len(fields[k]));\n        }\n        println(\"fields=\", length(fields));\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "spec_roman_roundtrip",
+      "title": "spec roman roundtrip",
+      "mechanisms": [
+        "frontier",
+        "spec_density",
+        "roman",
+        "subtractive"
+      ],
+      "prompt": "Write an Aether program that converts [4, 9, 14, 40, 1994, 3888, 2024] to Roman numerals using subtractive notation (4 is IV not IIII, 9 is IX, 40 is XL, 90 is XC, 400 is CD, 900 is CM), then parses each result back to an integer to verify. Parsing works by adding each symbol's value, except a symbol worth less than the one immediately after it is SUBTRACTED. Print `<n> -> <roman> -> <parsed>` per input, then `roundtripFailures=<count of mismatches>`.",
+      "expected_stdout": "4 -> IV -> 4\n9 -> IX -> 9\n14 -> XIV -> 14\n40 -> XL -> 40\n1994 -> MCMXCIV -> 1994\n3888 -> MMMDCCCLXXXVIII -> 3888\n2024 -> MMXXIV -> 2024\nroundtripFailures=0\n",
+      "files": {},
+      "reference_solution": "@pure\nfn toRoman(n: Int) -> Text {\n    let vals: Int[] = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];\n    let syms: Text[] = [\"M\",\"CM\",\"D\",\"CD\",\"C\",\"XC\",\"L\",\"XL\",\"X\",\"IX\",\"V\",\"IV\",\"I\"];\n    let out: Text = \"\";\n    let v: Int = n;\n    loop i in 0..length(vals) {\n        loop k in 0..4000 {\n            if v >= vals[i] { out = out + syms[i]; v = v - vals[i]; }\n        }\n    }\n    ret out;\n}\n@pure\nfn fromRoman(s: Text) -> Int {\n    let total: Int = 0;\n    loop i in 0..string_len(s) {\n        let c: Text = s[i..i + 1];\n        let v: Int = 0;\n        if string_eq(c, \"I\") { v = 1; }\n        if string_eq(c, \"V\") { v = 5; }\n        if string_eq(c, \"X\") { v = 10; }\n        if string_eq(c, \"L\") { v = 50; }\n        if string_eq(c, \"C\") { v = 100; }\n        if string_eq(c, \"D\") { v = 500; }\n        if string_eq(c, \"M\") { v = 1000; }\n        let nxt: Int = 0;\n        if i + 1 < string_len(s) {\n            let d: Text = s[i + 1..i + 2];\n            if string_eq(d, \"I\") { nxt = 1; }\n            if string_eq(d, \"V\") { nxt = 5; }\n            if string_eq(d, \"X\") { nxt = 10; }\n            if string_eq(d, \"L\") { nxt = 50; }\n            if string_eq(d, \"C\") { nxt = 100; }\n            if string_eq(d, \"D\") { nxt = 500; }\n            if string_eq(d, \"M\") { nxt = 1000; }\n        }\n        if v < nxt { total = total - v; } else { total = total + v; }\n    }\n    ret total;\n}\nfn main() -> Void {\n    let ns: Int[] = [4, 9, 14, 40, 1994, 3888, 2024];\n    let bad: Int = 0;\n    fx {\n        loop i in 0..length(ns) {\n            let r: Text = toRoman(ns[i]);\n            let back: Int = fromRoman(r);\n            if back != ns[i] { bad = bad + 1; }\n            println(ns[i], \" -> \", r, \" -> \", back);\n        }\n        println(\"roundtripFailures=\", bad);\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    },
+    {
+      "id": "spec_nearest_rank_percentile",
+      "title": "spec nearest rank percentile",
+      "mechanisms": [
+        "frontier",
+        "spec_density",
+        "percentile",
+        "ceiling"
+      ],
+      "prompt": "Write an Aether program that computes NEAREST-RANK percentiles of [15,20,35,40,50,20]. Sort ascending first. For percentile p the rank is ceil(p * n / 100) using integer arithmetic, clamped up to a minimum of 1, and the answer is the value at that 1-BASED rank. Do not interpolate between neighbours. Print `sorted:` followed by each value preceded by a space, then for each p in [0,25,50,75,100,30] a line `p<p> rank=<r> value=<v>`, then `n=<n>`.",
+      "expected_stdout": "sorted: 15 20 20 35 40 50\np0 rank=1 value=15\np25 rank=2 value=20\np50 rank=3 value=20\np75 rank=5 value=40\np100 rank=6 value=50\np30 rank=2 value=20\nn=6\n",
+      "files": {},
+      "reference_solution": "@pure\nfn ceilDiv(a: Int, b: Int) -> Int {\n    let q: Int = a / b;\n    if q * b < a { ret q + 1; }\n    ret q;\n}\nfn main() -> Void {\n    let raw: Int[] = [15, 20, 35, 40, 50, 20];\n    let xs: Int[] = [];\n    loop i in 0..length(raw) { xs = xs + [raw[i]]; }\n    loop i in 0..length(xs) {\n        loop j in 0..(length(xs) - 1 - i) {\n            if xs[j] > xs[j + 1] { let t: Int = xs[j]; xs[j] = xs[j + 1]; xs[j + 1] = t; }\n        }\n    }\n    let ps: Int[] = [0, 25, 50, 75, 100, 30];\n    let n: Int = length(xs);\n    fx {\n        print(\"sorted:\");\n        loop i in 0..n { print(\" \", xs[i]); }\n        println(\"\");\n        loop k in 0..length(ps) {\n            let p: Int = ps[k];\n            let rank: Int = ceilDiv(p * n, 100);\n            if rank < 1 { rank = 1; }\n            println(\"p\", p, \" rank=\", rank, \" value=\", xs[rank - 1]);\n        }\n        println(\"n=\", n);\n    }\n}\n",
+      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+    }
+  ]
+}

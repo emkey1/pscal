@@ -6,7 +6,7 @@ set -uo pipefail
 
 CFG=Tests/aether_doc_bench/destinations.glm47flash_tra.json
 DEST=glm47flash-tra-cardspec
-OUTDIR=Tests/aether_doc_bench/out/glm47flash_cardspec
+OUTDIR=Tests/aether_doc_bench/out/glm47flash_final
 AETHER_BIN=${AETHER_BIN:-/usr/local/bin/aether}
 mkdir -p "$OUTDIR"
 
