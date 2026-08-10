@@ -76,3 +76,22 @@ scratchpad/
 # Runtime artifact written by corpus program 07-19a_gemini_2_5_flash_lit_04
 # (rewrite/writeln); regenerated on every corpus run, trips the strict validator.
 Tests/aether_specialization/corpus_candidates/app_log.txt
+
+# Pre-2026-08-10 guided-benchmark raw results (~33 MB of full model outputs).
+# Kept on disk under results/history/ for provenance, out of git for bulk; the
+# findings live in results/history/HISTORY.md. Ignored by name so a stray
+# `git add -A` cannot sweep them in. NOT backed up elsewhere -- do not delete.
+Tests/aether_doc_bench/results/history/full/
+Tests/aether_doc_bench/results/history/guide_full_vs_medium_20260729/
+Tests/aether_doc_bench/results/history/guide_full_vs_medium_openai_20260729/
+Tests/aether_doc_bench/results/history/out_guided_cloud/
+Tests/aether_doc_bench/results/history/ornith_archive_20260630/
+Tests/aether_doc_bench/results/history/ornith_archive_20260705/
+Tests/aether_doc_bench/results/history/logs/
+# 2026-07-05 Ornith hang diagnostics and reruns. The three committed
+# ornith/*.json (the 2026-06-30 run) are tracked and unaffected.
+Tests/aether_doc_bench/results/history/ornith/cs_*
+Tests/aether_doc_bench/results/history/ornith/*.partial_hang_backup
+Tests/aether_doc_bench/results/history/ornith/ornith_cs_final*.json
+Tests/aether_doc_bench/results/history/ornith/ornith_cs_rerun.json
+Tests/aether_doc_bench/results/history/ornith/ornith_large_full_rerun.json
