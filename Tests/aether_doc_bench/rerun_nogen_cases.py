@@ -36,9 +36,10 @@ SUITE_MANIFEST = {
     "nontoon": "tasks_hard_nontoon.json",
 }
 
+# Both boards are pre-2026-08-10 runs and now live under results/history/.
 BOARDS = {
-    "gemini": ("results/guide_full_vs_medium_20260729", "destinations.guided_2026-07-20.gemini.json"),
-    "openai": ("results/guide_full_vs_medium_openai_20260729", "destinations.guided_2026-07-20.openai.json"),
+    "gemini": ("results/history/guide_full_vs_medium_20260729", "destinations.guided_2026-07-20.gemini.json"),
+    "openai": ("results/history/guide_full_vs_medium_openai_20260729", "destinations.guided_2026-07-20.openai.json"),
 }
 
 

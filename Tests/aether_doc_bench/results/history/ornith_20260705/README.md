@@ -41,8 +41,9 @@ original is kept and the `full` half of it should be ignored.
 on `cs_merge_sort` and produced a truncated artifact: 14 of 19 tasks, `full`
 variant only, no `small` variant at all, while its own `summary` block still
 claimed `total_cases_per_destination: 19, doc_variants: 2`. That file is **not**
-committed; it survives untracked as `ornith/ornith_cs.json.partial_hang_backup`,
-alongside the single-task probes used to isolate the hang
+committed; it survives untracked as
+`../ornith/ornith_cs.json.partial_hang_backup`, alongside the single-task probes
+used to isolate the hang
 (`cs_merge_sort_smoketest`, `cs_quick_sort_diffcheck`, `cs_bfs_diffcheck`). The
 two complete reruns are committed here as `repeat1` (16:45Z) and `repeat2`
 (17:43Z).
