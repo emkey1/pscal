@@ -5,8 +5,8 @@
 set -uo pipefail
 
 CFG=Tests/aether_doc_bench/destinations.ornith35b_claw3_tra.json
-DEST=ornith35b-claw3-cardbench
-OUTDIR=Tests/aether_doc_bench/out/ornith35b_claw3
+DEST=ornith35b-claw3-thinking-verified
+OUTDIR=Tests/aether_doc_bench/out/ornith35b_claw3_thinking_verified
 AETHER_BIN=${AETHER_BIN:-/usr/local/bin/aether}
 mkdir -p "$OUTDIR"
 
