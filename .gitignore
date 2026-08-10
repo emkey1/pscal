@@ -88,6 +88,9 @@ Tests/aether_doc_bench/results/history/out_guided_cloud/
 Tests/aether_doc_bench/results/history/ornith_archive_20260630/
 Tests/aether_doc_bench/results/history/ornith_archive_20260705/
 Tests/aether_doc_bench/results/history/logs/
+# The harness default-output dir as it stood at the reset: 141 MB, 553 runs,
+# 84 models, 17 aether versions, 51 distinct guide sizes, 2026-06-11..08-10.
+Tests/aether_doc_bench/results/history/harness_out/
 # 2026-07-05 Ornith hang diagnostics and reruns. The three committed
 # ornith/*.json (the 2026-06-30 run) are tracked and unaffected.
 Tests/aether_doc_bench/results/history/ornith/cs_*
