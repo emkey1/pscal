@@ -123,6 +123,16 @@ def test_single_line_token_reordering_still_reported():
 def test_single_line_missing_token_still_reported():
     detail = adb.describe_stdout_mismatch("a,b,c\n", "a,b\n")
     assert "missing: c" in detail
+    assert "trailing newlines differ" not in detail
+
+
+def test_token_mismatch_also_flags_a_trailing_newline_delta():
+    # A content fix alone would not have made this exact; say so in the same
+    # round rather than waiting for the next one.
+    detail = adb.describe_stdout_mismatch("a b\n", "a c\n\n")
+    assert "missing: b" in detail
+    assert "trailing newlines differ" in detail
+    assert "expected 1, observed 2" in detail
 
 
 def test_derive_failure_summary_passes_whitespace_detail_through():
