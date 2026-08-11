@@ -2754,9 +2754,19 @@ if(NOT PSCAL_PLATFORM_IOS)
                     USE_SOURCE_PERMISSIONS)
         endif()
     endforeach()
+    # CMAKE_BINARY_DIR is a configure-time variable and is NOT defined while
+    # cmake_install.cmake runs. The install(CODE [[...]]) blocks below are
+    # bracket-quoted, so nothing in them expands at configure time either --
+    # which left `--build "${CMAKE_BINARY_DIR}"` as `--build ""` at install
+    # time, and an empty build path silently falls back to the *current working
+    # directory*. That happened to work when the install was run from the build
+    # tree and failed everywhere else with "not a CMake build directory". Bake
+    # the path in here, in a quoted install(CODE) where expansion does happen,
+    # and have both blocks use it.
+    install(CODE "set(_pscal_binary_dir \"${CMAKE_BINARY_DIR}\")")
     if(PSCAL_CONFIGURED_EXAMPLES)
         install(CODE [[
-            set(_pscal_build_cmd "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target configured_examples)
+            set(_pscal_build_cmd "${CMAKE_COMMAND}" --build "${_pscal_binary_dir}" --target configured_examples)
             if(CMAKE_CONFIGURATION_TYPES)
                 list(APPEND _pscal_build_cmd --config "${CMAKE_INSTALL_CONFIG_NAME}")
             endif()
@@ -2787,13 +2797,13 @@ if(NOT PSCAL_PLATFORM_IOS)
     # tiny.clike directly when tiny.pbc is absent, so treat this as
     # best-effort rather than install-blocking.
     install(CODE [[
-        set(_pscal_build_cmd "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target tiny_pbc)
+        set(_pscal_build_cmd "${CMAKE_COMMAND}" --build "${_pscal_binary_dir}" --target tiny_pbc)
         if(CMAKE_CONFIGURATION_TYPES)
             list(APPEND _pscal_build_cmd --config "${CMAKE_INSTALL_CONFIG_NAME}")
         endif()
         execute_process(COMMAND ${_pscal_build_cmd}
             RESULT_VARIABLE _pscal_tiny_pbc_result)
-        if(NOT _pscal_tiny_pbc_result EQUAL 0 OR NOT EXISTS "${CMAKE_BINARY_DIR}/bin/tiny.pbc")
+        if(NOT _pscal_tiny_pbc_result EQUAL 0 OR NOT EXISTS "${_pscal_binary_dir}/bin/tiny.pbc")
             message(WARNING "tiny.pbc was not produced (tiny_pbc target); bin/tiny will fall back to interpreting tiny.clike directly")
         else()
             set(_pscal_tiny_pbc_root "")
@@ -2804,7 +2814,7 @@ if(NOT PSCAL_PLATFORM_IOS)
             else()
                 set(_pscal_tiny_pbc_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/${PSCAL_INSTALL_ROOT_DESTINATION}")
             endif()
-            file(INSTALL "${CMAKE_BINARY_DIR}/bin/tiny.pbc"
+            file(INSTALL "${_pscal_binary_dir}/bin/tiny.pbc"
                  DESTINATION "${_pscal_tiny_pbc_root}/bin")
         endif()
     ]])
