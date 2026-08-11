@@ -82,6 +82,48 @@ direct ds4 lane the stop is real and `stop: null` is load-bearing.
 `claw3_ornith`. The stale entry in `destinations.tra.json` is untouched and will
 mislead the next person who uses it.
 
+## Run log
+
+**Attempt 1 (06:41–07:00) — halted by a local network outage, not a fleet
+problem.** Tailscale on this laptop logged itself out mid-run: the node lost its
+session and could not re-authenticate because the network it is on resolves
+`controlplane.tailscale.com` to `192.200.0.115`, which is not Tailscale. General
+DNS and internet were unaffected throughout, which is why this looked at first
+like T'Ra failing.
+
+Sequence: ds4 finished `tasks_frontier` cleanly at 15/15 (424s) over the tunnel
+while it was still up. Then `qwen3.6-35b-a3b` got 2/15 with 13 HTTP timeouts,
+and every subsequent T'Ra run failed in ~30s. Lanes B and D never produced a
+file.
+
+| result | verdict |
+|---|---|
+| `high-ds4__tasks_frontier.json` | **kept** — 15/15 exact, 15/15 generated, 0 repairs |
+| 5 files in `rejected/` | quarantined, will re-run |
+
+**What the outage exposed.** The harness exits 0 and writes a well-formed report
+even when the target is unreachable — either with zero variants (preflight skip)
+or with real-looking scores where the failures are HTTP timeouts. The driver's
+original check was `rc == 0 && file non-empty`, which accepted all of them. That
+would have frozen `qwen3.6-35b-a3b` into this board at **2/15**, and
+skip-if-exists would then have refused to re-run it: a network outage
+permanently recorded as a capability score.
+
+The driver now validates before accepting a result, and quarantines rather than
+deletes:
+
+- zero variants, zero cases, or `generated_ok == 0` → reject
+- **any** case failing with a transport fingerprint (timeout, connection
+  refused, unreachable, 502/503/504) → reject, regardless of count
+
+The second rule is the load-bearing one. A model that writes bad Aether still
+produced bytes; a model behind a dead socket produced nothing, and only the
+first is a score. `gen_ok < total` with no transport errors is still accepted,
+flagged `PARTIAL` — genuine weakness in a small model is a result, not an error.
+
+Validated against all six real artifacts from attempt 1: the five outage files
+reject, the ds4 file accepts.
+
 ## Reproducing
 
 ```bash

@@ -1,0 +1,45 @@
+{
+  "tasks_file": "Tests/aether_doc_bench/tasks_frontier_algo.json",
+  "tasks_version": "2026-08-10-1",
+  "destinations_config": "Tests/aether_doc_bench/destinations.local_tiers_20260811.json",
+  "created_at_unix": 1786427996,
+  "aether_version": "2026-08-09-1",
+  "aether_version_raw": "Aether Compiler Version: 2026-08-09-1 (latest tag: untagged)",
+  "aether_bin": "/usr/local/bin/aether",
+  "summary": {
+    "total_cases_per_destination": 14,
+    "doc_variants": 1,
+    "destination_count": 1
+  },
+  "doc_token_reference": {
+    "full": {
+      "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+      "approx_tokens": 23299,
+      "bytes": 93573
+    },
+    "medium": {
+      "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+      "approx_tokens": 12750,
+      "bytes": 51303
+    },
+    "small": {
+      "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+      "approx_tokens": 9958,
+      "bytes": 39974
+    },
+    "none": {
+      "path": null,
+      "approx_tokens": 0,
+      "bytes": 0
+    }
+  },
+  "destinations": [],
+  "preflight_failures": [
+    {
+      "destination_id": "mid-glm47-flash",
+      "model": "zai-org/glm-4.7-flash",
+      "detail": "RuntimeError: HTTP API request failed: timed out"
+    }
+  ],
+  "updated_at_unix": 1786428026
+}

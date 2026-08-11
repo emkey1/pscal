@@ -1,0 +1,5 @@
+[progress] low-granite4-h-tiny medium val_checked_ledger repeat=0 start
+[progress] low-granite4-h-tiny medium val_checked_ledger repeat=0 generated=1 returncode=1 exact=0
+[progress] low-granite4-h-tiny medium par_shard_tally repeat=0 start
+[progress] low-granite4-h-tiny medium par_shard_tally repeat=0 generated=0 returncode=-1 exact=0
+[progress] low-granite4-h-tiny medium file_csv_roundtrip repeat=0 start

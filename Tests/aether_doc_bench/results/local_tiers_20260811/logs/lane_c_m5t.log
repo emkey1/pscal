@@ -1,0 +1,12 @@
+[lane ] C/m5t starting: mid-qwen36-35b-a3b mid-glm47-flash mid-devstral-small-2 mid-qwen36-27b low-qwen35-9b low-ornith-9b low-prism-coder-7b low-gemma4-e4b
+[run ] mid-qwen36-35b-a3b__tasks_frontier
+[done] mid-qwen36-35b-a3b__tasks_frontier rc=0 990s
+[run ] mid-qwen36-35b-a3b__tasks_frontier_algo
+[done] mid-qwen36-35b-a3b__tasks_frontier_algo rc=0 30s
+[run ] mid-qwen36-35b-a3b__tasks_frontier_spec
+[done] mid-qwen36-35b-a3b__tasks_frontier_spec rc=0 31s
+[run ] mid-glm47-flash__tasks_frontier
+[done] mid-glm47-flash__tasks_frontier rc=0 30s
+[run ] mid-glm47-flash__tasks_frontier_algo
+[done] mid-glm47-flash__tasks_frontier_algo rc=0 30s
+[run ] mid-glm47-flash__tasks_frontier_spec

@@ -1,0 +1,822 @@
+{
+  "tasks_file": "Tests/aether_doc_bench/tasks_frontier.json",
+  "tasks_version": "2026-08-10-2",
+  "destinations_config": "Tests/aether_doc_bench/destinations.local_tiers_20260811.json",
+  "created_at_unix": 1786426915,
+  "aether_version": "2026-08-09-1",
+  "aether_version_raw": "Aether Compiler Version: 2026-08-09-1 (latest tag: untagged)",
+  "aether_bin": "/usr/local/bin/aether",
+  "summary": {
+    "total_cases_per_destination": 15,
+    "doc_variants": 1,
+    "destination_count": 1
+  },
+  "doc_token_reference": {
+    "full": {
+      "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+      "approx_tokens": 23299,
+      "bytes": 93573
+    },
+    "medium": {
+      "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+      "approx_tokens": 12750,
+      "bytes": 51303
+    },
+    "small": {
+      "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+      "approx_tokens": 9958,
+      "bytes": 39974
+    },
+    "none": {
+      "path": null,
+      "approx_tokens": 0,
+      "bytes": 0
+    }
+  },
+  "destinations": [
+    {
+      "destination_id": "high-ornith-35b",
+      "type": "tra_queue",
+      "model": "ornith-1.0-35b-nvfp4",
+      "base_url": "http://m4t:8793",
+      "variants": [
+        {
+          "doc_name": "medium",
+          "doc_path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+          "doc_bytes": 51303,
+          "doc_approx_tokens": 12750,
+          "shared_guide_batch_size_requested": 1,
+          "shared_guide_batch_size": 1,
+          "batch_mode_enabled": false,
+          "batch_runs": [],
+          "results": [
+            {
+              "task_id": "val_checked_ledger",
+              "task_title": "val checked ledger",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 13154,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "fn main() -> Void {\n    let fields: Text[] = [\"42\", \"7x\", \"\", \"-13\", \"100\", \"3.5\"];\n    let accepted: Int = 0;\n    let rejected: Int = 0;\n    let sum: Int = 0;\n    let n: Int = 0;\n    let code: Int = 0;\n\n    fx {\n        loop i in 0..length(fields) {\n            val(fields[i], n, code);\n            if code == 0 {\n                accepted = accepted + 1;\n                sum = sum + n;\n            } else {\n                rejected = rejected + 1;\n                println(\"reject: \", fields[i]);\n            }\n        }\n        println(\"accepted=\", accepted, \" rejected=\", rejected);\n        println(\"sum=\", sum);\n    }\n    ret;\n}\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "e750af96-28e7-47ec-bc2f-a80bbd69c23e",
+                    "model": "claw3_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    let fields: Text[] = [\"42\", \"7x\", \"\", \"-13\", \"100\", \"3.5\"];\n    let accepted: Int = 0;\n    let rejected: Int = 0;\n    let sum: Int = 0;\n    let n: Int = 0;\n    let code: Int = 0;\n\n    fx {\n        loop i in 0..length(fields) {\n            val(fields[i], n, code);\n            if code == 0 {\n                accepted = accepted + 1;\n                sum = sum + n;\n            } else {\n                rejected = rejected + 1;\n                println(\"reject: \", fields[i]);\n            }\n        }\n        println(\"accepted=\", accepted, \" rejected=\", rejected);\n        println(\"sum=\", sum);\n    }\n    ret;\n}",
+                  "source_approx_tokens": 158,
+                  "run": {
+                    "command": [
+                      "/usr/local/bin/aether",
+                      "--deny",
+                      "net,proc",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-gxogy5nx/val_checked_ledger.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "reject: 7x\nreject: \nreject: 3.5\naccepted=3 rejected=3\nsum=129\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.031,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 13154,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "fn main() -> Void {\n    let fields: Text[] = [\"42\", \"7x\", \"\", \"-13\", \"100\", \"3.5\"];\n    let accepted: Int = 0;\n    let rejected: Int = 0;\n    let sum: Int = 0;\n    let n: Int = 0;\n    let code: Int = 0;\n\n    fx {\n        loop i in 0..length(fields) {\n            val(fields[i], n, code);\n            if code == 0 {\n                accepted = accepted + 1;\n                sum = sum + n;\n            } else {\n                rejected = rejected + 1;\n                println(\"reject: \", fields[i]);\n            }\n        }\n        println(\"accepted=\", accepted, \" rejected=\", rejected);\n        println(\"sum=\", sum);\n    }\n    ret;\n}\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "e750af96-28e7-47ec-bc2f-a80bbd69c23e",
+                "model": "claw3_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "fn main() -> Void {\n    let fields: Text[] = [\"42\", \"7x\", \"\", \"-13\", \"100\", \"3.5\"];\n    let accepted: Int = 0;\n    let rejected: Int = 0;\n    let sum: Int = 0;\n    let n: Int = 0;\n    let code: Int = 0;\n\n    fx {\n        loop i in 0..length(fields) {\n            val(fields[i], n, code);\n            if code == 0 {\n                accepted = accepted + 1;\n                sum = sum + n;\n            } else {\n                rejected = rejected + 1;\n                println(\"reject: \", fields[i]);\n            }\n        }\n        println(\"accepted=\", accepted, \" rejected=\", rejected);\n        println(\"sum=\", sum);\n    }\n    ret;\n}",
+              "source_approx_tokens": 158,
+              "run": {
+                "command": [
+                  "/usr/local/bin/aether",
+                  "--deny",
+                  "net,proc",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-gxogy5nx/val_checked_ledger.aether"
+                ],
+                "returncode": 0,
+                "stdout": "reject: 7x\nreject: \nreject: 3.5\naccepted=3 rejected=3\nsum=129\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.031,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "par_shard_tally",
+              "task_title": "par shard tally",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 13115,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "type Tally {\n    total: Int = 0;\n    count: Int = 0;\n}\n\nfn accumulate(start: Int, end: Int, t: Tally) -> Void {\n    loop i in start..end {\n        if i % 3 == 0 {\n            t.total = t.total + i;\n            t.count = t.count + 1;\n        }\n    }\n    ret;\n}\n\nfn main() -> Void {\n    let a: Tally = new Tally();\n    let b: Tally = new Tally();\n    par {\n        accumulate(0, 25, a);\n        accumulate(25, 50, b);\n    }\n    fx {\n        println(\"shardA total=\", a.total, \" count=\", a.count);\n        println(\"shardB total=\", b.total, \" count=\", b.count);\n        println(\"combined total=\", a.total + b.total, \" count=\", a.count + b.count);\n    }\n    ret;\n}\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "0d15a8eb-3594-473a-adb7-b7f05b985093",
+                    "model": "claw3_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "type Tally {\n    total: Int = 0;\n    count: Int = 0;\n}\n\nfn accumulate(start: Int, end: Int, t: Tally) -> Void {\n    loop i in start..end {\n        if i % 3 == 0 {\n            t.total = t.total + i;\n            t.count = t.count + 1;\n        }\n    }\n    ret;\n}\n\nfn main() -> Void {\n    let a: Tally = new Tally();\n    let b: Tally = new Tally();\n    par {\n        accumulate(0, 25, a);\n        accumulate(25, 50, b);\n    }\n    fx {\n        println(\"shardA total=\", a.total, \" count=\", a.count);\n        println(\"shardB total=\", b.total, \" count=\", b.count);\n        println(\"combined total=\", a.total + b.total, \" count=\", a.count + b.count);\n    }\n    ret;\n}",
+                  "source_approx_tokens": 165,
+                  "run": {
+                    "command": [
+                      "/usr/local/bin/aether",
+                      "--deny",
+                      "net,proc",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-lzuzazv0/par_shard_tally.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "shardA total=108 count=9\nshardB total=300 count=8\ncombined total=408 count=17\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.045,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 13115,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "type Tally {\n    total: Int = 0;\n    count: Int = 0;\n}\n\nfn accumulate(start: Int, end: Int, t: Tally) -> Void {\n    loop i in start..end {\n        if i % 3 == 0 {\n            t.total = t.total + i;\n            t.count = t.count + 1;\n        }\n    }\n    ret;\n}\n\nfn main() -> Void {\n    let a: Tally = new Tally();\n    let b: Tally = new Tally();\n    par {\n        accumulate(0, 25, a);\n        accumulate(25, 50, b);\n    }\n    fx {\n        println(\"shardA total=\", a.total, \" count=\", a.count);\n        println(\"shardB total=\", b.total, \" count=\", b.count);\n        println(\"combined total=\", a.total + b.total, \" count=\", a.count + b.count);\n    }\n    ret;\n}\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "0d15a8eb-3594-473a-adb7-b7f05b985093",
+                "model": "claw3_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "type Tally {\n    total: Int = 0;\n    count: Int = 0;\n}\n\nfn accumulate(start: Int, end: Int, t: Tally) -> Void {\n    loop i in start..end {\n        if i % 3 == 0 {\n            t.total = t.total + i;\n            t.count = t.count + 1;\n        }\n    }\n    ret;\n}\n\nfn main() -> Void {\n    let a: Tally = new Tally();\n    let b: Tally = new Tally();\n    par {\n        accumulate(0, 25, a);\n        accumulate(25, 50, b);\n    }\n    fx {\n        println(\"shardA total=\", a.total, \" count=\", a.count);\n        println(\"shardB total=\", b.total, \" count=\", b.count);\n        println(\"combined total=\", a.total + b.total, \" count=\", a.count + b.count);\n    }\n    ret;\n}",
+              "source_approx_tokens": 165,
+              "run": {
+                "command": [
+                  "/usr/local/bin/aether",
+                  "--deny",
+                  "net,proc",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-lzuzazv0/par_shard_tally.aether"
+                ],
+                "returncode": 0,
+                "stdout": "shardA total=108 count=9\nshardB total=300 count=8\ncombined total=408 count=17\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.045,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "file_csv_roundtrip",
+              "task_title": "file csv roundtrip",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 13111,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "```aether\nfn main() -> Void {\n    let f: File;\n    fx {\n        assign(f, \"ledger_tmp.txt\");\n        rewrite(f);\n        writeln(f, \"alpha,10\");\n        writeln(f, \"beta,25\");\n        writeln(f, \"gamma,7\");\n        close(f);\n\n        reset(f);\n        let total: Int = 0;\n        loop {\n            if eof(f) { break; }\n            let line: Text;\n            readln(f, line);\n            let parts: Text[] = split(line, \",\");\n            let name: Text = parts[0];\n            let val: Int = parse_int(parts[1]);\n            total = total + val;\n            println(name, \"=\", val);\n        }\n        close(f);\n        println(\"total=\", total);\n        erase(\"ledger_tmp.txt\");\n    }\n    ret;\n}\n```\n\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "8a51d915-cdab-4c55-a46c-974b5c8f2b21",
+                    "model": "claw3_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    let f: File;\n    fx {\n        assign(f, \"ledger_tmp.txt\");\n        rewrite(f);\n        writeln(f, \"alpha,10\");\n        writeln(f, \"beta,25\");\n        writeln(f, \"gamma,7\");\n        close(f);\n\n        reset(f);\n        let total: Int = 0;\n        loop {\n            if eof(f) { break; }\n            let line: Text;\n            readln(f, line);\n            let parts: Text[] = split(line, \",\");\n            let name: Text = parts[0];\n            let val: Int = parse_int(parts[1]);\n            total = total + val;\n            println(name, \"=\", val);\n        }\n        close(f);\n        println(\"total=\", total);\n        erase(\"ledger_tmp.txt\");\n    }\n    ret;\n}",
+                  "source_approx_tokens": 172,
+                  "run": {
+                    "command": [
+                      "/usr/local/bin/aether",
+                      "--deny",
+                      "net,proc",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-s7i9jbn2/file_csv_roundtrip.aether"
+                    ],
+                    "returncode": 1,
+                    "stdout": "",
+                    "stderr": "L25: Compiler error: Invalid expression cannot be used as a variable reference (L-Value).\nCompilation failed with errors.\n",
+                    "diagnostics": [
+                      {
+                        "severity": "error",
+                        "phase": "compile",
+                        "kind": "generic",
+                        "code": "SYN-001",
+                        "file": null,
+                        "line": 25,
+                        "column": null,
+                        "message": "Compiler error: Invalid expression cannot be used as a variable reference (L-Value).",
+                        "hint": null,
+                        "raw": "L25: Compiler error: Invalid expression cannot be used as a variable reference (L-Value)."
+                      },
+                      {
+                        "severity": "error",
+                        "phase": "compile",
+                        "kind": "compiler",
+                        "code": null,
+                        "file": null,
+                        "line": 0,
+                        "column": null,
+                        "message": "Compilation failed with errors.",
+                        "hint": null,
+                        "raw": "Compilation failed with errors."
+                      }
+                    ],
+                    "elapsed_seconds": 0.015,
+                    "exact_stdout_match": false
+                  }
+                },
+                {
+                  "prompt_kind": "repair",
+                  "prompt_approx_tokens": 13395,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "fn main() -> Void {\n    let f: File;\n    fx {\n        assign(f, \"ledger_tmp.txt\");\n        rewrite(f);\n        writeln(f, \"alpha,10\");\n        writeln(f, \"beta,25\");\n        writeln(f, \"gamma,7\");\n        close(f);\n\n        reset(f);\n        let total: Int = 0;\n        loop {\n            if eof(f) { break; }\n            let line: Text;\n            readln(f, line);\n            let parts: Text[] = split(line, \",\");\n            let name: Text = parts[0];\n            let val: Int = parse_int(parts[1]);\n            total = total + val;\n            println(name, \"=\", val);\n        }\n        close(f);\n        println(\"total=\", total);\n        erase(f);\n    }\n    ret;\n}\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "655b2ded-b34d-4ecf-b0ad-4cb0224df686",
+                    "model": "claw3_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    let f: File;\n    fx {\n        assign(f, \"ledger_tmp.txt\");\n        rewrite(f);\n        writeln(f, \"alpha,10\");\n        writeln(f, \"beta,25\");\n        writeln(f, \"gamma,7\");\n        close(f);\n\n        reset(f);\n        let total: Int = 0;\n        loop {\n            if eof(f) { break; }\n            let line: Text;\n            readln(f, line);\n            let parts: Text[] = split(line, \",\");\n            let name: Text = parts[0];\n            let val: Int = parse_int(parts[1]);\n            total = total + val;\n            println(name, \"=\", val);\n        }\n        close(f);\n        println(\"total=\", total);\n        erase(f);\n    }\n    ret;\n}",
+                  "source_approx_tokens": 168,
+                  "run": {
+                    "command": [
+                      "/usr/local/bin/aether",
+                      "--deny",
+                      "net,proc",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-hjh9g12g/file_csv_roundtrip.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "alpha=10\nbeta=25\ngamma=7\ntotal=42\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.136,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "repair",
+              "prompt_approx_tokens": 13395,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "fn main() -> Void {\n    let f: File;\n    fx {\n        assign(f, \"ledger_tmp.txt\");\n        rewrite(f);\n        writeln(f, \"alpha,10\");\n        writeln(f, \"beta,25\");\n        writeln(f, \"gamma,7\");\n        close(f);\n\n        reset(f);\n        let total: Int = 0;\n        loop {\n            if eof(f) { break; }\n            let line: Text;\n            readln(f, line);\n            let parts: Text[] = split(line, \",\");\n            let name: Text = parts[0];\n            let val: Int = parse_int(parts[1]);\n            total = total + val;\n            println(name, \"=\", val);\n        }\n        close(f);\n        println(\"total=\", total);\n        erase(f);\n    }\n    ret;\n}\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "655b2ded-b34d-4ecf-b0ad-4cb0224df686",
+                "model": "claw3_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "fn main() -> Void {\n    let f: File;\n    fx {\n        assign(f, \"ledger_tmp.txt\");\n        rewrite(f);\n        writeln(f, \"alpha,10\");\n        writeln(f, \"beta,25\");\n        writeln(f, \"gamma,7\");\n        close(f);\n\n        reset(f);\n        let total: Int = 0;\n        loop {\n            if eof(f) { break; }\n            let line: Text;\n            readln(f, line);\n            let parts: Text[] = split(line, \",\");\n            let name: Text = parts[0];\n            let val: Int = parse_int(parts[1]);\n            total = total + val;\n            println(name, \"=\", val);\n        }\n        close(f);\n        println(\"total=\", total);\n        erase(f);\n    }\n    ret;\n}",
+              "source_approx_tokens": 168,
+              "run": {
+                "command": [
+                  "/usr/local/bin/aether",
+                  "--deny",
+                  "net,proc",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-hjh9g12g/file_csv_roundtrip.aether"
+                ],
+                "returncode": 0,
+                "stdout": "alpha=10\nbeta=25\ngamma=7\ntotal=42\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.136,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 2,
+              "resolved_after_repair": true,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "contract_guarded_spread",
+              "task_title": "contract guarded spread",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 13099,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "@pure\nfn allPositive(xs: Int[]) -> Bool {\n    loop i in 0..length(xs) {\n        if xs[i] <= 0 {\n            ret false;\n        }\n    }\n    ret true;\n}\n\n@pure\n@pre length(xs) > 0\n@pre allPositive(xs)\n@post result >= 0\nfn spread(xs: Int[]) -> Int {\n    let bestMax: Int = xs[0];\n    let bestMin: Int = xs[0];\n    loop i in 1..length(xs) {\n        bestMax = max(bestMax, xs[i]);\n        bestMin = min(bestMin, xs[i]);\n    }\n    ret bestMax - bestMin;\n}\n\nfn main() -> Void {\n    let a1: Int[] = [4, 19, 7, 2, 11];\n    let a2: Int[] = [5];\n    fx {\n        println(\"spread=\", spread(a1));\n        println(\"single=\", spread(a2));\n    }\n    ret;\n}\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "dc04cc05-6d03-4821-ab11-6a666e661e13",
+                    "model": "claw3_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "@pure\nfn allPositive(xs: Int[]) -> Bool {\n    loop i in 0..length(xs) {\n        if xs[i] <= 0 {\n            ret false;\n        }\n    }\n    ret true;\n}\n\n@pure\n@pre length(xs) > 0\n@pre allPositive(xs)\n@post result >= 0\nfn spread(xs: Int[]) -> Int {\n    let bestMax: Int = xs[0];\n    let bestMin: Int = xs[0];\n    loop i in 1..length(xs) {\n        bestMax = max(bestMax, xs[i]);\n        bestMin = min(bestMin, xs[i]);\n    }\n    ret bestMax - bestMin;\n}\n\nfn main() -> Void {\n    let a1: Int[] = [4, 19, 7, 2, 11];\n    let a2: Int[] = [5];\n    fx {\n        println(\"spread=\", spread(a1));\n        println(\"single=\", spread(a2));\n    }\n    ret;\n}",
+                  "source_approx_tokens": 160,
+                  "run": {
+                    "command": [
+                      "/usr/local/bin/aether",
+                      "--deny",
+                      "net,proc",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-b24wz3ud/contract_guarded_spread.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "spread=17\nsingle=0\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.032,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 13099,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "@pure\nfn allPositive(xs: Int[]) -> Bool {\n    loop i in 0..length(xs) {\n        if xs[i] <= 0 {\n            ret false;\n        }\n    }\n    ret true;\n}\n\n@pure\n@pre length(xs) > 0\n@pre allPositive(xs)\n@post result >= 0\nfn spread(xs: Int[]) -> Int {\n    let bestMax: Int = xs[0];\n    let bestMin: Int = xs[0];\n    loop i in 1..length(xs) {\n        bestMax = max(bestMax, xs[i]);\n        bestMin = min(bestMin, xs[i]);\n    }\n    ret bestMax - bestMin;\n}\n\nfn main() -> Void {\n    let a1: Int[] = [4, 19, 7, 2, 11];\n    let a2: Int[] = [5];\n    fx {\n        println(\"spread=\", spread(a1));\n        println(\"single=\", spread(a2));\n    }\n    ret;\n}\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "dc04cc05-6d03-4821-ab11-6a666e661e13",
+                "model": "claw3_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "@pure\nfn allPositive(xs: Int[]) -> Bool {\n    loop i in 0..length(xs) {\n        if xs[i] <= 0 {\n            ret false;\n        }\n    }\n    ret true;\n}\n\n@pure\n@pre length(xs) > 0\n@pre allPositive(xs)\n@post result >= 0\nfn spread(xs: Int[]) -> Int {\n    let bestMax: Int = xs[0];\n    let bestMin: Int = xs[0];\n    loop i in 1..length(xs) {\n        bestMax = max(bestMax, xs[i]);\n        bestMin = min(bestMin, xs[i]);\n    }\n    ret bestMax - bestMin;\n}\n\nfn main() -> Void {\n    let a1: Int[] = [4, 19, 7, 2, 11];\n    let a2: Int[] = [5];\n    fx {\n        println(\"spread=\", spread(a1));\n        println(\"single=\", spread(a2));\n    }\n    ret;\n}",
+              "source_approx_tokens": 160,
+              "run": {
+                "command": [
+                  "/usr/local/bin/aether",
+                  "--deny",
+                  "net,proc",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-b24wz3ud/contract_guarded_spread.aether"
+                ],
+                "returncode": 0,
+                "stdout": "spread=17\nsingle=0\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.032,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "concat_chain_partition",
+              "task_title": "concat chain partition",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 13089,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "@pure\nfn evens(xs: Int[]) -> Int[] {\n    let out: Int[] = [];\n    loop i in 0..length(xs) {\n        if xs[i] % 2 == 0 {\n            out = out + [xs[i]];\n        }\n    }\n    ret out;\n}\n\n@pure\nfn odds(xs: Int[]) -> Int[] {\n    let out: Int[] = [];\n    loop i in 0..length(xs) {\n        if xs[i] % 2 != 0 {\n            out = out + [xs[i]];\n        }\n    }\n    ret out;\n}\n\nfn main() -> Void {\n    let xs: Int[] = [5, 2, 9, 4, 7, 6];\n    let e: Int[] = evens(xs);\n    let o: Int[] = odds(xs);\n    let merged: Int[] = e + [0] + o + [99];\n    fx {\n        print(\"merged:\");\n        loop i in 0..length(merged) {\n            print(\" \", merged[i]);\n        }\n        println(\"\");\n        println(\"len=\", length(merged));\n    }\n    ret;\n}\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "9cd674ce-3cf5-4409-8d39-261c71a5ffaf",
+                    "model": "claw3_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "@pure\nfn evens(xs: Int[]) -> Int[] {\n    let out: Int[] = [];\n    loop i in 0..length(xs) {\n        if xs[i] % 2 == 0 {\n            out = out + [xs[i]];\n        }\n    }\n    ret out;\n}\n\n@pure\nfn odds(xs: Int[]) -> Int[] {\n    let out: Int[] = [];\n    loop i in 0..length(xs) {\n        if xs[i] % 2 != 0 {\n            out = out + [xs[i]];\n        }\n    }\n    ret out;\n}\n\nfn main() -> Void {\n    let xs: Int[] = [5, 2, 9, 4, 7, 6];\n    let e: Int[] = evens(xs);\n    let o: Int[] = odds(xs);\n    let merged: Int[] = e + [0] + o + [99];\n    fx {\n        print(\"merged:\");\n        loop i in 0..length(merged) {\n            print(\" \", merged[i]);\n        }\n        println(\"\");\n        println(\"len=\", length(merged));\n    }\n    ret;\n}",
+                  "source_approx_tokens": 182,
+                  "run": {
+                    "command": [
+                      "/usr/local/bin/aether",
+                      "--deny",
+                      "net,proc",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-fntdzrtr/concat_chain_partition.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "merged: 2 4 6 0 5 9 7 99\nlen=8\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.04,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 13089,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "@pure\nfn evens(xs: Int[]) -> Int[] {\n    let out: Int[] = [];\n    loop i in 0..length(xs) {\n        if xs[i] % 2 == 0 {\n            out = out + [xs[i]];\n        }\n    }\n    ret out;\n}\n\n@pure\nfn odds(xs: Int[]) -> Int[] {\n    let out: Int[] = [];\n    loop i in 0..length(xs) {\n        if xs[i] % 2 != 0 {\n            out = out + [xs[i]];\n        }\n    }\n    ret out;\n}\n\nfn main() -> Void {\n    let xs: Int[] = [5, 2, 9, 4, 7, 6];\n    let e: Int[] = evens(xs);\n    let o: Int[] = odds(xs);\n    let merged: Int[] = e + [0] + o + [99];\n    fx {\n        print(\"merged:\");\n        loop i in 0..length(merged) {\n            print(\" \", merged[i]);\n        }\n        println(\"\");\n        println(\"len=\", length(merged));\n    }\n    ret;\n}\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "9cd674ce-3cf5-4409-8d39-261c71a5ffaf",
+                "model": "claw3_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "@pure\nfn evens(xs: Int[]) -> Int[] {\n    let out: Int[] = [];\n    loop i in 0..length(xs) {\n        if xs[i] % 2 == 0 {\n            out = out + [xs[i]];\n        }\n    }\n    ret out;\n}\n\n@pure\nfn odds(xs: Int[]) -> Int[] {\n    let out: Int[] = [];\n    loop i in 0..length(xs) {\n        if xs[i] % 2 != 0 {\n            out = out + [xs[i]];\n        }\n    }\n    ret out;\n}\n\nfn main() -> Void {\n    let xs: Int[] = [5, 2, 9, 4, 7, 6];\n    let e: Int[] = evens(xs);\n    let o: Int[] = odds(xs);\n    let merged: Int[] = e + [0] + o + [99];\n    fx {\n        print(\"merged:\");\n        loop i in 0..length(merged) {\n            print(\" \", merged[i]);\n        }\n        println(\"\");\n        println(\"len=\", length(merged));\n    }\n    ret;\n}",
+              "source_approx_tokens": 182,
+              "run": {
+                "command": [
+                  "/usr/local/bin/aether",
+                  "--deny",
+                  "net,proc",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-fntdzrtr/concat_chain_partition.aether"
+                ],
+                "returncode": 0,
+                "stdout": "merged: 2 4 6 0 5 9 7 99\nlen=8\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.04,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "method_self_state",
+              "task_title": "method self state",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 13119,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "type Counter {\n    hits: Int = 0;\n    label: Text = \"\";\n\n    fn add(amount: Int) -> Void {\n        self.hits = self.hits + amount;\n        ret;\n    }\n\n    fn describe(prefix: Text) -> Text {\n        ret prefix + self.label + \"=\" + int_to_text(self.hits);\n    }\n}\n\nfn main() -> Void {\n    let c: Counter = new Counter { label: \"clicks\" };\n    let amounts: Int[] = [3, 1, 4, 1, 5];\n    loop i in 0..length(amounts) {\n        c.add(amounts[i]);\n    }\n    fx {\n        println(c.describe(\"counter \"));\n        println(\"final=\" + int_to_text(c.hits));\n    }\n    ret;\n}\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "1c6b8971-1246-4134-ad05-0b35a1739120",
+                    "model": "claw3_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "type Counter {\n    hits: Int = 0;\n    label: Text = \"\";\n\n    fn add(amount: Int) -> Void {\n        self.hits = self.hits + amount;\n        ret;\n    }\n\n    fn describe(prefix: Text) -> Text {\n        ret prefix + self.label + \"=\" + int_to_text(self.hits);\n    }\n}\n\nfn main() -> Void {\n    let c: Counter = new Counter { label: \"clicks\" };\n    let amounts: Int[] = [3, 1, 4, 1, 5];\n    loop i in 0..length(amounts) {\n        c.add(amounts[i]);\n    }\n    fx {\n        println(c.describe(\"counter \"));\n        println(\"final=\" + int_to_text(c.hits));\n    }\n    ret;\n}",
+                  "source_approx_tokens": 141,
+                  "run": {
+                    "command": [
+                      "/usr/local/bin/aether",
+                      "--deny",
+                      "net,proc",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-2cijxng1/method_self_state.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "counter clicks=14\nfinal=14\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.021,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 13119,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "type Counter {\n    hits: Int = 0;\n    label: Text = \"\";\n\n    fn add(amount: Int) -> Void {\n        self.hits = self.hits + amount;\n        ret;\n    }\n\n    fn describe(prefix: Text) -> Text {\n        ret prefix + self.label + \"=\" + int_to_text(self.hits);\n    }\n}\n\nfn main() -> Void {\n    let c: Counter = new Counter { label: \"clicks\" };\n    let amounts: Int[] = [3, 1, 4, 1, 5];\n    loop i in 0..length(amounts) {\n        c.add(amounts[i]);\n    }\n    fx {\n        println(c.describe(\"counter \"));\n        println(\"final=\" + int_to_text(c.hits));\n    }\n    ret;\n}\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "1c6b8971-1246-4134-ad05-0b35a1739120",
+                "model": "claw3_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "type Counter {\n    hits: Int = 0;\n    label: Text = \"\";\n\n    fn add(amount: Int) -> Void {\n        self.hits = self.hits + amount;\n        ret;\n    }\n\n    fn describe(prefix: Text) -> Text {\n        ret prefix + self.label + \"=\" + int_to_text(self.hits);\n    }\n}\n\nfn main() -> Void {\n    let c: Counter = new Counter { label: \"clicks\" };\n    let amounts: Int[] = [3, 1, 4, 1, 5];\n    loop i in 0..length(amounts) {\n        c.add(amounts[i]);\n    }\n    fx {\n        println(c.describe(\"counter \"));\n        println(\"final=\" + int_to_text(c.hits));\n    }\n    ret;\n}",
+              "source_approx_tokens": 141,
+              "run": {
+                "command": [
+                  "/usr/local/bin/aether",
+                  "--deny",
+                  "net,proc",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-2cijxng1/method_self_state.aether"
+                ],
+                "returncode": 0,
+                "stdout": "counter clicks=14\nfinal=14\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.021,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "array_value_semantics",
+              "task_title": "array value semantics",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 13135,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "```aether\n@pure\nfn scale(arr: Int[], k: Int) -> Int[] {\n    let out: Int[] = [];\n    loop i in 0..length(arr) {\n        out = out + [arr[i] * k];\n    }\n    ret out;\n}\n\nfn main() -> Void {\n    let original: Int[] = [1, 2, 3];\n    let scaled: Int[] = scale(original, 10);\n    let twice: Int[] = scale(scaled, 3);\n\n    fx {\n        print(\"scaled:\");\n        loop i in 0..length(scaled) {\n            print(\" \", scaled[i]);\n        }\n        println(\"\");\n\n        print(\"twice:\");\n        loop i in 0..length(twice) {\n            print(\" \", twice[i]);\n        }\n        println(\"\");\n\n        print(\"original:\");\n        loop i in 0..length(original) {\n            print(\" \", original[i]);\n        }\n        println(\"\");\n    }\n    ret;\n}\n```",
+                    "usage": null,
+                    "response_id": "cfe49981-9ef4-4d25-a311-0f9ee633b03d",
+                    "model": "claw3_ornith"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "@pure\nfn scale(arr: Int[], k: Int) -> Int[] {\n    let out: Int[] = [];\n    loop i in 0..length(arr) {\n        out = out + [arr[i] * k];\n    }\n    ret out;\n}\n\nfn main() -> Void {\n    let original: Int[] = [1, 2, 3];\n    let scaled: Int[] = scale(original, 10);\n    let twice: Int[] = scale(scaled, 3);\n\n    fx {\n        print(\"scaled:\");\n        loop i in 0..length(scaled) {\n            print(\" \", scaled[i]);\n        }\n        println(\"\");\n\n        print(\"twice:\");\n        loop i in 0..length(twice) {\n            print(\" \", twice[i]);\n        }\n        println(\"\");\n\n        print(\"original:\");\n        loop i in 0..length(original) {\n            print(\" \", original[i]);\n        }\n        println(\"\");\n    }\n    ret;\n}",
+                  "source_approx_tokens": 181,
+                  "run": {
+                    "command": [
+                      "/usr/local/bin/aether",
+                      "--deny",
+                      "net,proc",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-znpj5k01/array_value_semantics.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "scaled: 10 20 30\ntwice: 30 60 90\noriginal: 1 2 3\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.02,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 13135,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "```aether\n@pure\nfn scale(arr: Int[], k: Int) -> Int[] {\n    let out: Int[] = [];\n    loop i in 0..length(arr) {\n        out = out + [arr[i] * k];\n    }\n    ret out;\n}\n\nfn main() -> Void {\n    let original: Int[] = [1, 2, 3];\n    let scaled: Int[] = scale(original, 10);\n    let twice: Int[] = scale(scaled, 3);\n\n    fx {\n        print(\"scaled:\");\n        loop i in 0..length(scaled) {\n            print(\" \", scaled[i]);\n        }\n        println(\"\");\n\n        print(\"twice:\");\n        loop i in 0..length(twice) {\n            print(\" \", twice[i]);\n        }\n        println(\"\");\n\n        print(\"original:\");\n        loop i in 0..length(original) {\n            print(\" \", original[i]);\n        }\n        println(\"\");\n    }\n    ret;\n}\n```",
+                "usage": null,
+                "response_id": "cfe49981-9ef4-4d25-a311-0f9ee633b03d",
+                "model": "claw3_ornith"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "@pure\nfn scale(arr: Int[], k: Int) -> Int[] {\n    let out: Int[] = [];\n    loop i in 0..length(arr) {\n        out = out + [arr[i] * k];\n    }\n    ret out;\n}\n\nfn main() -> Void {\n    let original: Int[] = [1, 2, 3];\n    let scaled: Int[] = scale(original, 10);\n    let twice: Int[] = scale(scaled, 3);\n\n    fx {\n        print(\"scaled:\");\n        loop i in 0..length(scaled) {\n            print(\" \", scaled[i]);\n        }\n        println(\"\");\n\n        print(\"twice:\");\n        loop i in 0..length(twice) {\n            print(\" \", twice[i]);\n        }\n        println(\"\");\n\n        print(\"original:\");\n        loop i in 0..length(original) {\n            print(\" \", original[i]);\n        }\n        println(\"\");\n    }\n    ret;\n}",
+              "source_approx_tokens": 181,
+              "run": {
+                "command": [
+                  "/usr/local/bin/aether",
+                  "--deny",
+                  "net,proc",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-znpj5k01/array_value_semantics.aether"
+                ],
+                "returncode": 0,
+                "stdout": "scaled: 10 20 30\ntwice: 30 60 90\noriginal: 1 2 3\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.02,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            }
+          ],
+          "summary": {
+            "total_cases": 7,
+            "generated_ok": 7,
+            "run_ok": 7,
+            "exact_stdout_match": 7,
+            "resolved_after_repair": 1,
+            "generated_rate": 1.0,
+            "run_rate": 1.0,
+            "exact_match_rate": 1.0,
+            "repair_recovery_rate": 0.1429
+          },
+          "usage_summary": {
+            "attempts_total": 8,
+            "attempts_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null
+          },
+          "source_token_summary": {
+            "attempts_total": 8,
+            "source_approx_tokens_total": 1327,
+            "source_approx_tokens_avg": 165.88
+          },
+          "final_usage_summary": {
+            "cases_total": 7,
+            "cases_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null,
+            "success_filter": "all"
+          },
+          "run_ok_final_usage_summary": {
+            "cases_total": 7,
+            "cases_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null,
+            "success_filter": "run_ok"
+          },
+          "exact_final_usage_summary": {
+            "cases_total": 7,
+            "cases_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null,
+            "success_filter": "exact"
+          },
+          "final_source_token_summary": {
+            "cases_counted": 7,
+            "source_approx_tokens_total": 1155,
+            "source_approx_tokens_avg": 165.0,
+            "success_filter": "all"
+          },
+          "run_ok_final_source_token_summary": {
+            "cases_counted": 7,
+            "source_approx_tokens_total": 1155,
+            "source_approx_tokens_avg": 165.0,
+            "success_filter": "run_ok"
+          },
+          "exact_final_source_token_summary": {
+            "cases_counted": 7,
+            "source_approx_tokens_total": 1155,
+            "source_approx_tokens_avg": 165.0,
+            "success_filter": "exact"
+          },
+          "failure_patterns": []
+        }
+      ]
+    }
+  ],
+  "updated_at_unix": 1786427500
+}

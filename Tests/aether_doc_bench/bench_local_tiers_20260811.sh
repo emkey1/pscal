@@ -65,13 +65,67 @@ run_one() {
     local rc=$?
     local elapsed=$(( SECONDS - started ))
 
-    if [ $rc -eq 0 ] && [ -s "$out.tmp" ]; then
-        mv "$out.tmp" "$out"
-        echo "[done] $name rc=0 ${elapsed}s"
-    else
+    if [ $rc -ne 0 ] || [ ! -s "$out.tmp" ]; then
         rm -f "$out.tmp"
         echo "[FAIL] $name rc=$rc ${elapsed}s -- see $log"
+        return 0
     fi
+
+    # A non-zero exit and a non-empty file are NOT enough. When a target is
+    # unreachable the harness still exits 0 and still writes a well-formed
+    # report -- with zero variants, or with variants whose generated_ok is 0.
+    # Accepting those is how a serving outage becomes a permanent 2/15 in the
+    # record, and how skip-if-exists then refuses to re-run it.
+    local verdict
+    verdict=$(python3 - "$out.tmp" <<'PYEOF'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception as e:
+    print(f"REJECT unparseable: {e}"); raise SystemExit(0)
+dests = d.get("destinations") or []
+variants = dests[0].get("variants") if dests else []
+if not variants:
+    print("REJECT zero variants (target unreachable / preflight skip)"); raise SystemExit(0)
+# Transport failures are never model results. A model that writes bad Aether
+# still produced bytes; one behind a dead socket produced nothing, and scoring
+# that as capability is how a network outage becomes a permanent low score.
+TRANSPORT = ("timed out", "timeout", "http api request failed", "connection",
+             "refused", "unreachable", "reset by peer", " 502", " 503", " 504")
+notes = []
+for v in variants:
+    s = v.get("summary", {})
+    tot, gen = s.get("total_cases", 0), s.get("generated_ok", 0)
+    if tot == 0:
+        print(f"REJECT variant {v.get('doc_name')} has zero cases"); raise SystemExit(0)
+    if gen == 0:
+        print(f"REJECT variant {v.get('doc_name')} generated 0/{tot} -- serving failure, not a score")
+        raise SystemExit(0)
+    hit = 0
+    for fp in v.get("failure_patterns", []):
+        fingerprint = str(fp.get("fingerprint", "")).lower()
+        if any(t in fingerprint for t in TRANSPORT):
+            hit += int(fp.get("count", 0))
+    if hit:
+        print(f"REJECT variant {v.get('doc_name')}: {hit}/{tot} cases failed in transport, not generation")
+        raise SystemExit(0)
+    if gen < tot:
+        notes.append(f"{v.get('doc_name')} gen_ok={gen}/{tot}")
+print("ACCEPT" + (" PARTIAL " + ", ".join(notes) if notes else ""))
+PYEOF
+)
+
+    case "$verdict" in
+        ACCEPT*)
+            mv "$out.tmp" "$out"
+            echo "[done] $name rc=0 ${elapsed}s ${verdict#ACCEPT}"
+            ;;
+        *)
+            mkdir -p "$OUTDIR/rejected"
+            mv "$out.tmp" "$OUTDIR/rejected/${name}.json"
+            echo "[FAIL] $name rc=0 ${elapsed}s -- $verdict (quarantined, will re-run)"
+            ;;
+    esac
     return 0
 }
 

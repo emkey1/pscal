@@ -1,0 +1,42 @@
+[progress] mid-qwen36-35b-a3b medium val_checked_ledger repeat=0 start
+[progress] mid-qwen36-35b-a3b medium val_checked_ledger repeat=0 generated=1 returncode=0 exact=1
+[progress] mid-qwen36-35b-a3b medium par_shard_tally repeat=0 start
+[progress] mid-qwen36-35b-a3b medium par_shard_tally repeat=0 generated=1 returncode=0 exact=1
+[progress] mid-qwen36-35b-a3b medium file_csv_roundtrip repeat=0 start
+[progress] mid-qwen36-35b-a3b medium file_csv_roundtrip repeat=0 generated=0 returncode=-1 exact=0
+[progress] mid-qwen36-35b-a3b medium contract_guarded_spread repeat=0 start
+[progress] mid-qwen36-35b-a3b medium contract_guarded_spread repeat=0 generated=0 returncode=-1 exact=0
+[progress] mid-qwen36-35b-a3b medium concat_chain_partition repeat=0 start
+[progress] mid-qwen36-35b-a3b medium concat_chain_partition repeat=0 generated=0 returncode=-1 exact=0
+[progress] mid-qwen36-35b-a3b medium method_self_state repeat=0 start
+[progress] mid-qwen36-35b-a3b medium method_self_state repeat=0 generated=0 returncode=-1 exact=0
+[progress] mid-qwen36-35b-a3b medium array_value_semantics repeat=0 start
+[progress] mid-qwen36-35b-a3b medium array_value_semantics repeat=0 generated=0 returncode=-1 exact=0
+[progress] mid-qwen36-35b-a3b medium jagged_nested_grid repeat=0 start
+[progress] mid-qwen36-35b-a3b medium jagged_nested_grid repeat=0 generated=0 returncode=-1 exact=0
+[progress] mid-qwen36-35b-a3b medium text_slice_tokenize repeat=0 start
+[progress] mid-qwen36-35b-a3b medium text_slice_tokenize repeat=0 generated=0 returncode=-1 exact=0
+[progress] mid-qwen36-35b-a3b medium bitwise_permission_flags repeat=0 start
+[progress] mid-qwen36-35b-a3b medium bitwise_permission_flags repeat=0 generated=0 returncode=-1 exact=0
+[progress] mid-qwen36-35b-a3b medium toon_fleet_rollup repeat=0 start
+[progress] mid-qwen36-35b-a3b medium toon_fleet_rollup repeat=0 generated=0 returncode=-1 exact=0
+[progress] mid-qwen36-35b-a3b medium tuple_stats_pipeline repeat=0 start
+[progress] mid-qwen36-35b-a3b medium tuple_stats_pipeline repeat=0 generated=0 returncode=-1 exact=0
+[progress] mid-qwen36-35b-a3b medium mstream_field_parse repeat=0 start
+[progress] mid-qwen36-35b-a3b medium mstream_field_parse repeat=0 generated=0 returncode=-1 exact=0
+[progress] mid-qwen36-35b-a3b medium money_cents_report repeat=0 start
+[progress] mid-qwen36-35b-a3b medium money_cents_report repeat=0 generated=0 returncode=-1 exact=0
+[progress] mid-qwen36-35b-a3b medium parallel_array_wordcount repeat=0 start
+[progress] mid-qwen36-35b-a3b medium parallel_array_wordcount repeat=0 generated=0 returncode=-1 exact=0
+tasks file    : Tests/aether_doc_bench/tasks_frontier.json
+cases/dest    : 15
+destinations  : 1
+
+destination   : mid-qwen36-35b-a3b
+type          : tra_queue
+model         : qwen/qwen3.6-35b-a3b
+medium  approx_tokens=12750   generated=2/15  run=2/15  exact=2/15  repaired=0/15
+       usage : all_attempt_answer_tok~=325  final_answer_tok~=325  exact_final_answer_tok~=325
+       fail x9: generation:HTTP API request failed: timed out [tasks: array_value_semantics, jagged_nested_grid, text_slice_tokenize, bitwise_permission_flags, toon_fleet_rollup, tuple_stats_pipeline, mstream_field_parse, money_cents_report, parallel_array_wordcount]
+       fail x4: generation:HTTP API request timed out after 30 seconds [tasks: file_csv_roundtrip, contract_guarded_spread, concat_chain_partition, method_self_state]
+
