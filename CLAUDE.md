@@ -67,7 +67,9 @@ lives in the auto-memory files (this file wins if they disagree).
 3. Bump the `components/` gitlinks in PBuild, commit, push `main`.
 4. Autodeploy (post-commit hook → `tools/deploy_aether_to_claws.sh`) builds the
    pushed SHA on all three claws. Verify it ran; confirm with
-   `ssh claw@clawN '~/aether-current/build/bin/aether --version'` when in doubt.
+   `ssh claw@clawN '~/aether-current/build/aether --version'` when in doubt.
+   (No `bin/` on the claws — that path is the local PBuild layout, not the
+   deployed one; `deploy_aether_to_claws.sh` verifies `build/aether`.)
 5. If the language changed, also confirm the VERSION bump (step 0, really).
 
 Never leave verified work uncommitted at the end of a task. The `/ship` skill
