@@ -245,3 +245,24 @@ still no matter what lands in `components/aether` next. The guide cannot be
 pinned the same way -- `DOC_VARIANTS` is hardcoded in the harness, which the
 other session is also editing -- so guide drift stays visible through `doc_bytes`
 rather than prevented.
+
+## The 35B head-to-head (rerun on the pinned toolchain)
+
+`ornith-1.0-35b` and `qwen3.6-35b-a3b` are the only pair on this board with
+identical size and architecture (35B MoE, ~3B active, `qwen3_5_moe`), which
+makes their gap the cleanest capability signal available here — and the one most
+easily ruined by toolchain drift, because the gap is small.
+
+Their first runs were on aether 2026-08-09-1 + guide 2026-08-10-1 and scored
+**37/41** and **40/41**. Both were re-run on the pinned aether 2026-08-11-1 +
+guide 2026-08-11-3 so the comparison rests on one toolchain rather than two.
+
+Ornith runs on **claw3** (`ornith-1.0-35b-nvfp4`, llama.cpp) — verified at launch
+by `claw3_ornith` showing `active=ornith-1.0-35b-nvfp4`. That matters because m5t
+holds a *different* Ornith 35B (`ornith-1.0-35b-mlx`, 5-bit, 25 GB); the two are
+not interchangeable and federation must not be allowed to substitute one for the
+other. qwen3.6-35b-a3b runs on m5t as before.
+
+The superseded first runs are kept in `superseded/` rather than deleted — they
+are the only record of these models on the earlier toolchain, and the delta
+across toolchains is itself worth having.
