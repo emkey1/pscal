@@ -1,0 +1,863 @@
+{
+  "tasks_file": "Tests/aether_doc_bench/tasks_frontier.json",
+  "tasks_version": "2026-08-10-2",
+  "destinations_config": "Tests/aether_doc_bench/destinations.local_tiers_20260811.json",
+  "created_at_unix": 1786426915,
+  "aether_version": "2026-08-09-1",
+  "aether_version_raw": "Aether Compiler Version: 2026-08-09-1 (latest tag: untagged)",
+  "aether_bin": "/usr/local/bin/aether",
+  "summary": {
+    "total_cases_per_destination": 15,
+    "doc_variants": 1,
+    "destination_count": 1
+  },
+  "doc_token_reference": {
+    "full": {
+      "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+      "approx_tokens": 23299,
+      "bytes": 93573
+    },
+    "medium": {
+      "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+      "approx_tokens": 12750,
+      "bytes": 51303
+    },
+    "small": {
+      "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+      "approx_tokens": 9958,
+      "bytes": 39974
+    },
+    "none": {
+      "path": null,
+      "approx_tokens": 0,
+      "bytes": 0
+    }
+  },
+  "destinations": [
+    {
+      "destination_id": "mid-qwen36-35b-a3b",
+      "type": "tra_queue",
+      "model": "qwen/qwen3.6-35b-a3b",
+      "base_url": "http://m4t:8793",
+      "variants": [
+        {
+          "doc_name": "medium",
+          "doc_path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+          "doc_bytes": 51303,
+          "doc_approx_tokens": 12750,
+          "shared_guide_batch_size_requested": 1,
+          "shared_guide_batch_size": 1,
+          "batch_mode_enabled": false,
+          "batch_runs": [],
+          "results": [
+            {
+              "task_id": "val_checked_ledger",
+              "task_title": "val checked ledger",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 13154,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "fn main() -> Void {\n    let fields: Text[] = [\"42\", \"7x\", \"\", \"-13\", \"100\", \"3.5\"];\n    let accepted: Int = 0;\n    let rejected: Int = 0;\n    let sum: Int = 0;\n\n    loop i in 0..length(fields) {\n        let n: Int = 0;\n        let code: Int = 0;\n        val(fields[i], n, code);\n        if code == 0 {\n            accepted = accepted + 1;\n            sum = sum + n;\n        } else {\n            fx {\n                println(\"reject: \", fields[i]);\n            }\n            rejected = rejected + 1;\n        }\n    }\n\n    fx {\n        println(\"accepted=\", accepted, \" rejected=\", rejected);\n        println(\"sum=\", sum);\n    }\n\n    ret;\n}\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "e63fecd4-8c43-413c-9db7-98bbe31536c6",
+                    "model": "m5_remote"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    let fields: Text[] = [\"42\", \"7x\", \"\", \"-13\", \"100\", \"3.5\"];\n    let accepted: Int = 0;\n    let rejected: Int = 0;\n    let sum: Int = 0;\n\n    loop i in 0..length(fields) {\n        let n: Int = 0;\n        let code: Int = 0;\n        val(fields[i], n, code);\n        if code == 0 {\n            accepted = accepted + 1;\n            sum = sum + n;\n        } else {\n            fx {\n                println(\"reject: \", fields[i]);\n            }\n            rejected = rejected + 1;\n        }\n    }\n\n    fx {\n        println(\"accepted=\", accepted, \" rejected=\", rejected);\n        println(\"sum=\", sum);\n    }\n\n    ret;\n}",
+                  "source_approx_tokens": 159,
+                  "run": {
+                    "command": [
+                      "/usr/local/bin/aether",
+                      "--deny",
+                      "net,proc",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-jqmd6tot/val_checked_ledger.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "reject: 7x\nreject: \nreject: 3.5\naccepted=3 rejected=3\nsum=129\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.153,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 13154,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "fn main() -> Void {\n    let fields: Text[] = [\"42\", \"7x\", \"\", \"-13\", \"100\", \"3.5\"];\n    let accepted: Int = 0;\n    let rejected: Int = 0;\n    let sum: Int = 0;\n\n    loop i in 0..length(fields) {\n        let n: Int = 0;\n        let code: Int = 0;\n        val(fields[i], n, code);\n        if code == 0 {\n            accepted = accepted + 1;\n            sum = sum + n;\n        } else {\n            fx {\n                println(\"reject: \", fields[i]);\n            }\n            rejected = rejected + 1;\n        }\n    }\n\n    fx {\n        println(\"accepted=\", accepted, \" rejected=\", rejected);\n        println(\"sum=\", sum);\n    }\n\n    ret;\n}\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "e63fecd4-8c43-413c-9db7-98bbe31536c6",
+                "model": "m5_remote"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "fn main() -> Void {\n    let fields: Text[] = [\"42\", \"7x\", \"\", \"-13\", \"100\", \"3.5\"];\n    let accepted: Int = 0;\n    let rejected: Int = 0;\n    let sum: Int = 0;\n\n    loop i in 0..length(fields) {\n        let n: Int = 0;\n        let code: Int = 0;\n        val(fields[i], n, code);\n        if code == 0 {\n            accepted = accepted + 1;\n            sum = sum + n;\n        } else {\n            fx {\n                println(\"reject: \", fields[i]);\n            }\n            rejected = rejected + 1;\n        }\n    }\n\n    fx {\n        println(\"accepted=\", accepted, \" rejected=\", rejected);\n        println(\"sum=\", sum);\n    }\n\n    ret;\n}",
+              "source_approx_tokens": 159,
+              "run": {
+                "command": [
+                  "/usr/local/bin/aether",
+                  "--deny",
+                  "net,proc",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-jqmd6tot/val_checked_ledger.aether"
+                ],
+                "returncode": 0,
+                "stdout": "reject: 7x\nreject: \nreject: 3.5\naccepted=3 rejected=3\nsum=129\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.153,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "par_shard_tally",
+              "task_title": "par shard tally",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 13115,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "type Tally {\n    total: Int = 0;\n    count: Int = 0;\n}\n\nfn processRange(t: Tally, start: Int, end: Int) -> Void {\n    loop i in start..end {\n        if i % 3 == 0 {\n            t.total = t.total + i;\n            t.count = t.count + 1;\n        }\n    }\n    ret;\n}\n\nfn main() -> Void {\n    let a: Tally = new Tally();\n    let b: Tally = new Tally();\n    par {\n        processRange(a, 0, 25);\n        processRange(b, 25, 50);\n    }\n    fx {\n        println(\"shardA total=\", a.total, \" count=\", a.count);\n        println(\"shardB total=\", b.total, \" count=\", b.count);\n        println(\"combined total=\", a.total + b.total, \" count=\", a.count + b.count);\n    }\n    ret;\n}\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "888d7bec-a572-4b97-a330-d7f47413c535",
+                    "model": "m5_remote"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "type Tally {\n    total: Int = 0;\n    count: Int = 0;\n}\n\nfn processRange(t: Tally, start: Int, end: Int) -> Void {\n    loop i in start..end {\n        if i % 3 == 0 {\n            t.total = t.total + i;\n            t.count = t.count + 1;\n        }\n    }\n    ret;\n}\n\nfn main() -> Void {\n    let a: Tally = new Tally();\n    let b: Tally = new Tally();\n    par {\n        processRange(a, 0, 25);\n        processRange(b, 25, 50);\n    }\n    fx {\n        println(\"shardA total=\", a.total, \" count=\", a.count);\n        println(\"shardB total=\", b.total, \" count=\", b.count);\n        println(\"combined total=\", a.total + b.total, \" count=\", a.count + b.count);\n    }\n    ret;\n}",
+                  "source_approx_tokens": 166,
+                  "run": {
+                    "command": [
+                      "/usr/local/bin/aether",
+                      "--deny",
+                      "net,proc",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-qzq9hupf/par_shard_tally.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "shardA total=108 count=9\nshardB total=300 count=8\ncombined total=408 count=17\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.022,
+                    "exact_stdout_match": true
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "initial",
+              "prompt_approx_tokens": 13115,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "type Tally {\n    total: Int = 0;\n    count: Int = 0;\n}\n\nfn processRange(t: Tally, start: Int, end: Int) -> Void {\n    loop i in start..end {\n        if i % 3 == 0 {\n            t.total = t.total + i;\n            t.count = t.count + 1;\n        }\n    }\n    ret;\n}\n\nfn main() -> Void {\n    let a: Tally = new Tally();\n    let b: Tally = new Tally();\n    par {\n        processRange(a, 0, 25);\n        processRange(b, 25, 50);\n    }\n    fx {\n        println(\"shardA total=\", a.total, \" count=\", a.count);\n        println(\"shardB total=\", b.total, \" count=\", b.count);\n        println(\"combined total=\", a.total + b.total, \" count=\", a.count + b.count);\n    }\n    ret;\n}\n__AETHER_BENCH_END__",
+                "usage": null,
+                "response_id": "888d7bec-a572-4b97-a330-d7f47413c535",
+                "model": "m5_remote"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "type Tally {\n    total: Int = 0;\n    count: Int = 0;\n}\n\nfn processRange(t: Tally, start: Int, end: Int) -> Void {\n    loop i in start..end {\n        if i % 3 == 0 {\n            t.total = t.total + i;\n            t.count = t.count + 1;\n        }\n    }\n    ret;\n}\n\nfn main() -> Void {\n    let a: Tally = new Tally();\n    let b: Tally = new Tally();\n    par {\n        processRange(a, 0, 25);\n        processRange(b, 25, 50);\n    }\n    fx {\n        println(\"shardA total=\", a.total, \" count=\", a.count);\n        println(\"shardB total=\", b.total, \" count=\", b.count);\n        println(\"combined total=\", a.total + b.total, \" count=\", a.count + b.count);\n    }\n    ret;\n}",
+              "source_approx_tokens": 166,
+              "run": {
+                "command": [
+                  "/usr/local/bin/aether",
+                  "--deny",
+                  "net,proc",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-qzq9hupf/par_shard_tally.aether"
+                ],
+                "returncode": 0,
+                "stdout": "shardA total=108 count=9\nshardB total=300 count=8\ncombined total=408 count=17\n",
+                "stderr": "",
+                "diagnostics": null,
+                "elapsed_seconds": 0.022,
+                "exact_stdout_match": true
+              },
+              "attempt_count": 1,
+              "resolved_after_repair": false,
+              "failure_fingerprint": ""
+            },
+            {
+              "task_id": "file_csv_roundtrip",
+              "task_title": "file csv roundtrip",
+              "repeat_index": 0,
+              "attempts": [],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "generated_ok": false,
+              "generation_error": "HTTP API request timed out after 30 seconds",
+              "run": {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": "HTTP API request timed out after 30 seconds",
+                "elapsed_seconds": 0.0,
+                "exact_stdout_match": false
+              },
+              "attempt_count": 0,
+              "resolved_after_repair": false,
+              "failure_fingerprint": "generation:HTTP API request timed out after 30 seconds"
+            },
+            {
+              "task_id": "contract_guarded_spread",
+              "task_title": "contract guarded spread",
+              "repeat_index": 0,
+              "attempts": [],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "generated_ok": false,
+              "generation_error": "HTTP API request timed out after 30 seconds",
+              "run": {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": "HTTP API request timed out after 30 seconds",
+                "elapsed_seconds": 0.0,
+                "exact_stdout_match": false
+              },
+              "attempt_count": 0,
+              "resolved_after_repair": false,
+              "failure_fingerprint": "generation:HTTP API request timed out after 30 seconds"
+            },
+            {
+              "task_id": "concat_chain_partition",
+              "task_title": "concat chain partition",
+              "repeat_index": 0,
+              "attempts": [],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "generated_ok": false,
+              "generation_error": "HTTP API request timed out after 30 seconds",
+              "run": {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": "HTTP API request timed out after 30 seconds",
+                "elapsed_seconds": 0.0,
+                "exact_stdout_match": false
+              },
+              "attempt_count": 0,
+              "resolved_after_repair": false,
+              "failure_fingerprint": "generation:HTTP API request timed out after 30 seconds"
+            },
+            {
+              "task_id": "method_self_state",
+              "task_title": "method self state",
+              "repeat_index": 0,
+              "attempts": [],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "generated_ok": false,
+              "generation_error": "HTTP API request timed out after 30 seconds",
+              "run": {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": "HTTP API request timed out after 30 seconds",
+                "elapsed_seconds": 0.0,
+                "exact_stdout_match": false
+              },
+              "attempt_count": 0,
+              "resolved_after_repair": false,
+              "failure_fingerprint": "generation:HTTP API request timed out after 30 seconds"
+            },
+            {
+              "task_id": "array_value_semantics",
+              "task_title": "array value semantics",
+              "repeat_index": 0,
+              "attempts": [],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "generated_ok": false,
+              "generation_error": "HTTP API request failed: timed out",
+              "run": {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": "HTTP API request failed: timed out",
+                "elapsed_seconds": 0.0,
+                "exact_stdout_match": false
+              },
+              "attempt_count": 0,
+              "resolved_after_repair": false,
+              "failure_fingerprint": "generation:HTTP API request failed: timed out"
+            },
+            {
+              "task_id": "jagged_nested_grid",
+              "task_title": "jagged nested grid",
+              "repeat_index": 0,
+              "attempts": [],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "generated_ok": false,
+              "generation_error": "HTTP API request failed: timed out",
+              "run": {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": "HTTP API request failed: timed out",
+                "elapsed_seconds": 0.0,
+                "exact_stdout_match": false
+              },
+              "attempt_count": 0,
+              "resolved_after_repair": false,
+              "failure_fingerprint": "generation:HTTP API request failed: timed out"
+            },
+            {
+              "task_id": "text_slice_tokenize",
+              "task_title": "text slice tokenize",
+              "repeat_index": 0,
+              "attempts": [],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "generated_ok": false,
+              "generation_error": "HTTP API request failed: timed out",
+              "run": {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": "HTTP API request failed: timed out",
+                "elapsed_seconds": 0.0,
+                "exact_stdout_match": false
+              },
+              "attempt_count": 0,
+              "resolved_after_repair": false,
+              "failure_fingerprint": "generation:HTTP API request failed: timed out"
+            },
+            {
+              "task_id": "bitwise_permission_flags",
+              "task_title": "bitwise permission flags",
+              "repeat_index": 0,
+              "attempts": [],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "generated_ok": false,
+              "generation_error": "HTTP API request failed: timed out",
+              "run": {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": "HTTP API request failed: timed out",
+                "elapsed_seconds": 0.0,
+                "exact_stdout_match": false
+              },
+              "attempt_count": 0,
+              "resolved_after_repair": false,
+              "failure_fingerprint": "generation:HTTP API request failed: timed out"
+            },
+            {
+              "task_id": "toon_fleet_rollup",
+              "task_title": "toon fleet rollup",
+              "repeat_index": 0,
+              "attempts": [],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "generated_ok": false,
+              "generation_error": "HTTP API request failed: timed out",
+              "run": {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": "HTTP API request failed: timed out",
+                "elapsed_seconds": 0.0,
+                "exact_stdout_match": false
+              },
+              "attempt_count": 0,
+              "resolved_after_repair": false,
+              "failure_fingerprint": "generation:HTTP API request failed: timed out"
+            },
+            {
+              "task_id": "tuple_stats_pipeline",
+              "task_title": "tuple stats pipeline",
+              "repeat_index": 0,
+              "attempts": [],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "generated_ok": false,
+              "generation_error": "HTTP API request failed: timed out",
+              "run": {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": "HTTP API request failed: timed out",
+                "elapsed_seconds": 0.0,
+                "exact_stdout_match": false
+              },
+              "attempt_count": 0,
+              "resolved_after_repair": false,
+              "failure_fingerprint": "generation:HTTP API request failed: timed out"
+            },
+            {
+              "task_id": "mstream_field_parse",
+              "task_title": "mstream field parse",
+              "repeat_index": 0,
+              "attempts": [],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "generated_ok": false,
+              "generation_error": "HTTP API request failed: timed out",
+              "run": {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": "HTTP API request failed: timed out",
+                "elapsed_seconds": 0.0,
+                "exact_stdout_match": false
+              },
+              "attempt_count": 0,
+              "resolved_after_repair": false,
+              "failure_fingerprint": "generation:HTTP API request failed: timed out"
+            },
+            {
+              "task_id": "money_cents_report",
+              "task_title": "money cents report",
+              "repeat_index": 0,
+              "attempts": [],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "generated_ok": false,
+              "generation_error": "HTTP API request failed: timed out",
+              "run": {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": "HTTP API request failed: timed out",
+                "elapsed_seconds": 0.0,
+                "exact_stdout_match": false
+              },
+              "attempt_count": 0,
+              "resolved_after_repair": false,
+              "failure_fingerprint": "generation:HTTP API request failed: timed out"
+            },
+            {
+              "task_id": "parallel_array_wordcount",
+              "task_title": "parallel array wordcount",
+              "repeat_index": 0,
+              "attempts": [],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "generated_ok": false,
+              "generation_error": "HTTP API request failed: timed out",
+              "run": {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": "HTTP API request failed: timed out",
+                "elapsed_seconds": 0.0,
+                "exact_stdout_match": false
+              },
+              "attempt_count": 0,
+              "resolved_after_repair": false,
+              "failure_fingerprint": "generation:HTTP API request failed: timed out"
+            }
+          ],
+          "summary": {
+            "total_cases": 15,
+            "generated_ok": 2,
+            "run_ok": 2,
+            "exact_stdout_match": 2,
+            "resolved_after_repair": 0,
+            "generated_rate": 0.1333,
+            "run_rate": 0.1333,
+            "exact_match_rate": 0.1333,
+            "repair_recovery_rate": 0.0
+          },
+          "usage_summary": {
+            "attempts_total": 2,
+            "attempts_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null
+          },
+          "source_token_summary": {
+            "attempts_total": 2,
+            "source_approx_tokens_total": 325,
+            "source_approx_tokens_avg": 162.5
+          },
+          "final_usage_summary": {
+            "cases_total": 15,
+            "cases_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null,
+            "success_filter": "all"
+          },
+          "run_ok_final_usage_summary": {
+            "cases_total": 2,
+            "cases_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null,
+            "success_filter": "run_ok"
+          },
+          "exact_final_usage_summary": {
+            "cases_total": 2,
+            "cases_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null,
+            "success_filter": "exact"
+          },
+          "final_source_token_summary": {
+            "cases_counted": 2,
+            "source_approx_tokens_total": 325,
+            "source_approx_tokens_avg": 162.5,
+            "success_filter": "all"
+          },
+          "run_ok_final_source_token_summary": {
+            "cases_counted": 2,
+            "source_approx_tokens_total": 325,
+            "source_approx_tokens_avg": 162.5,
+            "success_filter": "run_ok"
+          },
+          "exact_final_source_token_summary": {
+            "cases_counted": 2,
+            "source_approx_tokens_total": 325,
+            "source_approx_tokens_avg": 162.5,
+            "success_filter": "exact"
+          },
+          "failure_patterns": [
+            {
+              "fingerprint": "generation:HTTP API request failed: timed out",
+              "count": 9,
+              "task_ids": [
+                "array_value_semantics",
+                "jagged_nested_grid",
+                "text_slice_tokenize",
+                "bitwise_permission_flags",
+                "toon_fleet_rollup",
+                "tuple_stats_pipeline",
+                "mstream_field_parse",
+                "money_cents_report",
+                "parallel_array_wordcount"
+              ]
+            },
+            {
+              "fingerprint": "generation:HTTP API request timed out after 30 seconds",
+              "count": 4,
+              "task_ids": [
+                "file_csv_roundtrip",
+                "contract_guarded_spread",
+                "concat_chain_partition",
+                "method_self_state"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "updated_at_unix": 1786427905
+}

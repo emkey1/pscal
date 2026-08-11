@@ -1,0 +1,417 @@
+{
+  "tasks_file": "Tests/aether_doc_bench/tasks_frontier.json",
+  "tasks_version": "2026-08-10-2",
+  "destinations_config": "Tests/aether_doc_bench/destinations.local_tiers_20260811.json",
+  "created_at_unix": 1786426915,
+  "aether_version": "2026-08-09-1",
+  "aether_version_raw": "Aether Compiler Version: 2026-08-09-1 (latest tag: untagged)",
+  "aether_bin": "/usr/local/bin/aether",
+  "summary": {
+    "total_cases_per_destination": 15,
+    "doc_variants": 1,
+    "destination_count": 1
+  },
+  "doc_token_reference": {
+    "full": {
+      "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+      "approx_tokens": 23299,
+      "bytes": 93573
+    },
+    "medium": {
+      "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+      "approx_tokens": 12750,
+      "bytes": 51303
+    },
+    "small": {
+      "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+      "approx_tokens": 9958,
+      "bytes": 39974
+    },
+    "none": {
+      "path": null,
+      "approx_tokens": 0,
+      "bytes": 0
+    }
+  },
+  "destinations": [
+    {
+      "destination_id": "low-granite4-h-tiny",
+      "type": "tra_queue",
+      "model": "ibm/granite-4-h-tiny",
+      "base_url": "http://m4t:8793",
+      "variants": [
+        {
+          "doc_name": "medium",
+          "doc_path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+          "doc_bytes": 51303,
+          "doc_approx_tokens": 12750,
+          "shared_guide_batch_size_requested": 1,
+          "shared_guide_batch_size": 1,
+          "batch_mode_enabled": false,
+          "batch_runs": [],
+          "results": [
+            {
+              "task_id": "val_checked_ledger",
+              "task_title": "val checked ledger",
+              "repeat_index": 0,
+              "attempts": [
+                {
+                  "prompt_kind": "initial",
+                  "prompt_approx_tokens": 13154,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "```aether\nfn main() -> Void {\n    let fields: Text[] = [\"42\", \"7x\", \"\", \"-13\", \"100\", \"3.5\"];\n    let mut accepted: Int = 0;\n    let mut rejected: Int = 0;\n    let mut total: Real = 0.0;\n\n    fx {\n        loop i in 0..length(fields) {\n            let s: Text = fields[i];\n            let n: Int = parse_int(s);\n            if string_len(s) == length(int_to_text(n)) {\n                accepted = accepted + 1;\n                total = total + Real(n);\n            } else {\n                rejected = rejected + 1;\n                println(\"reject:\", s);\n            }\n        }\n\n        println(\"accepted=\", accepted, \" rejected=\", rejected);\n        println(\"sum=\", total);\n    }\n\n    ret;\n}\n__AETHER_BENCH_END__\n```",
+                    "usage": null,
+                    "response_id": "217a7cfd-fece-450d-b4d0-04e3fd3056d7",
+                    "model": "m2_remote"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    let fields: Text[] = [\"42\", \"7x\", \"\", \"-13\", \"100\", \"3.5\"];\n    let mut accepted: Int = 0;\n    let mut rejected: Int = 0;\n    let mut total: Real = 0.0;\n\n    fx {\n        loop i in 0..length(fields) {\n            let s: Text = fields[i];\n            let n: Int = parse_int(s);\n            if string_len(s) == length(int_to_text(n)) {\n                accepted = accepted + 1;\n                total = total + Real(n);\n            } else {\n                rejected = rejected + 1;\n                println(\"reject:\", s);\n            }\n        }\n\n        println(\"accepted=\", accepted, \" rejected=\", rejected);\n        println(\"sum=\", total);\n    }\n\n    ret;\n}",
+                  "source_approx_tokens": 170,
+                  "run": {
+                    "command": [
+                      "/usr/local/bin/aether",
+                      "--deny",
+                      "net,proc",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-6g1szvtu/val_checked_ledger.aether"
+                    ],
+                    "returncode": 0,
+                    "stdout": "reject:7x\nreject:\nreject:3.5\naccepted=3 rejected=3\nsum=129.000000\n",
+                    "stderr": "",
+                    "diagnostics": null,
+                    "elapsed_seconds": 0.032,
+                    "exact_stdout_match": false
+                  }
+                },
+                {
+                  "prompt_kind": "repair",
+                  "prompt_approx_tokens": 13442,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "fn main() -> Void {\n    let fields: Text[] = [\"42\", \"7x\", \"\", \"-13\", \"100\", \"3.5\"];\n    let mut accepted: Int = 0;\n    let mut rejected: Int = 0;\n    let mut total: Real = 0.0;\n\n    fx {\n        loop i in 0..length(fields) {\n            let s: Text = fields[i];\n            let n: Int = val(s, _, _);\n            if string_len(s) == length(int_to_text(n)) {\n                accepted = accepted + 1;\n                total = total + Real(n);\n            } else {\n                rejected = rejected + 1;\n                println(\"reject:\", s);\n            }\n        }\n\n        println(\"accepted=\", accepted, \" rejected=\", rejected);\n        println(\"sum=\", total);\n    }\n\n    ret;\n}\n\n__AETHER_BENCH_END__",
+                    "usage": null,
+                    "response_id": "cc93246e-2f75-4979-97e8-d9c5ca97bd9a",
+                    "model": "m2_remote"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    let fields: Text[] = [\"42\", \"7x\", \"\", \"-13\", \"100\", \"3.5\"];\n    let mut accepted: Int = 0;\n    let mut rejected: Int = 0;\n    let mut total: Real = 0.0;\n\n    fx {\n        loop i in 0..length(fields) {\n            let s: Text = fields[i];\n            let n: Int = val(s, _, _);\n            if string_len(s) == length(int_to_text(n)) {\n                accepted = accepted + 1;\n                total = total + Real(n);\n            } else {\n                rejected = rejected + 1;\n                println(\"reject:\", s);\n            }\n        }\n\n        println(\"accepted=\", accepted, \" rejected=\", rejected);\n        println(\"sum=\", total);\n    }\n\n    ret;\n}",
+                  "source_approx_tokens": 170,
+                  "run": {
+                    "command": [
+                      "/usr/local/bin/aether",
+                      "--deny",
+                      "net,proc",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-vf51vwcb/val_checked_ledger.aether"
+                    ],
+                    "returncode": 1,
+                    "stdout": "",
+                    "stderr": "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-vf51vwcb/val_checked_ledger.aether:10: [SCOPE-001] identifier '_' not in scope.\n/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-vf51vwcb/val_checked_ledger.aether:10: [SCOPE-001] identifier '_' not in scope.\n",
+                    "diagnostics": [
+                      {
+                        "severity": "error",
+                        "phase": "semantic",
+                        "kind": "scope",
+                        "code": "SCOPE-001",
+                        "file": "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-vf51vwcb/val_checked_ledger.aether",
+                        "line": 10,
+                        "column": null,
+                        "message": "identifier '_' not in scope.",
+                        "hint": null,
+                        "raw": "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-vf51vwcb/val_checked_ledger.aether:10: [SCOPE-001] identifier '_' not in scope."
+                      },
+                      {
+                        "severity": "error",
+                        "phase": "semantic",
+                        "kind": "scope",
+                        "code": "SCOPE-001",
+                        "file": "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-vf51vwcb/val_checked_ledger.aether",
+                        "line": 10,
+                        "column": null,
+                        "message": "identifier '_' not in scope.",
+                        "hint": null,
+                        "raw": "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-vf51vwcb/val_checked_ledger.aether:10: [SCOPE-001] identifier '_' not in scope."
+                      }
+                    ],
+                    "elapsed_seconds": 0.01,
+                    "exact_stdout_match": false
+                  }
+                },
+                {
+                  "prompt_kind": "repair",
+                  "prompt_approx_tokens": 13465,
+                  "runner": "aether",
+                  "generation": {
+                    "raw_text": "fn main() -> Void {\n    let fields: Text[] = [\"42\", \"7x\", \"\", \"-13\", \"100\", \"3.5\"];\n    fx {\n        let accepted: Int = 0;\n        let rejected: Int = 0;\n        let total: Real = 0.0;\n\n        loop i in 0..length(fields) {\n            let s: Text = fields[i];\n            let n: Int = val(s, _, _);\n            if string_len(s) == length(int_to_text(n)) {\n                accepted = accepted + 1;\n                total = total + Real(n);\n            } else {\n                rejected = rejected + 1;\n                println(\"reject:\", s);\n            }\n        }\n\n        println(\"accepted=\", accepted, \" rejected=\", rejected);\n        println(\"sum=\", total);\n    }\n    ret;\n}\n\n__AETHER_BENCH_END__\n\nThe corrected program uses `val` to safely parse each field, checking that the entire string converts without truncation. It counts valid and invalid entries separately, prints rejections as requested, then outputs the accepted count, rejected count, and sum of the converted values. The final line contains exactly `__AETHER_BENCH_END__`.",
+                    "usage": null,
+                    "response_id": "469af330-75fc-478a-844f-333c52ca6577",
+                    "model": "m2_remote"
+                  },
+                  "usage": null,
+                  "generated_ok": true,
+                  "source_code": "fn main() -> Void {\n    let fields: Text[] = [\"42\", \"7x\", \"\", \"-13\", \"100\", \"3.5\"];\n    fx {\n        let accepted: Int = 0;\n        let rejected: Int = 0;\n        let total: Real = 0.0;\n\n        loop i in 0..length(fields) {\n            let s: Text = fields[i];\n            let n: Int = val(s, _, _);\n            if string_len(s) == length(int_to_text(n)) {\n                accepted = accepted + 1;\n                total = total + Real(n);\n            } else {\n                rejected = rejected + 1;\n                println(\"reject:\", s);\n            }\n        }\n\n        println(\"accepted=\", accepted, \" rejected=\", rejected);\n        println(\"sum=\", total);\n    }\n    ret;\n}",
+                  "source_approx_tokens": 170,
+                  "run": {
+                    "command": [
+                      "/usr/local/bin/aether",
+                      "--deny",
+                      "net,proc",
+                      "--no-cache",
+                      "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-3lwb8bwr/val_checked_ledger.aether"
+                    ],
+                    "returncode": 1,
+                    "stdout": "",
+                    "stderr": "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-3lwb8bwr/val_checked_ledger.aether:10: [SCOPE-001] identifier '_' not in scope.\n/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-3lwb8bwr/val_checked_ledger.aether:10: [SCOPE-001] identifier '_' not in scope.\n",
+                    "diagnostics": [
+                      {
+                        "severity": "error",
+                        "phase": "semantic",
+                        "kind": "scope",
+                        "code": "SCOPE-001",
+                        "file": "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-3lwb8bwr/val_checked_ledger.aether",
+                        "line": 10,
+                        "column": null,
+                        "message": "identifier '_' not in scope.",
+                        "hint": null,
+                        "raw": "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-3lwb8bwr/val_checked_ledger.aether:10: [SCOPE-001] identifier '_' not in scope."
+                      },
+                      {
+                        "severity": "error",
+                        "phase": "semantic",
+                        "kind": "scope",
+                        "code": "SCOPE-001",
+                        "file": "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-3lwb8bwr/val_checked_ledger.aether",
+                        "line": 10,
+                        "column": null,
+                        "message": "identifier '_' not in scope.",
+                        "hint": null,
+                        "raw": "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-3lwb8bwr/val_checked_ledger.aether:10: [SCOPE-001] identifier '_' not in scope."
+                      }
+                    ],
+                    "elapsed_seconds": 0.005,
+                    "exact_stdout_match": false
+                  }
+                }
+              ],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "prompt_kind": "repair",
+              "prompt_approx_tokens": 13465,
+              "runner": "aether",
+              "generation": {
+                "raw_text": "fn main() -> Void {\n    let fields: Text[] = [\"42\", \"7x\", \"\", \"-13\", \"100\", \"3.5\"];\n    fx {\n        let accepted: Int = 0;\n        let rejected: Int = 0;\n        let total: Real = 0.0;\n\n        loop i in 0..length(fields) {\n            let s: Text = fields[i];\n            let n: Int = val(s, _, _);\n            if string_len(s) == length(int_to_text(n)) {\n                accepted = accepted + 1;\n                total = total + Real(n);\n            } else {\n                rejected = rejected + 1;\n                println(\"reject:\", s);\n            }\n        }\n\n        println(\"accepted=\", accepted, \" rejected=\", rejected);\n        println(\"sum=\", total);\n    }\n    ret;\n}\n\n__AETHER_BENCH_END__\n\nThe corrected program uses `val` to safely parse each field, checking that the entire string converts without truncation. It counts valid and invalid entries separately, prints rejections as requested, then outputs the accepted count, rejected count, and sum of the converted values. The final line contains exactly `__AETHER_BENCH_END__`.",
+                "usage": null,
+                "response_id": "469af330-75fc-478a-844f-333c52ca6577",
+                "model": "m2_remote"
+              },
+              "usage": null,
+              "generated_ok": true,
+              "source_code": "fn main() -> Void {\n    let fields: Text[] = [\"42\", \"7x\", \"\", \"-13\", \"100\", \"3.5\"];\n    fx {\n        let accepted: Int = 0;\n        let rejected: Int = 0;\n        let total: Real = 0.0;\n\n        loop i in 0..length(fields) {\n            let s: Text = fields[i];\n            let n: Int = val(s, _, _);\n            if string_len(s) == length(int_to_text(n)) {\n                accepted = accepted + 1;\n                total = total + Real(n);\n            } else {\n                rejected = rejected + 1;\n                println(\"reject:\", s);\n            }\n        }\n\n        println(\"accepted=\", accepted, \" rejected=\", rejected);\n        println(\"sum=\", total);\n    }\n    ret;\n}",
+              "source_approx_tokens": 170,
+              "run": {
+                "command": [
+                  "/usr/local/bin/aether",
+                  "--deny",
+                  "net,proc",
+                  "--no-cache",
+                  "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-3lwb8bwr/val_checked_ledger.aether"
+                ],
+                "returncode": 1,
+                "stdout": "",
+                "stderr": "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-3lwb8bwr/val_checked_ledger.aether:10: [SCOPE-001] identifier '_' not in scope.\n/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-3lwb8bwr/val_checked_ledger.aether:10: [SCOPE-001] identifier '_' not in scope.\n",
+                "diagnostics": [
+                  {
+                    "severity": "error",
+                    "phase": "semantic",
+                    "kind": "scope",
+                    "code": "SCOPE-001",
+                    "file": "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-3lwb8bwr/val_checked_ledger.aether",
+                    "line": 10,
+                    "column": null,
+                    "message": "identifier '_' not in scope.",
+                    "hint": null,
+                    "raw": "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-3lwb8bwr/val_checked_ledger.aether:10: [SCOPE-001] identifier '_' not in scope."
+                  },
+                  {
+                    "severity": "error",
+                    "phase": "semantic",
+                    "kind": "scope",
+                    "code": "SCOPE-001",
+                    "file": "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-3lwb8bwr/val_checked_ledger.aether",
+                    "line": 10,
+                    "column": null,
+                    "message": "identifier '_' not in scope.",
+                    "hint": null,
+                    "raw": "/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/aether-doc-bench-3lwb8bwr/val_checked_ledger.aether:10: [SCOPE-001] identifier '_' not in scope."
+                  }
+                ],
+                "elapsed_seconds": 0.005,
+                "exact_stdout_match": false
+              },
+              "attempt_count": 3,
+              "resolved_after_repair": false,
+              "failure_fingerprint": "run_error_code:SCOPE-001"
+            },
+            {
+              "task_id": "par_shard_tally",
+              "task_title": "par shard tally",
+              "repeat_index": 0,
+              "attempts": [],
+              "doc_token_reference": {
+                "full": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_and_others.md",
+                  "approx_tokens": 23299,
+                  "bytes": 93573
+                },
+                "medium": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_medium_contexts.md",
+                  "approx_tokens": 12750,
+                  "bytes": 51303
+                },
+                "small": {
+                  "path": "/Users/mke/PBuild/components/aether/docs/aether_for_llms_with_small_contexts.md",
+                  "approx_tokens": 9958,
+                  "bytes": 39974
+                },
+                "none": {
+                  "path": null,
+                  "approx_tokens": 0,
+                  "bytes": 0
+                }
+              },
+              "generated_ok": false,
+              "generation_error": "HTTP API request timed out after 30 seconds",
+              "run": {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": "HTTP API request timed out after 30 seconds",
+                "elapsed_seconds": 0.0,
+                "exact_stdout_match": false
+              },
+              "attempt_count": 0,
+              "resolved_after_repair": false,
+              "failure_fingerprint": "generation:HTTP API request timed out after 30 seconds"
+            }
+          ],
+          "summary": {
+            "total_cases": 2,
+            "generated_ok": 1,
+            "run_ok": 0,
+            "exact_stdout_match": 0,
+            "resolved_after_repair": 0,
+            "generated_rate": 0.5,
+            "run_rate": 0.0,
+            "exact_match_rate": 0.0,
+            "repair_recovery_rate": 0.0
+          },
+          "usage_summary": {
+            "attempts_total": 3,
+            "attempts_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null
+          },
+          "source_token_summary": {
+            "attempts_total": 3,
+            "source_approx_tokens_total": 510,
+            "source_approx_tokens_avg": 170.0
+          },
+          "final_usage_summary": {
+            "cases_total": 2,
+            "cases_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null,
+            "success_filter": "all"
+          },
+          "run_ok_final_usage_summary": {
+            "cases_total": 0,
+            "cases_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null,
+            "success_filter": "run_ok"
+          },
+          "exact_final_usage_summary": {
+            "cases_total": 0,
+            "cases_with_usage": 0,
+            "coverage_rate": 0.0,
+            "prompt_tokens_total": null,
+            "completion_tokens_total": null,
+            "total_tokens_total": null,
+            "cached_tokens_total": null,
+            "reasoning_tokens_total": null,
+            "success_filter": "exact"
+          },
+          "final_source_token_summary": {
+            "cases_counted": 1,
+            "source_approx_tokens_total": 170,
+            "source_approx_tokens_avg": 170.0,
+            "success_filter": "all"
+          },
+          "run_ok_final_source_token_summary": {
+            "cases_counted": 0,
+            "source_approx_tokens_total": null,
+            "source_approx_tokens_avg": null,
+            "success_filter": "run_ok"
+          },
+          "exact_final_source_token_summary": {
+            "cases_counted": 0,
+            "source_approx_tokens_total": null,
+            "source_approx_tokens_avg": null,
+            "success_filter": "exact"
+          },
+          "failure_patterns": [
+            {
+              "fingerprint": "generation:HTTP API request timed out after 30 seconds",
+              "count": 1,
+              "task_ids": [
+                "par_shard_tally"
+              ]
+            },
+            {
+              "fingerprint": "run_error_code:SCOPE-001",
+              "count": 1,
+              "task_ids": [
+                "val_checked_ledger"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "updated_at_unix": 1786427412
+}

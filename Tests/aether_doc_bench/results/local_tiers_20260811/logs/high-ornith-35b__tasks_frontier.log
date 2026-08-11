@@ -1,0 +1,15 @@
+[progress] high-ornith-35b medium val_checked_ledger repeat=0 start
+[progress] high-ornith-35b medium val_checked_ledger repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ornith-35b medium par_shard_tally repeat=0 start
+[progress] high-ornith-35b medium par_shard_tally repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ornith-35b medium file_csv_roundtrip repeat=0 start
+[progress] high-ornith-35b medium file_csv_roundtrip repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ornith-35b medium contract_guarded_spread repeat=0 start
+[progress] high-ornith-35b medium contract_guarded_spread repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ornith-35b medium concat_chain_partition repeat=0 start
+[progress] high-ornith-35b medium concat_chain_partition repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ornith-35b medium method_self_state repeat=0 start
+[progress] high-ornith-35b medium method_self_state repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ornith-35b medium array_value_semantics repeat=0 start
+[progress] high-ornith-35b medium array_value_semantics repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ornith-35b medium jagged_nested_grid repeat=0 start

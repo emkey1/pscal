@@ -1,0 +1,40 @@
+[progress] high-ds4 medium val_checked_ledger repeat=0 start
+[progress] high-ds4 medium val_checked_ledger repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ds4 medium par_shard_tally repeat=0 start
+[progress] high-ds4 medium par_shard_tally repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ds4 medium file_csv_roundtrip repeat=0 start
+[progress] high-ds4 medium file_csv_roundtrip repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ds4 medium contract_guarded_spread repeat=0 start
+[progress] high-ds4 medium contract_guarded_spread repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ds4 medium concat_chain_partition repeat=0 start
+[progress] high-ds4 medium concat_chain_partition repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ds4 medium method_self_state repeat=0 start
+[progress] high-ds4 medium method_self_state repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ds4 medium array_value_semantics repeat=0 start
+[progress] high-ds4 medium array_value_semantics repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ds4 medium jagged_nested_grid repeat=0 start
+[progress] high-ds4 medium jagged_nested_grid repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ds4 medium text_slice_tokenize repeat=0 start
+[progress] high-ds4 medium text_slice_tokenize repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ds4 medium bitwise_permission_flags repeat=0 start
+[progress] high-ds4 medium bitwise_permission_flags repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ds4 medium toon_fleet_rollup repeat=0 start
+[progress] high-ds4 medium toon_fleet_rollup repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ds4 medium tuple_stats_pipeline repeat=0 start
+[progress] high-ds4 medium tuple_stats_pipeline repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ds4 medium mstream_field_parse repeat=0 start
+[progress] high-ds4 medium mstream_field_parse repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ds4 medium money_cents_report repeat=0 start
+[progress] high-ds4 medium money_cents_report repeat=0 generated=1 returncode=0 exact=1
+[progress] high-ds4 medium parallel_array_wordcount repeat=0 start
+[progress] high-ds4 medium parallel_array_wordcount repeat=0 generated=1 returncode=0 exact=1
+tasks file    : Tests/aether_doc_bench/tasks_frontier.json
+cases/dest    : 15
+destinations  : 1
+
+destination   : high-ds4
+type          : openai_chat_completions
+model         : deepseek-v4-flash-0731
+medium  approx_tokens=12750   generated=15/15  run=15/15  exact=15/15  repaired=0/15
+       usage : workflow_prompt_tok=233609  workflow_completion_tok=25165  workflow_total_tok=258774  usage_cov=15/15  all_attempt_answer_tok~=2930  final_answer_tok~=2930  exact_final_answer_tok~=2930
+
