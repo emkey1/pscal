@@ -1,0 +1,31 @@
+{
+  "_note": [
+    "Same destination id as the main board so output filenames match and",
+    "the main driver will [skip] it. Entry point moved to m2_remote because",
+    "m5_remote is saturated at 0/4 slots. devstral is pre-loaded on m4t, so",
+    "federation should execute it there -- VERIFY with lms ps before trusting."
+  ],
+  "destinations": [
+    {
+      "id": "mid-devstral-small-2",
+      "_tier": "mid",
+      "_params": "24B",
+      "type": "tra_queue",
+      "base_url": "http://m4t:8793",
+      "model": "mistralai/devstral-small-2-2512",
+      "preferred_targets": [
+        "m2_remote"
+      ],
+      "temperature": 0.2,
+      "max_output_tokens": 24000,
+      "request_timeout_seconds": 8900,
+      "request_max_retries": 2,
+      "retry_backoff_seconds": 5,
+      "priority": 5,
+      "cooldown_seconds": 1,
+      "extra_body": {
+        "stop": null
+      }
+    }
+  ]
+}
