@@ -26,7 +26,7 @@ exploring new ones.
 | low | `ornith-1.0-9b` | 9B | m5t | T'Ra `m5_remote` |
 | low | `prism-coder-7b` | 7B | m5t | T'Ra `m5_remote` |
 | low | `gemma-4-e4b-it-mlx@8bit` | ~4B effective | m5t | T'Ra `m5_remote` |
-| low | `ibm/granite-4-h-tiny` | tiny | m2t | T'Ra `m2_remote` |
+| low | `ibm/granite-4-h-tiny` | 7B | **m4t** *(see below)* | T'Ra `m2_remote` |
 
 The high tier is the user's definition. `qwen3.5-122b-a10b` (m5t) would qualify
 on parameter count alone and is the obvious third member if this board is
@@ -44,6 +44,35 @@ deployments run concurrently.
 | B | claw3 | ornith-35b |
 | C | m5t | 4 mid + 4 low, sequential |
 | D | m2t | granite-4-h-tiny |
+
+## LM Studio federation: the T'Ra target is not the executing node
+
+The three LM Studio nodes (m5t 128 GB, m4t 64 GB, m2t 32 GB) are **federated**,
+and all of them advertise the same 127-model catalog. A T'Ra target therefore
+selects the *entry point*, not the machine that runs the model — LM Studio
+federation picks that, from whichever nodes physically hold the weights.
+
+Measured, not assumed: `ibm/granite-4-h-tiny` was routed through T'Ra's
+`m2_remote` and **executed on m4t**. `lms ps` reports the truth in its `DEVICE`
+column (`Local` = m5t, `m4` = m4t, `M2-mini` = m2t); `lms ls` reports which
+nodes hold each model, and a model may sit on several.
+
+So "which node is this tier running on" cannot be read off the config. It has to
+be read off `lms ps` while the model is loaded. This board's `_tier` labels are
+about model size, and the lane names are about T'Ra targets — neither is a claim
+about hardware.
+
+Placement of this board's models, from `lms ls`:
+
+| model | size | physically on |
+|---|---:|---|
+| `qwen3.5-9b-mlx`, `qwen3.6-27b-mlx-oq8` | 10.5 / 28.6 GB | Local only |
+| `ornith-1.0-9b`, `prism-coder-7b`, `gemma-4-e4b@8bit` | 6.0 / 15.2 / 9.0 GB | **Local only** |
+| `zai-org/glm-4.7-flash`, `devstral-small-2-2512` | 31.8 / 14.1 GB | Local **and** m4 |
+| `ibm/granite-4-h-tiny` | 4.2 GB | Local **and** m4 → ran on m4 |
+
+Models that exist only on `Local` are pinned to m5t by availability, which is
+why the low-tier trio could not be moved off the laptop to relieve it.
 
 ## Caveats that shape what these numbers can say
 
