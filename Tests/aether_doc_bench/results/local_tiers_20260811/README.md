@@ -32,6 +32,39 @@ The high tier is the user's definition. `qwen3.5-122b-a10b` (m5t) would qualify
 on parameter count alone and is the obvious third member if this board is
 extended.
 
+### The tiers above are wrong at the 35B boundary
+
+`ornith-1.0-35b` and `qwen/qwen3.6-35b-a3b` are **the same class by every model
+property this board tiers on**: both 35B MoE with ~3B active, and both report
+architecture `qwen3_5_moe` — Ornith's `config.json` says
+`Qwen3_5MoeForConditionalGeneration` outright. Ornith was placed in the high
+tier and qwen3.6-35b-a3b in mid, but nothing about the *models* separates them.
+Ornith's placement came from an operational fact (it has a dedicated claw
+deployment), not a model one.
+
+A caution on architecture strings: `qwen3_5_moe` is a family, not a generation.
+Qwen **3.6** models report it too, so the string cannot by itself distinguish a
+3.5-base from a 3.6-base, and the local metadata carries no `base_model` field.
+If Ornith is a 3.5-generation derivative — plausible, and consistent with
+everything observable here — then recency separates the pair even though size
+and architecture do not, and the newer base winning is the expected result.
+
+Measured: qwen3.6-35b-a3b **40/41**, ornith-1.0-35b **37/41**. Same size, same
+architecture, so that gap is training, not capacity.
+
+A tiering that survives this board would be:
+
+| tier | basis | members |
+|---|---|---|
+| high | >100B total | `ds4` (284B/13B active) |
+| mid | 24–35B | `qwen3.6-35b-a3b`, `ornith-1.0-35b`, `qwen3.6-27b`, `glm-4.7-flash`, `devstral-small-2` |
+| low | ≤9B | `qwen3.5-9b`, `ornith-1.0-9b`, `granite-4.1-8b`, `prism-coder-7b`, `gemma-4-e4b`, `granite-4-h-tiny` |
+
+That leaves one model in high, which is honest: on this fleet ds4 is the only
+thing in its scale class, and the 35B group is the real top of the local range.
+The `_tier` labels in the destinations config are left as they were run so the
+board's rows stay traceable to the config that produced them.
+
 ## Lanes
 
 Lanes are the physical serving nodes, not the tiers — m5t holds one LM Studio
