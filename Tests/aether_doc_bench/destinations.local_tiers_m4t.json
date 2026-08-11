@@ -9,7 +9,7 @@
     {
       "id": "mid-devstral-small-2",
       "_tier": "mid",
-      "_params": "24B",
+      "_params": "24B dense",
       "type": "tra_queue",
       "base_url": "http://m4t:8793",
       "model": "mistralai/devstral-small-2-2512",
@@ -25,12 +25,14 @@
       "cooldown_seconds": 1,
       "extra_body": {
         "stop": null
-      }
+      },
+      "_arch": "mistral3",
+      "_tier_note": "tier is model scale only; the id prefix is the as-run label and may disagree -- see tiers.json"
     },
     {
       "id": "low-granite41-8b",
       "_tier": "low",
-      "_params": "8B (granite arch, 5.09 GB)",
+      "_params": "8B",
       "type": "tra_queue",
       "base_url": "http://m4t:8793",
       "model": "granite-4.1-8b",
@@ -46,7 +48,9 @@
       "cooldown_seconds": 1,
       "extra_body": {
         "stop": null
-      }
+      },
+      "_arch": "granite",
+      "_tier_note": "tier is model scale only; the id prefix is the as-run label and may disagree -- see tiers.json"
     }
   ]
 }
