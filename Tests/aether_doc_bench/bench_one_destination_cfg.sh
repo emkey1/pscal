@@ -17,6 +17,10 @@ DEST=${1:?usage: bench_one_destination.sh <destination-id>}
 CFG=${CFG:-Tests/aether_doc_bench/destinations.local_tiers_20260811.json}
 OUTDIR=Tests/aether_doc_bench/results/local_tiers_20260811
 AETHER_BIN=${AETHER_BIN:-/usr/local/bin/aether}
+# The harness runs each case from a temp cwd, so a relative --aether-bin
+# resolves to nothing and every compile fails with ENOENT. Make it absolute
+# here rather than trusting the caller (runbook pre-flight #1).
+case "$AETHER_BIN" in /*) ;; *) AETHER_BIN="$PWD/$AETHER_BIN" ;; esac
 SUITES=${SUITES:-"tasks_frontier tasks_frontier_algo tasks_frontier_spec"}
 REPAIR=${REPAIR:-2}
 
