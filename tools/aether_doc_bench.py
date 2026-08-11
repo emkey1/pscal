@@ -113,6 +113,21 @@ def approx_tokens(text: str) -> int:
     return max(1, (len(text) + 3) // 4)
 
 
+def guide_version(text: str) -> str | None:
+    """The guide's own stamp, e.g. '2026-08-11-3'.
+
+    Each guide carries `*Guide version: YYYY-MM-DD-N*` near the top, bumped per
+    revision per day. That stamp is the identity of the document the model was
+    shown -- doc_bytes is a proxy that collides (two edits can land on the same
+    size) and says nothing about ordering. Recorded per variant so a report
+    states which guide produced it instead of leaving it to be inferred.
+    """
+    if not text:
+        return None
+    m = re.search(r"Guide version:\s*([0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+)", text[:4000])
+    return m.group(1) if m else None
+
+
 def infer_model_size_billions(model_name: str | None) -> float | None:
     if not model_name:
         return None
@@ -3179,6 +3194,7 @@ def main() -> int:
             variant_report = {
                 "doc_name": doc_name,
                 "doc_path": str(doc_path) if doc_path else None,
+                "doc_version": guide_version(doc_text),
                 "doc_bytes": len(doc_text.encode("utf-8")),
                 "doc_approx_tokens": approx_tokens(doc_text) if doc_text else 0,
                 "shared_guide_batch_size_requested": max(1, int(args.shared_guide_batch_size)),
