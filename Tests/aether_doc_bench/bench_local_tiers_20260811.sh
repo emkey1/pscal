@@ -28,12 +28,19 @@ REPAIR=2
 
 mkdir -p "$OUTDIR/logs"
 
-# Gate on the compiler version before spending a single GPU-hour. A stale
-# binary invalidates the whole board (runbook pre-flight #1).
-WANT_VERSION=$(cat components/aether/VERSION)
+# Gate on the compiler the board is PINNED to, not on the live VERSION file.
+# components/aether moves while a board runs (a separate session landed compiler
+# fixes and a VERSION bump mid-run on 2026-08-11), and a board must hold its
+# toolchain still or its rows stop being comparable with each other.
+PIN_FILE=Tests/aether_doc_bench/toolchain/PINNED_VERSION
+if [ -f "$PIN_FILE" ]; then
+    WANT_VERSION=$(cat "$PIN_FILE"); PIN_SRC="pin"
+else
+    WANT_VERSION=$(cat components/aether/VERSION); PIN_SRC="components/aether/VERSION"
+fi
 GOT_VERSION=$("$AETHER_BIN" --version 2>&1 | sed -n 's/.*Version: \([0-9-]*\).*/\1/p')
 if [ "$WANT_VERSION" != "$GOT_VERSION" ]; then
-    echo "FATAL: $AETHER_BIN is $GOT_VERSION but components/aether/VERSION is $WANT_VERSION"
+    echo "FATAL: $AETHER_BIN is $GOT_VERSION but $PIN_SRC says $WANT_VERSION"
     exit 1
 fi
 echo "[preflight] aether $GOT_VERSION at $AETHER_BIN"
@@ -103,12 +110,16 @@ for v in variants:
         raise SystemExit(0)
     hit = 0
     for fp in v.get("failure_patterns", []):
-        fingerprint = str(fp.get("fingerprint", "")).lower()
-        if any(t in fingerprint for t in TRANSPORT):
+        if any(t in str(fp.get("fingerprint", "")).lower() for t in TRANSPORT):
             hit += int(fp.get("count", 0))
-    if hit:
+    # Proportional, not absolute. An outage looks like most of the suite failing
+    # in transport; a single blip is one unmeasured case in an otherwise good
+    # run, and discarding 13 valid measurements to avoid 1 bad one is worse.
+    if tot and hit / tot > 0.25:
         print(f"REJECT variant {v.get('doc_name')}: {hit}/{tot} cases failed in transport, not generation")
         raise SystemExit(0)
+    if hit:
+        notes.append(f"{v.get('doc_name')} {hit}/{tot} UNMEASURED (transport)")
     if gen < tot:
         notes.append(f"{v.get('doc_name')} gen_ok={gen}/{tot}")
 print("ACCEPT" + (" PARTIAL " + ", ".join(notes) if notes else ""))

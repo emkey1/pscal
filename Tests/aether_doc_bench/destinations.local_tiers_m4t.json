@@ -26,6 +26,27 @@
       "extra_body": {
         "stop": null
       }
+    },
+    {
+      "id": "low-granite41-8b",
+      "_tier": "low",
+      "_params": "8B (granite arch, 5.09 GB)",
+      "type": "tra_queue",
+      "base_url": "http://m4t:8793",
+      "model": "granite-4.1-8b",
+      "preferred_targets": [
+        "m2_remote"
+      ],
+      "temperature": 0.2,
+      "max_output_tokens": 24000,
+      "request_timeout_seconds": 8900,
+      "request_max_retries": 2,
+      "retry_backoff_seconds": 5,
+      "priority": 5,
+      "cooldown_seconds": 1,
+      "extra_body": {
+        "stop": null
+      }
     }
   ]
 }

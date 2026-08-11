@@ -173,3 +173,42 @@ picks up exactly where it stopped.
 | `logs/<destination>__<suite>.log` | harness stdout for that run |
 | `logs/lane_[abcd]_*.log` | per-lane progress, `[run]`/`[done]`/`[FAIL]` |
 | `driver.log` | preflight + lane orchestration |
+
+## Toolchain drift mid-board (2026-08-11), and the pin
+
+A separate session landed aether fixes while this board was running:
+`/usr/local/bin/aether` was replaced at 10:53 (2026-08-09-1 -> 2026-08-11-1),
+`VERSION` went to 2026-08-11-2, and the guides were edited more than once
+(51,303 -> 51,618 -> 51,613 bytes within the hour).
+
+Every result stamps `aether_version` and `doc_bytes`, so the damage is exactly
+characterisable rather than suspected:
+
+| rows | compiler | guide |
+|---:|---|---|
+| 13 | 2026-08-09-1 | 51,303 |
+| 4 | mixed *(run spanned the 10:53 swap)* | 51,303 |
+| 1 | 2026-08-11-1 | 51,303 |
+| 1 | 2026-08-11-1 | 51,618 |
+
+The four spanning rows are the subtle ones: a run that starts before the swap
+and ends after it compiles early tasks with one binary and later tasks with
+another, while stamping only the version it saw at startup. Timestamps, not
+stamps, are what identify those.
+
+**Measured impact, rather than assumed.** The landed fixes were an unknown-type
+diagnostic (SCOPE-001) and tuple items that are arrays, `(Int, Int[])`. Scanning
+every generated program on the board: **4 case-instances out of ~500** touch
+those paths (`algo_knapsack_items`, `toon_fleet_rollup`,
+`algo_union_find_components`, `algo_record_pipeline`), spread over 3 of 19 files,
+and all four are already failures — so the only possible movement is fail->pass
+by one or two tasks. Under 1%, inside this board's documented noise floor. The
+rows were kept.
+
+**The pin.** `Tests/aether_doc_bench/toolchain/aether-pinned` is a private copy
+of the compiler, with its version in `PINNED_VERSION`; the drivers now gate
+against that pin instead of the live `VERSION`, so the board holds its toolchain
+still no matter what lands in `components/aether` next. The guide cannot be
+pinned the same way -- `DOC_VARIANTS` is hardcoded in the harness, which the
+other session is also editing -- so guide drift stays visible through `doc_bytes`
+rather than prevented.
