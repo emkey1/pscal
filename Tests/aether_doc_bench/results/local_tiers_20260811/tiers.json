@@ -1,0 +1,90 @@
+{
+  "_note": "Authoritative tiering for the 2026-08-11 board, keyed by the destination_id recorded in every result JSON. The id PREFIX is the as-run label and is wrong for high-ornith-35b: it is a 35B MoE of the same architecture and size as mid-qwen36-35b-a3b, and was placed high because it has a dedicated claw deployment, which is a fact about the fleet rather than the model. Result files and their destination_id are deliberately left untouched so every row stays traceable to the config that produced it; this file is the correction, not an edit to the artifacts.",
+  "_basis": "model scale and architecture only: high >100B, mid 24-35B, low <=9B",
+  "tiers": {
+    "high-ds4": {
+      "tier": "high",
+      "params": "284B total / 13B active",
+      "arch": "deepseek-v4-flash",
+      "as_run_prefix": "high",
+      "prefix_correct": true
+    },
+    "high-ornith-35b": {
+      "tier": "mid",
+      "params": "35B MoE / ~3B active",
+      "arch": "qwen3_5_moe",
+      "as_run_prefix": "high",
+      "prefix_correct": false
+    },
+    "mid-qwen36-35b-a3b": {
+      "tier": "mid",
+      "params": "35B MoE / ~3B active",
+      "arch": "qwen3_5_moe",
+      "as_run_prefix": "mid",
+      "prefix_correct": true
+    },
+    "mid-qwen36-27b": {
+      "tier": "mid",
+      "params": "27B dense",
+      "arch": "qwen3_5",
+      "as_run_prefix": "mid",
+      "prefix_correct": true
+    },
+    "mid-glm47-flash": {
+      "tier": "mid",
+      "params": "30B MoE",
+      "arch": "glm4_moe_lite",
+      "as_run_prefix": "mid",
+      "prefix_correct": true
+    },
+    "mid-devstral-small-2": {
+      "tier": "mid",
+      "params": "24B dense",
+      "arch": "mistral3",
+      "as_run_prefix": "mid",
+      "prefix_correct": true
+    },
+    "low-qwen35-9b": {
+      "tier": "low",
+      "params": "9B dense",
+      "arch": "qwen3_5",
+      "as_run_prefix": "low",
+      "prefix_correct": true
+    },
+    "low-ornith-9b": {
+      "tier": "low",
+      "params": "9B dense",
+      "arch": "qwen3_5",
+      "as_run_prefix": "low",
+      "prefix_correct": true
+    },
+    "low-granite41-8b": {
+      "tier": "low",
+      "params": "8B",
+      "arch": "granite",
+      "as_run_prefix": "low",
+      "prefix_correct": true
+    },
+    "low-prism-coder-7b": {
+      "tier": "low",
+      "params": "7B",
+      "arch": "Qwen2",
+      "as_run_prefix": "low",
+      "prefix_correct": true
+    },
+    "low-granite4-h-tiny": {
+      "tier": "low",
+      "params": "7B",
+      "arch": "granitehybrid",
+      "as_run_prefix": "low",
+      "prefix_correct": true
+    },
+    "low-gemma4-e4b": {
+      "tier": "low",
+      "params": "~4B effective (E4B)",
+      "arch": "gemma4",
+      "as_run_prefix": "low",
+      "prefix_correct": true
+    }
+  }
+}

@@ -1,16 +1,24 @@
 {
   "_note": [
     "Local-model tier board, first run of the post-2026-08-10 fresh era.",
-    "Tiers are by parameter count x recency; every model here has been benchmarked",
+    "Tiers are by model scale and architecture; see the correction below.",
     "before (see results/history/HISTORY.md), so this board is a re-measurement of",
     "known subjects against the 1.0-era guide and compiler, not an exploration.",
     "",
-    "HIGH  ds4 (284B/13B-active), ornith-1.0-35b (35B NVFP4) -- the two dedicated",
-    "      claw deployments. User-specified tier.",
-    "MID   qwen3.6-35b-a3b (35B/3B), glm-4.7-flash, devstral-small-2 (24B),",
-    "      qwen3.6-27b (27B) -- 24-35B class, all 2026 releases.",
-    "LOW   qwen3.5-9b, ornith-1.0-9b (9B), prism-coder-7b (7B), gemma-4-e4b (~4B",
-    "      effective), granite-4-h-tiny -- <=9B.",
+    "TIERS CORRECTED 2026-08-11 (see results/local_tiers_20260811/tiers.json).",
+    "Tier is model scale and architecture only:",
+    "HIGH  >100B: ds4 (284B/13B-active). The only model in its class on this fleet.",
+    "MID   24-35B: qwen3.6-35b-a3b, ornith-1.0-35b, qwen3.6-27b, glm-4.7-flash,",
+    "      devstral-small-2.",
+    "LOW   <=9B: qwen3.5-9b, ornith-1.0-9b, granite-4.1-8b, prism-coder-7b,",
+    "      gemma-4-e4b, granite-4-h-tiny.",
+    "",
+    "The id PREFIXES are the as-run labels and are frozen so results stay traceable",
+    "to the config that produced them. 'high-ornith-35b' is therefore misnamed: it",
+    "is a 35B MoE of the same architecture (qwen3_5_moe) and size as",
+    "mid-qwen36-35b-a3b, and was originally placed high because it has a dedicated",
+    "claw deployment -- a fact about the fleet, not the model. Trust _tier and",
+    "tiers.json over the prefix.",
     "",
     "ROUTING. Everything goes through T'Ra except ds4, which is not a registered",
     "T'Ra target and has no registration API (only GET /api/targets). T'Ra",
@@ -62,16 +70,23 @@
       "request_max_retries": 2,
       "retry_backoff_seconds": 5,
       "cooldown_seconds": 0,
-      "extra_body": { "stop": null, "top_p": 0.95 }
+      "extra_body": {
+        "stop": null,
+        "top_p": 0.95
+      },
+      "_arch": "deepseek-v4-flash",
+      "_tier_note": "tier is model scale only; the id prefix is the as-run label and may disagree -- see tiers.json"
     },
     {
       "id": "high-ornith-35b",
-      "_tier": "high",
-      "_params": "35B NVFP4",
+      "_tier": "mid",
+      "_params": "35B MoE / ~3B active",
       "type": "tra_queue",
       "base_url": "http://m4t:8793",
       "model": "ornith-1.0-35b-nvfp4",
-      "preferred_targets": ["claw3_ornith"],
+      "preferred_targets": [
+        "claw3_ornith"
+      ],
       "temperature": 0.2,
       "max_output_tokens": 24000,
       "request_timeout_seconds": 8900,
@@ -79,17 +94,23 @@
       "retry_backoff_seconds": 5,
       "priority": 5,
       "cooldown_seconds": 1,
-      "extra_body": { "stop": null, "disable_thinking": false }
+      "extra_body": {
+        "stop": null,
+        "disable_thinking": false
+      },
+      "_arch": "qwen3_5_moe",
+      "_tier_note": "tier is model scale only; the id prefix is the as-run label and may disagree -- see tiers.json"
     },
-
     {
       "id": "mid-qwen36-35b-a3b",
       "_tier": "mid",
-      "_params": "35B / 3B active",
+      "_params": "35B MoE / ~3B active",
       "type": "tra_queue",
       "base_url": "http://m4t:8793",
       "model": "qwen/qwen3.6-35b-a3b",
-      "preferred_targets": ["m5_remote"],
+      "preferred_targets": [
+        "m5_remote"
+      ],
       "temperature": 0.2,
       "max_output_tokens": 24000,
       "request_timeout_seconds": 8900,
@@ -97,16 +118,23 @@
       "retry_backoff_seconds": 5,
       "priority": 5,
       "cooldown_seconds": 1,
-      "extra_body": { "stop": null, "disable_thinking": false }
+      "extra_body": {
+        "stop": null,
+        "disable_thinking": false
+      },
+      "_arch": "qwen3_5_moe",
+      "_tier_note": "tier is model scale only; the id prefix is the as-run label and may disagree -- see tiers.json"
     },
     {
       "id": "mid-glm47-flash",
       "_tier": "mid",
-      "_params": "MoE flash",
+      "_params": "30B MoE",
       "type": "tra_queue",
       "base_url": "http://m4t:8793",
       "model": "zai-org/glm-4.7-flash",
-      "preferred_targets": ["m5_remote"],
+      "preferred_targets": [
+        "m5_remote"
+      ],
       "temperature": 1.0,
       "max_output_tokens": 4096,
       "request_timeout_seconds": 8900,
@@ -114,16 +142,23 @@
       "retry_backoff_seconds": 5,
       "priority": 5,
       "cooldown_seconds": 1,
-      "extra_body": { "stop": null, "top_p": 0.95 }
+      "extra_body": {
+        "stop": null,
+        "top_p": 0.95
+      },
+      "_arch": "glm4_moe_lite",
+      "_tier_note": "tier is model scale only; the id prefix is the as-run label and may disagree -- see tiers.json"
     },
     {
       "id": "mid-devstral-small-2",
       "_tier": "mid",
-      "_params": "24B",
+      "_params": "24B dense",
       "type": "tra_queue",
       "base_url": "http://m4t:8793",
       "model": "mistralai/devstral-small-2-2512",
-      "preferred_targets": ["m5_remote"],
+      "preferred_targets": [
+        "m5_remote"
+      ],
       "temperature": 0.2,
       "max_output_tokens": 24000,
       "request_timeout_seconds": 8900,
@@ -131,16 +166,22 @@
       "retry_backoff_seconds": 5,
       "priority": 5,
       "cooldown_seconds": 1,
-      "extra_body": { "stop": null }
+      "extra_body": {
+        "stop": null
+      },
+      "_arch": "mistral3",
+      "_tier_note": "tier is model scale only; the id prefix is the as-run label and may disagree -- see tiers.json"
     },
     {
       "id": "mid-qwen36-27b",
       "_tier": "mid",
-      "_params": "27B",
+      "_params": "27B dense",
       "type": "tra_queue",
       "base_url": "http://m4t:8793",
       "model": "qwen3.6-27b-mlx-oq8",
-      "preferred_targets": ["m5_remote"],
+      "preferred_targets": [
+        "m5_remote"
+      ],
       "temperature": 0.2,
       "max_output_tokens": 24000,
       "request_timeout_seconds": 8900,
@@ -148,17 +189,23 @@
       "retry_backoff_seconds": 5,
       "priority": 5,
       "cooldown_seconds": 1,
-      "extra_body": { "stop": null, "disable_thinking": false }
+      "extra_body": {
+        "stop": null,
+        "disable_thinking": false
+      },
+      "_arch": "qwen3_5",
+      "_tier_note": "tier is model scale only; the id prefix is the as-run label and may disagree -- see tiers.json"
     },
-
     {
       "id": "low-qwen35-9b",
       "_tier": "low",
-      "_params": "9B",
+      "_params": "9B dense",
       "type": "tra_queue",
       "base_url": "http://m4t:8793",
       "model": "qwen3.5-9b-mlx",
-      "preferred_targets": ["m5_remote"],
+      "preferred_targets": [
+        "m5_remote"
+      ],
       "temperature": 0.2,
       "max_output_tokens": 24000,
       "request_timeout_seconds": 8900,
@@ -166,16 +213,22 @@
       "retry_backoff_seconds": 5,
       "priority": 5,
       "cooldown_seconds": 1,
-      "extra_body": { "stop": null }
+      "extra_body": {
+        "stop": null
+      },
+      "_arch": "qwen3_5",
+      "_tier_note": "tier is model scale only; the id prefix is the as-run label and may disagree -- see tiers.json"
     },
     {
       "id": "low-ornith-9b",
       "_tier": "low",
-      "_params": "9B",
+      "_params": "9B dense",
       "type": "tra_queue",
       "base_url": "http://m4t:8793",
       "model": "ornith-1.0-9b",
-      "preferred_targets": ["m5_remote"],
+      "preferred_targets": [
+        "m5_remote"
+      ],
       "temperature": 0.2,
       "max_output_tokens": 24000,
       "request_timeout_seconds": 8900,
@@ -183,7 +236,11 @@
       "retry_backoff_seconds": 5,
       "priority": 5,
       "cooldown_seconds": 1,
-      "extra_body": { "stop": null }
+      "extra_body": {
+        "stop": null
+      },
+      "_arch": "qwen3_5",
+      "_tier_note": "tier is model scale only; the id prefix is the as-run label and may disagree -- see tiers.json"
     },
     {
       "id": "low-prism-coder-7b",
@@ -192,7 +249,9 @@
       "type": "tra_queue",
       "base_url": "http://m4t:8793",
       "model": "prism-coder-7b",
-      "preferred_targets": ["m5_remote"],
+      "preferred_targets": [
+        "m5_remote"
+      ],
       "temperature": 0.2,
       "max_output_tokens": 24000,
       "request_timeout_seconds": 8900,
@@ -200,7 +259,11 @@
       "retry_backoff_seconds": 5,
       "priority": 5,
       "cooldown_seconds": 1,
-      "extra_body": { "stop": null }
+      "extra_body": {
+        "stop": null
+      },
+      "_arch": "Qwen2",
+      "_tier_note": "tier is model scale only; the id prefix is the as-run label and may disagree -- see tiers.json"
     },
     {
       "id": "low-gemma4-e4b",
@@ -209,7 +272,9 @@
       "type": "tra_queue",
       "base_url": "http://m4t:8793",
       "model": "gemma-4-e4b-it-mlx@8bit",
-      "preferred_targets": ["m5_remote"],
+      "preferred_targets": [
+        "m5_remote"
+      ],
       "temperature": 0.2,
       "max_output_tokens": 24000,
       "request_timeout_seconds": 8900,
@@ -217,16 +282,22 @@
       "retry_backoff_seconds": 5,
       "priority": 5,
       "cooldown_seconds": 1,
-      "extra_body": { "stop": null }
+      "extra_body": {
+        "stop": null
+      },
+      "_arch": "gemma4",
+      "_tier_note": "tier is model scale only; the id prefix is the as-run label and may disagree -- see tiers.json"
     },
     {
       "id": "low-granite4-h-tiny",
       "_tier": "low",
-      "_params": "tiny",
+      "_params": "7B",
       "type": "tra_queue",
       "base_url": "http://m4t:8793",
       "model": "ibm/granite-4-h-tiny",
-      "preferred_targets": ["m2_remote"],
+      "preferred_targets": [
+        "m2_remote"
+      ],
       "temperature": 0.2,
       "max_output_tokens": 24000,
       "request_timeout_seconds": 8900,
@@ -234,7 +305,11 @@
       "retry_backoff_seconds": 5,
       "priority": 5,
       "cooldown_seconds": 1,
-      "extra_body": { "stop": null }
+      "extra_body": {
+        "stop": null
+      },
+      "_arch": "granitehybrid",
+      "_tier_note": "tier is model scale only; the id prefix is the as-run label and may disagree -- see tiers.json"
     }
   ]
 }
