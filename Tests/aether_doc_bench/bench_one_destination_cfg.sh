@@ -22,9 +22,10 @@ REPAIR=${REPAIR:-2}
 
 mkdir -p "$OUTDIR/logs"
 
-WANT=$(cat components/aether/VERSION)
+PIN_FILE=Tests/aether_doc_bench/toolchain/PINNED_VERSION
+if [ -f "$PIN_FILE" ]; then WANT=$(cat "$PIN_FILE"); PIN_SRC="pin"; else WANT=$(cat components/aether/VERSION); PIN_SRC="VERSION"; fi
 GOT=$("$AETHER_BIN" --version 2>&1 | sed -n 's/.*Version: \([0-9-]*\).*/\1/p')
-[ "$WANT" != "$GOT" ] && { echo "FATAL: $AETHER_BIN is $GOT, VERSION is $WANT"; exit 1; }
+[ "$WANT" != "$GOT" ] && { echo "FATAL: $AETHER_BIN is $GOT, $PIN_SRC says $WANT"; exit 1; }
 echo "[preflight] aether $GOT | destination $DEST"
 
 for suite in $SUITES; do
@@ -77,9 +78,14 @@ for v in variants:
     for fp in v.get("failure_patterns", []):
         if any(t in str(fp.get("fingerprint", "")).lower() for t in TRANSPORT):
             hit += int(fp.get("count", 0))
-    if hit:
+    # Proportional, not absolute. An outage looks like most of the suite failing
+    # in transport; a single blip is one unmeasured case in an otherwise good
+    # run, and discarding 13 valid measurements to avoid 1 bad one is worse.
+    if tot and hit / tot > 0.25:
         print(f"REJECT variant {v.get('doc_name')}: {hit}/{tot} cases failed in transport, not generation")
         raise SystemExit(0)
+    if hit:
+        notes.append(f"{v.get('doc_name')} {hit}/{tot} UNMEASURED (transport)")
     if gen < tot:
         notes.append(f"{v.get('doc_name')} gen_ok={gen}/{tot}")
 print("ACCEPT" + (" PARTIAL " + ", ".join(notes) if notes else ""))
