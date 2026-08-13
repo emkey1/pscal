@@ -979,6 +979,11 @@ if(PSCAL_USE_BUNDLED_CURL)
         set(CURL_ZSTD OFF CACHE BOOL "Disable zstd to avoid extra dependencies on iOS" FORCE)
         set(USE_NGHTTP2 OFF CACHE BOOL "Disable nghttp2 on iOS builds" FORCE)
         set(HTTP_ONLY ON CACHE BOOL "Limit libcurl to HTTP/HTTPS on iOS builds" FORCE)
+        # curl's check_symbol_exists() finds pipe2 when cross-compiling for iOS, but the
+        # iOS SDK headers never declare it, so lib/socketpair.c fails to compile with
+        # "call to undeclared function 'pipe2'". Same class of cross-compile false
+        # positive the OpenSSH config.h rewrite above handles. Force it off.
+        set(HAVE_PIPE2 OFF CACHE BOOL "iOS SDK does not declare pipe2" FORCE)
     else()
         set(CURL_USE_OPENSSL ON CACHE BOOL "Use OpenSSL for bundled libcurl" FORCE)
     endif()
