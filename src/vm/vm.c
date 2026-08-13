@@ -6456,11 +6456,8 @@ dispatch_switch:
                 break;
             }
             case INT_DIV: {
-                /* Optimization: Fast path for INT_DIV. Direct stack access via FAST_POP/FAST_PUSH
-                   bypasses the function call overhead of standard pop()/push().
-                   We skip freeValue() for primitive integers in the fast path as they don't use heap allocations. */
-                Value b_val = FAST_POP();
-                Value a_val = FAST_POP();
+                Value b_val = pop(vm);
+                Value a_val = pop(vm);
                 if (a_val.type == TYPE_INT32 && b_val.type == TYPE_INT32) {
                     int32_t ia = (int32_t)a_val.i_val;
                     int32_t ib = (int32_t)b_val.i_val;
@@ -6470,9 +6467,9 @@ dispatch_switch:
                     }
                     if (ia == INT32_MIN && ib == -1) {
                         // Prevent x86 hardware trap and preserve 64-bit promotion semantics
-                        FAST_PUSH(makeInt(2147483648LL));
+                        push(vm, makeInt(2147483648LL));
                     } else {
-                        FAST_PUSH(makeInt((long long)(ia / ib)));
+                        push(vm, makeInt((long long)(ia / ib)));
                     }
                 } else if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
                     long long ia = AS_INTEGER(a_val);
@@ -6487,22 +6484,20 @@ dispatch_switch:
                         freeValue(&a_val); freeValue(&b_val);
                         return INTERPRET_RUNTIME_ERROR;
                     }
-                    FAST_PUSH(makeInt(ia / ib));
-                    freeValue(&a_val);
-                    freeValue(&b_val);
+                    push(vm, makeInt(ia / ib));
                 } else {
                     runtimeError(vm, "Runtime Error: Operands for 'int_div' must be integers. Got %s and %s.",
                                  varTypeToString(a_val.type), varTypeToString(b_val.type));
                     freeValue(&a_val); freeValue(&b_val);
                     return INTERPRET_RUNTIME_ERROR;
                 }
+                freeValue(&a_val);
+                freeValue(&b_val);
                 break;
             }
             case MOD: {
-                /* Optimization: Fast path for MOD using direct stack access (FAST_POP/FAST_PUSH)
-                   to eliminate function call overhead, and skipping redundant freeValue() for TYPE_INT32. */
-                Value b_val = FAST_POP();
-                Value a_val = FAST_POP();
+                Value b_val = pop(vm);
+                Value a_val = pop(vm);
                 if (a_val.type == TYPE_INT32 && b_val.type == TYPE_INT32) {
                     int32_t ia = (int32_t)a_val.i_val;
                     int32_t ib = (int32_t)b_val.i_val;
@@ -6512,9 +6507,9 @@ dispatch_switch:
                     }
                     if (ia == INT32_MIN && ib == -1) {
                         // For mod, division by -1 is always exactly representable, modulo is 0
-                        FAST_PUSH(makeInt(0));
+                        push(vm, makeInt(0));
                     } else {
-                        FAST_PUSH(makeInt((long long)(ia % ib)));
+                        push(vm, makeInt((long long)(ia % ib)));
                     }
                 } else if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
                     long long ia = AS_INTEGER(a_val);
@@ -6524,15 +6519,15 @@ dispatch_switch:
                         freeValue(&a_val); freeValue(&b_val);
                         return INTERPRET_RUNTIME_ERROR;
                     }
-                    FAST_PUSH(makeInt(ia % ib));
-                    freeValue(&a_val);
-                    freeValue(&b_val);
+                    push(vm, makeInt(ia % ib));
                 } else {
                     runtimeError(vm, "Runtime Error: Operands for 'mod' must be integers. Got %s and %s.",
                                  varTypeToString(a_val.type), varTypeToString(b_val.type));
                     freeValue(&a_val); freeValue(&b_val);
                     return INTERPRET_RUNTIME_ERROR;
                 }
+                freeValue(&a_val);
+                freeValue(&b_val);
                 break;
             }
             case SHL:
