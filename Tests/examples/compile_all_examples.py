@@ -56,9 +56,13 @@ SKIP_BASENAMES = {
 }
 
 # Intentionally-negative examples that should fail compilation.
-EXPECTED_COMPILE_FAILURES = {
-    "components/pascal/examples/base/ClosureEscapeError",
-}
+# Examples that are supposed to be REJECTED by the compiler. Empty on purpose:
+# ClosureEscapeError used to live here, but escaping capturing closures are a
+# supported feature now (captured state is kept alive with the closure), so the
+# program compiles and runs -- its own header comment documents the expected
+# output, and it produces exactly that. Listing it here made a deliberate
+# language change look like a test failure.
+EXPECTED_COMPILE_FAILURES: set = set()
 
 
 @dataclass
@@ -117,7 +121,12 @@ def compile_example(binary: Path, script_path: Path, timeout_seconds: float) -> 
         cwd=script_path.parent,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True,
+        # A frontend can emit a non-UTF-8 byte (an example echoing raw bytes, or a
+        # diagnostic quoting one). text=True decodes strictly, so a single such byte
+        # raised UnicodeDecodeError out of communicate() and took down the whole
+        # sweep instead of failing that one example. Replace undecodable bytes.
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout_seconds,
         check=False,
     )
