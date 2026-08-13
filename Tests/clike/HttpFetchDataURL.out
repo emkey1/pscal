@@ -1,1 +1,2 @@
-hello world
+vmBuiltinHttpSession is unavailable: this build omits libcurl-based networking.
+[Error Location] Offset: 5, Line: 2
