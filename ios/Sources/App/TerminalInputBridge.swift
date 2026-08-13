@@ -87,11 +87,6 @@ struct TerminalInputBridge: UIViewRepresentable {
 }
 
 @MainActor
-final class TerminalAccessoryView: UIInputView, UIInputViewAudioFeedback {
-    var enableInputClicksWhenVisible: Bool { return true }
-}
-
-@MainActor
 final class TerminalKeyInputView: UITextView {
     var onInput: ((String) -> Void)?
     var onPaste: ((String) -> Void)?
@@ -141,7 +136,7 @@ final class TerminalKeyInputView: UITextView {
     }
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
-        self.accessoryBar = TerminalAccessoryView(frame: .zero, inputViewStyle: .keyboard)
+        self.accessoryBar = UIInputView(frame: .zero, inputViewStyle: .keyboard)
         self.repeatKeyCommands = []
         super.init(frame: frame, textContainer: textContainer)
         configureAccessoryBar()
@@ -151,7 +146,7 @@ final class TerminalKeyInputView: UITextView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        self.accessoryBar = TerminalAccessoryView(frame: .zero, inputViewStyle: .keyboard)
+        self.accessoryBar = UIInputView(frame: .zero, inputViewStyle: .keyboard)
         self.repeatKeyCommands = []
         super.init(coder: coder)
         configureAccessoryBar()
@@ -177,7 +172,7 @@ final class TerminalKeyInputView: UITextView {
     private weak var optionButton: UIButton?
 
     // MARK: - FIXED ACCESSORY BAR
-    private let accessoryBar: TerminalAccessoryView
+    private let accessoryBar: UIInputView
 
     override var inputAccessoryView: UIView? {
         get {
@@ -223,7 +218,6 @@ final class TerminalKeyInputView: UITextView {
             button.configuration = config
             button.titleLabel?.font = UIFontMetrics.default.scaledFont(for: .systemFont(ofSize: 15, weight: .semibold))
             button.addTarget(self, action: action, for: .touchUpInside)
-            button.addTarget(self, action: #selector(playInputClickSound), for: .touchDown)
             return button
         }
 
@@ -898,10 +892,6 @@ final class TerminalKeyInputView: UITextView {
     }
 
     // MARK: - Accessory button actions
-    @objc private func playInputClickSound() {
-        UIDevice.current.playInputClick()
-    }
-
     @objc private func handleEsc() {
         onInput?("\u{1B}")
     }
