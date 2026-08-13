@@ -216,3 +216,59 @@ jobs:
           export REA_LIB_DIR="$GITHUB_WORKSPACE/lib/rea"
           export PASCAL_LIB_DIR="$GITHUB_WORKSPACE/lib/pascal"
           python3 Tests/examples/compile_all_examples.py --languages rea --fail-on-empty
+
+  # Nothing else in this workflow compiles the iOS app -- every other job runs on
+  # ubuntu, so Swift changes and iOS-only C paths reached main unbuilt. This job
+  # exists to catch that. macOS runners bill at 10x, so it is gated on the paths
+  # that can actually break the iOS build rather than running on every push.
+  ios-build:
+    needs: submodule-ref-guard
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - name: Detect iOS-relevant changes
+        id: ios-changed
+        uses: tj-actions/changed-files@v46
+        with:
+          files: |
+            ios/**
+            src/ios/**
+            src/smallclue/**
+            components/pscal-core/**
+            cmake/toolchains/ios.cmake
+            CMakeLists.txt
+            CMakePresets.json
+            .github/workflows/ci.yml
+      - name: Set up Go
+        if: steps.ios-changed.outputs.any_changed == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - name: Fetch bundled libcurl source
+        if: steps.ios-changed.outputs.any_changed == 'true'
+        run: |
+          set -euo pipefail
+          # third-party/curl-8.17.0 is gitignored, so CI has to materialise it.
+          # Pinned by SHA-256 -- a mismatch fails the job rather than building
+          # whatever the mirror happened to serve.
+          expected=955f6e729ad6b3566260e8fef68620e76ba3c31acf0a18524416a185acf77992
+          curl -fsSL -o /tmp/curl-8.17.0.tar.xz https://curl.se/download/curl-8.17.0.tar.xz
+          echo "${expected}  /tmp/curl-8.17.0.tar.xz" | shasum -a 256 -c -
+          tar -xJf /tmp/curl-8.17.0.tar.xz -C third-party/
+      - name: Build iOS simulator static libs
+        if: steps.ios-changed.outputs.any_changed == 'true'
+        env:
+          SDK_NAME: iphonesimulator
+          CONFIGURATION: Debug
+        run: bash ios/Tools/ensure_static_libs.sh
+      - name: Build the iOS app
+        if: steps.ios-changed.outputs.any_changed == 'true'
+        run: |
+          set -euo pipefail
+          xcodebuild -project ios/PSCAL.xcodeproj -scheme PscalApp \
+            -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/DerivedData-ios build
