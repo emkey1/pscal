@@ -10,13 +10,25 @@ lives in the auto-memory files (this file wins if they disagree).
   submodules under `components/`: `pscal-core`, `rea`, `aether`, `clike`,
   `pascal`, `exsh` (all public under github.com/emkey1). Dependency chain:
   aether → rea → pscal-core.
-- PBuild builds the components from `components/` siblings via
-  `FETCHCONTENT_SOURCE_DIR` overrides. **Edit `components/<name>/`, never
-  `build/_deps/` (stale, uncompiled copies).**
+- PBuild's `CMakeLists.txt` lists component sources as plain relative paths
+  (`components/<name>/src/...`), so the build compiles the submodule working
+  trees directly. There is no FetchContent in the umbrella and no
+  `build/_deps/`. **Edit `components/<name>/` and rebuild — the recorded
+  gitlink SHA has no effect on a local incremental build.** (The SHA matters
+  only where sources are re-materialised from git: fresh clones, CI checkout,
+  and `tools/deploy_aether_to_claws.sh`, which builds the pinned SHA.)
 - aether additionally vendors rea+pscal-core as submodules under
   `components/aether/external/`. When pscal-core or rea change, those pins go
   stale and break the *standalone* aether build while PBuild stays green.
   Bump them as part of shipping (see Ship flow).
+- All 12 submodules declare a tracking branch in `.gitmodules` (`main`, except
+  dvtm/micro/openrsync which use `master`), so **`git submodule update
+  --remote`** advances every one to its branch tip; commit the resulting
+  gitlinks. Git has no branch-tip gitlink mode — the superproject always
+  records a SHA — so the commit step is unavoidable, but it no longer means
+  hand-picking SHAs. This clone also sets `push.recurseSubmodules=on-demand`,
+  which matters because `tools/check_submodule_refs.sh` fails CI on a gitlink
+  whose commit was never pushed.
 - **Active development branch is `main`.** Commit and push there directly.
   (`AetherLang` was the active branch early on, with `main` synced from it by
   fast-forward; that's no longer the case — as of 2026-07-03 `main` is
