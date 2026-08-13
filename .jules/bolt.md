@@ -4,3 +4,7 @@
 ## $(date +%Y-%m-%d) - [Integer Fast Paths in VM]
 **Learning:** Optimizing common binary operators (ADD, SUBTRACT, MULTIPLY, INT_DIV, MOD) for integer types (`TYPE_INT32`) in the bytecode dispatch loop can yield significant execution time improvements by skipping full value pop/push struct manipulations and type switch resolution in macros.
 **Action:** Always consider fast-path inline type checks coupled with GCC built-in overflow routines (`__builtin_add_overflow`, etc.) and direct stack-pointer decrements to sidestep function overhead in heavily utilized code paths. Ensure the fallback path correctly runs when optimizations don't apply.
+
+## $(date +%Y-%m-%d) - [Integer Fast Paths in VM PR Rejection]
+**Learning:** The PR was rejected because `src/vm/vm.c` was modified, but this file no longer exists on `main` branch. The VM code was moved to a submodule at `components/pscal-core/src/vm/vm.c`. Submitting changes to the old file location adds a dead file and the optimization does not take effect.
+**Action:** Always check the repository structure against the `main` branch or the target base branch before implementing extensive optimizations, especially in older forks or branches, to ensure the files being modified are the active, compiled ones.
