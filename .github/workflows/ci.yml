@@ -38,6 +38,11 @@ jobs:
           import os
 
           frontends = {
+              "aether": [
+                  "components/aether/**",
+                  "Tests/run_aether_tests.sh",
+                  "components/aether/examples/**",
+              ],
               "clike": [
                   "src/clike/**",
                   "components/clike/**",
@@ -84,6 +89,7 @@ jobs:
 
           build_targets: list[str] = []
           target_mapping = {
+              "aether": ["aether", "pscalvm"],
               "clike": ["clike"],
               "exsh": ["exsh"],
               "pascal": ["pascal", "pscalvm"],
