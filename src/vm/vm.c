@@ -6342,54 +6342,9 @@ dispatch_switch:
                 push(vm, makePointer(&frame->slots[slot], NULL));
                 break;
             }
-            case ADD: {
-                // Optimization: In-place fast path for TYPE_INT32 addition.
-                // Avoids Value copy overhead of BINARY_OP macro if both operands are 32-bit ints.
-                if (vm->stackTop[-1].type == TYPE_INT32 && vm->stackTop[-2].type == TYPE_INT32) {
-                    int32_t a = (int32_t)vm->stackTop[-2].i_val;
-                    int32_t b = (int32_t)vm->stackTop[-1].i_val;
-                    int32_t result;
-                    if (!__builtin_add_overflow(a, b, &result)) {
-                        vm->stackTop[-2].i_val = result;
-                        vm->stackTop--;
-                        break;
-                    }
-                }
-                BINARY_OP("+", instruction_val);
-                break;
-            }
-            case SUBTRACT: {
-                // Optimization: In-place fast path for TYPE_INT32 subtraction.
-                // Avoids Value copy overhead of BINARY_OP macro if both operands are 32-bit ints.
-                if (vm->stackTop[-1].type == TYPE_INT32 && vm->stackTop[-2].type == TYPE_INT32) {
-                    int32_t a = (int32_t)vm->stackTop[-2].i_val;
-                    int32_t b = (int32_t)vm->stackTop[-1].i_val;
-                    int32_t result;
-                    if (!__builtin_sub_overflow(a, b, &result)) {
-                        vm->stackTop[-2].i_val = result;
-                        vm->stackTop--;
-                        break;
-                    }
-                }
-                BINARY_OP("-", instruction_val);
-                break;
-            }
-            case MULTIPLY: {
-                // Optimization: In-place fast path for TYPE_INT32 multiplication.
-                // Avoids Value copy overhead of BINARY_OP macro if both operands are 32-bit ints.
-                if (vm->stackTop[-1].type == TYPE_INT32 && vm->stackTop[-2].type == TYPE_INT32) {
-                    int32_t a = (int32_t)vm->stackTop[-2].i_val;
-                    int32_t b = (int32_t)vm->stackTop[-1].i_val;
-                    int32_t result;
-                    if (!__builtin_mul_overflow(a, b, &result)) {
-                        vm->stackTop[-2].i_val = result;
-                        vm->stackTop--;
-                        break;
-                    }
-                }
-                BINARY_OP("*", instruction_val);
-                break;
-            }
+            case ADD:      BINARY_OP("+", instruction_val); break;
+            case SUBTRACT: BINARY_OP("-", instruction_val); break;
+            case MULTIPLY: BINARY_OP("*", instruction_val); break;
             case DIVIDE:   BINARY_OP("/", instruction_val); break;
 
             case NEGATE: {
