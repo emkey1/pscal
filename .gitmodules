@@ -1,36 +1,48 @@
 [submodule "src/smallclue"]
 	path = src/smallclue
 	url = https://github.com/emkey1/smallclue.git
+	branch = main
 [submodule "third-party/SDL"]
 	path = third-party/SDL
 	url = https://github.com/libsdl-org/SDL_mixer.git
+	branch = main
 [submodule "third-party/micro"]
 	path = third-party/micro
 	url = https://github.com/emkey1/micro.git
+	branch = master
 [submodule "third-party/dvtm"]
 	path = third-party/dvtm
 	url = https://github.com/emkey1/dvtm.git
+	branch = master
 [submodule "third-party/libgit2"]
 	path = third-party/libgit2
 	url = https://github.com/emkey1/libgit2.git
+	branch = main
 [submodule "third-party/openrsync"]
 	path = third-party/openrsync
 	url = https://github.com/emkey1/openrsync.git
+	branch = master
 [submodule "components/clike"]
 	path = components/clike
 	url = https://github.com/emkey1/clike.git
+	branch = main
 [submodule "components/pscal-core"]
 	path = components/pscal-core
 	url = https://github.com/emkey1/pscal-core.git
+	branch = main
 [submodule "components/rea"]
 	path = components/rea
 	url = https://github.com/emkey1/rea.git
+	branch = main
 [submodule "components/aether"]
 	path = components/aether
 	url = https://github.com/emkey1/aether.git
+	branch = main
 [submodule "components/pascal"]
 	path = components/pascal
 	url = https://github.com/emkey1/pascal.git
+	branch = main
 [submodule "components/exsh"]
 	path = components/exsh
 	url = https://github.com/emkey1/exsh.git
+	branch = main
