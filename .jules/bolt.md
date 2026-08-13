@@ -1,6 +1,6 @@
 ## 2024-05-18 - [Optimization of INT_DIV and MOD]
 **Learning:** When adding fast paths for arithmetic in the VM using smaller data types (like 32-bit math for `TYPE_INT32`), you must be extremely careful to preserve the original semantics of the fallback path. In this codebase, the standard integer types are backed by 64-bit `long long`. Therefore, an operation that overflows a 32-bit integer (like `INT32_MIN / -1`) should *not* trap or throw an error; it needs to be promoted cleanly to its valid 64-bit result to avoid breaking valid language semantics.
 **Action:** Always verify that edge cases in numerical fast paths yield the exact same result as the slower generic path, rather than naively enforcing the bounds of the smaller optimized type.
-## 2024-05-18 - [Optimization of INC_LOCAL and DEC_LOCAL bounds checking]
-**Learning:** When adding fast paths in `src/vm/vm.c` that access specific array elements like `&frame->slots[slot]`, safety checks such as validating `slot >= frame_window` must occur *before* the pointer is dereferenced or checked for its type. Skipping bounds checks before type checks introduces an out-of-bounds memory read (and potentially write) vulnerability.
-**Action:** Always ensure array bounds and validity are confirmed before dereferencing, even in performance-critical fast paths where branching logic is otherwise minimized.
+## 2026-08-08 - [Optimization file paths vs Submodules]
+**Learning:** The VM implementation has been moved to the `pscal-core` submodule at `components/pscal-core/src/vm/vm.c`. Modifying the root `src/vm/vm.c` results in modifying a dead file that is no longer compiled on the `main` branch, meaning optimizations applied there will have no effect.
+**Action:** When making VM optimizations, ensure modifications are applied to `components/pscal-core/src/vm/vm.c` instead of the root directory.

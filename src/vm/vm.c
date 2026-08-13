@@ -8788,17 +8788,9 @@ comparison_error_label:
                                  slot, declared_window, live_window);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-
                 Value* target_slot = &frame->slots[slot];
-
-                // Fast path for TYPE_INT32 common in loop iterators
-                if (target_slot->type == TYPE_INT32) {
-                    target_slot->i_val++;
-                    target_slot->u_val = target_slot->i_val;
-                } else {
-                    if (!adjustLocalByDelta(vm, target_slot, 1, "INC_LOCAL")) {
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
+                if (!adjustLocalByDelta(vm, target_slot, 1, "INC_LOCAL")) {
+                    return INTERPRET_RUNTIME_ERROR;
                 }
                 break;
             }
@@ -8813,17 +8805,9 @@ comparison_error_label:
                                  slot, declared_window, live_window);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-
                 Value* target_slot = &frame->slots[slot];
-
-                // Fast path for TYPE_INT32 common in loop iterators
-                if (target_slot->type == TYPE_INT32) {
-                    target_slot->i_val--;
-                    target_slot->u_val = target_slot->i_val;
-                } else {
-                    if (!adjustLocalByDelta(vm, target_slot, -1, "DEC_LOCAL")) {
-                        return INTERPRET_RUNTIME_ERROR;
-                    }
+                if (!adjustLocalByDelta(vm, target_slot, -1, "DEC_LOCAL")) {
+                    return INTERPRET_RUNTIME_ERROR;
                 }
                 break;
             }
