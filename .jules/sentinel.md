@@ -1,0 +1,5 @@
+
+## 2024-11-20 - [CRITICAL] Command Injection via Environment Variable in popen()
+**Vulnerability:** In `src/backend_ast/shell/shell_builtins.inc`, `popen()` was used to execute a shell command to detect arithmetic error string formats. However, the path to the shell binary was retrieved from the `BASH` environment variable (`shellSafeGetenv("BASH")`). This allowed an attacker to execute arbitrary commands by simply setting `BASH` to a malicious binary or script.
+**Learning:** Using `popen()` or `system()` with components derived from environment variables, especially for testing or probing the environment, introduces a significant command injection risk. Environment variables controlled by the user should never be executed without strict validation.
+**Prevention:** Hardcode paths to trusted system binaries (e.g., `/bin/bash`) when using them internally for execution via `popen()` or `system()`. Avoid using environment variables to define executable paths unless absolutely necessary, and if required, strictly validate the path.
