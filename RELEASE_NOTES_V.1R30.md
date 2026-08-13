@@ -116,10 +116,12 @@ Status: Release candidate
 ## Known Gaps
 - The TestFlight archive for this build has not been uploaded. This release is a candidate; no TestFlight or App Store submission has been made.
 - `ios/IOS_AUDIT_STATUS.md` still records "Last updated: 2026-01-03" and has not been refreshed for this release. Its recorded build results predate the `components/` split and the iOS build breaks fixed here.
-- Validation beyond what is listed below has not been run for this release. In particular, no device (`generic/platform=iOS`) build, no Release-configuration iOS build, and no iOS regression harness run has been performed against this candidate.
+- No code signing is configured on the build machine: only an Apple Development identity is present and no provisioning profiles are installed. A TestFlight archive requires an Apple Distribution certificate and an App Store profile, so the archive step is the one remaining task and it is not a code change.
+- No iOS regression harness run has been performed against this candidate; the iOS validation below is build-and-link only, not runtime testing on a device or simulator.
 
 ## Validation
 - `ctest` — 5/5 suites pass: `pascal_tests`, `clike_tests`, `rea_tests`, `aether_tests`, `json2bc_tests`.
 - Example sweeps pass: pascal 103 files, clike 38 files, rea 33 files, exsh 19 files.
 - The iOS app builds and links for the iOS Simulator (Debug).
+- The iOS app builds and links for device hardware in Release (`-sdk iphoneos`, `generic/platform=iOS`, signing disabled): a 32 MB arm64 `PSCAL.app/PSCAL`. The device Release static libraries build clean (1155/1155) and are arm64, including `libpscal_aether_static.a`, so Aether is present in the device build.
 - A new macOS CI job compiles the iOS app on every change to the gated paths; previously no job did.
