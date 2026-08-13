@@ -880,15 +880,9 @@ struct AppDiagnosticsView: View {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button(copiedReport ? "Copied" : "Copy Report") {
                         runner.copyReportToPasteboard()
-                        UINotificationFeedbackGenerator().notificationOccurred(.success)
-                        UIAccessibility.post(notification: .announcement, argument: "Copied report")
-                        withAnimation {
-                            copiedReport = true
-                        }
+                        copiedReport = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                            withAnimation {
-                                copiedReport = false
-                            }
+                            copiedReport = false
                         }
                     }
                     .disabled(runner.report.isEmpty)
