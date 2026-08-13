@@ -8789,7 +8789,10 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 Value* target_slot = &frame->slots[slot];
-                if (!adjustLocalByDelta(vm, target_slot, 1, "INC_LOCAL")) {
+                if (target_slot->type == TYPE_INT32) {
+                    target_slot->i_val++;
+                    target_slot->u_val = (unsigned long long)target_slot->i_val;
+                } else if (!adjustLocalByDelta(vm, target_slot, 1, "INC_LOCAL")) {
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 break;
@@ -8806,7 +8809,10 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 Value* target_slot = &frame->slots[slot];
-                if (!adjustLocalByDelta(vm, target_slot, -1, "DEC_LOCAL")) {
+                if (target_slot->type == TYPE_INT32) {
+                    target_slot->i_val--;
+                    target_slot->u_val = (unsigned long long)target_slot->i_val;
+                } else if (!adjustLocalByDelta(vm, target_slot, -1, "DEC_LOCAL")) {
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 break;
