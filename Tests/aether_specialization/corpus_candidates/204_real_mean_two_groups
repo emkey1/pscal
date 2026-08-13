@@ -1,0 +1,11 @@
+// real_mean_two_groups
+// expect: average = 61.40
+fn main() -> Void {
+    let sumA: Int = 40 + 56;
+    let nA: Int = 2;
+    let sumB: Int = 61 + 70 + 80;
+    let nB: Int = 3;
+    let average: Real = (sumA + sumB) / (nA + nB);
+    fx { println("average = ", average:0:2); }
+    ret;
+}

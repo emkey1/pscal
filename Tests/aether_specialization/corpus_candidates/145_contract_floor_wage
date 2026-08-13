@@ -1,0 +1,16 @@
+// 145_contract_floor_wage
+@pre wage >= 0
+@post result >= 15
+fn floorWage(wage: Int) -> Int {
+    if wage < 15 {
+        ret 15;
+    }
+    ret wage;
+}
+fn main() -> Void {
+    fx {
+        println("wage 9 => ", floorWage(9));
+        println("wage 24 => ", floorWage(24));
+    }
+    ret;
+}

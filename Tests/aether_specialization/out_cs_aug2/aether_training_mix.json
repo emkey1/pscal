@@ -1,0 +1,9 @@
+{
+  "raw_corpus": "/Users/mke/PBuild/Tests/aether_specialization/out_cs_aug2/aether_raw_corpus.json",
+  "reference_corpus": "/Users/mke/PBuild/Tests/aether_specialization/out_cs_aug2/aether_reference_corpus.json",
+  "instruction_jsonl": "/Users/mke/PBuild/Tests/aether_specialization/out_cs_aug2/aether_instruction_sft.jsonl",
+  "repair_jsonl": "/Users/mke/PBuild/Tests/aether_specialization/out_cs_aug2/aether_repair_sft.jsonl",
+  "instruction_records": 409,
+  "repair_records": 25,
+  "policy": "CORRECTED CS-augmented instruction-only SFT (data_cs_aug2). Fixes the v1 CS-aug regression: (1) CS held to ~9/family = 72 records = 17.6% of the 409 instruction records (was 256 = ~43%); (2) ALL @pure annotations removed from the 306-313 CS-classics templates so the model does not over-apply @pure (no [ANN-001] purity errors). Corpus mix: 72 CS (306-313) + 160 business (301-305) + 166 base + 11 seed instruction pairs. Decontaminated against tasks_cs/tasks_v2_pos/tasks_hard (0 output overlaps; verified two ways: build-time --exclude-benchmark-tasks AND an independent recompile+compare of all 434 records vs 57 benchmark outputs). Built with components/aether/build/aether (2026-06-23-1). 5 business templates and the data_cs_aug v1 dir left untouched."
+}

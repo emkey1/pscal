@@ -1,0 +1,14 @@
+// real_mean_guarded
+// Guard the divisor; the average still binds Real.
+// expect: average = 70.33
+fn main() -> Void {
+    let xs: Int[] = [60, 71, 80];
+    let n: Int = length(xs);
+    let sum: Int = 0;
+    loop i in 0..n {
+        sum = sum + xs[i];
+    }
+    let average: Real = if n > 0 { sum / n } else { 0.0 };
+    fx { println("average = ", average:0:2); }
+    ret;
+}

@@ -1,0 +1,30 @@
+// 33_toon_config
+// Concepts: copy JSON keys exactly (no invented flattened keys),
+// extract section nodes, fall back with _or on the final lookup
+// expect: port = 8080
+// expect: app = demo
+// expect: level = info
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse("{\"server\":{\"port\":8080},\"app\":{\"name\":\"demo\"},\"log\":{}}");
+    let root: ToonNode = toon_root(doc);
+
+    let server: ToonNode = toon_key(root, "server");
+    let app: ToonNode = toon_key(root, "app");
+    let log: ToonNode = toon_key(root, "log");
+
+    let port: Int = toon_get_int_or(server, "port", 0);
+    let appName: Text = toon_get_text_or(app, "name", "");
+    let logLevel: Text = toon_get_text_or(log, "level", "info");
+
+    fx {
+        println("port = ", port);
+        println("app = ", appName);
+        println("level = ", logLevel);
+    }
+
+    toon_close(doc);
+    ret;
+}

@@ -1,0 +1,55 @@
+// 127_username_validation
+// Concepts: inline toon_parse, string_len text checks, pure length validator,
+// Bool printing (true/false), valid counter, summary
+// expect: user 0: ed / 2 / false
+// expect: user 1: alice / 5 / true
+// expect: user 2: supercalifrag / 13 / false
+// expect: user 3: bob / 3 / true
+// expect: valid = 2
+
+@pure
+fn validLength(name: Text) -> Bool {
+    let n: Int = string_len(name);
+    if n < 3 {
+        ret false;
+    }
+    if n > 12 {
+        ret false;
+    }
+    ret true;
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("{\"users\":[{\"name\":\"ed\"},{\"name\":\"alice\"},{\"name\":\"supercalifrag\"},{\"name\":\"bob\"}]}");
+    let root: ToonNode = toon_root(doc);
+    let users: ToonNode = toon_key(root, "users");
+    let valid: Int = 0;
+
+    loop i in 0..toon_len(users) {
+        let user: ToonNode = toon_at(users, i);
+        let name: Text = toon_get_text_or(user, "name", "");
+        let size: Int = string_len(name);
+        let ok: Bool = validLength(name);
+        if ok {
+            valid = valid + 1;
+        }
+
+        fx {
+            println("user ", i, ": ", name, " / ", size, " / ", ok);
+        }
+    }
+
+    fx {
+        println("valid = ", valid);
+    }
+
+    toon_close(doc);
+    ret;
+}

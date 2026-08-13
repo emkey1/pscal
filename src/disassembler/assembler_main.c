@@ -33,8 +33,8 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "Pascal/globals.h"
-#include "Pascal/type_registry.h"
+#include "core/globals.h"
+#include "core/type_registry.h"
 #include "ast/ast.h"
 #include "common/frontend_kind.h"
 #include "compiler/bytecode.h"
@@ -97,6 +97,9 @@ typedef struct {
     bool has_header;
     bool has_version;
     uint32_t version;
+
+    bool has_cache_count;
+    int cache_count;
 
     bool has_constants;
     int constants_count;
@@ -567,8 +570,8 @@ static int instructionLengthForAsm(const ParsedInstruction *inst, int *out_lengt
     }
     int length = 1;
     if (inst->opcode == JUMP || inst->opcode == JUMP_IF_FALSE) {
-        if (inst->operand_count == 1 || inst->operand_count == 2) {
-            length = 3;
+        if (inst->operand_count == 1 || inst->operand_count == 4) {
+            length = 5;
         } else {
             return 0;
         }
@@ -645,29 +648,31 @@ static int buildCodeFromInstructions(ParsedAsmProgram *program,
         }
 
         if (inst->opcode == JUMP || inst->opcode == JUMP_IF_FALSE) {
-            int16_t distance = 0;
-            if (inst->operand_count == 2) {
-                uint8_t b0 = 0;
-                uint8_t b1 = 0;
+            int32_t distance = 0;
+            if (inst->operand_count == 4) {
+                uint8_t b0 = 0, b1 = 0, b2 = 0, b3 = 0;
                 if (!parseByteExact(inst->operands[0], &b0) ||
-                    !parseByteExact(inst->operands[1], &b1)) {
-                    fprintf(stderr, "pscalasm:%d: jump with two operands requires byte values.\n",
+                    !parseByteExact(inst->operands[1], &b1) ||
+                    !parseByteExact(inst->operands[2], &b2) ||
+                    !parseByteExact(inst->operands[3], &b3)) {
+                    fprintf(stderr, "pscalasm:%d: jump with four operands requires byte values.\n",
                             inst->asm_line_number);
                     free(offsets);
                     return 0;
                 }
-                distance = (int16_t)(((uint16_t)b0 << 8) | (uint16_t)b1);
+                distance = (int32_t)(((uint32_t)b0 << 24) | ((uint32_t)b1 << 16) |
+                                     ((uint32_t)b2 << 8) | (uint32_t)b3);
             } else if (inst->operand_count == 1) {
                 const char *op = inst->operands[0];
                 long long numeric_distance = 0;
                 if (parseInt64Exact(op, &numeric_distance)) {
-                    if (numeric_distance < INT16_MIN || numeric_distance > INT16_MAX) {
+                    if (numeric_distance < INT32_MIN || numeric_distance > INT32_MAX) {
                         fprintf(stderr, "pscalasm:%d: jump distance out of range: %lld.\n",
                                 inst->asm_line_number, numeric_distance);
                         free(offsets);
                         return 0;
                     }
-                    distance = (int16_t)numeric_distance;
+                    distance = (int32_t)numeric_distance;
                 } else {
                     const char *label_name = op;
                     if (*label_name == '@') {
@@ -681,25 +686,27 @@ static int buildCodeFromInstructions(ParsedAsmProgram *program,
                         return 0;
                     }
                     int target_offset = offsets[target->instruction_index];
-                    int origin_after_inst = offsets[i] + 3;
-                    int delta = target_offset - origin_after_inst;
-                    if (delta < INT16_MIN || delta > INT16_MAX) {
-                        fprintf(stderr, "pscalasm:%d: jump to label '%s' out of int16 range.\n",
+                    int origin_after_inst = offsets[i] + 5;
+                    long long delta = (long long)target_offset - (long long)origin_after_inst;
+                    if (delta < INT32_MIN || delta > INT32_MAX) {
+                        fprintf(stderr, "pscalasm:%d: jump to label '%s' out of int32 range.\n",
                                 inst->asm_line_number, label_name);
                         free(offsets);
                         return 0;
                     }
-                    distance = (int16_t)delta;
+                    distance = (int32_t)delta;
                 }
             } else {
-                fprintf(stderr, "pscalasm:%d: jump opcode requires 1 label/offset operand or 2 raw bytes.\n",
+                fprintf(stderr, "pscalasm:%d: jump opcode requires 1 label/offset operand or 4 raw bytes.\n",
                         inst->asm_line_number);
                 free(offsets);
                 return 0;
             }
 
-            uint16_t encoded = (uint16_t)distance;
-            if (!appendCodeByte(program, (uint8_t)((encoded >> 8) & 0xFF), inst->line) ||
+            uint32_t encoded = (uint32_t)distance;
+            if (!appendCodeByte(program, (uint8_t)((encoded >> 24) & 0xFF), inst->line) ||
+                !appendCodeByte(program, (uint8_t)((encoded >> 16) & 0xFF), inst->line) ||
+                !appendCodeByte(program, (uint8_t)((encoded >> 8) & 0xFF), inst->line) ||
                 !appendCodeByte(program, (uint8_t)(encoded & 0xFF), inst->line)) {
                 free(offsets);
                 return 0;
@@ -910,8 +917,9 @@ static int parseShellFunctionPointerPayload(const char *asm_text, Value *value_o
     unlink(tmp_path);
 
     value_out->type = TYPE_POINTER;
-    value_out->ptr_val = (Value *)compiled;
-    value_out->base_type_node = SHELL_FUNCTION_PTR_SENTINEL;
+    pscalPointerEnsureObj(value_out);
+    AS_POINTER(*value_out) = (Value *)compiled;
+    PTR_BASE_TYPE_NODE(*value_out) = SHELL_FUNCTION_PTR_SENTINEL;
     return 1;
 }
 
@@ -966,12 +974,12 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
         }
 
         Value arr = makeEmptyArray(elem_type, NULL);
-        arr.dimensions = dims;
-        arr.lower_bounds = lower_bounds;
-        arr.upper_bounds = upper_bounds;
-        arr.lower_bound = lower_bounds[0];
-        arr.upper_bound = upper_bounds[0];
-        arr.array_is_packed = isPackedByteElementType(elem_type);
+        ARRAY_DIMENSIONS(arr) = dims;
+        ARRAY_LOWER_BOUNDS(arr) = lower_bounds;
+        ARRAY_UPPER_BOUNDS(arr) = upper_bounds;
+        ARRAY_LOWER_BOUND(arr) = lower_bounds[0];
+        ARRAY_UPPER_BOUND(arr) = upper_bounds[0];
+        ARRAY_IS_PACKED(arr) = isPackedByteElementType(elem_type);
 
         int total = calculateArrayTotalSize(&arr);
         if (total < 0 || declared_total_ll != total) {
@@ -980,9 +988,9 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
         }
 
         if (total > 0) {
-            if (arr.array_is_packed) {
-                arr.array_raw = (uint8_t *)calloc((size_t)total, sizeof(uint8_t));
-                if (!arr.array_raw) {
+            if (ARRAY_IS_PACKED(arr)) {
+                AS_ARRAY_RAW(arr) = (uint8_t *)calloc((size_t)total, sizeof(uint8_t));
+                if (!AS_ARRAY_RAW(arr)) {
                     freeValue(&arr);
                     return 0;
                 }
@@ -992,11 +1000,11 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                         freeValue(&arr);
                         return 0;
                     }
-                    arr.array_raw[i] = (uint8_t)n;
+                    AS_ARRAY_RAW(arr)[i] = (uint8_t)n;
                 }
             } else {
-                arr.array_val = (Value *)calloc((size_t)total, sizeof(Value));
-                if (!arr.array_val) {
+                AS_ARRAY(arr) = (Value *)calloc((size_t)total, sizeof(Value));
+                if (!AS_ARRAY(arr)) {
                     freeValue(&arr);
                     return 0;
                 }
@@ -1028,8 +1036,10 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                                 freeValue(&arr);
                                 return 0;
                             }
-                            elem.u_val = (unsigned long long)n;
-                            elem.i_val = (long long)elem.u_val;
+                            // SET_INT_VALUE stores the exact 64-bit pattern
+                            // (VAL_UINT reinterprets it), same as cache.c's
+                            // readValue for the same type family.
+                            SET_INT_VALUE(&elem, n);
                             break;
                         }
                         case TYPE_FLOAT:
@@ -1049,7 +1059,9 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                                 freeValue(&arr);
                                 return 0;
                             }
-                            elem.s_val = text;
+                            StringObj *elem_str_obj = pscalStringObjCreate(-1, TYPE_STRING);
+                            pscalValueSetHeapPtrBits(&elem, elem_str_obj);
+                            elem_str_obj->buffer = text;
                             break;
                         }
                         case TYPE_CHAR: {
@@ -1058,8 +1070,7 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                                 freeValue(&arr);
                                 return 0;
                             }
-                            elem.c_val = (int)n;
-                            SET_INT_VALUE(&elem, elem.c_val);
+                            SET_INT_VALUE(&elem, n);
                             break;
                         }
                         case TYPE_NIL: {
@@ -1076,7 +1087,7 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                             freeValue(&arr);
                             return 0;
                     }
-                    arr.array_val[i] = elem;
+                    AS_ARRAY(arr)[i] = elem;
                 }
             }
         }
@@ -1108,8 +1119,7 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
             if (!parseLongLongToken(cursor, &n) || n < 0) {
                 return 0;
             }
-            v.u_val = (unsigned long long)n;
-            v.i_val = (long long)v.u_val;
+            SET_INT_VALUE(&v, n);
             break;
         }
         case TYPE_FLOAT:
@@ -1127,7 +1137,9 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
             if (!parseQuotedStringToken(cursor, &text)) {
                 return 0;
             }
-            v.s_val = text;
+            StringObj *str_obj = pscalStringObjCreate(-1, TYPE_STRING);
+            pscalValueSetHeapPtrBits(&v, str_obj);
+            str_obj->buffer = text;
             break;
         }
         case TYPE_CHAR: {
@@ -1135,8 +1147,7 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
             if (!parseLongLongToken(cursor, &n) || n < 0 || n > 255) {
                 return 0;
             }
-            v.c_val = (int)n;
-            SET_INT_VALUE(&v, v.c_val);
+            SET_INT_VALUE(&v, n);
             break;
         }
         case TYPE_NIL:
@@ -1160,18 +1171,20 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                 set_size < 0 || set_size > INT32_MAX) {
                 return 0;
             }
-            v.set_val.set_size = (int)set_size;
-            if (v.set_val.set_size > 0) {
-                v.set_val.set_values =
-                    (long long *)calloc((size_t)v.set_val.set_size, sizeof(long long));
-                if (!v.set_val.set_values) {
+            SetObj *set_obj = pscalSetObjCreate();
+            pscalValueSetHeapPtrBits(&v, set_obj);
+            set_obj->set_size = (int)set_size;
+            if (set_obj->set_size > 0) {
+                set_obj->set_values =
+                    (long long *)calloc((size_t)set_obj->set_size, sizeof(long long));
+                if (!set_obj->set_values) {
                     return 0;
                 }
-                for (int i = 0; i < v.set_val.set_size; ++i) {
-                    if (!parseLongLongToken(cursor, &v.set_val.set_values[i])) {
-                        free(v.set_val.set_values);
-                        v.set_val.set_values = NULL;
-                        v.set_val.set_size = 0;
+                for (int i = 0; i < set_obj->set_size; ++i) {
+                    if (!parseLongLongToken(cursor, &set_obj->set_values[i])) {
+                        free(set_obj->set_values);
+                        set_obj->set_values = NULL;
+                        set_obj->set_size = 0;
                         return 0;
                     }
                 }
@@ -1184,8 +1197,7 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                 return 0;
             }
             if (strcmp(keyword, "null") == 0) {
-                v.ptr_val = NULL;
-                v.base_type_node = NULL;
+                pscalValueSetHeapPtrBits(&v, NULL);
                 break;
             }
             if (strcmp(keyword, "shellfn_asm") == 0) {
@@ -1205,8 +1217,9 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                 if (!parseQuotedStringToken(cursor, &text)) {
                     return 0;
                 }
-                v.ptr_val = (Value *)text;
-                v.base_type_node = SERIALIZED_CHAR_PTR_SENTINEL;
+                pscalPointerEnsureObj(&v);
+                AS_POINTER(v) = (Value *)text;
+                PTR_BASE_TYPE_NODE(v) = SERIALIZED_CHAR_PTR_SENTINEL;
                 break;
             }
             if (strcmp(keyword, "opaque_addr") == 0) {
@@ -1220,8 +1233,9 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                 if (errno != 0 || end == addr_token || *end != '\0') {
                     return 0;
                 }
-                v.ptr_val = (Value *)(uintptr_t)addr;
-                v.base_type_node = OPAQUE_POINTER_SENTINEL;
+                pscalPointerEnsureObj(&v);
+                AS_POINTER(v) = (Value *)(uintptr_t)addr;
+                PTR_BASE_TYPE_NODE(v) = OPAQUE_POINTER_SENTINEL;
                 break;
             }
             return 0;
@@ -1289,6 +1303,24 @@ static int parsePscalasm2(const char *input_text, ParsedAsmProgram *program) {
             }
             program->version = (uint32_t)v;
             program->has_version = true;
+            continue;
+        }
+
+        // VM 2.0 Phase 2a: optional directive sizing the global-access cache
+        // side table (chunk.caches) for hand-assembled programs that use
+        // GET_GLOBAL/SET_GLOBAL/GET_GLOBAL16/SET_GLOBAL16 (whose cache_id
+        // operand is a raw byte pair the .asm author supplies directly, like
+        // any other operand). Defaults to 0 (no cache sites) when omitted --
+        // fine for programs that don't touch those opcodes.
+        if (strcmp(directive, "cache_count") == 0) {
+            long long v = 0;
+            if (!parseLongLongToken(&cursor, &v) || v < 0 || v > 0xFFFF) {
+                fprintf(stderr, "pscalasm:%d: invalid cache_count directive.\n", line_number);
+                free(copy);
+                return -1;
+            }
+            program->cache_count = (int)v;
+            program->has_cache_count = true;
             continue;
         }
 
@@ -2015,13 +2047,12 @@ static int assembleAndWritePscalasm2(const ParsedAsmProgram *program,
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
     chunk.version = program->has_version ? program->version : pscal_vm_version();
+    chunk.cache_count = program->has_cache_count ? program->cache_count : 0;
 
     if (program->constants_count > 0) {
         chunk.constants = (Value *)calloc((size_t)program->constants_count, sizeof(Value));
         chunk.builtin_lowercase_indices = (int *)malloc(sizeof(int) * (size_t)program->constants_count);
-        chunk.global_symbol_cache =
-            (Symbol **)calloc((size_t)program->constants_count, sizeof(Symbol *));
-        if (!chunk.constants || !chunk.builtin_lowercase_indices || !chunk.global_symbol_cache) {
+        if (!chunk.constants || !chunk.builtin_lowercase_indices) {
             fprintf(stderr, "pscalasm: out of memory allocating constants.\n");
             goto cleanup;
         }
@@ -2030,7 +2061,6 @@ static int assembleAndWritePscalasm2(const ParsedAsmProgram *program,
         for (int i = 0; i < program->constants_count; ++i) {
             chunk.constants[i] = makeCopyOfValue(&program->constants[i]);
             chunk.builtin_lowercase_indices[i] = -1;
-            chunk.global_symbol_cache[i] = NULL;
         }
     }
 

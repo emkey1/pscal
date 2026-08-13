@@ -1,6 +1,0 @@
-program InvalidArrayBounds;
-var
-  a: array['a'..26] of integer;  { invalid: mixed ordinal types }
-begin
-  writeln('unreachable');
-end.

@@ -1,0 +1,26 @@
+// 28_toon_object
+// Concepts: parse, object-root field extraction, _or fallback, toon_close
+// expect: name = Vega
+// expect: count = 3
+// expect: enabled: yes
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse("{\"name\":\"Vega\",\"enabled\":true,\"count\":3}");
+    let root: ToonNode = toon_root(doc);
+
+    let name: Text = toon_get_text(root, "name");
+    let count: Int = toon_get_int_or(root, "count", 0);
+    let enabled: Bool = toon_get_bool(root, "enabled");
+    let enabledLabel: Text = if enabled { "yes" } else { "no" };
+
+    fx {
+        println("name = ", name);
+        println("count = ", count);
+        println("enabled: ", enabledLabel);
+    }
+
+    toon_close(doc);
+    ret;
+}

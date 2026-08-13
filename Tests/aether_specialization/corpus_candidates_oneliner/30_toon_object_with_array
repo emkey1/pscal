@@ -1,0 +1,31 @@
+// 30_toon_object_with_array
+// Concepts: JSON starting with '{' means extract the named array first,
+// then iterate the extracted node (never the object root)
+// expect: job ingest priority 3
+// expect: job retry priority 1
+
+@pure
+fn priority(score: Int) -> Int {
+    if score >= 90 { ret 3; }
+    if score >= 70 { ret 2; }
+    ret 1;
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse("{\"jobs\":[{\"name\":\"ingest\",\"score\":94},{\"name\":\"retry\",\"score\":35}]}");
+    let root: ToonNode = toon_root(doc);
+    let jobs: ToonNode = toon_key(root, "jobs");
+
+    loop i in 0..toon_len(jobs) {
+        let job: ToonNode = toon_at(jobs, i);
+        let name: Text = toon_get_text(job, "name");
+        let score: Int = toon_get_int_or(job, "score", 0);
+        let level: Int = priority(score);
+        fx { println("job ", name, " priority ", level); }
+    }
+
+    toon_close(doc);
+    ret;
+}

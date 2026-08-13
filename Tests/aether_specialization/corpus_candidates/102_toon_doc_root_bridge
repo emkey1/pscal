@@ -1,0 +1,27 @@
+// 102_toon_doc_root_bridge
+// Concepts: ToonDoc -> toon_root -> ToonNode, object root scalar extraction
+// expect: name = Aether
+// expect: enabled = true
+// expect: count = 2
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("{\"name\":\"Aether\",\"enabled\":true,\"count\":2}");
+    let root: ToonNode = toon_root(doc);
+    let name: Text = toon_get_text(root, "name");
+    let enabled: Bool = toon_get_bool(root, "enabled");
+    let count: Int = toon_get_int(root, "count");
+
+    fx {
+        println("name = ", name);
+        println("enabled = ", enabled);
+        println("count = ", count);
+    }
+
+    toon_close(doc);
+    ret;
+}

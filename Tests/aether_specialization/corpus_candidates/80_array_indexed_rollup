@@ -1,0 +1,24 @@
+// a1_array_rollup  (wishlist 1)
+// expect: sum = 31
+// expect: max = 9
+// expect: count = 8
+
+fn main() -> Void {
+    let xs: Int[] = [3, 1, 4, 1, 5, 9, 2, 6];
+    let n: Int = length(xs);
+    let sum: Int = 0;
+    let max: Int = xs[0];
+    loop i in 0..n {
+        let v: Int = xs[i];
+        sum = sum + v;
+        if v > max {
+            max = v;
+        }
+    }
+    fx {
+        println("sum = ", sum);
+        println("max = ", max);
+        println("count = ", n);
+    }
+    ret;
+}

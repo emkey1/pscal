@@ -1,4 +1,0 @@
-int bits = 5 ^ 3;
-bool flag = true xor false;
-bits = bits ^ 2;
-flag = flag xor (bits == 4);

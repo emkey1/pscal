@@ -1,0 +1,45 @@
+// 315_category_counter_016
+// Concepts: parallel Text arrays of items and category tags, per-category tally helper with string equality, first-appearance ordering, counted summary
+// expect: item 0: yogurt [dairy]
+// expect: item 1: oat [grain]
+// expect: item 2: oat [grain]
+// expect: item 3: plum [fruit]
+// expect: item 4: cream [dairy]
+// expect: item 5: apple [fruit]
+// expect: item 6: milk [dairy]
+// expect: item 7: rye [grain]
+// expect: item 8: fig [fruit]
+// expect: item 9: rye [grain]
+// expect: item 10: lime [fruit]
+// expect: item 11: wheat [grain]
+// expect: item 12: apple [fruit]
+// expect: item 13: rye [grain]
+// expect: dairy: 3
+// expect: grain: 6
+// expect: fruit: 5
+// expect: categories: 3
+
+fn countTag(tags: Text[], cat: Text) -> Int {
+    let total: Int = 0;
+    loop i in 0..length(tags) {
+        if tags[i] == cat { total = total + 1; }
+    }
+    ret total;
+}
+
+fn main() -> Void {
+    let items: Text[] = ["yogurt", "oat", "oat", "plum", "cream", "apple", "milk", "rye", "fig", "rye", "lime", "wheat", "apple", "rye"];
+    let tags: Text[] = ["dairy", "grain", "grain", "fruit", "dairy", "fruit", "dairy", "grain", "fruit", "grain", "fruit", "grain", "fruit", "grain"];
+    let cats: Text[] = ["dairy", "grain", "fruit"];
+    let n: Int = length(tags);
+    let c: Int = length(cats);
+    loop i in 0..n {
+        fx { println("item ", i, ": ", items[i], " [", tags[i], "]"); }
+    }
+    loop j in 0..c {
+        let total: Int = countTag(tags, cats[j]);
+        fx { println(cats[j], ": ", total); }
+    }
+    fx { println("categories: ", c); }
+    ret;
+}

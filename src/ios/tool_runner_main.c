@@ -7,6 +7,7 @@
 extern int pascal_main(int argc, char **argv);
 extern int clike_main(int argc, char **argv);
 extern int rea_main(int argc, char **argv);
+extern int aether_main(int argc, char **argv);
 extern int pscalvm_main(int argc, char **argv);
 extern int pscaljson2bc_main(int argc, char **argv);
 #ifdef PSCAL_TARGET_IOS
@@ -34,6 +35,7 @@ static const ToolDescriptor kToolDescriptors[] = {
     {"pascal", pascal_main, FRONTEND_KIND_PASCAL},
     {"clike", clike_main, FRONTEND_KIND_CLIKE},
     {"rea", rea_main, FRONTEND_KIND_REA},
+    {"aether", aether_main, FRONTEND_KIND_AETHER},
     {"pscalvm", pscalvm_main, FRONTEND_KIND_PASCAL},
     {"pscaljson2bc", pscaljson2bc_main, FRONTEND_KIND_PASCAL},
 #ifdef BUILD_DASCAL

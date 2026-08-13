@@ -1,0 +1,10 @@
+// 22_report_line
+// Concepts: '+' for pure-Text building, commas for mixed-type println
+// expect: [report] items = 3
+
+fn main() -> Void {
+    let header: Text = "[" + "report" + "]";
+    let items: Int = 3;
+    fx { println(header, " items = ", items); }
+    ret;
+}

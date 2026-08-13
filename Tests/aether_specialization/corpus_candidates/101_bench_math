@@ -1,0 +1,6 @@
+mod BenchMath {
+    @pure
+    export fn answer() -> Int {
+        ret 42;
+    }
+}

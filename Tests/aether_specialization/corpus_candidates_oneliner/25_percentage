@@ -1,0 +1,11 @@
+// 25_percentage
+// Concepts: 100.0 forces real-valued division, value:0:2 stable output
+// expect: success = 84.00 %
+
+fn main() -> Void {
+    let successful: Int = 42;
+    let total: Int = 50;
+    let successRate: Real = successful * 100.0 / total;
+    fx { println("success = ", successRate:0:2, "%"); }
+    ret;
+}

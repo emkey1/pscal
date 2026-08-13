@@ -1,0 +1,10 @@
+// 05_inline_conditional
+// Concepts: inline conditional expression (RHS only), bound before printing
+// expect: score is high
+
+fn main() -> Void {
+    let score: Int = 14;
+    let label: Text = if score > 10 { "high" } else { "low" };
+    fx { println("score is ", label); }
+    ret;
+}

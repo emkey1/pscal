@@ -1,0 +1,90 @@
+// 69_release_board_file
+// Concepts: object-root TOON parsing, score normalization, lane classification,
+// blocked flag, custom stats type, formatted average
+// expect: release 0: R1 / green / false / 92
+// expect: release 1: R2 / yellow / true / 76
+// expect: release 2: R3 / red / false / 61
+// expect: release 3: R4 / green / true / 100
+// expect: green = 2
+// expect: yellow = 1
+// expect: red = 1
+// expect: blocked = 2
+// expect: average = 82.25
+
+@pure
+fn normalizeScore(score: Int) -> Int {
+    if score < 0 { ret 0; }
+    if score > 100 { ret 100; }
+    ret score;
+}
+
+@pure
+fn classifyLane(score: Int) -> Text {
+    if score >= 90 { ret "green"; }
+    if score >= 70 { ret "yellow"; }
+    ret "red";
+}
+
+@pure
+fn blockedFlag(blockers: Int) -> Bool {
+    ret blockers > 0;
+}
+
+type BoardStats {
+    green: Int;
+    yellow: Int;
+    red: Int;
+    blocked: Int;
+    totalScore: Int;
+    count: Int;
+
+    fn record(lane: Text, isBlocked: Bool, score: Int) -> Void {
+        self.count = self.count + 1;
+        self.totalScore = self.totalScore + score;
+
+        if lane == "green" { self.green = self.green + 1; }
+        if lane == "yellow" { self.yellow = self.yellow + 1; }
+        if lane == "red" { self.red = self.red + 1; }
+        if isBlocked { self.blocked = self.blocked + 1; }
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("releases69.json");
+    let root: ToonNode = toon_root(doc);
+    let releases: ToonNode = toon_key(root, "releases");
+    let stats: BoardStats = new BoardStats();
+
+    loop i in 0..toon_len(releases) {
+        let release: ToonNode = toon_at(releases, i);
+        let releaseId: Text = toon_get_text_or(release, "id", "UNKNOWN");
+        let rawScore: Int = toon_get_int_or(release, "score", 0);
+        let blockers: Int = toon_get_int_or(release, "blockers", 0);
+        let score: Int = normalizeScore(rawScore);
+        let lane: Text = classifyLane(score);
+        let blocked: Bool = blockedFlag(blockers);
+
+        stats.record(lane, blocked, score);
+
+        fx {
+            println("release ", i, ": ", releaseId, " / ", lane, " / ", blocked, " / ", score);
+        }
+    }
+
+    let average: Real = 0.0;
+    if stats.count > 0 { average = stats.totalScore * 1.0 / stats.count; }
+
+    fx {
+        println("green = ", stats.green);
+        println("yellow = ", stats.yellow);
+        println("red = ", stats.red);
+        println("blocked = ", stats.blocked);
+        println("average = ", average:0:2);
+    }
+
+    toon_close(doc);
+    ret;
+}

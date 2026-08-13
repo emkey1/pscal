@@ -100,7 +100,7 @@ older version will load the bytecode but emit a warning if it targets a newer
 VM. Programs can call `VMVersion` and `BytecodeVersion` to decide whether to
 continue or exit. Set `PSCAL_STRICT_VM=1` to force the VM to abort instead.
 Example programs demonstrating these builtins are available in
-`Examples/pascal/base/VMVersionDemo` and `Examples/clike/base/vm_version_demo`.
+`components/pascal/examples/base/VMVersionDemo` and `components/clike/examples/base/vm_version_demo`.
 Run the result with:
 
 ```sh
@@ -170,7 +170,7 @@ demonstrated in `src/clike/codegen.c`.
 
 Opcodes `CALL_BUILTIN` and `CALL_BUILTIN_PROC` invoke the VM's built-in
 functions and procedures. The VM exposes a large catalog of routines described in
-`Docs/pscal_vm_builtins.md`. To add your own, see
+`components/pscal-core/docs/pscal_vm_builtins.md`. To add your own, see
 [`extended_builtins.md`](extended_builtins.md).
 
 To invoke a builtin from generated code:

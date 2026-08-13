@@ -1,0 +1,53 @@
+// 115_incident_severity_digest
+// Concepts: object-root array, GUARDED nested-object extraction (toon_has_key
+// before toon_key, then a guarded inner key), fallback codes, coded/missing
+// tally via a custom type, per-row and summary output
+// expect: incident 0: INC1 / SEV1
+// expect: incident 1: INC2 / NONE
+// expect: incident 2: INC3 / NONE
+// expect: incident 3: UNKNOWN / NONE
+// expect: coded = 1
+// expect: missing = 3
+
+type Digest {
+    coded: Int;
+    missing: Int;
+
+    fn record(hasCode: Bool) -> Void {
+        if hasCode { self.coded = self.coded + 1; ret; }
+        self.missing = self.missing + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("incidents115.json");
+    let root: ToonNode = toon_root(doc);
+    let rows: ToonNode = toon_key(root, "incidents");
+    let digest: Digest = new Digest();
+
+    loop i in 0..toon_len(rows) {
+        let row: ToonNode = toon_at(rows, i);
+        let id: Text = toon_get_text_or(row, "id", "UNKNOWN");
+        let code: Text = "NONE";
+        let hasCode: Bool = false;
+        if toon_has_key(row, "meta") {
+            let meta: ToonNode = toon_key(row, "meta");
+            if toon_has_key(meta, "code") {
+                code = toon_get_text_or(meta, "code", "NONE");
+                hasCode = true;
+            }
+        }
+
+        digest.record(hasCode);
+
+        fx { println("incident ", i, ": ", id, " / ", code); }
+    }
+
+    fx { println("coded = ", digest.coded); println("missing = ", digest.missing); }
+
+    toon_close(doc);
+    ret;
+}

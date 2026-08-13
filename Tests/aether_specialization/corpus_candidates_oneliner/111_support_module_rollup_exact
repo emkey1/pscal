@@ -1,0 +1,53 @@
+// 111_support_module_rollup_exact
+// Concepts: verified module import, exact exported-name usage, file-based TOON
+// parsing, imported default score, per-job report, final totals
+// expect: job 0 -> Alpha / ready / 95
+// expect: job 1 -> Beta / blocked / 50
+// expect: job 2 -> Gamma / blocked / 12
+// expect: ready = 1
+// expect: review = 0
+// expect: blocked = 2
+
+use "97_support_rules";
+
+type Totals {
+    ready: Int;
+    review: Int;
+    blocked: Int;
+
+    fn record(status: Text) -> Void {
+        if status == "ready" { self.ready = self.ready + 1; ret; }
+        if status == "review" { self.review = self.review + 1; ret; }
+        self.blocked = self.blocked + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("support_jobs111.json");
+    let root: ToonNode = toon_root(doc);
+    let jobs: ToonNode = toon_key(root, "jobs");
+    let totals: Totals = new Totals();
+
+    loop i in 0..toon_len(jobs) {
+        let job: ToonNode = toon_at(jobs, i);
+        let name: Text = toon_get_text(job, "name");
+        let rawScore: Int = toon_get_int_or(job, "score", DefaultScore);
+        let status: Text = classifySupport(rawScore);
+
+        totals.record(status);
+
+        fx { println("job ", i, " -> ", name, " / ", status, " / ", rawScore); }
+    }
+
+    fx {
+        println("ready = ", totals.ready);
+        println("review = ", totals.review);
+        println("blocked = ", totals.blocked);
+    }
+
+    toon_close(doc);
+    ret;
+}

@@ -1,0 +1,24 @@
+// 17_job_summary
+// Concepts: Bool method, binding method result, inline conditional label
+// expect: job alpha: ready
+
+type JobSummary {
+    name: Text;
+    score: Int;
+    priority: Int;
+
+    fn isReady() -> Bool {
+        ret self.priority == 3;
+    }
+}
+
+fn main() -> Void {
+    let summary: JobSummary = new JobSummary();
+    summary.name = "alpha";
+    summary.score = 95;
+    summary.priority = 3;
+    let ready: Bool = summary.isReady();
+    let label: Text = if ready { "ready" } else { "waiting" };
+    fx { println("job ", summary.name, ": ", label); }
+    ret;
+}

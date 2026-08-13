@@ -19683,6 +19683,9 @@ hterm.VT.prototype.parseUnknown_ = function(parseState) {
       str = this[this.GL].GL(str);
     }
 
+    if (str.length) {
+      this.lastPrintedCharacter_ = str.substr(str.length - 1);
+    }
     this.terminal.print(str);
   };
 
@@ -21580,7 +21583,20 @@ hterm.VT.CSI['a'] = function(parseState) {
  *
  * Not currently implemented.
  */
-hterm.VT.CSI['b'] = hterm.VT.ignore;
+hterm.VT.CSI['b'] = function(parseState) {
+  if (!this.lastPrintedCharacter_) {
+    return;
+  }
+  let count = parseState.iarg(0, 1);
+  if (count < 1) {
+    count = 1;
+  }
+  const max = this.terminal.screenSize.width * this.terminal.screenSize.height;
+  if (count > max) {
+    count = max;
+  }
+  this.terminal.print(this.lastPrintedCharacter_.repeat(count));
+};
 
 /**
  * Send Device Attributes (Primary DA).

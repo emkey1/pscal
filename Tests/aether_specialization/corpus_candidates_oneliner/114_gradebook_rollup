@@ -1,0 +1,85 @@
+// 114_gradebook_rollup
+// Concepts: object-root TOON extraction, pure clamp + tiered classify helpers,
+// custom mutable gradebook type, clamped real average with fixed precision,
+// per-student and summary output
+// expect: student 0: Ana / 92 / distinction
+// expect: student 1: Ben / 78 / merit
+// expect: student 2: Cy / 55 / pass
+// expect: student 3: Dee / 100 / distinction
+// expect: student 4: Eli / 0 / fail
+// expect: distinction = 2
+// expect: merit = 1
+// expect: pass = 1
+// expect: fail = 1
+// expect: average = 65.00
+
+const MaxScore: Int = 100;
+
+@pure
+fn clampScore(raw: Int) -> Int {
+    if raw < 0 { ret 0; }
+    if raw > MaxScore { ret MaxScore; }
+    ret raw;
+}
+
+@pure
+fn classifyGrade(score: Int) -> Text {
+    if score >= 85 { ret "distinction"; }
+    if score >= 70 { ret "merit"; }
+    if score >= 50 { ret "pass"; }
+    ret "fail";
+}
+
+type Gradebook {
+    count: Int;
+    total: Int;
+    distinction: Int;
+    merit: Int;
+    passed: Int;
+    failed: Int;
+
+    fn record(grade: Text, score: Int) -> Void {
+        self.count = self.count + 1;
+        self.total = self.total + score;
+        if grade == "distinction" { self.distinction = self.distinction + 1; ret; }
+        if grade == "merit" { self.merit = self.merit + 1; ret; }
+        if grade == "pass" { self.passed = self.passed + 1; ret; }
+        self.failed = self.failed + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("grades114.json");
+    let root: ToonNode = toon_root(doc);
+    let students: ToonNode = toon_key(root, "students");
+    let book: Gradebook = new Gradebook();
+
+    loop i in 0..toon_len(students) {
+        let student: ToonNode = toon_at(students, i);
+        let name: Text = toon_get_text_or(student, "name", "UNKNOWN");
+        let raw: Int = toon_get_int_or(student, "raw", 0);
+        let score: Int = clampScore(raw);
+        let grade: Text = classifyGrade(score);
+
+        book.record(grade, score);
+
+        fx { println("student ", i, ": ", name, " / ", score, " / ", grade); }
+    }
+
+    let average: Real = 0.0;
+    if book.count > 0 { average = book.total * 1.0 / book.count; }
+
+    fx {
+        println("distinction = ", book.distinction);
+        println("merit = ", book.merit);
+        println("pass = ", book.passed);
+        println("fail = ", book.failed);
+        println("average = ", average:0:2);
+    }
+
+    toon_close(doc);
+    ret;
+}

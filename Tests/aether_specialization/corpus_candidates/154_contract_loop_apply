@@ -1,0 +1,24 @@
+// 154_contract_loop_apply
+@pre value >= 0
+@post result <= 100
+fn cap(value: Int) -> Int {
+    if value > 100 {
+        ret 100;
+    }
+    ret value;
+}
+fn main() -> Void {
+    let inputs: Int[] = [40, 120, 90];
+    let total: Int = 0;
+    loop i in 0..length(inputs) {
+        let c: Int = cap(inputs[i]);
+        total = total + c;
+        fx {
+            println("capped ", i, " = ", c);
+        }
+    }
+    fx {
+        println("total = ", total);
+    }
+    ret;
+}

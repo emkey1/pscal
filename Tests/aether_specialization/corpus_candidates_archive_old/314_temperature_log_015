@@ -1,0 +1,48 @@
+// 314_temperature_log_015
+// Concepts: Real[] readings, clamp(x,lo,hi) builtin into a valid range, per-reading clamp flag helper, running min/max/sum over clamped values, real average, summary
+// expect: reading 0: 15.60
+// expect: reading 1: 25.00
+// expect: reading 2: 40.00 (clamped)
+// expect: reading 3: 5.00 (clamped)
+// expect: reading 4: 23.20
+// expect: reading 5: 36.50
+// expect: reading 6: 11.30
+// expect: reading 7: 27.90
+// expect: reading 8: 20.40
+// expect: min: 5.00
+// expect: max: 40.00
+// expect: avg: 22.77
+// expect: clamped readings: 2
+
+fn clampTag(raw: Real, clamped: Real) -> Text {
+    if clamped != raw { ret " (clamped)"; }
+    ret "";
+}
+
+fn main() -> Void {
+    let raw: Real[] = [15.6, 25.0, 46.0, 4.3, 23.2, 36.5, 11.3, 27.9, 20.4];
+    let lo: Real = 5.0;
+    let hi: Real = 40.0;
+    let n: Int = length(raw);
+    let sum: Real = 0.0;
+    let adjusted: Int = 0;
+    let cmin: Real = clamp(raw[0], lo, hi);
+    let cmax: Real = clamp(raw[0], lo, hi);
+    loop i in 0..n {
+        let c: Real = clamp(raw[i], lo, hi);
+        sum = sum + c;
+        if c < cmin { cmin = c; }
+        if c > cmax { cmax = c; }
+        let tag: Text = clampTag(raw[i], c);
+        if c != raw[i] { adjusted = adjusted + 1; }
+        fx { println("reading ", i, ": ", c:0:2, tag); }
+    }
+    let avg: Real = sum / n;
+    fx {
+        println("min: ", cmin:0:2);
+        println("max: ", cmax:0:2);
+        println("avg: ", avg:0:2);
+        println("clamped readings: ", adjusted);
+    }
+    ret;
+}

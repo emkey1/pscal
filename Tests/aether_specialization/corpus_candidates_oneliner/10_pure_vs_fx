@@ -1,0 +1,24 @@
+// 10_pure_vs_fx
+// Concepts: compute pure values outside fx, perform effects inside fx
+// expect: 31C -> hot
+// expect: 20C -> mild
+// expect: 5C -> cold
+
+@pure
+fn tempLabel(celsius: Int) -> Text {
+    if celsius >= 30 { ret "hot"; }
+    if celsius >= 15 { ret "mild"; }
+    ret "cold";
+}
+
+fn main() -> Void {
+    let a: Text = tempLabel(31);
+    let b: Text = tempLabel(20);
+    let c: Text = tempLabel(5);
+    fx {
+        println("31C -> ", a);
+        println("20C -> ", b);
+        println("5C -> ", c);
+    }
+    ret;
+}

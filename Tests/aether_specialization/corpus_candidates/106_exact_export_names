@@ -1,0 +1,22 @@
+// 106_exact_export_names
+// Concepts: verified import, exact export-name usage, no guessed wrappers
+// expect: raw=120
+// expect: score=100
+// expect: status=ready
+// expect: default=50
+
+use "107_exact_export_names_module";
+
+fn main() -> Void {
+    let raw: Int = 120;
+    let score: Int = clampSupport(raw);
+    let status: Text = classifySupport(score);
+
+    fx {
+        println("raw=", raw);
+        println("score=", score);
+        println("status=", status);
+        println("default=", DefaultScore);
+    }
+    ret;
+}

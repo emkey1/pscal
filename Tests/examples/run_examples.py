@@ -91,11 +91,22 @@ def build_command(entry, script_path):
     return binary, cmd
 
 
+def resolve_example_path(raw_path: str) -> Path:
+    # Example programs moved from Examples/<lang>/... into
+    # components/<lang>/examples/... during the repo split (522db2d95).
+    parts = Path(raw_path).parts
+    if parts and parts[0] == "Examples" and len(parts) > 1:
+        language = parts[1]
+        rest = parts[2:]
+        return REPO_ROOT.joinpath("components", language, "examples", *rest).resolve()
+    return (REPO_ROOT / raw_path).resolve()
+
+
 def run_entry(entry, *, timeout: float, startup_only: bool):
     stdin_data = entry.get("stdin", "")
     input_delay = float(entry.get("input_delay", 0.0))
     env_overrides = entry.get("env", {})
-    script_path = (REPO_ROOT / entry["path"]).resolve()
+    script_path = resolve_example_path(entry["path"])
     workdir = script_path.parent
     env = os.environ.copy()
     env.setdefault("TERM", "xterm-256color")

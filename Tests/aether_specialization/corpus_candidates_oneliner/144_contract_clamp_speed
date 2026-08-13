@@ -1,0 +1,11 @@
+// 144_contract_clamp_speed
+@pre limit >= 0
+@post result <= 120
+fn clampSpeed(limit: Int) -> Int {
+    if limit > 120 { ret 120; }
+    ret limit;
+}
+fn main() -> Void {
+    fx { println("130 -> ", clampSpeed(130)); println("65 -> ", clampSpeed(65)); }
+    ret;
+}

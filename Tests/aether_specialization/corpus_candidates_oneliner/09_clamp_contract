@@ -1,0 +1,18 @@
+// 09_clamp_contract
+// Concepts: @pre and @post directly above the function, @post uses result
+// expect: clamp(150) = 100
+// expect: clamp(42) = 42
+
+@pre score >= 0
+@post result <= 100
+fn clamp(score: Int) -> Int {
+    if score > 100 { ret 100; }
+    ret score;
+}
+
+fn main() -> Void {
+    let high: Int = clamp(150);
+    let mid: Int = clamp(42);
+    fx { println("clamp(150) = ", high); println("clamp(42) = ", mid); }
+    ret;
+}

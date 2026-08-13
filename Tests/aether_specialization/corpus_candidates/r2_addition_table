@@ -1,0 +1,11 @@
+// nested loops over 1..4 produce values 1,2,3 (half-open, no ..=)
+fn main() -> Void {
+    loop a in 1..4 {
+        loop b in 1..4 {
+            fx {
+                println(a, " + ", b, " = ", a + b);
+            }
+        }
+    }
+    ret;
+}

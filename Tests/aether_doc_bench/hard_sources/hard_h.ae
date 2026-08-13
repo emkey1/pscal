@@ -1,0 +1,45 @@
+// hard_h_word_lengths
+// Classify each word in a TOON array by length (short <4, medium 4-7, long >7),
+// summing total characters and tracking the single longest word (argmax over
+// string_len, returning the word itself, not just its length).
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("words_hard_h.json");
+    let root: ToonNode = toon_root(doc);
+    let words: ToonNode = toon_key(root, "words");
+
+    let shortN: Int = 0;
+    let medN: Int = 0;
+    let longN: Int = 0;
+    let totalChars: Int = 0;
+    let maxLen: Int = -1;
+    let longest: Text = "none";
+
+    loop i in 0..toon_len(words) {
+        let wn: ToonNode = toon_at(words, i);
+        let w: Text = toon_get_text_or(wn, "w", "");
+        let wlen: Int = string_len(w);
+        totalChars = totalChars + wlen;
+        let kind: Text = "medium";
+        if wlen < 4 { kind = "short"; }
+        if wlen > 7 { kind = "long"; }
+        if kind == "short" { shortN = shortN + 1; }
+        if kind == "medium" { medN = medN + 1; }
+        if kind == "long" { longN = longN + 1; }
+        if wlen > maxLen { maxLen = wlen; longest = w; }
+        fx { println("word ", i, ": ", w, " (", wlen, ") ", kind); }
+    }
+
+    fx {
+        println("short = ", shortN);
+        println("medium = ", medN);
+        println("long = ", longN);
+        println("total chars = ", totalChars);
+        println("longest = ", longest, " (", maxLen, ")");
+    }
+
+    toon_close(doc);
+    ret;
+}

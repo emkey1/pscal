@@ -1,4 +1,0 @@
-myVar after ++: 11
-myVar after -- twice: 9
-myVar after + step: 14
-myArray[1] after ++: 201

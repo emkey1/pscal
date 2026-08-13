@@ -1,0 +1,17 @@
+// 147_contract_scale_score
+@pre raw >= 0
+@post result <= 100
+fn scaleScore(raw: Int) -> Int {
+    let scaled: Int = raw * 2;
+    if scaled > 100 {
+        ret 100;
+    }
+    ret scaled;
+}
+fn main() -> Void {
+    fx {
+        println("30 => ", scaleScore(30));
+        println("70 => ", scaleScore(70));
+    }
+    ret;
+}

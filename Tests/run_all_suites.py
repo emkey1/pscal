@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
 BASE_SUITE_KEYS = ["core", "library", "scope"]
-OPTIONAL_SUITE_KEYS = ["ios", "smallclue-git", "smallclue-git-mutation", "smallclue-git-path-truncate", "smallclue-git-remote"]
+OPTIONAL_SUITE_KEYS = ["ios", "smallclue-git", "smallclue-git-mutation", "smallclue-git-path-truncate", "smallclue-git-remote", "vm-verify-corpus", "vm-fx-policy", "vm-thread-stress", "vm-ext-plugin"]
 SUITE_KEYS = BASE_SUITE_KEYS + OPTIONAL_SUITE_KEYS
 
 
@@ -151,6 +151,31 @@ def main(argv: Sequence[str]) -> int:
         default="",
         help="Extra arguments (shlex-split) forwarded to Tests/smallclue/run_git_remote_parity.py.",
     )
+    parser.add_argument(
+        "--include-vm-verify-corpus",
+        action="store_true",
+        help="Run the Phase 1e bytecode-verifier malformed-.bc corpus (opt-in, off by default; "
+        "needs build/bin/pascal and build/bin/pscalvm already built).",
+    )
+    parser.add_argument(
+        "--include-vm-fx-policy",
+        action="store_true",
+        help="Run the Phase 6 --deny/--fx-record/--fx-replay regression suite (opt-in, off by "
+        "default; needs build/bin/pascal already built).",
+    )
+    parser.add_argument(
+        "--include-vm-thread-stress",
+        action="store_true",
+        help="Run the Phase 5a/5b task/channel concurrency regression suite (opt-in, off by "
+        "default; needs build/bin/pascal and build/bin/clike already built).",
+    )
+    parser.add_argument(
+        "--include-vm-ext-plugin",
+        action="store_true",
+        help="Run the Phase 7 dlopen plugin ABI regression suite (opt-in, off by default; "
+        "needs build/bin/pascal and build/sqlite_ext_plugin.{dylib,so} already built; skips "
+        "cleanly if the sqlite plugin wasn't built).",
+    )
     args = parser.parse_args(argv)
 
     skip = set(args.skip or [])
@@ -165,6 +190,14 @@ def main(argv: Sequence[str]) -> int:
         selected.append("smallclue-git-path-truncate")
     if args.include_smallclue_git_remote and "smallclue-git-remote" not in skip:
         selected.append("smallclue-git-remote")
+    if args.include_vm_verify_corpus and "vm-verify-corpus" not in skip:
+        selected.append("vm-verify-corpus")
+    if args.include_vm_fx_policy and "vm-fx-policy" not in skip:
+        selected.append("vm-fx-policy")
+    if args.include_vm_thread_stress and "vm-thread-stress" not in skip:
+        selected.append("vm-thread-stress")
+    if args.include_vm_ext_plugin and "vm-ext-plugin" not in skip:
+        selected.append("vm-ext-plugin")
 
     if not selected:
         print("No suites selected. Use --skip judiciously or omit it altogether.")
@@ -222,6 +255,22 @@ def main(argv: Sequence[str]) -> int:
             repo_root,
             False,
         )
+
+    if "vm-verify-corpus" in selected:
+        vm_verify_script = tests_root / "vm_verify_corpus" / "run.sh"
+        commands["vm-verify-corpus"] = (["bash", str(vm_verify_script)], repo_root, False)
+
+    if "vm-fx-policy" in selected:
+        vm_fx_script = tests_root / "vm_fx_policy" / "run.sh"
+        commands["vm-fx-policy"] = (["bash", str(vm_fx_script)], repo_root, False)
+
+    if "vm-thread-stress" in selected:
+        vm_thread_stress_script = tests_root / "vm_thread_stress" / "run.sh"
+        commands["vm-thread-stress"] = (["bash", str(vm_thread_stress_script)], repo_root, False)
+
+    if "vm-ext-plugin" in selected:
+        vm_ext_plugin_script = tests_root / "vm_ext_plugin" / "run.sh"
+        commands["vm-ext-plugin"] = (["bash", str(vm_ext_plugin_script)], repo_root, False)
 
     summary: List[Tuple[str, int]] = []
     for key in selected:

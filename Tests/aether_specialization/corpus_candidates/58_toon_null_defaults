@@ -1,0 +1,49 @@
+// 58_toon_null_defaults
+// Concepts: null-aware TOON extraction, explicit null check plus fallback handling
+// expect: Original Price: 100
+// expect: Discount Applied: 0
+// expect: Final Price: 100
+// expect: Notes: No notes provided
+
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("TOON unavailable");
+        }
+        ret;
+    }
+
+    let json: Text = "{\"price\":100,\"discount\":null,\"notes\":null}";
+    let doc: ToonDoc = toon_parse(json);
+    let root: ToonNode = toon_root(doc);
+
+    let price: Int = toon_get_int(root, "price");
+    let discount: Int = 0;
+    if toon_has_key(root, "discount") {
+        let discountNode: ToonNode = toon_key(root, "discount");
+        if !toon_is_null(discountNode) {
+            discount = toon_get_int(root, "discount");
+        }
+        toon_free(discountNode);
+    }
+
+    let notes: Text = "No notes provided";
+    if toon_has_key(root, "notes") {
+        let notesNode: ToonNode = toon_key(root, "notes");
+        if !toon_is_null(notesNode) {
+            notes = toon_get_text(root, "notes");
+        }
+        toon_free(notesNode);
+    }
+    let finalPrice: Int = price - discount;
+
+    fx {
+        println("Original Price: ", price);
+        println("Discount Applied: ", discount);
+        println("Final Price: ", finalPrice);
+        println("Notes: ", notes);
+    }
+
+    toon_close(doc);
+    ret;
+}

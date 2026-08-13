@@ -1,0 +1,24 @@
+// e2_else_if  (wishlist 4)
+// expect: 95 -> A
+// expect: 85 -> B
+// expect: 70 -> C
+
+@pure
+fn grade(score: Int) -> Text {
+    if score >= 90 {
+        ret "A";
+    } else if score >= 80 {
+        ret "B";
+    } else {
+        ret "C";
+    }
+}
+
+fn main() -> Void {
+    fx {
+        println("95 -> ", grade(95));
+        println("85 -> ", grade(85));
+        println("70 -> ", grade(70));
+    }
+    ret;
+}

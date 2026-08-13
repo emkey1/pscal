@@ -1,0 +1,21 @@
+// t1_clamp_tuple  (wishlist 2)
+// expect: clamp 150 -> 100 changed=true
+// expect: clamp 42 -> 42 changed=false
+
+@post result.0 <= 100
+fn clamp(value: Int) -> (Int, Bool) {
+    if value > 100 {
+        ret (100, true);
+    }
+    ret (value, false);
+}
+
+fn main() -> Void {
+    let (v1, c1) = clamp(150);
+    let (v2, c2) = clamp(42);
+    fx {
+        println("clamp 150 -> ", v1, " changed=", c1);
+        println("clamp 42 -> ", v2, " changed=", c2);
+    }
+    ret;
+}

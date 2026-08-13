@@ -1,0 +1,13 @@
+// 149_pure_to_fahrenheit
+@pure
+fn toF(celsius: Int) -> Int {
+    ret celsius * 9 / 5 + 32;
+}
+fn main() -> Void {
+    fx {
+        println("0C=", toF(0));
+        println("100C=", toF(100));
+        println("37C=", toF(37));
+    }
+    ret;
+}

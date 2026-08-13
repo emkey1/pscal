@@ -1,0 +1,14 @@
+// 07_range_sum
+// Concepts: loop i in 0..n (half-open), accumulator pattern
+// expect: sum of 0..5 = 10
+
+fn main() -> Void {
+    let sum: Int = 0;
+    loop i in 0..5 {
+        sum = sum + i;
+    }
+    fx {
+        println("sum of 0..5 = ", sum);
+    }
+    ret;
+}

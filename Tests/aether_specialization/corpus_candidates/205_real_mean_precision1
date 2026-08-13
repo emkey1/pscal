@@ -1,0 +1,8 @@
+// real_mean_precision1
+// expect: average = 42.3
+fn main() -> Void {
+    let sum: Int = 33 + 44 + 50;
+    let average: Real = sum / 3;
+    fx { println("average = ", average:0:1); }
+    ret;
+}

@@ -1,0 +1,8 @@
+// 01_hello
+// Concepts: minimal program, fx block, ret in Void main
+// expect: Hello from Aether
+
+fn main() -> Void {
+    fx { println("Hello from Aether"); }
+    ret;
+}

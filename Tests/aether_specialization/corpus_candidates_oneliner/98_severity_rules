@@ -1,0 +1,10 @@
+mod SeverityRules {
+    export const WarmThreshold = 80;
+
+    @pure
+    export fn classifySeverity(score: Int) -> Text {
+        if score >= 90 { ret "hot"; }
+        if score >= WarmThreshold { ret "warm"; }
+        ret "cold";
+    }
+}

@@ -1,0 +1,9 @@
+@pure
+fn doubled(n: Int) -> Int {
+    ret n * 2;
+}
+
+fn main() -> Void {
+    fx { println("doubled=", doubled(21)); }
+    ret;
+}

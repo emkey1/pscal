@@ -1,0 +1,18 @@
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("toon unavailable"); }
+        ret;
+    }
+    let doc: ToonDoc = toon_parse("{\"items\":[{\"id\":1,\"ok\":true},{\"id\":2,\"ok\":false}]}");
+    let root: ToonNode = toon_root(doc);
+    let items: ToonNode = toon_key(root, "items");
+    loop i in 0..toon_len(items) {
+        let it: ToonNode = toon_at(items, i);
+        let id: Int = toon_get_int_or(it, "id", 0);
+        let ok: Bool = toon_get_bool_or(it, "ok", false);
+        let okLabel: Text = if ok { "yes" } else { "no" };
+        fx { println("id ", id, " ok=", okLabel); }
+    }
+    toon_close(doc);
+    ret;
+}

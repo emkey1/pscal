@@ -1,0 +1,12 @@
+// 03_const_let
+// Concepts: const declaration, plain let mutability (never `let mut`)
+// expect: count = 3 of 3
+
+const Limit: Int = 3;
+
+fn main() -> Void {
+    let count: Int = 0;
+    loop count < Limit { count = count + 1; }
+    fx { println("count = ", count, " of ", Limit); }
+    ret;
+}

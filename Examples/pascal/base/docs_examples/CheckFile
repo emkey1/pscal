@@ -1,9 +1,0 @@
-program CheckFile;
-
-uses SysUtils;
-begin
-  if FileExists('data.txt') then
-    writeln(UpperCase('file found'))
-  else
-    writeln(UpperCase('file not found'));
-end.

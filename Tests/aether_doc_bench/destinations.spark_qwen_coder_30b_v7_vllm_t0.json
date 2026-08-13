@@ -1,0 +1,17 @@
+{
+  "destinations": [
+    {
+      "id": "spark-qwen-coder-30b-v7-vllm-t0",
+      "type": "openai_chat_completions",
+      "base_url": "http://100.124.15.16:8018/v1",
+      "api_key": "",
+      "model": "aether-qwen-coder-30b-v7",
+      "temperature": 0.0,
+      "max_output_tokens": 3000,
+      "request_timeout_seconds": 900,
+      "request_max_retries": 1,
+      "retry_backoff_seconds": 5,
+      "cooldown_seconds": 0
+    }
+  ]
+}

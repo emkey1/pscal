@@ -6,41 +6,45 @@ set(PASCAL_BIN ${CMAKE_BINARY_DIR}/bin/pascal)
 # Path to the Rea front end built by main project
 set(REA_BIN ${CMAKE_BINARY_DIR}/bin/rea)
 
+# The example programs moved into the component submodules during the repo split.
+set(PASCAL_EX ${CMAKE_SOURCE_DIR}/components/pascal/examples)
+set(REA_EX ${CMAKE_SOURCE_DIR}/components/rea/examples)
+
 # Basic example target
 add_custom_target(run_basic_examples
     COMMAND ${CMAKE_COMMAND} -E echo "Running basic examples..."
-    COMMAND ${PASCAL_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/pascal/base/AreaCalculation
-    COMMAND ${PASCAL_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/pascal/base/DosExample
+    COMMAND ${PASCAL_BIN} ${PASCAL_EX}/base/AreaCalculation
+    COMMAND ${PASCAL_BIN} ${PASCAL_EX}/base/DosExample
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 # Procedure pointers + threads demo
 add_custom_target(run_threads_procptr_demo
     COMMAND ${CMAKE_COMMAND} -E echo "Running ThreadsProcPtrDemo..."
-    COMMAND ${PASCAL_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/pascal/base/ThreadsProcPtrDemo
+    COMMAND ${PASCAL_BIN} ${PASCAL_EX}/base/ThreadsProcPtrDemo
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 # HTTP fetch demo (sync)
 add_custom_target(run_http_fetch_demo
     COMMAND ${CMAKE_COMMAND} -E echo "Running HttpFetchDemo..."
-    COMMAND ${PASCAL_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/pascal/base/HttpFetchDemo
+    COMMAND ${PASCAL_BIN} ${PASCAL_EX}/base/HttpFetchDemo
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 # Rea example target
 add_custom_target(run_rea_examples
     COMMAND ${CMAKE_COMMAND} -E echo "Running Rea examples..."
-    COMMAND ${REA_BIN} --dump-bytecode-only ${CMAKE_CURRENT_SOURCE_DIR}/rea/base/hello
-    COMMAND ${REA_BIN} --dump-bytecode-only ${CMAKE_CURRENT_SOURCE_DIR}/rea/base/showcase
-    COMMAND ${REA_BIN} --dump-bytecode-only ${CMAKE_CURRENT_SOURCE_DIR}/rea/base/method_demo
+    COMMAND ${REA_BIN} --dump-bytecode-only ${REA_EX}/base/hello
+    COMMAND ${REA_BIN} --dump-bytecode-only ${REA_EX}/base/showcase
+    COMMAND ${REA_BIN} --dump-bytecode-only ${REA_EX}/base/method_demo
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 # Executing CRT demo (requires unit linking via #import)
 add_custom_target(run_rea_crt_demo
     COMMAND ${CMAKE_COMMAND} -E echo "Running Rea CRT demo (executing)..."
-    COMMAND ${REA_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/rea/base/crt_demo
+    COMMAND ${REA_BIN} ${REA_EX}/base/crt_demo
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
@@ -48,9 +52,9 @@ add_custom_target(run_rea_crt_demo
 if(SDL)
     add_custom_target(run_sdl_examples
         COMMAND ${CMAKE_COMMAND} -E echo "Running SDL examples..."
-        COMMAND ${PASCAL_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/pascal/sdl/RuntimeCameraDemo
-        COMMAND ${PASCAL_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/pascal/sdl/SoundSimplePong
-        COMMAND ${REA_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/rea/sdl/multibouncingballs
+        COMMAND ${PASCAL_BIN} ${PASCAL_EX}/sdl/RuntimeCameraDemo
+        COMMAND ${PASCAL_BIN} ${PASCAL_EX}/sdl/SoundSimplePong
+        COMMAND ${REA_BIN} ${REA_EX}/sdl/multibouncingballs
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 else()

@@ -1,3 +1,0 @@
-PASS: Nested routines can access outer vars
-currentline=2
-outtext=changed

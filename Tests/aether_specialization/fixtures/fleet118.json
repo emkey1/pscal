@@ -1,0 +1,1 @@
+{"vehicles":[{"id":"V1","mileage":42000,"lastServiceKm":25000},{"id":"V2","mileage":35000,"lastServiceKm":22000},{"id":"V3","mileage":60000,"lastServiceKm":43000},{"id":"V4","mileage":12000,"lastServiceKm":11000},{"broken":true}]}

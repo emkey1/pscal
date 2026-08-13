@@ -1,0 +1,71 @@
+// 309_dp1d_005
+// Concepts: 1-D dynamic programming — Kadane's running max-subarray, climbing-stairs step counting (two-back recurrence), house-robber take/skip choice; rolling state, max() via if
+// expect: array: 5 -7 -1 6 2 -8 2 7 -6 1
+// expect: max_subarray = 9
+// expect: stairs(5) ways = 8
+// expect: houses: 16 5 3 18 11 21
+// expect: rob_max = 55
+
+fn maxSubarray(xs: Int[]) -> Int {
+    let best: Int = xs[0];
+    let cur: Int = xs[0];
+    let n: Int = length(xs);
+    loop i in 1..n {
+        if cur + xs[i] > xs[i] { cur = cur + xs[i]; }
+        if cur + xs[i] <= xs[i] { cur = xs[i]; }
+        if cur > best { best = cur; }
+    }
+    ret best;
+}
+
+fn climbStairs(n: Int) -> Int {
+    let a: Int = 1;
+    let b: Int = 1;
+    loop i in 2..n + 1 {
+        let next: Int = a + b;
+        a = b;
+        b = next;
+    }
+    ret b;
+}
+
+fn robHouses(xs: Int[]) -> Int {
+    let prev2: Int = 0;
+    let prev1: Int = 0;
+    let n: Int = length(xs);
+    loop i in 0..n {
+        let take: Int = prev2 + xs[i];
+        let best: Int = prev1;
+        if take > best { best = take; }
+        prev2 = prev1;
+        prev1 = best;
+    }
+    ret prev1;
+}
+
+fn joinInts(xs: Int[]) -> Text {
+    let out: Text = "";
+    let n: Int = length(xs);
+    loop i in 0..n {
+        if i > 0 { out = out + " "; }
+        out = out + int_to_text(xs[i]);
+    }
+    ret out;
+}
+
+fn main() -> Void {
+    let arr: Int[] = [5, -7, -1, 6, 2, -8, 2, 7, -6, 1];
+    let houses: Int[] = [16, 5, 3, 18, 11, 21];
+    let stairs: Int = 5;
+    let best: Int = maxSubarray(arr);
+    let ways: Int = climbStairs(stairs);
+    let rob: Int = robHouses(houses);
+    fx {
+        println("array: ", joinInts(arr));
+        println("max_subarray = ", best);
+        println("stairs(", stairs, ") ways = ", ways);
+        println("houses: ", joinInts(houses));
+        println("rob_max = ", rob);
+    }
+    ret;
+}

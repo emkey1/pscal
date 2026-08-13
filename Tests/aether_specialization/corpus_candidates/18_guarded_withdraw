@@ -1,0 +1,26 @@
+// 18_guarded_withdraw
+// Concepts: business-rule guards without else, @pre/@post contracts
+// expect: after withdraw 30: 70
+// expect: after withdraw 200: 70
+
+@pre amount >= 0
+@post result >= 0
+fn withdraw(balance: Int, amount: Int) -> Int {
+    if amount > balance {
+        ret balance;
+    }
+    ret balance - amount;
+}
+
+fn main() -> Void {
+    let balance: Int = 100;
+    balance = withdraw(balance, 30);
+    fx {
+        println("after withdraw 30: ", balance);
+    }
+    balance = withdraw(balance, 200);
+    fx {
+        println("after withdraw 200: ", balance);
+    }
+    ret;
+}

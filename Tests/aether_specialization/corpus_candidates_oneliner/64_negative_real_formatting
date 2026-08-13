@@ -1,0 +1,25 @@
+// 64_negative_real_formatting
+// Concepts: negative Real formatting, explicit precision, padded output
+// expect: Default: -0.500000
+// expect: Prec=3: -0.500
+// expect: Right-align:      -0.50
+// expect: Default: -2.345600
+// expect: Prec=3: -2.346
+// expect: Right-align:      -2.35
+// expect: Default: 10.123450
+// expect: Prec=3: 10.123
+// expect: Right-align:      10.12
+
+fn main() -> Void {
+    let values: Real[] = [-0.5, -2.3456, 10.12345];
+
+    loop i in 0..length(values) {
+        let value: Real = values[i];
+        fx {
+            println("Default: ", value);
+            println("Prec=3: ", value:0:3);
+            println("Right-align: ", value:10:2);
+        }
+    }
+    ret;
+}

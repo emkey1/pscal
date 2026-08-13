@@ -1,0 +1,20 @@
+// 14_factorial_loop
+// Concepts: iterative computation inside a pure function
+// expect: 5! = 120
+
+@pre n >= 0
+fn factorial(n: Int) -> Int {
+    let acc: Int = 1;
+    loop i in 0..n {
+        acc = acc * (i + 1);
+    }
+    ret acc;
+}
+
+fn main() -> Void {
+    let result: Int = factorial(5);
+    fx {
+        println("5! = ", result);
+    }
+    ret;
+}

@@ -1,0 +1,9 @@
+mod ServiceConfig {
+    export const MaxRetries: Int = 3;
+    export const ServiceUrl: Text = "https://api.example.com";
+
+    @pure
+    export fn isHealthy(status: Int) -> Bool {
+        ret status == 200;
+    }
+}

@@ -1,0 +1,42 @@
+// hard_f_sensor_streak
+// Adjacent-record analysis over a TOON array of readings: print each step's
+// delta to the previous reading, and report the largest single-step increase
+// and the length of the longest non-decreasing run.
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("readings_hard_f.json");
+    let root: ToonNode = toon_root(doc);
+    let readings: ToonNode = toon_key(root, "readings");
+    let n: Int = toon_len(readings);
+
+    let prev: Int = 0;
+    let havePrev: Bool = false;
+    let maxJump: Int = 0;
+    let run: Int = 1;
+    let bestRun: Int = 1;
+
+    loop i in 0..n {
+        let r: ToonNode = toon_at(readings, i);
+        let v: Int = toon_get_int_or(r, "value", 0);
+        if havePrev {
+            let jump: Int = v - prev;
+            if jump > maxJump { maxJump = jump; }
+            if v >= prev { run = run + 1; }
+            if v < prev { run = 1; }
+            if run > bestRun { bestRun = run; }
+            fx { println("step ", i, ": ", prev, " -> ", v, " (", jump, ")"); }
+        }
+        prev = v;
+        havePrev = true;
+    }
+
+    fx {
+        println("maxJump = ", maxJump);
+        println("longest non-decreasing run = ", bestRun);
+    }
+
+    toon_close(doc);
+    ret;
+}

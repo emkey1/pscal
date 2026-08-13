@@ -1,0 +1,25 @@
+// 44_tuple_bounds_contracts
+// Concepts: pure helper, stacked contracts, narrow tuple return, direct tuple destructuring
+// expect: Clamped range: 50 to 100
+
+@pure
+@pre value >= 0
+@post result <= 100
+fn clamp(value: Int) -> Int {
+    if value > 100 { ret 100; }
+    ret value;
+}
+
+@pure
+fn getBounds(low: Int, high: Int) -> (Int, Int) {
+    ret (clamp(low), clamp(high));
+}
+
+fn main() -> Void {
+    let rawMin: Int = 50;
+    let rawMax: Int = 150;
+    let (safeMin, safeMax) = getBounds(rawMin, rawMax);
+
+    fx { println("Clamped range: ", safeMin, " to ", safeMax); }
+    ret;
+}

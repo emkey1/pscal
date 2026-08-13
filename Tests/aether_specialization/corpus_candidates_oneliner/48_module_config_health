@@ -1,0 +1,20 @@
+// 48_module_config_health
+// Concepts: verified module import, exported consts and functions, imported names used directly
+// expect: Service https://api.example.com is healthy.
+// expect: Max retries allowed: 3
+
+use "100_service_config";
+
+fn main() -> Void {
+    let status: Int = 200;
+
+    if isHealthy(status) {
+        fx {
+            println("Service ", ServiceUrl, " is healthy.");
+            println("Max retries allowed: ", MaxRetries);
+        }
+    } else {
+        fx { println("Service unhealthy. Retrying..."); }
+    }
+    ret;
+}

@@ -1,0 +1,30 @@
+// 29_toon_array_root
+// Concepts: JSON starting with '[' means root IS the array to iterate
+// expect: A: ready
+// expect: B: review
+// expect: C: blocked
+
+@pure
+fn classify(score: Int) -> Text {
+    if score >= 90 { ret "ready"; }
+    if score >= 70 { ret "review"; }
+    ret "blocked";
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse("[{\"name\":\"A\",\"score\":95},{\"name\":\"B\",\"score\":72},{\"name\":\"C\",\"score\":40}]");
+    let root: ToonNode = toon_root(doc);
+
+    loop i in 0..toon_len(root) {
+        let row: ToonNode = toon_at(root, i);
+        let name: Text = toon_get_text(row, "name");
+        let score: Int = toon_get_int_or(row, "score", 0);
+        let status: Text = classify(score);
+        fx { println(name, ": ", status); }
+    }
+
+    toon_close(doc);
+    ret;
+}

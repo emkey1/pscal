@@ -1,0 +1,9 @@
+{
+  "metadata": "batch_99",
+  "transactions": [
+    { "id": "T1", "amount": 500 },
+    { "id": "T2", "amount": 99999 },
+    { "id": "T3", "amount": -100 },
+    { "note": "id and amount absent" }
+  ]
+}

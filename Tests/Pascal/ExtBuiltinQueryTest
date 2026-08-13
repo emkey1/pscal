@@ -1,8 +1,0 @@
-program ExtBuiltinQueryTest;
-begin
-  if HasExtBuiltin('system', 'GetPid') and
-     not HasExtBuiltin('system', 'NoSuchFunction') then
-    writeln('ok')
-  else
-    writeln('fail');
-end.

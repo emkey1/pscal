@@ -1,0 +1,15 @@
+// 146_contract_cap_discount
+@post result <= 50
+fn capDiscount(pct: Int) -> Int {
+    if pct > 50 {
+        ret 50;
+    }
+    ret pct;
+}
+fn main() -> Void {
+    fx {
+        println("80 => ", capDiscount(80));
+        println("35 => ", capDiscount(35));
+    }
+    ret;
+}

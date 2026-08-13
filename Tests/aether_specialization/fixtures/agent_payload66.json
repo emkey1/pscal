@@ -1,0 +1,9 @@
+{
+  "jobs": [
+    { "name": "Alpha", "score": 95 },
+    { "name": "Beta", "score": 78 },
+    { "name": "Gamma", "score": 62 },
+    { "name": "Delta", "score": 41 },
+    { "name": "Epsilon", "score": 120 }
+  ]
+}

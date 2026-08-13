@@ -1,6 +1,0 @@
-#!/usr/bin/env rea
-#import "crt";
-
-writeln("Hello from Rea before clear...");
-ClrScr();
-writeln("Screen cleared. This is after clear.");

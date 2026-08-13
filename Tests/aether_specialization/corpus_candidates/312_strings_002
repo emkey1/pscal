@@ -1,0 +1,74 @@
+// 312_strings_002
+// Concepts: Text processing with 1-based character indexing (s[1]..s[string_len(s)]) — reverse by prepend-scan, palindrome check via string equality, vowel counting by per-char test, single-character frequency tally
+// expect: word: civic
+// expect: reversed: civic
+// expect: is_palindrome = true
+// expect: vowel_count = 2
+// expect: freq('i') = 2
+
+fn reverseStr(s: Text) -> Text {
+    let out: Text = "";
+    let n: Int = string_len(s);
+    let i: Int = n;
+    loop i >= 1 {
+        out = out + s[i];
+        i = i - 1;
+    }
+    ret out;
+}
+
+fn isPalindrome(s: Text) -> Bool {
+    let n: Int = string_len(s);
+    let i: Int = 1;
+    let j: Int = n;
+    loop i < j {
+        if s[i] != s[j] { ret false; }
+        i = i + 1;
+        j = j - 1;
+    }
+    ret true;
+}
+
+fn isVowel(c: Text) -> Bool {
+    if c == "a" { ret true; }
+    if c == "e" { ret true; }
+    if c == "i" { ret true; }
+    if c == "o" { ret true; }
+    if c == "u" { ret true; }
+    ret false;
+}
+
+fn vowelCount(s: Text) -> Int {
+    let count: Int = 0;
+    let n: Int = string_len(s);
+    loop i in 1..n + 1 {
+        if isVowel(s[i]) { count = count + 1; }
+    }
+    ret count;
+}
+
+fn charFreq(s: Text, target: Text) -> Int {
+    let count: Int = 0;
+    let n: Int = string_len(s);
+    loop i in 1..n + 1 {
+        if s[i] == target { count = count + 1; }
+    }
+    ret count;
+}
+
+fn main() -> Void {
+    let word: Text = "civic";
+    let target: Text = "i";
+    let rev: Text = reverseStr(word);
+    let pal: Bool = isPalindrome(word);
+    let vowels: Int = vowelCount(word);
+    let freq: Int = charFreq(word, target);
+    fx {
+        println("word: ", word);
+        println("reversed: ", rev);
+        println("is_palindrome = ", pal);
+        println("vowel_count = ", vowels);
+        println("freq('", target, "') = ", freq);
+    }
+    ret;
+}

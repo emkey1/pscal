@@ -1,0 +1,5 @@
+// values 1..5 inclusive are written as 1..6
+fn main() -> Void {
+    loop n in 1..6 { fx { println("n=", n); } }
+    ret;
+}

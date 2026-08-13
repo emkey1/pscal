@@ -1,0 +1,17 @@
+// e1_if_else  (wishlist 4)
+// expect: 7 -> non-negative
+// expect: -3 -> negative
+
+@pure
+fn sign(n: Int) -> Text {
+    if n >= 0 {
+        ret "non-negative";
+    } else {
+        ret "negative";
+    }
+}
+
+fn main() -> Void {
+    fx { println("7 -> ", sign(7)); println("-3 -> ", sign(-3)); }
+    ret;
+}

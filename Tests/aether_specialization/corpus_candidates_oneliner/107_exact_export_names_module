@@ -1,0 +1,17 @@
+mod ExactExportNamesModule {
+    export const DefaultScore: Int = 50;
+
+    @pure
+    export fn clampSupport(score: Int) -> Int {
+        if score < 0 { ret 0; }
+        if score > 100 { ret 100; }
+        ret score;
+    }
+
+    @pure
+    export fn classifySupport(score: Int) -> Text {
+        if score >= 90 { ret "ready"; }
+        if score >= 70 { ret "review"; }
+        ret "blocked";
+    }
+}

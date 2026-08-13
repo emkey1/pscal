@@ -1,0 +1,15 @@
+// a3_text_array  (wishlist 1)
+// expect: 0: Ada
+// expect: 1: Bob
+// expect: 2: Cara
+
+fn main() -> Void {
+    let names: Text[] = ["Ada", "Bob", "Cara"];
+    let n: Int = length(names);
+    loop i in 0..n {
+        fx {
+            println(i, ": ", names[i]);
+        }
+    }
+    ret;
+}

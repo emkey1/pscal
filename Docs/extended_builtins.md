@@ -117,10 +117,10 @@ expose the same helpers with lowercase identifiers (for example,
 `extbuiltincategorycount()`).
 
 Complete runnable examples that exercise these helpers live under
-`Examples/pascal/base/DumpExtBuiltins`,
-`Examples/clike/base/DumpExtBuiltins`,
-`Examples/rea/base/dump_ext_builtins`, and
-`Examples/exsh/dump_ext_builtins`.
+`components/pascal/examples/base/DumpExtBuiltins`,
+`components/clike/examples/base/DumpExtBuiltins`,
+`components/rea/examples/base/dump_ext_builtins`, and
+`components/exsh/examples/exsh/dump_ext_builtins`.
 
 Example Pascal snippet that lists the available routines when the category is
 present:
@@ -342,7 +342,7 @@ end.
 Running the program prints:
 
 ```sh
-$ build/bin/pascal Examples/pascal/base/ShowExtendedBuiltins
+$ build/bin/pascal components/pascal/examples/base/ShowExtendedBuiltins
 PID = 12345
 After Swap: a=2 b=1
 ```
@@ -364,7 +364,7 @@ int main() {
 ```
 
 ```
-$ build/bin/clike Examples/clike/base/docs_examples/ShowExtendedBuiltins
+$ build/bin/clike components/clike/examples/base/docs_examples/ShowExtendedBuiltins
 PID = 98106
 After Swap: a=2 b=1
 ```

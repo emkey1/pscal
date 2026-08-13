@@ -1,0 +1,44 @@
+// 52_loop_break_control
+// Concepts: loop { }, break, effectful progress reporting
+// expect: Starting process...
+// expect: Attempt # 1
+// expect: Attempt # 2
+// expect: Attempt # 3
+// expect: Critical check passed. Stopping early.
+// expect: Process finished after 3 iterations.
+
+fn main() -> Void {
+    let counter: Int = 0;
+    let maxAttempts: Int = 5;
+
+    fx {
+        println("Starting process...");
+    }
+
+    loop {
+        counter = counter + 1;
+
+        fx {
+            println("Attempt #", counter);
+        }
+
+        if counter >= maxAttempts {
+            fx {
+                println("Max attempts reached. Stopping.");
+            }
+            break;
+        }
+
+        if counter == 3 {
+            fx {
+                println("Critical check passed. Stopping early.");
+            }
+            break;
+        }
+    }
+
+    fx {
+        println("Process finished after ", counter, " iterations.");
+    }
+    ret;
+}

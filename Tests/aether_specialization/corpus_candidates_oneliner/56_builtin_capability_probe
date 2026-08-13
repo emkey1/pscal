@@ -1,0 +1,23 @@
+// 56_builtin_capability_probe
+// Concepts: has_builtin probing for optional runtime capabilities
+// expect: AI capabilities not available in this runtime.
+// expect: Task spawning is disabled.
+
+fn main() -> Void {
+    if has_builtin("ai", "chat") {
+        fx {
+            println("AI capabilities detected. Starting chat...");
+            println("AI session initialized.");
+        }
+    } else {
+        fx { println("AI capabilities not available in this runtime."); }
+    }
+
+    if has_builtin("task", "spawn") {
+        fx { println("Task spawning is supported."); }
+    } else {
+        fx { println("Task spawning is disabled."); }
+    }
+
+    ret;
+}

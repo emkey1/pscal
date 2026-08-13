@@ -1,0 +1,28 @@
+// 04_classify
+// Concepts: @pure helper, canonical multi-branch via sequential if + ret
+// expect: 95 -> ready
+// expect: 72 -> review
+// expect: 40 -> blocked
+
+@pure
+fn classify(score: Int) -> Text {
+    if score >= 90 {
+        ret "ready";
+    }
+    if score >= 70 {
+        ret "review";
+    }
+    ret "blocked";
+}
+
+fn main() -> Void {
+    let a: Text = classify(95);
+    let b: Text = classify(72);
+    let c: Text = classify(40);
+    fx {
+        println("95 -> ", a);
+        println("72 -> ", b);
+        println("40 -> ", c);
+    }
+    ret;
+}

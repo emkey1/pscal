@@ -11,6 +11,7 @@
 - Library conformance lives under `Tests/libs/`. Each front end has its own harness; the Rea suite (`Tests/libs/rea/run_tests.py`) spins up an HTTP helper, inspects optional extended built-ins (yyjson, etc.), and exports `REA_TEST_EXT_BUILTINS`/`REA_TEST_HAS_YYJSON` so JSON checks are skipped when support is absent.
 - Scope validation suites live in `Tests/scope_verify/` (`clike`, `pascal`, `rea`). The harnesses are manifest-driven and support `--only`, `--list`, `--seed`, and `--cmd` overrides. Rea's runner (`Tests/scope_verify/rea/rea_scope_test_harness.py`) materialises fixtures via `--update` and records reports under `Tests/scope_verify/rea/out/`.
 - Test manifests (e.g., `Tests/scope_verify/rea/tests/manifest.json`) are generated through the corresponding `build_manifest.py`; regenerate them when adding or editing cases to keep fixtures in sync.
+- VM 2.0 phase gate: `Tests/vm_diff_harness.py --vm-a <bin dir> --vm-b <bin dir>` runs the Pascal/CLike/Rea/Aether fixture corpora (plus an optional aether_doc_bench sample) through two VM builds and byte-compares stdout/stderr/exit codes; resumable via its `--out` dir, exits nonzero on any reproducible diff. See Docs/pscal_vm2_plan.md §4.
 - For exsh tests that don't include PSCAL extenstions, the output should always be identical to what the bash shell would produce
 - For exsh shellbench (https://github.com/shellspec/shellbench) is used as both benchmarking and functionality verification
 - Appropriate tests should always be run.  It is NEVER appropriate not to test.  At the very least you should verify that modified code compiles
@@ -29,3 +30,4 @@
 - Document any env vars you touch (`SDL_VIDEODRIVER`, `RUN_SDL`, etc.) in commits/PRs; future agents look here for quick bootstrapping.
 - Binaries tend to have both a --dump-ast-json and --dump-bytecode options which can provide substantial clues as to what is going on in the AST building and compilation portions of the code when debugging.
 - Commit early and often—small, frequent commits keep iPadOS and desktop work in sync and avoid multi-thousand-file diffs that are hard to review or push.
+- On the Spark/training hosts, do not default to tiny context windows or overly conservative output-token caps just to be "safe". Those machines are provisioned for large-context benchmarking and training work. Start with a generous context and output budget, and only shrink it after a concrete memory-fit or latency problem is observed.

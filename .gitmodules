@@ -12,7 +12,25 @@
 	url = https://github.com/emkey1/dvtm.git
 [submodule "third-party/libgit2"]
 	path = third-party/libgit2
-	url = https://github.com/libgit2/libgit2.git
+	url = https://github.com/emkey1/libgit2.git
 [submodule "third-party/openrsync"]
 	path = third-party/openrsync
 	url = https://github.com/emkey1/openrsync.git
+[submodule "components/clike"]
+	path = components/clike
+	url = https://github.com/emkey1/clike.git
+[submodule "components/pscal-core"]
+	path = components/pscal-core
+	url = https://github.com/emkey1/pscal-core.git
+[submodule "components/rea"]
+	path = components/rea
+	url = https://github.com/emkey1/rea.git
+[submodule "components/aether"]
+	path = components/aether
+	url = https://github.com/emkey1/aether.git
+[submodule "components/pascal"]
+	path = components/pascal
+	url = https://github.com/emkey1/pascal.git
+[submodule "components/exsh"]
+	path = components/exsh
+	url = https://github.com/emkey1/exsh.git

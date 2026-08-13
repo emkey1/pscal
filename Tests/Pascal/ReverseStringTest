@@ -1,5 +1,0 @@
-program ReverseStringTest;
-uses StringUtil;
-begin
-  writeln(ReverseString('pscal'));
-end.

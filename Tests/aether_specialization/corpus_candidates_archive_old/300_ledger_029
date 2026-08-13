@@ -1,0 +1,52 @@
+// 300_ledger_029
+// Concepts: Real arithmetic, helper functions, overdraft guard, percentage interest, fx formatted output, multi-step state
+// expect: Starting balance: $500.00
+// expect: Withdraw $278.00: $222.00
+// expect: Deposit $283.00: $505.00
+// expect: Withdraw $269.00: $236.00
+// expect: Withdraw $141.00: $95.00
+// expect: Withdraw $187.00: $95.00
+// expect: Interest 1%: $95.95
+// expect: Deposit $149.00: $244.95
+// expect: Withdraw $285.00: $244.95
+// expect: Withdraw $269.00: $244.95
+// expect: Withdraw $72.00: $172.95
+
+fn deposit(balance: Real, amount: Real) -> Real {
+    ret balance + amount;
+}
+
+fn withdraw(balance: Real, amount: Real) -> Real {
+    if balance >= amount { ret balance - amount; }
+    ret balance;
+}
+
+fn applyInterest(balance: Real, rate: Real) -> Real {
+    ret balance * (1.0 + rate);
+}
+
+fn main() -> Void {
+    let balance: Real = 500.0;
+    fx { println("Starting balance: $", balance:0:2); }
+    balance = withdraw(balance, 278.0);
+    fx { println("Withdraw $278.00: $", balance:0:2); }
+    balance = deposit(balance, 283.0);
+    fx { println("Deposit $283.00: $", balance:0:2); }
+    balance = withdraw(balance, 269.0);
+    fx { println("Withdraw $269.00: $", balance:0:2); }
+    balance = withdraw(balance, 141.0);
+    fx { println("Withdraw $141.00: $", balance:0:2); }
+    balance = withdraw(balance, 187.0);
+    fx { println("Withdraw $187.00: $", balance:0:2); }
+    balance = applyInterest(balance, 0.01);
+    fx { println("Interest 1%: $", balance:0:2); }
+    balance = deposit(balance, 149.0);
+    fx { println("Deposit $149.00: $", balance:0:2); }
+    balance = withdraw(balance, 285.0);
+    fx { println("Withdraw $285.00: $", balance:0:2); }
+    balance = withdraw(balance, 269.0);
+    fx { println("Withdraw $269.00: $", balance:0:2); }
+    balance = withdraw(balance, 72.0);
+    fx { println("Withdraw $72.00: $", balance:0:2); }
+    ret;
+}

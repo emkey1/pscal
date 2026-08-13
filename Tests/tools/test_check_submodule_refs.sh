@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-CHECK_SCRIPT="${ROOT_DIR}/Tools/check_submodule_refs.sh"
+CHECK_SCRIPT="${ROOT_DIR}/tools/check_submodule_refs.sh"
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/check-submodule-refs-test.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT

@@ -1,0 +1,16 @@
+// r3_currency  (wishlist 7)
+// expect: items = 3
+// expect: total = $28.74
+
+fn main() -> Void {
+    let prices: Real[] = [19.99, 5.50, 3.25];
+    let n: Int = length(prices);
+    let total: Real = 0.0;
+    loop i in 0..n { total = total + prices[i]; }
+    fx {
+        println("items = ", n);
+        print("total = $");
+        println(total:0:2);
+    }
+    ret;
+}

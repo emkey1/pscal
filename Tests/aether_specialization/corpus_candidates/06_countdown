@@ -1,0 +1,20 @@
+// 06_countdown
+// Concepts: condition loop, fx inside loop body
+// expect: 3
+// expect: 2
+// expect: 1
+// expect: liftoff
+
+fn main() -> Void {
+    let n: Int = 3;
+    loop n > 0 {
+        fx {
+            println(n);
+        }
+        n = n - 1;
+    }
+    fx {
+        println("liftoff");
+    }
+    ret;
+}

@@ -1,5 +1,0 @@
-#!/usr/bin/env clike
-int main() {
-    printf("Hello World!\n");
-    return 0;
-}

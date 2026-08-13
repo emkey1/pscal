@@ -1,0 +1,39 @@
+{
+  "pairs": [
+    {
+      "id": "repair_granite_toon_get_nested_4arg",
+      "diagnostic": "[SYN-001] Aether parser rewrite error: expected ')' to close parenthesized expression (opened at line 8).",
+      "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no\"); }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"meta\\\":{\\\"code\\\":\\\"A1\\\"}}\");\n    let root: ToonNode = toon_root(doc);\n    let code: Text = toon_get_text_or(root, \"meta\", \"code\", \"EMPTY\");\n    fx { println(\"code=\", code); }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no\"); }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"meta\\\":{\\\"code\\\":\\\"A1\\\"}}\");\n    let root: ToonNode = toon_root(doc);\n    let code: Text = \"EMPTY\";\n    if toon_has_key(root, \"meta\") {\n        let meta: ToonNode = toon_key(root, \"meta\");\n        if toon_has_key(meta, \"code\") {\n            code = toon_get_text_or(meta, \"code\", \"EMPTY\");\n        }\n    }\n    fx { println(\"code=\", code); }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "code=A1\n"
+    },
+    {
+      "id": "repair_granite_post_tuple_dot_index",
+      "diagnostic": "[ANN-001] Aether contract rewrite error: tuple-return @post checks must reference slots explicitly, for example `result.0` or `result.1`.",
+      "broken_source": "@post result[0] >= result[1]\nfn ordered(a: Int, b: Int) -> (Int, Int) {\n    if a > b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (hi, lo) = ordered(3, 8);\n    fx { println(\"hi=\", hi); }\n    ret;\n}\n",
+      "fixed_source": "@post result.0 >= result.1\nfn ordered(a: Int, b: Int) -> (Int, Int) {\n    if a > b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (hi, lo) = ordered(3, 8);\n    fx { println(\"hi=\", hi); }\n    ret;\n}\n",
+      "expected_stdout": "hi=8\n"
+    },
+    {
+      "id": "repair_granite_toon_prefix_haskey_gettext",
+      "diagnostic": "[SCOPE-001] identifier 'has_key' not in scope.",
+      "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no\"); }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42,\\\"ok\\\":true}\");\n    let root: ToonNode = toon_root(doc);\n    let name: Text = \"unknown\";\n    if has_key(root, \"name\") {\n        name = get_text(root, \"name\");\n    }\n    fx { println(\"name=\", name); }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no\"); }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42,\\\"ok\\\":true}\");\n    let root: ToonNode = toon_root(doc);\n    let name: Text = \"unknown\";\n    if toon_has_key(root, \"name\") {\n        name = toon_get_text(root, \"name\");\n    }\n    fx { println(\"name=\", name); }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "name=Aether\n"
+    },
+    {
+      "id": "repair_granite_toon_prefix_getint",
+      "diagnostic": "[SCOPE-001] identifier 'get_int' not in scope.",
+      "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no\"); }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42,\\\"ok\\\":true}\");\n    let root: ToonNode = toon_root(doc);\n    let score: Int = get_int(root, \"score\");\n    fx { println(\"score=\", score); }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no\"); }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42,\\\"ok\\\":true}\");\n    let root: ToonNode = toon_root(doc);\n    let score: Int = toon_get_int_or(root, \"score\", 0);\n    fx { println(\"score=\", score); }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "score=42\n"
+    },
+    {
+      "id": "repair_granite_post_dot_minmax",
+      "diagnostic": "[ANN-001] Aether contract rewrite error: tuple-return @post checks must reference slots explicitly, for example `result.0` or `result.1`.",
+      "broken_source": "@post result[0] <= result[1]\nfn minmax(a: Int, b: Int) -> (Int, Int) {\n    if a <= b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (lo, hi) = minmax(8, 3);\n    fx { println(\"lo=\", lo); }\n    ret;\n}\n",
+      "fixed_source": "@post result.0 <= result.1\nfn minmax(a: Int, b: Int) -> (Int, Int) {\n    if a <= b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (lo, hi) = minmax(8, 3);\n    fx { println(\"lo=\", lo); }\n    ret;\n}\n",
+      "expected_stdout": "lo=3\n"
+    }
+  ]
+}

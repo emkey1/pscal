@@ -1,0 +1,10 @@
+// real_mean_three
+// expect: average = 72.33
+fn main() -> Void {
+    let a: Int = 50;
+    let b: Int = 72;
+    let c: Int = 95;
+    let average: Real = (a + b + c) / 3;
+    fx { println("average = ", average:0:2); }
+    ret;
+}

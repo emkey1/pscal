@@ -1,0 +1,35 @@
+// 104_builtin_info_sleep
+// Concepts: builtin_info metadata query, TOON inspection of builtin descriptors
+// expect: builtin = sleep
+// expect: kind = procedure
+// expect: backend = delay
+// expect: return = Void
+// expect: effectful = true
+
+fn describeBuiltin(name: Text) -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let metaJson: Text = builtin_info(name);
+    let doc: ToonDoc = toon_parse(metaJson);
+    let root: ToonNode = toon_root(doc);
+    let kind: Text = toon_get_text(root, "kind");
+    let backend: Text = toon_get_text(root, "backend_name");
+    let returnType: Text = toon_get_text(root, "return_type");
+    let effectful: Bool = toon_get_bool_or(root, "effectful", false);
+
+    fx {
+        println("builtin = ", name);
+        println("kind = ", kind);
+        println("backend = ", backend);
+        println("return = ", returnType);
+        println("effectful = ", effectful);
+    }
+
+    toon_close(doc);
+    ret;
+}
+
+fn main() -> Void {
+    describeBuiltin("sleep");
+    ret;
+}

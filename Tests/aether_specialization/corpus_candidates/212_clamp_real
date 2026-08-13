@@ -1,0 +1,8 @@
+// clamp_real
+// expect: clamped = 1.00
+fn main() -> Void {
+    let t: Real = 1.5;
+    let c: Real = clamp(t, 0.0, 1.0);
+    fx { println("clamped = ", c:0:2); }
+    ret;
+}

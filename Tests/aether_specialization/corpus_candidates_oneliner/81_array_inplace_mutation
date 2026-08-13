@@ -1,0 +1,22 @@
+// a2_inplace_mutation  (wishlist 1)
+// Doubles every element in place, then attempts a guarded out-of-bounds write
+// that is correctly skipped because the index is checked against length.
+// expect: a = 20
+// expect: b = 40
+// expect: c = 60
+
+fn main() -> Void {
+    let xs: Int[] = [10, 20, 30];
+    let n: Int = length(xs);
+    loop i in 0..n { xs[i] = xs[i] * 2; }
+
+    let target: Int = 5;
+    if target < length(xs) { xs[target] = 999; }
+
+    fx {
+        println("a = ", xs[0]);
+        println("b = ", xs[1]);
+        println("c = ", xs[2]);
+    }
+    ret;
+}

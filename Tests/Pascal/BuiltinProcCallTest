@@ -1,6 +1,0 @@
-program BuiltinProcCallTest;
-begin
-  wRiTe(ChR(ORD('A')));
-  WrItE(chr(Ord('B')));
-  wRiTeLn(cHr(oRd('C')));
-end.

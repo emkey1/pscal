@@ -1,0 +1,74 @@
+{
+  "version": "v2-additions-draft",
+  "description": "Verified candidate tasks for benchmark v2 (see Docs/aether_benchmark_gaps.md §7). Splits release_board's kitchen-sink sub-skills into single-skill tasks (real-mean, clamp/normalize, classify-by-threshold, count-by-category), fills untested holes (clamp builtin, recursion, isolated real-mean), and introduces a negative-invariant tier (should_fail) that pins the compiler's deliberate rejections. Every positive reference_solution was compiled and run against build/bin/aether and matched expected_stdout exactly; every negative program was confirmed rejected with the listed error code. Negative tasks require a should_fail scorer path: compile the program, pass iff it is rejected with expected_error_code (no model generation).",
+  "tasks": [
+    {
+      "id": "real_mean_format",
+      "title": "Real-valued mean with fixed precision",
+      "prompt": "Given three integer scores 70, 80, and 95, print exactly two lines. First line: `total = <sum>` where <sum> is their sum. Second line: `average = <mean>` where <mean> is their arithmetic mean rounded to exactly two decimal places.",
+      "expected_stdout": "total = 245\naverage = 81.67\n",
+      "mechanisms": ["real", "arithmetic", "formatting"],
+      "achievability": "model-verified",
+      "splits_from": "release_board",
+      "reference_solution": "fn main() -> Void {\n    let a: Int = 70;\n    let b: Int = 80;\n    let c: Int = 95;\n    let total: Int = a + b + c;\n    let avg: Real = total * 1.0 / 3;\n    fx {\n        println(\"total = \", total);\n        println(\"average = \", avg:0:2);\n    }\n    ret;\n}\n"
+    },
+    {
+      "id": "clamp_scores",
+      "title": "Clamp values into a range",
+      "prompt": "Print, one per line and in this order, each of these values clamped to the inclusive range 0 to 100: first 120, then -5, then 50.",
+      "expected_stdout": "100\n0\n50\n",
+      "mechanisms": ["clamp", "builtin"],
+      "achievability": "model-verified",
+      "splits_from": "release_board",
+      "reference_solution": "fn main() -> Void {\n    fx {\n        println(clamp(120, 0, 100));\n        println(clamp(-5, 0, 100));\n        println(clamp(50, 0, 100));\n    }\n    ret;\n}\n"
+    },
+    {
+      "id": "classify_threshold",
+      "title": "Classify scores by threshold",
+      "prompt": "For each of the scores 95, 83, 71, and 40 (in that order), print its letter grade on its own line: `A` for 90 or above, `B` for 80 to 89, `C` for 70 to 79, otherwise `F`.",
+      "expected_stdout": "A\nB\nC\nF\n",
+      "mechanisms": ["branching", "pure"],
+      "achievability": "model-verified",
+      "splits_from": "release_board",
+      "reference_solution": "@pure\nfn tier(score: Int) -> Text {\n    if score >= 90 { ret \"A\"; }\n    if score >= 80 { ret \"B\"; }\n    if score >= 70 { ret \"C\"; }\n    ret \"F\";\n}\nfn main() -> Void {\n    fx {\n        println(tier(95));\n        println(tier(83));\n        println(tier(71));\n        println(tier(40));\n    }\n    ret;\n}\n"
+    },
+    {
+      "id": "count_by_category",
+      "title": "Count pass/fail by threshold",
+      "prompt": "Four students scored 75, 50, 90, and 40. A score of 60 or above passes; below 60 fails. Print `passed = <count>` on the first line and `failed = <count>` on the second.",
+      "expected_stdout": "passed = 2\nfailed = 2\n",
+      "mechanisms": ["pure", "arithmetic"],
+      "achievability": "model-verified",
+      "splits_from": "release_board",
+      "reference_solution": "@pure\nfn pass(s: Int) -> Int {\n    if s >= 60 { ret 1; }\n    ret 0;\n}\nfn main() -> Void {\n    let passed: Int = pass(75) + pass(50) + pass(90) + pass(40);\n    let failed: Int = 4 - passed;\n    fx {\n        println(\"passed = \", passed);\n        println(\"failed = \", failed);\n    }\n    ret;\n}\n"
+    },
+    {
+      "id": "recursion_factorial",
+      "title": "Recursive factorial",
+      "prompt": "Using a recursive function, compute the factorial of 5 and print it exactly in the form `5! = <value>`.",
+      "expected_stdout": "5! = 120\n",
+      "mechanisms": ["recursion"],
+      "achievability": "model-verified",
+      "hole": "recursion (0 tasks in v1)",
+      "reference_solution": "fn fact(n: Int) -> Int {\n    if n <= 1 { ret 1; }\n    ret n * fact(n - 1);\n}\nfn main() -> Void {\n    fx { println(\"5! = \", fact(5)); }\n    ret;\n}\n"
+    },
+    {
+      "id": "reject_inclusive_range",
+      "title": "Compiler rejects inclusive range ..=",
+      "should_fail": true,
+      "program": "fn main() -> Void {\n    loop i in 1..=3 {\n        fx { println(i); }\n    }\n    ret;\n}\n",
+      "expected_error_code": "SYN-001",
+      "mechanisms": ["negative", "syntax", "loops"],
+      "note": "Aether ranges are half-open; ..= must be rejected. Verified: compiler emits [SYN-001] Unexpected token EQUAL."
+    },
+    {
+      "id": "effect_boundary_reject",
+      "title": "Compiler rejects effectful call outside fx",
+      "should_fail": true,
+      "program": "fn main() -> Void {\n    println(\"this is effectful and outside fx\");\n    ret;\n}\n",
+      "expected_error_code": "FX-001",
+      "mechanisms": ["negative", "effects"],
+      "note": "The effect system's core invariant: an effectful call (println) must be inside an fx block. Verified: compiler emits [FX-001] Aether effect error: call to 'println' requires an fx block."
+    }
+  ]
+}

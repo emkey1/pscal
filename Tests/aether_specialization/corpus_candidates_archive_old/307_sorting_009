@@ -1,0 +1,71 @@
+// 307_sorting_009
+// Concepts: comparison sorting (insertion sort shifts a key left into place; selection sort swaps the running minimum forward), in-place Int[] mutation, indexed element output, min/max of the sorted array
+// expect: input: 30 3 97 7 99 95 42 1 82
+// expect: algorithm: selection
+// expect: sorted[0] = 1
+// expect: sorted[1] = 3
+// expect: sorted[2] = 7
+// expect: sorted[3] = 30
+// expect: sorted[4] = 42
+// expect: sorted[5] = 82
+// expect: sorted[6] = 95
+// expect: sorted[7] = 97
+// expect: sorted[8] = 99
+// expect: min: 1
+// expect: max: 99
+
+fn insertionSort(xs: Int[]) -> Int[] {
+    let n: Int = length(xs);
+    loop i in 1..n {
+        let key: Int = xs[i];
+        let j: Int = i - 1;
+        loop j >= 0 {
+            if xs[j] <= key { break; }
+            xs[j + 1] = xs[j];
+            j = j - 1;
+        }
+        xs[j + 1] = key;
+    }
+    ret xs;
+}
+
+fn selectionSort(xs: Int[]) -> Int[] {
+    let n: Int = length(xs);
+    loop i in 0..n {
+        let m: Int = i;
+        loop j in i + 1..n {
+            if xs[j] < xs[m] { m = j; }
+        }
+        let tmp: Int = xs[i];
+        xs[i] = xs[m];
+        xs[m] = tmp;
+    }
+    ret xs;
+}
+
+fn joinInts(xs: Int[]) -> Text {
+    let out: Text = "";
+    let n: Int = length(xs);
+    loop i in 0..n {
+        if i > 0 { out = out + " "; }
+        out = out + int_to_text(xs[i]);
+    }
+    ret out;
+}
+
+fn main() -> Void {
+    let xs: Int[] = [30, 3, 97, 7, 99, 95, 42, 1, 82];
+    let algo: Text = "selection";
+    let n: Int = length(xs);
+    fx { println("input: ", joinInts(xs)); }
+    fx { println("algorithm: ", algo); }
+    xs = selectionSort(xs);
+    loop i in 0..n {
+        fx { println("sorted[", i, "] = ", xs[i]); }
+    }
+    fx {
+        println("min: ", xs[0]);
+        println("max: ", xs[n - 1]);
+    }
+    ret;
+}

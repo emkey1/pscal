@@ -1,0 +1,7 @@
+// compute in a loop, then print inside fx
+fn main() -> Void {
+    let total: Int = 0;
+    loop i in 1..5 { total = total + i; }
+    fx { println("total=", total); }
+    ret;
+}

@@ -1,0 +1,9 @@
+mod SalesTargets {
+    export const MonthlyQuota: Int = 100;
+    export const BonusThreshold: Int = 150;
+
+    @pure
+    export fn attainment(sales: Int) -> Int {
+        ret sales * 100 / MonthlyQuota;
+    }
+}

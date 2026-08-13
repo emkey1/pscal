@@ -101,16 +101,16 @@ if(PSCAL_PLATFORM_IOS)
     if(VPROC_ENABLE_STUBS_FOR_TESTS)
         add_compile_definitions(VPROC_ENABLE_STUBS_FOR_TESTS)
     endif()
-    add_compile_options(-include ${CMAKE_SOURCE_DIR}/src/ios/vproc_shim.h)
+    add_compile_options(-include ${CMAKE_SOURCE_DIR}/components/pscal-core/src/runtime/vproc/vproc_shim.h)
     # vproc implementation compiles without the global shim overrides to avoid macro pollution.
-    set_property(SOURCE src/ios/vproc.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
+    set_property(SOURCE components/pscal-core/src/runtime/vproc/vproc.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
     # path virtualization helpers must call the real syscalls to avoid recursion with vproc shim macros.
-    set_property(SOURCE src/common/path_virtualization.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
+    set_property(SOURCE components/pscal-core/src/common/path_virtualization.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
     # path truncation helpers should bypass vproc shims to avoid recursive syscalls.
-    set_property(SOURCE src/common/path_truncate.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
+    set_property(SOURCE components/pscal-core/src/common/path_truncate.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
     # low-level tty/pty helpers must bypass vproc shim macros to avoid recursive interpose calls.
-    set_property(SOURCE src/ios/tty/pscal_fd.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
-    set_property(SOURCE src/ios/tty/pscal_pty.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
+    set_property(SOURCE components/pscal-core/src/runtime/vproc/tty/pscal_fd.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
+    set_property(SOURCE components/pscal-core/src/runtime/vproc/tty/pscal_pty.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
 elseif(VPROC_ENABLE_STUBS_FOR_TESTS)
     add_compile_definitions(VPROC_ENABLE_STUBS_FOR_TESTS)
 endif()
@@ -161,6 +161,38 @@ endif()
 
 set(CMAKE_C_STANDARD 11)
 add_compile_options(-Wall)
+if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+    # PSCAL_VALUE_FIELD (pscal-core core/types.h) keeps a `const Value`
+    # _Generic branch for compilers that do not drop qualifiers during
+    # lvalue conversion; clang does drop them and warns it is unreachable.
+    add_compile_options(-Wno-unreachable-code-generic-assoc)
+endif()
+
+# VM 2.0 Phase 0 accessor-sweep lint: poison raw Value payload field names in
+# pscal-core sources (frontends are out of scope for the sweep). Opt-in; see
+# pscal-core src/core/utils.h.
+option(PSCAL_VALUE_ACCESS_LINT
+    "Forbid raw Value payload field access in pscal-core outside its representation layer" OFF)
+
+# VM 2.0 Phase 2a (plan Docs/pscal_vm2_plan.md §5.6, goal G2): mprotect(PROT_READ)
+# a chunk's CODE buffer once it's prepared for execution, so any code path
+# that still tries to write into it crashes loudly instead of silently
+# succeeding -- proof the self-modifying-code migration actually happened.
+# Defaults on for Debug builds (this is where build-asan lives), off otherwise.
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    option(PSCAL_VM_CODE_PROTECT "mprotect(PROT_READ) bytecode CODE after load (debug-only immutability enforcement)" ON)
+else()
+    option(PSCAL_VM_CODE_PROTECT "mprotect(PROT_READ) bytecode CODE after load (debug-only immutability enforcement)" OFF)
+endif()
+
+# VM 2.0 Phase 7 (plan Docs/pscal_vm2_plan.md §7.1): dlopen-based plugin
+# loading (--ext/PSCAL_EXT_DIR). Deployment-level hard gate, independent of
+# the runtime --deny ext / PSCAL_VM_DENY=ext sandbox control -- OFF compiles
+# the real dlopen path out of ext_builtins/plugin_loader.c entirely, so no
+# runtime flag/env var can re-enable it. Default ON; configure with
+# -DPSCAL_ENABLE_EXT_PLUGINS=OFF for a build that should never have this
+# capability at all.
+option(PSCAL_ENABLE_EXT_PLUGINS "Enable dlopen-based plugin loading (--ext/PSCAL_EXT_DIR)" ON)
 
 if(UNIX AND NOT APPLE)
     add_compile_definitions(_GNU_SOURCE _POSIX_C_SOURCE=200809L)
@@ -188,7 +220,7 @@ endif()
 set(PSCAL_INSTALL_ROOT "${_pscal_install_root_default}" CACHE PATH "Default PSCAL runtime asset directory")
 string(REGEX REPLACE "/$" "" PSCAL_INSTALL_ROOT "${PSCAL_INSTALL_ROOT}")
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
-configure_file(src/core/pscal_paths.h.in "${CMAKE_BINARY_DIR}/generated/pscal_paths.h" @ONLY)
+configure_file(components/pscal-core/src/core/pscal_paths.h.in "${CMAKE_BINARY_DIR}/generated/pscal_paths.h" @ONLY)
 include_directories("${CMAKE_BINARY_DIR}/generated")
 
 if(PSCAL_PLATFORM_IOS AND NOT PSCAL_USE_HOST_OPENSSL)
@@ -552,7 +584,7 @@ if(ENABLE_EXT_BUILTIN_SQLITE)
     endif()
 endif()
 if(APPLE)
-    set_property(SOURCE src/backend_ast/graphics_3d_metal_apple.m
+    set_property(SOURCE components/pscal-core/src/backend_ast/graphics_3d_metal_apple.m
         APPEND PROPERTY COMPILE_OPTIONS -fobjc-arc)
 endif()
 
@@ -573,15 +605,20 @@ endif()
 # ---- Include Directories (Project Structure) ----
 include_directories(
     src
-    src/core
-    src/Pascal
-    src/clike
-    src/symbol
-    src/backend_ast
-    src/compiler
-    src/vm
-    src/third_party/yyjson
+    components/pscal-core/src
+    components/pscal-core/src/core
+    components/pascal/src
+    components/clike/src
+    components/rea/src
+    components/aether/src
+    components/exsh/src
+    components/pscal-core/src/symbol
+    components/pscal-core/src/backend_ast
+    components/pscal-core/src/compiler
+    components/pscal-core/src/vm
+    components/pscal-core/src/third_party/yyjson
     lib
+    components/pscal-core/lib
 )
 if(PSCAL_PLATFORM_IOS)
     include_directories(
@@ -901,6 +938,14 @@ if(PSCAL_REAL_IOS)
     unset(_PSCAL_ZLIB_SYSROOT)
 endif()
 
+# --- Zlib (system) ---
+find_package(ZLIB QUIET)
+if(NOT ZLIB_FOUND)
+    message(FATAL_ERROR "zlib is required but was not found. "
+        "Install the development package (e.g. 'sudo apt install zlib1g-dev' on Debian/Ubuntu "
+        "or 'sudo dnf install zlib-devel' on Fedora/RHEL) and re-run cmake.")
+endif()
+
 # --- CURL (system vs bundled) ---
 # Option A: build against a bundled libcurl (default on iOS where the SDK does not provide one).
 # Option B: rely on the system SDK via FindCURL (with optional Homebrew hints on macOS).
@@ -1135,42 +1180,47 @@ endif()
 find_package(Threads REQUIRED)
 
 if(PSCAL_HAS_LIBCURL)
-    set(PSCAL_NETWORK_IMPL_SOURCE src/backend_ast/builtin_network_api.c)
+    set(PSCAL_NETWORK_IMPL_SOURCE components/pscal-core/src/backend_ast/builtin_network_api.c)
 else()
-    set(PSCAL_NETWORK_IMPL_SOURCE src/backend_ast/builtin_network_api_stub.c)
+    set(PSCAL_NETWORK_IMPL_SOURCE components/pscal-core/src/backend_ast/builtin_network_api_stub.c)
 endif()
 
 # ---- Source Files ----
 set(PSCAL_CORE_SOURCES
-    src/Pascal/globals.c
-    src/Pascal/type_registry.c
-    src/core/types.c src/core/utils.c src/core/list.c src/core/preproc.c src/core/version.c
-    src/ast/ast.c src/ast/closure_registry.c
-    src/symbol/symbol.c
-    src/backend_ast/builtin.c
+    components/pscal-core/src/core/globals.c
+    components/pscal-core/src/core/type_registry.c
+    components/pscal-core/src/core/types.c components/pscal-core/src/core/utils.c components/pscal-core/src/core/list.c components/pscal-core/src/core/preproc.c components/pscal-core/src/core/version.c
+    components/pscal-core/src/core/obj_header.c
+    components/pscal-core/src/ast/ast.c components/pscal-core/src/ast/closure_registry.c
+    components/pscal-core/src/symbol/symbol.c
+    components/pscal-core/src/lexer/lexer.c
+    components/pscal-core/src/backend_ast/builtin.c
     ${PSCAL_NETWORK_IMPL_SOURCE}
-    src/backend_ast/shell_runtime_stub.c
-    src/backend_ast/thread_wrappers.c
-    src/compiler/bytecode.c src/compiler/compiler.c
-    src/core/cache.c
-    src/common/runtime_params.c
-    src/common/runtime_tty.c
-    src/common/runtime_clipboard.c
-    src/common/env_snapshot.c
-    src/common/pscal_hosts.c
-    src/common/path_truncate.c
-    src/common/path_virtualization.c
-    src/common/pscal_terminal_host.c
-    src/common/frontend_kind.c
-    src/common/runtime_paths.c
-    src/common/pascal_state.c
-    src/vm/vm.c
-    lib/noise/noise.c
-    src/runtime/terrain/terrain_generator.c
-    src/runtime/shaders/shader_common.c
-    src/runtime/shaders/terrain/terrain_shader.c
-    src/runtime/shaders/sky/sky_dome.c
-    src/runtime/shaders/sky/cloud_layer.c
+    components/pscal-core/src/backend_ast/shell_runtime_stub.c
+    components/pscal-core/src/backend_ast/thread_wrappers.c
+    components/pscal-core/src/compiler/bytecode.c components/pscal-core/src/compiler/bytecode_verify.c components/pscal-core/src/compiler/bytecode_link.c components/pscal-core/src/compiler/compiler.c
+    components/pscal-core/src/core/cache.c
+    components/pscal-core/src/common/runtime_params.c
+    components/pscal-core/src/common/runtime_tty.c
+    components/pscal-core/src/common/runtime_clipboard.c
+    components/pscal-core/src/common/env_snapshot.c
+    components/pscal-core/src/common/pscal_hosts.c
+    components/pscal-core/src/common/path_truncate.c
+    components/pscal-core/src/common/path_virtualization.c
+    components/pscal-core/src/common/pscal_terminal_host.c
+    components/pscal-core/src/common/frontend_kind.c
+    components/pscal-core/src/common/runtime_paths.c
+    components/pscal-core/src/common/pascal_state.c
+    components/pscal-core/src/core/diagmap.c
+    components/pscal-core/src/vm/vm.c
+    components/pscal-core/src/vm/vm_fx_policy.c
+    components/pscal-core/src/backend_ast/pscal_ext_api.c
+    components/pscal-core/lib/noise/noise.c
+    components/pscal-core/src/runtime/terrain/terrain_generator.c
+    components/pscal-core/src/runtime/shaders/shader_common.c
+    components/pscal-core/src/runtime/shaders/terrain/terrain_shader.c
+    components/pscal-core/src/runtime/shaders/sky/sky_dome.c
+    components/pscal-core/src/runtime/shaders/sky/cloud_layer.c
 )
 
 set(SMALLCLUE_SOURCES
@@ -1184,6 +1234,34 @@ set(SMALLCLUE_SOURCES
     src/smallclue/src/openssh_app.c
     src/smallclue/src/openrsync_app.c
     src/smallclue/src/vproc_test_app.c
+    src/smallclue/src/awk_app.c
+    src/smallclue/src/awk_interp.c
+    src/smallclue/src/awk_lexer.c
+    src/smallclue/src/awk_parser.c
+    src/smallclue/src/awk_value.c
+    src/smallclue/src/base64_app.c
+    src/smallclue/src/checksum_app.c
+    src/smallclue/src/chown_app.c
+    src/smallclue/src/cmp_app.c
+    src/smallclue/src/comm_app.c
+    src/smallclue/src/dd_app.c
+    src/smallclue/src/diff_app.c
+    src/smallclue/src/expr_app.c
+    src/smallclue/src/fmt_app.c
+    src/smallclue/src/fold_app.c
+    src/smallclue/src/gzip_app.c
+    src/smallclue/src/nl_app.c
+    src/smallclue/src/nohup_app.c
+    src/smallclue/src/od_app.c
+    src/smallclue/src/paste_app.c
+    src/smallclue/src/patch_app.c
+    src/smallclue/src/printf_app.c
+    src/smallclue/src/readlink_app.c
+    src/smallclue/src/rev_app.c
+    src/smallclue/src/seq_app.c
+    src/smallclue/src/split_app.c
+    src/smallclue/src/tac_app.c
+    src/smallclue/src/tar_app.c
 )
 
 if(PSCAL_PLATFORM_IOS OR APPLE)
@@ -1454,6 +1532,7 @@ set(PSCAL_OPENRSYNC_SOURCES
     ${PSCAL_OPENRSYNC_ROOT}/socket.c
     ${PSCAL_OPENRSYNC_ROOT}/symlinks.c
     ${PSCAL_OPENRSYNC_ROOT}/uploader.c
+    ${PSCAL_OPENRSYNC_ROOT}/zcompress.c
 )
 
 if(PSCAL_PLATFORM_IOS OR APPLE)
@@ -1489,27 +1568,27 @@ set_property(SOURCE ${PSCAL_OPENRSYNC_ROOT}/main.c
 # --- Conditionally add SDL source files ---
 if(SDL)
     list(APPEND PSCAL_CORE_SOURCES
-        src/backend_ast/sdl.c
-        src/backend_ast/sdl3d.c
-        src/backend_ast/gl.c
-        src/backend_ast/audio.c
+        components/pscal-core/src/backend_ast/sdl.c
+        components/pscal-core/src/backend_ast/sdl3d.c
+        components/pscal-core/src/backend_ast/gl.c
+        components/pscal-core/src/backend_ast/audio.c
     )
     if(PSCAL_PLATFORM_IOS OR APPLE)
         list(APPEND PSCAL_CORE_SOURCES
-            src/backend_ast/graphics_3d_backend_ios.c
-            src/backend_ast/graphics_3d_metal_apple.m
+            components/pscal-core/src/backend_ast/graphics_3d_backend_ios.c
+            components/pscal-core/src/backend_ast/graphics_3d_metal_apple.m
         )
     else()
         list(APPEND PSCAL_CORE_SOURCES
-            src/backend_ast/graphics_3d_backend_gl.c
+            components/pscal-core/src/backend_ast/graphics_3d_backend_gl.c
         )
     endif()
 endif()
 
-set(NEXTVI_CORE_SOURCES third-party/nextvi/vi.c)
+set(NEXTVI_CORE_SOURCES components/pscal-core/third-party/nextvi/vi.c)
 list(APPEND PSCAL_CORE_SOURCES ${NEXTVI_CORE_SOURCES})
-set_property(SOURCE third-party/nextvi/vi.c APPEND PROPERTY COMPILE_DEFINITIONS "main=nextvi_main_entry")
-set_property(SOURCE third-party/nextvi/vi.c APPEND PROPERTY COMPILE_OPTIONS -Wno-gnu-folding-constant)
+set_property(SOURCE components/pscal-core/third-party/nextvi/vi.c APPEND PROPERTY COMPILE_DEFINITIONS "main=nextvi_main_entry")
+set_property(SOURCE components/pscal-core/third-party/nextvi/vi.c APPEND PROPERTY COMPILE_OPTIONS -Wno-gnu-folding-constant)
 
 option(SMALLCLUE_WITH_DVTM "Enable the dvtm front end as the smallclue 'dvtm' applet (host builds)." OFF)
 if(PSCAL_PLATFORM_IOS)
@@ -1741,33 +1820,34 @@ if(PSCAL_REAL_IOS)
         src/ios/hosts_override.c)
     # When using the custom resolver/interposer, suppress the portable wrapper
     # definitions in pscal_hosts.c to avoid duplicate symbols.
-    set_property(SOURCE src/common/pscal_hosts.c APPEND PROPERTY COMPILE_DEFINITIONS PSCAL_HOSTS_CUSTOM_IMPL)
+    set_property(SOURCE components/pscal-core/src/common/pscal_hosts.c APPEND PROPERTY COMPILE_DEFINITIONS PSCAL_HOSTS_CUSTOM_IMPL)
 endif()
 
 # ---- Extended builtins ----
 # Allow selectively enabling categories of extended builtins.
-add_subdirectory(src/ext_builtins)
+add_subdirectory(components/pscal-core/src/ext_builtins)
 list(APPEND PSCAL_CORE_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
-list(APPEND PSCAL_CORE_SOURCES src/third_party/yyjson/yyjson.c)
+list(APPEND PSCAL_CORE_SOURCES components/pscal-core/src/third_party/yyjson/yyjson.c)
 if(PSCAL_PLATFORM_IOS)
     list(APPEND PSCAL_CORE_SOURCES
-        src/common/frontend_symbol_wrappers.c
-        src/ios/vproc.c
-        src/ios/vproc_tree.c
-        src/ios/tty/ish_compat.c
-        src/ios/tty/pscal_fd.c
-        src/ios/tty/pscal_tty.c
-        src/ios/tty/pscal_pty.c
-        src/ios/tty/pscal_tty_host.c
+        components/pscal-core/src/common/frontend_symbol_wrappers.c
+        components/pscal-core/src/runtime/vproc/vproc.c
+        components/pscal-core/src/runtime/vproc/vproc_tree.c
+        components/pscal-core/src/runtime/vproc/tty/ish_compat.c
+        components/pscal-core/src/runtime/vproc/tty/pscal_fd.c
+        components/pscal-core/src/runtime/vproc/tty/pscal_tty.c
+        components/pscal-core/src/runtime/vproc/tty/pscal_pty.c
+        components/pscal-core/src/runtime/vproc/tty/pscal_tty_host.c
     )
 endif()
 
+# Pascal front-end sources, consumed from the pascal submodule.
+set(PASCAL_SRC components/pascal/src/Pascal)
 set(PASCAL_FRONTEND_SOURCES
-    src/Pascal/main.c
-    src/Pascal/lexer.c
-    src/Pascal/parser.c
-    src/Pascal/semantic.c
-    src/Pascal/opt.c
+    ${PASCAL_SRC}/main.c
+    ${PASCAL_SRC}/parser.c
+    ${PASCAL_SRC}/semantic.c
+    ${PASCAL_SRC}/opt.c
 )
 
 # ---- Toolchain feature detection ----
@@ -1834,6 +1914,18 @@ if(PSCAL_HAS_LIBGIT2 AND PSCAL_LIBGIT2_TARGET)
     target_link_libraries(pscal_core_static PUBLIC ${PSCAL_LIBGIT2_TARGET})
 endif()
 target_compile_definitions(pscal_core_static PRIVATE PSCAL_NO_CLI_ENTRYPOINTS)
+if(PSCAL_VM_CODE_PROTECT)
+    target_compile_definitions(pscal_core_static PRIVATE PSCAL_VM_CODE_PROTECT)
+    message(STATUS "pscal-core: VM CODE-section mprotect ENABLED")
+endif()
+if(PSCAL_VALUE_ACCESS_LINT)
+    target_compile_definitions(pscal_core_static PRIVATE PSCAL_VALUE_ACCESS_LINT)
+    message(STATUS "pscal-core: Value access lint ENABLED")
+endif()
+if(NOT PSCAL_ENABLE_EXT_PLUGINS)
+    target_compile_definitions(pscal_core_static PRIVATE PSCAL_EXT_PLUGINS_DISABLED)
+    message(STATUS "pscal-core: dlopen plugin loading DISABLED at build time")
+endif()
 if(NOT PSCAL_PLATFORM_IOS OR PSCAL_USE_HOST_OPENSSL)
     if(OPENSSL_INCLUDE_DIR)
         target_include_directories(pscal_core_static PRIVATE ${OPENSSL_INCLUDE_DIR})
@@ -1895,7 +1987,7 @@ if(PSCAL_PLATFORM_IOS)
         COMMENT "Embedding required static archives into libpscal_core_static.a for iOS")
 endif()
 target_include_directories(pscal_core_static BEFORE PRIVATE
-    third-party/nextvi
+    components/pscal-core/third-party/nextvi
 )
 if(PSCAL_DVTM_ENABLED)
     add_dependencies(pscal_core_static pscal_dvtm_static)
@@ -2074,7 +2166,7 @@ endif()
 # add_pscal_executable(hscal) // Lets not build this normally
 
 # Standalone VM binary
-set(PSCAL_VM_SOURCES src/vm/vm_main.c)
+set(PSCAL_VM_SOURCES components/pscal-core/src/vm/vm_main.c)
 if(NOT PSCAL_PLATFORM_IOS)
     add_pscal_executable(pscalvm ${PSCAL_VM_SOURCES})
 endif()
@@ -2107,23 +2199,26 @@ if(BUILD_PSCALD)
 endif()
 
 # exsh front-end executable
+# exsh front-end sources, consumed from the exsh submodule. The shared shell
+# pieces (backend shell.c, common ast/builtin helpers) live in pscal-core.
+set(EXSH_SRC components/exsh/src/shell)
 set(SHELL_SOURCES
-    src/shell/main.c
-    src/shell/lexer.c
-    src/shell/parser.c
-    src/shell/ast.c
-    src/shell/semantics.c
-    src/shell/codegen.c
-    src/shell/builtins.c
-    src/shell/runner.c
-    src/shell/opt.c
-    src/shell/stubs.c
-    src/backend_ast/shell.c
+    ${EXSH_SRC}/main.c
+    ${EXSH_SRC}/lexer.c
+    ${EXSH_SRC}/parser.c
+    ${EXSH_SRC}/ast.c
+    ${EXSH_SRC}/semantics.c
+    ${EXSH_SRC}/codegen.c
+    ${EXSH_SRC}/builtins.c
+    ${EXSH_SRC}/runner.c
+    ${EXSH_SRC}/opt.c
+    ${EXSH_SRC}/stubs.c
+    components/pscal-core/src/backend_ast/shell.c
 )
 
 list(APPEND SHELL_SOURCES
-    src/common/ast_shared.c
-    src/common/builtin_shared.c
+    components/pscal-core/src/common/ast_shared.c
+    components/pscal-core/src/common/builtin_shared.c
 )
 
 list(APPEND SHELL_SOURCES ${EXSH_EXT_BUILTIN_SOURCES})
@@ -2198,24 +2293,25 @@ if(SMALLCLUE_WITH_EXSH AND NOT TARGET pscal_exsh_static)
     target_link_libraries(pscal_exsh_static PUBLIC pscal_core_static)
 endif()
 
-# Tiny C front-end executable
+# Tiny C front-end executable (sources consumed from the clike submodule)
+set(CLIKE_SRC components/clike/src/clike)
 set(CLIKE_SOURCES
-    src/clike/main.c
-    src/clike/lexer.c
-    src/clike/parser.c
-    src/clike/ast.c
-    src/clike/builtins.c
-    src/clike/builtins/thread.c
-    src/clike/semantics.c
-    src/clike/codegen.c
-    src/clike/opt.c
-    src/clike/preproc.c
-    src/clike/state.c
+    ${CLIKE_SRC}/main.c
+    ${CLIKE_SRC}/lexer.c
+    ${CLIKE_SRC}/parser.c
+    ${CLIKE_SRC}/ast.c
+    ${CLIKE_SRC}/builtins.c
+    ${CLIKE_SRC}/builtins/thread.c
+    ${CLIKE_SRC}/semantics.c
+    ${CLIKE_SRC}/translate.c
+    ${CLIKE_SRC}/opt.c
+    ${CLIKE_SRC}/preproc.c
+    ${CLIKE_SRC}/state.c
 )
 
 set(CLIKE_REPL_SOURCES ${CLIKE_SOURCES})
-list(REMOVE_ITEM CLIKE_REPL_SOURCES src/clike/main.c)
-list(APPEND CLIKE_REPL_SOURCES src/clike/repl.c)
+list(REMOVE_ITEM CLIKE_REPL_SOURCES ${CLIKE_SRC}/main.c)
+list(APPEND CLIKE_REPL_SOURCES ${CLIKE_SRC}/repl.c)
 
 if(NOT PSCAL_PLATFORM_IOS)
     add_executable(clike ${CLIKE_SOURCES})
@@ -2315,20 +2411,24 @@ if(PSCAL_BUILD_STATIC_LIBS)
 endif()
 
 # Rea front-end executable (placeholder)
+# Rea front-end engine sources, consumed from the rea submodule. Aether reuses
+# these (AETHER_SOURCES below) and installs its overrides via the hook seam.
+set(REA_SRC components/rea/src/rea)
 set(REA_SOURCES
-    src/rea/main.c
-    src/rea/lexer.c
-    src/rea/parser.c
-    src/rea/semantic.c
-    src/rea/state.c
-    src/rea/builtins/thread.c
-    src/rea/type_stubs.c
+    ${REA_SRC}/main.c
+    ${REA_SRC}/lexer.c
+    ${REA_SRC}/parser.c
+    ${REA_SRC}/semantic.c
+    ${REA_SRC}/state.c
+    ${REA_SRC}/builtins/thread.c
+    ${REA_SRC}/type_stubs.c
+    ${REA_SRC}/frontend_hooks.c
 )
 
 if(NOT PSCAL_PLATFORM_IOS)
     add_executable(rea ${REA_SOURCES})
     target_compile_definitions(rea PRIVATE FRONTEND_REA)
-    target_link_libraries(rea PRIVATE pscal_pascal_static)
+    target_link_libraries(rea PRIVATE pscal_core_static)
     if(PSCAL_HAS_LIBCURL)
         if(TARGET CURL::libcurl)
             target_link_libraries(rea PRIVATE CURL::libcurl)
@@ -2384,14 +2484,176 @@ if(PSCAL_BUILD_STATIC_LIBS)
     target_link_libraries(pscal_rea_static PUBLIC pscal_core_static)
 endif()
 
+# Aether front-end executable (bootstrapped on the shared Rea implementation)
+# Aether overrides, consumed from the aether submodule; layered on the shared
+# Rea engine (REA_SOURCES) and installed at startup via the frontend-hook seam.
+#
+# Aether tracks its own language version (VERSION file, YYYY-MM-DD-N, bumped
+# only on language-affecting changes) independently of PBuild's generic
+# PROGRAM_VERSION wall-clock/_DEV scheme above -- that scheme only says when a
+# binary was compiled, not what language semantics it has, which makes it
+# useless for telling two Aether builds apart. Fed to the aether targets below
+# via PSCAL_PROGRAM_VERSION_OVERRIDE (pscal-core's build_info.h honors it ahead
+# of PROGRAM_VERSION) rather than redefining PROGRAM_VERSION itself: CMake's
+# directory-scope compile definitions always win over a same-named
+# target-level override added later in the same directory, so redefining
+# PROGRAM_VERSION at target scope here would silently lose to the umbrella's
+# blanket definition above. This makes `aether --version` report the real
+# language version, matching the standalone components/aether build
+# (components/aether/CMakeLists.txt) instead of PBuild's default.
+file(STRINGS "${CMAKE_SOURCE_DIR}/components/aether/VERSION" AETHER_LANG_VERSION LIMIT_COUNT 1)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/components/aether/VERSION")
+if(NOT AETHER_LANG_VERSION)
+    set(AETHER_LANG_VERSION "unknown")
+endif()
+message(STATUS "Aether language version: ${AETHER_LANG_VERSION}")
+set(AETHER_SRC components/aether/src/aether)
+set(AETHER_SOURCES
+    ${REA_SOURCES}
+    ${AETHER_SRC}/diagnostics.c
+    ${AETHER_SRC}/parser.c
+    ${AETHER_SRC}/ast_prepasses.c
+    ${AETHER_SRC}/ast_parser.c
+    ${AETHER_SRC}/semantic.c
+    ${AETHER_SRC}/state.c
+)
+
+if(NOT PSCAL_PLATFORM_IOS)
+    add_executable(aether ${AETHER_SOURCES})
+    target_compile_definitions(aether PRIVATE
+        FRONTEND_REA
+        PSCAL_FRONTEND_MAIN_NAME=aether_main
+        PSCAL_FRONTEND_KIND=FRONTEND_KIND_AETHER
+        PSCAL_FRONTEND_DISPLAY_NAME=\"Aether\"
+        PSCAL_FRONTEND_USAGE_NAME=\"aether\"
+        PSCAL_FRONTEND_COMPILER_ID=\"aether\"
+        PSCAL_FRONTEND_INSTALL_HOOKS=aetherInstallFrontendHooks
+        PSCAL_PROGRAM_VERSION_OVERRIDE="${AETHER_LANG_VERSION}")
+    # Aether installs its parse/semantic/module + diagnostic hooks at startup via
+    # reaSetFrontendHooks() (src/aether/state.c); main() calls the installer named
+    # here, which also forces that TU to link inside the static library.
+    target_link_libraries(aether PRIVATE pscal_core_static)
+    if(PSCAL_HAS_LIBCURL)
+        if(TARGET CURL::libcurl)
+            target_link_libraries(aether PRIVATE CURL::libcurl)
+        else()
+            target_link_libraries(aether PRIVATE ${CURL_LIBRARIES})
+        endif()
+    endif()
+    target_link_libraries(aether PRIVATE m Threads::Threads)
+    if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+        target_link_libraries(aether PRIVATE ${PSCAL_SQLITE_LIBS})
+    endif()
+
+    if(SDL)
+        target_include_directories(aether PRIVATE
+            ${PSCAL_SDL_INCLUDE_DIRS}
+            ${PC_SDL_IMAGE_INCLUDE_DIRS}
+            ${PC_SDL_MIXER_INCLUDE_DIRS}
+            ${PC_SDL_TTF_INCLUDE_DIRS}
+        )
+
+        target_link_directories(aether PRIVATE
+            ${PC_SDL_IMAGE_LIBRARY_DIRS}
+            ${PC_SDL_MIXER_LIBRARY_DIRS}
+            ${PC_SDL_TTF_LIBRARY_DIRS}
+        )
+
+        set(AETHER_SDL_LIBS "")
+        list(APPEND AETHER_SDL_LIBS ${PSCAL_SDL_CORE_LINK_LIBS})
+        list(APPEND AETHER_SDL_LIBS
+            ${PC_SDL_IMAGE_LIBRARIES}
+            ${PC_SDL_MIXER_LIBRARIES}
+            ${PC_SDL_TTF_LIBRARIES}
+            ${PC_SDL_IMAGE_LDFLAGS_OTHER}
+            ${PC_SDL_MIXER_LDFLAGS_OTHER}
+            ${PC_SDL_TTF_LDFLAGS_OTHER}
+        )
+        if(PSCAL_OPENGL_TARGET)
+            list(APPEND AETHER_SDL_LIBS ${PSCAL_OPENGL_TARGET})
+        elseif(OPENGL_LIBRARIES)
+            list(APPEND AETHER_SDL_LIBS ${OPENGL_LIBRARIES})
+        endif()
+        list(APPEND AETHER_SDL_LIBS ${PSCAL_SDL_PLATFORM_LIBS})
+        list(REMOVE_DUPLICATES AETHER_SDL_LIBS)
+        target_link_libraries(aether PRIVATE ${AETHER_SDL_LIBS})
+        target_compile_definitions(aether PRIVATE SDL)
+    endif()
+endif()
+
+# ---- VM 2.0 Phase 7 (Docs/pscal_vm2_plan.md §7.1): sqlite-as-plugin proof ----
+# A standalone .dylib/.so build of the sqlite category, loadable via --ext,
+# proving the pscal_ext_api.h ABI end-to-end. Desktop/server only (no dlopen
+# culture on iOS, matching plugin_loader.c's own PSCAL_TARGET_IOS gate); the
+# in-tree static sqlite category (src/ext_builtins/sqlite/sqlite_builtins.c)
+# is untouched and still ships by default -- this is a proof of mechanism,
+# not a replacement.
+if(NOT PSCAL_PLATFORM_IOS AND ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_INCLUDE_DIRS)
+    add_library(sqlite_ext_plugin MODULE
+        components/pscal-core/plugins/sqlite/sqlite_ext_plugin.c)
+    set_target_properties(sqlite_ext_plugin PROPERTIES
+        PREFIX ""
+        OUTPUT_NAME "sqlite_ext_plugin")
+    if(APPLE)
+        # Match plugin_loader.c's PSCAL_EXT_DIR directory-scan suffix
+        # (".dylib" on Apple) -- CMake's default MODULE suffix is ".so" even
+        # on macOS, which dlopen() itself doesn't care about but the scan
+        # filter does.
+        set_target_properties(sqlite_ext_plugin PROPERTIES SUFFIX ".dylib")
+    endif()
+    if(CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
+        target_compile_options(sqlite_ext_plugin PRIVATE -Wno-nullability-completeness)
+    endif()
+    target_include_directories(sqlite_ext_plugin PRIVATE
+        components/pscal-core/src
+        ${PSCAL_SQLITE_INCLUDE_DIRS})
+    if(PSCAL_SQLITE_LIBS)
+        target_link_libraries(sqlite_ext_plugin PRIVATE ${PSCAL_SQLITE_LIBS})
+    endif()
+endif()
+
+if(PSCAL_BUILD_STATIC_LIBS)
+    pscal_add_static_library(pscal_aether_static
+        FRONTEND FRONTEND_REA
+        SOURCES ${AETHER_SOURCES})
+    target_compile_definitions(pscal_aether_static PRIVATE
+        FRONTEND_REA
+        PSCAL_FRONTEND_MAIN_NAME=aether_main
+        PSCAL_FRONTEND_KIND=FRONTEND_KIND_AETHER
+        PSCAL_FRONTEND_DISPLAY_NAME=\"Aether\"
+        PSCAL_FRONTEND_USAGE_NAME=\"aether\"
+        PSCAL_FRONTEND_COMPILER_ID=\"aether\"
+        PSCAL_FRONTEND_INSTALL_HOOKS=aetherInstallFrontendHooks
+        PSCAL_PROGRAM_VERSION_OVERRIDE="${AETHER_LANG_VERSION}")
+    # Aether installs its parse/semantic/module + diagnostic hooks at startup via
+    # reaSetFrontendHooks() (src/aether/state.c); main() calls the installer named
+    # here, which also forces that TU to link inside the static library.
+    target_link_libraries(pscal_aether_static PUBLIC pscal_core_static)
+endif()
+
 # ---- Examples ----
 if(NOT PSCAL_PLATFORM_IOS)
     add_subdirectory(Examples)
 
+    # Example programs live in each component submodule's examples/ dir
+    # (moved there during the repo split); the root Examples/ tree is
+    # legacy/stale except for Examples/tiny, which has no component home.
+    set(PSCAL_EXAMPLE_COMPONENTS pascal clike rea aether exsh)
+
     file(GLOB_RECURSE PSCAL_ALL_EXAMPLE_FILES
         LIST_DIRECTORIES false
         RELATIVE "${CMAKE_SOURCE_DIR}"
-        "Examples/*")
+        "Examples/tiny/*")
+    foreach(_pscal_ex_comp IN LISTS PSCAL_EXAMPLE_COMPONENTS)
+        if(EXISTS "${CMAKE_SOURCE_DIR}/components/${_pscal_ex_comp}/examples")
+            file(GLOB_RECURSE _pscal_comp_example_files
+                LIST_DIRECTORIES false
+                RELATIVE "${CMAKE_SOURCE_DIR}"
+                "components/${_pscal_ex_comp}/examples/*")
+            list(APPEND PSCAL_ALL_EXAMPLE_FILES ${_pscal_comp_example_files})
+        endif()
+    endforeach()
 
     set(PSCAL_CONFIGURED_EXAMPLES)
     foreach(example IN LISTS PSCAL_ALL_EXAMPLE_FILES)
@@ -2444,7 +2706,7 @@ if(NOT PSCAL_PLATFORM_IOS)
     include(GNUInstallDirs)
     set(_pscal_runtime_root "${PSCAL_INSTALL_ROOT_DESTINATION}")
 
-    install(TARGETS pascal pscalvm clike clike-repl rea
+    install(TARGETS pascal pscalvm clike clike-repl rea aether
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
     if(BUILD_DASCAL)
         install(TARGETS dascal
@@ -2481,9 +2743,16 @@ if(NOT PSCAL_PLATFORM_IOS)
     install(DIRECTORY etc/
             DESTINATION "${_pscal_runtime_root}/etc"
             USE_SOURCE_PERMISSIONS)
-    install(DIRECTORY Examples/
-            DESTINATION "${_pscal_runtime_root}/Examples"
+    install(DIRECTORY Examples/tiny/
+            DESTINATION "${_pscal_runtime_root}/Examples/tiny"
             USE_SOURCE_PERMISSIONS)
+    foreach(_pscal_ex_comp IN LISTS PSCAL_EXAMPLE_COMPONENTS)
+        if(EXISTS "${CMAKE_SOURCE_DIR}/components/${_pscal_ex_comp}/examples")
+            install(DIRECTORY components/${_pscal_ex_comp}/examples/
+                    DESTINATION "${_pscal_runtime_root}/Examples/${_pscal_ex_comp}"
+                    USE_SOURCE_PERMISSIONS)
+        endif()
+    endforeach()
     if(PSCAL_CONFIGURED_EXAMPLES)
         install(CODE [[
             set(_pscal_build_cmd "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target configured_examples)
@@ -2498,7 +2767,11 @@ if(NOT PSCAL_PLATFORM_IOS)
         ]])
     endif()
     foreach(example IN LISTS PSCAL_CONFIGURED_EXAMPLES)
-        string(REGEX REPLACE "^Examples/" "" example_relative "${example}")
+        if(example MATCHES "^Examples/")
+            string(REGEX REPLACE "^Examples/" "" example_relative "${example}")
+        else()
+            string(REGEX REPLACE "^components/([^/]+)/examples/" "\\1/" example_relative "${example}")
+        endif()
         get_filename_component(example_dir "${example_relative}" DIRECTORY)
         install(FILES "${PSCAL_CONFIGURED_EXAMPLES_DIR}/${example}"
                 DESTINATION "${_pscal_runtime_root}/Examples/${example_dir}"
@@ -2508,17 +2781,41 @@ if(NOT PSCAL_PLATFORM_IOS)
     endforeach()
     install(DIRECTORY Docs/
             DESTINATION "${_pscal_runtime_root}/docs")
-    install(FILES ${CMAKE_BINARY_DIR}/bin/tiny.pbc
-            DESTINATION "${_pscal_runtime_root}/bin")
+    # tiny.pbc is a precompiled-bytecode fast path for the tiny.clike
+    # mini-compiler; bin/tiny already falls back to interpreting
+    # tiny.clike directly when tiny.pbc is absent, so treat this as
+    # best-effort rather than install-blocking.
+    install(CODE [[
+        set(_pscal_build_cmd "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --target tiny_pbc)
+        if(CMAKE_CONFIGURATION_TYPES)
+            list(APPEND _pscal_build_cmd --config "${CMAKE_INSTALL_CONFIG_NAME}")
+        endif()
+        execute_process(COMMAND ${_pscal_build_cmd}
+            RESULT_VARIABLE _pscal_tiny_pbc_result)
+        if(NOT _pscal_tiny_pbc_result EQUAL 0 OR NOT EXISTS "${CMAKE_BINARY_DIR}/bin/tiny.pbc")
+            message(WARNING "tiny.pbc was not produced (tiny_pbc target); bin/tiny will fall back to interpreting tiny.clike directly")
+        else()
+            set(_pscal_tiny_pbc_root "")
+            if("${PSCAL_INSTALL_ROOT_DESTINATION}" STREQUAL "." OR "${PSCAL_INSTALL_ROOT_DESTINATION}" STREQUAL "")
+                set(_pscal_tiny_pbc_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+            elseif(IS_ABSOLUTE "${PSCAL_INSTALL_ROOT_DESTINATION}")
+                set(_pscal_tiny_pbc_root "$ENV{DESTDIR}${PSCAL_INSTALL_ROOT_DESTINATION}")
+            else()
+                set(_pscal_tiny_pbc_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/${PSCAL_INSTALL_ROOT_DESTINATION}")
+            endif()
+            file(INSTALL "${CMAKE_BINARY_DIR}/bin/tiny.pbc"
+                 DESTINATION "${_pscal_tiny_pbc_root}/bin")
+        endif()
+    ]])
     # Tiny compiler runtime assets for iOS/iPadOS: install script plus minimal headers it loads.
     install(PROGRAMS bin/tiny
             DESTINATION "${_pscal_runtime_root}/bin"
             PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
                         GROUP_READ GROUP_EXECUTE
                         WORLD_READ WORLD_EXECUTE)
-    install(FILES src/compiler/bytecode.h
+    install(FILES components/pscal-core/src/compiler/bytecode.h
             DESTINATION "${_pscal_runtime_root}/src/compiler")
-    install(FILES src/core/version.h
+    install(FILES components/pscal-core/src/core/version.h
             DESTINATION "${_pscal_runtime_root}/src/core")
     install(DIRECTORY Tests/libs/
             DESTINATION "${_pscal_runtime_root}/etc/tests"
@@ -2583,6 +2880,7 @@ if(NOT PSCAL_PLATFORM_IOS)
     add_test(NAME pascal_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_pascal_tests.sh)
     add_test(NAME clike_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_clike_tests.sh)
     add_test(NAME rea_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_rea_tests.sh)
+    add_test(NAME aether_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_aether_tests.sh)
     set_tests_properties(rea_tests PROPERTIES ENVIRONMENT "REA_SKIP_TESTS=constructor_init field_access_assign field_access_read method_this_assign new_alloc new_assign_ptr")
     add_test(NAME json2bc_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_json2bc_tests.sh)
 endif()
@@ -2591,7 +2889,7 @@ endif()
 set(JSON2BC_SOURCES
     src/tools/json2bc.c
     src/tools/ast_json_loader.c
-    src/rea/type_stubs.c
+    ${REA_SRC}/type_stubs.c
 )
 if(NOT PSCAL_PLATFORM_IOS)
     add_executable(pscaljson2bc ${JSON2BC_SOURCES})
@@ -2652,6 +2950,9 @@ endif()
 if(TARGET exsh AND PSCAL_FORCE_IOS)
     if(TARGET pscal_pascal_static)
         target_link_libraries(exsh PRIVATE pscal_pascal_static)
+    endif()
+    if(TARGET pscal_aether_static)
+        target_link_libraries(exsh PRIVATE pscal_aether_static)
     endif()
     if(TARGET pscal_vm_static)
         target_link_libraries(exsh PRIVATE pscal_vm_static)
@@ -2733,6 +3034,7 @@ if(PSCAL_PLATFORM_IOS)
     set(_tool_runner_libs
         pscal_clike_static
         pscal_rea_static
+        pscal_aether_static
         pscal_pascal_static
         pscal_vm_static
         pscal_json2bc_static

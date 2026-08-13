@@ -1,0 +1,11 @@
+// emit several lines from one fx block
+fn main() -> Void {
+    let a: Int = 4;
+    let b: Int = 6;
+    fx {
+        println("a=", a);
+        println("b=", b);
+        println("sum=", a + b);
+    }
+    ret;
+}

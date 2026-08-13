@@ -1,0 +1,11 @@
+// 60_module_function_import_quoted
+// Concepts: canonical quoted module import, direct exported helper call
+// expect: 42
+
+use "101_bench_math";
+
+fn main() -> Void {
+    let value: Int = answer();
+    fx { println(value); }
+    ret;
+}

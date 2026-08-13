@@ -1,0 +1,36 @@
+// 123_sales_quota_report
+// Concepts: importing a provided module (use "124_sales_targets"), calling its
+// exact exported CONSTS (MonthlyQuota, BonusThreshold) and pure fn (attainment),
+// object-root TOON extraction, bonus tally, summary
+// expect: rep 0: Ada / 120 / bonus no
+// expect: rep 1: Ben / 160 / bonus yes
+// expect: rep 2: Cyd / 90 / bonus no
+// expect: quota = 100
+// expect: bonus reps = 1
+
+use "124_sales_targets";
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("sales123.json");
+    let root: ToonNode = toon_root(doc);
+    let reps: ToonNode = toon_key(root, "reps");
+    let bonusCount: Int = 0;
+
+    loop i in 0..toon_len(reps) {
+        let rep: ToonNode = toon_at(reps, i);
+        let name: Text = toon_get_text_or(rep, "name", "UNKNOWN");
+        let sales: Int = toon_get_int_or(rep, "sales", 0);
+        let pct: Int = attainment(sales);
+        let bonus: Text = "no";
+        if sales >= BonusThreshold { bonus = "yes"; bonusCount = bonusCount + 1; }
+
+        fx { println("rep ", i, ": ", name, " / ", pct, " / bonus ", bonus); }
+    }
+
+    fx { println("quota = ", MonthlyQuota); println("bonus reps = ", bonusCount); }
+
+    toon_close(doc);
+    ret;
+}

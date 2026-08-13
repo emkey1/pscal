@@ -1,0 +1,11 @@
+{
+  "expenses": [
+    {"name": "a", "amount": 100},
+    {"name": "b", "amount": 110},
+    {"name": "c", "amount": 90},
+    {"name": "d", "amount": 105},
+    {"name": "e", "amount": 95},
+    {"name": "big", "amount": 400},
+    {"name": "tiny", "amount": 5}
+  ]
+}

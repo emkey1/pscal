@@ -1,0 +1,29 @@
+// 108_name_validation_exact
+// Concepts: string_len, text equality, direct Bool printing, exact-output labels
+// expect: alpha=true
+// expect: empty=false
+// expect: bad=false
+
+@pure
+fn validName(name: Text) -> Bool {
+    let size: Int = string_len(name);
+    if size < 1 {
+        ret false;
+    }
+    if size > 6 {
+        ret false;
+    }
+    if name == "bad" {
+        ret false;
+    }
+    ret true;
+}
+
+fn main() -> Void {
+    fx {
+        println("alpha=", validName("alpha"));
+        println("empty=", validName(""));
+        println("bad=", validName("bad"));
+    }
+    ret;
+}

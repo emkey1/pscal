@@ -1,0 +1,15 @@
+@pure
+fn sum_to(n: Int) -> Int {
+    let s: Int = 0;
+    loop i in 1..n + 1 {
+        s = s + i;
+    }
+    ret s;
+}
+
+fn main() -> Void {
+    fx {
+        println("sum=", sum_to(5));
+    }
+    ret;
+}

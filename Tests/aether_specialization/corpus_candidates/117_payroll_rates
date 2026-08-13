@@ -1,0 +1,25 @@
+mod PayrollRates {
+    export const BaseHours: Int = 40;
+
+    @pure
+    export fn clampHours(hours: Int) -> Int {
+        if hours < 0 {
+            ret 0;
+        }
+        if hours > 80 {
+            ret 80;
+        }
+        ret hours;
+    }
+
+    @pure
+    export fn classifyShift(hours: Int) -> Text {
+        if hours > BaseHours {
+            ret "overtime";
+        }
+        if hours == BaseHours {
+            ret "full";
+        }
+        ret "partial";
+    }
+}

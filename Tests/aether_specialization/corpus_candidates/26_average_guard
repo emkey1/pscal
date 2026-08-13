@@ -1,0 +1,20 @@
+// 26_average_guard
+// Concepts: guarded division with an inline conditional expression
+// expect: average = 7.50
+// expect: empty average = 0.00
+
+fn main() -> Void {
+    let total: Int = 30;
+    let count: Int = 4;
+    let average: Real = if count > 0 { total * 1.0 / count } else { 0.0 };
+
+    let emptyTotal: Int = 0;
+    let emptyCount: Int = 0;
+    let emptyAverage: Real = if emptyCount > 0 { emptyTotal * 1.0 / emptyCount } else { 0.0 };
+
+    fx {
+        println("average = ", average:0:2);
+        println("empty average = ", emptyAverage:0:2);
+    }
+    ret;
+}

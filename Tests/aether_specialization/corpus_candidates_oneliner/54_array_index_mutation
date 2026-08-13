@@ -1,0 +1,28 @@
+// 54_array_index_mutation
+// Concepts: dynamic array indexing, in-place mutation, indexed reads and writes
+// expect: Modified buffer:
+// expect:   [ 0]: 20
+// expect:   [ 1]: 40
+// expect:   [ 2]: 99
+// expect:   [ 3]: 80
+// expect:   [ 4]: 100
+
+fn main() -> Void {
+    let buffer: Int[] = [10, 20, 30, 40, 50];
+    let size: Int = length(buffer);
+    let first: Int = buffer[0];
+    buffer[2] = 99;
+
+    if first < 0 { fx { println("unreachable"); } }
+
+    loop i in 0..size {
+        let current: Int = buffer[i];
+        if current % 2 == 0 { buffer[i] = current * 2; }
+    }
+
+    fx {
+        println("Modified buffer:");
+        loop i in 0..length(buffer) { println("  [", i, "]: ", buffer[i]); }
+    }
+    ret;
+}

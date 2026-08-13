@@ -16,18 +16,18 @@
 ## Usage
 Binary: `build/bin/clike`
 
-Source: `Examples/clike/base/simple_web_server`
+Source: `components/clike/examples/base/simple_web_server`
 
 Examples:
 - Default temp root (port 5555):
-  - `build/bin/clike Examples/clike/base/simple_web_server`
+  - `build/bin/clike components/clike/examples/base/simple_web_server`
 - Serve existing directory on default port:
-  - `build/bin/clike Examples/clike/base/simple_web_server /path/to/htdocs`
+  - `build/bin/clike components/clike/examples/base/simple_web_server /path/to/htdocs`
 - Custom port and root:
-  - `build/bin/clike Examples/clike/base/simple_web_server 8080 /path/to/htdocs`
-  - or `build/bin/clike Examples/clike/base/simple_web_server /path/to/htdocs 8080`
+  - `build/bin/clike components/clike/examples/base/simple_web_server 8080 /path/to/htdocs`
+  - or `build/bin/clike components/clike/examples/base/simple_web_server /path/to/htdocs 8080`
 - Tuning threads and queue capacity (3rd/4th args):
-  - `build/bin/clike Examples/clike/base/simple_web_server /path 8080 16 128`
+  - `build/bin/clike components/clike/examples/base/simple_web_server /path 8080 16 128`
   - Threads clamped to 1..64; queue capacity to 8..256.
 
 ## HTTP Behavior
@@ -67,12 +67,12 @@ Examples:
 - Heartbeat (every 60s): `YYYY-MM-DD HH:MM:SS [HB] q=depth/cap thr=T accepted=A enq=E served=S drop=D dps=ΔS`.
 
 ## Tests
-- Network test: `Tests/clike/SimpleWebServerClient.cl` (marked `.net`).
+- Network test: `components/clike/tests/SimpleWebServerClient.cl` (marked `.net`).
   - Verifies index handling, percent-decoding (spaces), and traversal blocking.
 - Run with: `RUN_NET_TESTS=1 ctest --test-dir build --output-on-failure -R clike_tests`.
 
 ## Implementation Notes
-- File: `Examples/clike/base/simple_web_server`.
+- File: `components/clike/examples/base/simple_web_server`.
 - Important functions:
   - `serveConn(int)`: Request parsing, routing, response assembly.
   - `decodePercent(str)`: Percent-decoding with hex validation.

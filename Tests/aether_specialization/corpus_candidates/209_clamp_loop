@@ -1,0 +1,13 @@
+// clamp_loop
+// expect: 100
+// expect: 5
+// expect: 100
+// expect: 73
+fn main() -> Void {
+    let xs: Int[] = [120, 5, 250, 73];
+    let n: Int = length(xs);
+    loop i in 0..n {
+        fx { println(clamp(xs[i], 0, 100)); }
+    }
+    ret;
+}

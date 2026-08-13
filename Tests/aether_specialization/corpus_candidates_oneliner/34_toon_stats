@@ -1,0 +1,36 @@
+// 34_toon_stats
+// Concepts: accumulate over a TOON array, real-valued rate via 100.0,
+// stable decimal output
+// expect: transactions = 4
+// expect: total = 545
+// expect: large share = 50.00 %
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse("{\"transactions\":[{\"amount\":120},{\"amount\":80},{\"amount\":45},{\"amount\":300}]}");
+    let root: ToonNode = toon_root(doc);
+    let transactions: ToonNode = toon_key(root, "transactions");
+
+    let count: Int = toon_len(transactions);
+    let total: Int = 0;
+    let large: Int = 0;
+
+    loop i in 0..count {
+        let tx: ToonNode = toon_at(transactions, i);
+        let amount: Int = toon_get_int_or(tx, "amount", 0);
+        total = total + amount;
+        if amount >= 100 { large = large + 1; }
+    }
+
+    let largeShare: Real = large * 100.0 / count;
+
+    fx {
+        println("transactions = ", count);
+        println("total = ", total);
+        println("large share = ", largeShare:0:2, "%");
+    }
+
+    toon_close(doc);
+    ret;
+}

@@ -1,5 +1,0 @@
-class Point { int x; int y; }
-Point p;
-// Read field as rvalue
-int a = p.x;
-

@@ -1,0 +1,12 @@
+// 59_range_loop_squares_typed
+// Concepts: half-open range loop, explicit local typing for arithmetic-derived values
+// expect: 0 => 0
+// expect: 1 => 1
+// expect: 2 => 4
+// expect: 3 => 9
+// expect: 4 => 16
+
+fn main() -> Void {
+    loop i in 0..5 { let square: Int = i * i; fx { println(i, " => ", square); } }
+    ret;
+}

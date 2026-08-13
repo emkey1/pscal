@@ -1,0 +1,28 @@
+// n1_missing_final_key  (wishlist 8)
+// user.profile exists but has no "email"; _or supplies the fallback only at
+// the final lookup, after both intermediates are guarded.
+// expect: email = none
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("{\"user\":{\"profile\":{\"name\":\"Ada\"}}}");
+    let root: ToonNode = toon_root(doc);
+
+    let email: Text = "none";
+    if toon_has_key(root, "user") {
+        let user: ToonNode = toon_key(root, "user");
+        if toon_has_key(user, "profile") {
+            let profile: ToonNode = toon_key(user, "profile");
+            email = toon_get_text_or(profile, "email", "none");
+        }
+    }
+    fx {
+        println("email = ", email);
+    }
+    toon_close(doc);
+    ret;
+}

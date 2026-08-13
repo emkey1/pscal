@@ -1,0 +1,14 @@
+// clamp_readings
+// expect: reading 0: 105
+// expect: reading 1: 0
+// expect: reading 2: 72
+// expect: reading 3: 120
+fn main() -> Void {
+    let readings: Int[] = [105, -20, 72, 200];
+    let n: Int = length(readings);
+    loop i in 0..n {
+        let safe: Int = clamp(readings[i], 0, 120);
+        fx { println("reading ", i, ": ", safe); }
+    }
+    ret;
+}

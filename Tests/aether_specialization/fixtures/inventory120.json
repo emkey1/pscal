@@ -1,0 +1,1 @@
+{"items":[{"sku":"A1","qty":50,"reorderAt":20},{"sku":"B2","qty":5,"reorderAt":10},{"sku":"C3","qty":0,"reorderAt":5},{"sku":"D4","qty":15,"reorderAt":15},{"broken":true}]}

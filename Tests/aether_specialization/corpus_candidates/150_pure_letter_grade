@@ -1,0 +1,22 @@
+// 150_pure_letter_grade
+@pure
+fn letter(score: Int) -> Text {
+    if score >= 90 {
+        ret "A";
+    }
+    if score >= 80 {
+        ret "B";
+    }
+    if score >= 70 {
+        ret "C";
+    }
+    ret "F";
+}
+fn main() -> Void {
+    fx {
+        println("95:", letter(95));
+        println("82:", letter(82));
+        println("60:", letter(60));
+    }
+    ret;
+}

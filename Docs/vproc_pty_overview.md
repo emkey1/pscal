@@ -59,7 +59,7 @@ This note summarizes how the virtual process (vproc) and pseudo-tty (vpty) layer
   - `assert_sigint_runtime_callback_reenters_without_deadlock`
   - `assert_sigtstp_runtime_callback_reenters_without_deadlock`
   - These verify runtime callback re-entry from vproc signal delivery does not deadlock for shell-thread `SIGINT`/`SIGTSTP`.
-- `Tests/exsh/tests/watch_top_vproc.exsh` and `Tests/exsh/tests/watch_top_foreground_vproc.exsh`
+- `components/exsh/tests/tests/watch_top_vproc.exsh` and `components/exsh/tests/tests/watch_top_foreground_vproc.exsh`
   - These cover watch/top synthetic vproc behavior and foreground label stability after job-control/signal-path changes.
 
 This overview should give enough context to reason about how applets, front-end interpreters, nextvi, and other tools interact with the virtual process/pty layers on iOS/Catalyst, and where to look when job control or device handling behaves unexpectedly. 

@@ -1,9 +1,0 @@
-program Demo;
-uses StringUtil; { MathLib no longer required for core math }
-var
-  r: real;
-begin
-  r := arcsin(0.5);
-  writeln('ArcSin(0.5)=', r:0:4);
-  writeln(ReverseString('pscal'));
-end.

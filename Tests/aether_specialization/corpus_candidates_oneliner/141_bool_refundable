@@ -1,0 +1,15 @@
+// 141_bool_refundable
+// Concepts: boolean operators && and ! in a pure predicate
+@pure
+fn refundable(unopened: Bool, withinDays: Bool, finalSale: Bool) -> Bool {
+    ret unopened && withinDays && !finalSale;
+}
+
+fn main() -> Void {
+    fx {
+        println("a=", refundable(true, true, false));
+        println("b=", refundable(true, false, false));
+        println("c=", refundable(true, true, true));
+    }
+    ret;
+}

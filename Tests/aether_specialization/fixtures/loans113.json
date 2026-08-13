@@ -1,0 +1,1 @@
+{"loans":[{"id":"B101","borrower":"alice","daysOut":20},{"id":"B102","borrower":"bob","daysOut":10},{"id":"B103","borrower":"cara","daysOut":30},{"broken":true}]}

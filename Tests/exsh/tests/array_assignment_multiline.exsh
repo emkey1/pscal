@@ -1,9 +1,0 @@
-#!/usr/bin/env exsh
-
-declare -A prompt_colors=(
-    [primary]="blue"
-    [secondary]="green"
-)
-
-printf 'primary=%s\n' "${prompt_colors[primary]}"
-printf 'len=%s\n' "${#prompt_colors[@]}"

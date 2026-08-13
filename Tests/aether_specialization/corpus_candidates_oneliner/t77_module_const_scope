@@ -1,0 +1,11 @@
+const RATE: Int = 7;
+
+@pure
+fn weekly(days: Int) -> Int {
+    ret days * RATE;
+}
+
+fn main() -> Void {
+    fx { println("weekly=", weekly(3)); }
+    ret;
+}

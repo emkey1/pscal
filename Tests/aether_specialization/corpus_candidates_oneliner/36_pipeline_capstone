@@ -1,0 +1,75 @@
+// 36_pipeline_capstone
+// Concepts: end-to-end shape — pure classification, contract-guarded
+// normalization, record construction from TOON rows, effectful report
+// expect: alpha [ 95] -> ready
+// expect: beta [ 72] -> review
+// expect: gamma [ 100] -> ready
+// expect: ready jobs = 2
+
+const DefaultScore: Int = 50;
+
+@pure
+fn classify(score: Int) -> Text {
+    if score >= 90 { ret "ready"; }
+    if score >= 70 { ret "review"; }
+    ret "blocked";
+}
+
+@pure
+fn priority(score: Int) -> Int {
+    if score >= 90 { ret 3; }
+    if score >= 70 { ret 2; }
+    ret 1;
+}
+
+@pre score >= 0
+@post result >= 0
+fn normalizeScore(score: Int) -> Int {
+    if score > 100 { ret 100; }
+    ret score;
+}
+
+type JobSummary {
+    name: Text;
+    score: Int;
+    status: Text;
+    priority: Int;
+
+    fn isReady() -> Bool {
+        ret self.priority == 3;
+    }
+}
+
+fn makeSummary(job: ToonNode) -> JobSummary {
+    let name: Text = toon_get_text(job, "name");
+    let rawScore: Int = toon_get_int_or(job, "score", DefaultScore);
+    let score: Int = normalizeScore(rawScore);
+    let summary: JobSummary = new JobSummary();
+    summary.name = name;
+    summary.score = score;
+    summary.status = classify(score);
+    summary.priority = priority(score);
+    ret summary;
+}
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse("{\"jobs\":[{\"name\":\"alpha\",\"score\":95},{\"name\":\"beta\",\"score\":72},{\"name\":\"gamma\",\"score\":150}]}");
+    let root: ToonNode = toon_root(doc);
+    let jobs: ToonNode = toon_key(root, "jobs");
+
+    let readyCount: Int = 0;
+    loop i in 0..toon_len(jobs) {
+        let job: ToonNode = toon_at(jobs, i);
+        let summary: JobSummary = makeSummary(job);
+        let ready: Bool = summary.isReady();
+        if ready { readyCount = readyCount + 1; }
+        fx { println(summary.name, " [", summary.score, "] -> ", summary.status); }
+    }
+
+    fx { println("ready jobs = ", readyCount); }
+
+    toon_close(doc);
+    ret;
+}

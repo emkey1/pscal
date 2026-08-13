@@ -1,0 +1,39 @@
+// 311_gradebook_014
+// Concepts: parallel Text/Int arrays, flat per-student score blocks, helper functions, indexed accumulation, real average, pass/fail threshold, class rollup
+// expect: Cy: avg 67.00 (pass)
+// expect: Mo: avg 54.00 (fail)
+// expect: Rex: avg 67.50 (pass)
+// expect: Ana: avg 55.50 (fail)
+// expect: class average: 61.00
+
+fn sumScores(scores: Int[], base: Int, count: Int) -> Int {
+    let total: Int = 0;
+    loop j in 0..count {
+        total = total + scores[base + j];
+    }
+    ret total;
+}
+
+fn grade(total: Int, count: Int) -> Text {
+    if total >= 60 * count { ret "pass"; }
+    ret "fail";
+}
+
+fn main() -> Void {
+    let names: Text[] = ["Cy", "Mo", "Rex", "Ana"];
+    let scores: Int[] = [66, 73, 37, 92, 54, 51, 40, 71, 70, 95, 51, 54, 82, 39, 61, 40];
+    let students: Int = 4;
+    let perStudent: Int = 4;
+    let classSum: Int = 0;
+    loop s in 0..students {
+        let base: Int = s * perStudent;
+        let total: Int = sumScores(scores, base, perStudent);
+        classSum = classSum + total;
+        let avg: Real = total * 1.0 / perStudent;
+        let status: Text = grade(total, perStudent);
+        fx { println(names[s], ": avg ", avg:0:2, " (", status, ")"); }
+    }
+    let classAvg: Real = classSum * 1.0 / (students * perStudent);
+    fx { println("class average: ", classAvg:0:2); }
+    ret;
+}

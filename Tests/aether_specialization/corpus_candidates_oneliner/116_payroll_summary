@@ -1,0 +1,45 @@
+// 116_payroll_summary
+// Concepts: importing a provided module with `use`, calling its exact exported
+// const (BaseHours) and pure fns (clampHours, classifyShift), object-root TOON
+// extraction, running totals, per-worker and summary output
+// expect: worker 0: Ivy / 45 / overtime
+// expect: worker 1: Jon / 40 / full
+// expect: worker 2: Kim / 30 / partial
+// expect: worker 3: Lee / 80 / overtime
+// expect: base hours = 40
+// expect: overtime workers = 2
+// expect: total hours = 195
+
+use "117_payroll_rates";
+
+fn main() -> Void {
+    if !has_toon() { fx { println("yyjson unavailable"); } ret; }
+
+    let doc: ToonDoc = toon_parse_file("shifts116.json");
+    let root: ToonNode = toon_root(doc);
+    let workers: ToonNode = toon_key(root, "workers");
+    let totalHours: Int = 0;
+    let overtimeCount: Int = 0;
+
+    loop i in 0..toon_len(workers) {
+        let worker: ToonNode = toon_at(workers, i);
+        let name: Text = toon_get_text_or(worker, "name", "UNKNOWN");
+        let raw: Int = toon_get_int_or(worker, "hours", 0);
+        let hours: Int = clampHours(raw);
+        let shift: Text = classifyShift(hours);
+
+        totalHours = totalHours + hours;
+        if shift == "overtime" { overtimeCount = overtimeCount + 1; }
+
+        fx { println("worker ", i, ": ", name, " / ", hours, " / ", shift); }
+    }
+
+    fx {
+        println("base hours = ", BaseHours);
+        println("overtime workers = ", overtimeCount);
+        println("total hours = ", totalHours);
+    }
+
+    toon_close(doc);
+    ret;
+}

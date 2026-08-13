@@ -1,3 +1,0 @@
-VM Error: Interface assertion expected 'tfilegreeter' but receiver is 'tconsolegreeter'.
-[Error Location] Offset: 95, Line: 33
-

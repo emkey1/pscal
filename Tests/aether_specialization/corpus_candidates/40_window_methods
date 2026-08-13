@@ -1,0 +1,47 @@
+// 40_window_methods
+// Concepts: methods mutating array fields, extension-style helpers over a type
+// with an array field, stable Real formatting
+// expect: count = 3
+// expect: sum = 27
+// expect: average = 9.00
+
+type Window {
+    values: Int[];
+    total: Int;
+
+    fn push(value: Int) -> Void {
+        self.values = self.values + [value];
+        self.total = self.total + value;
+        ret;
+    }
+
+    fn count() -> Int {
+        ret length(self.values);
+    }
+
+    fn sum() -> Int {
+        ret self.total;
+    }
+
+    fn average() -> Real {
+        let size: Int = self.count();
+        if size == 0 {
+            ret 0.0;
+        }
+        ret self.total * 1.0 / size;
+    }
+}
+
+fn main() -> Void {
+    let window: Window = Window { values: [], total: 0 };
+    window.push(5);
+    window.push(9);
+    window.push(13);
+
+    fx {
+        println("count = ", window.count());
+        println("sum = ", window.sum());
+        println("average = ", window.average():0:2);
+    }
+    ret;
+}

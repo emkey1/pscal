@@ -1,0 +1,55 @@
+// 300_ledger_005
+// Concepts: Real arithmetic, helper functions, overdraft guard, percentage interest, fx formatted output, multi-step state
+// expect: Starting balance: $250.00
+// expect: Withdraw $163.00: $87.00
+// expect: Deposit $101.00: $188.00
+// expect: Withdraw $175.00: $13.00
+// expect: Deposit $116.00: $129.00
+// expect: Interest 5%: $135.45
+// expect: Withdraw $32.00: $103.45
+// expect: Deposit $38.00: $141.45
+// expect: Deposit $58.00: $199.45
+// expect: Deposit $54.00: $253.45
+// expect: Deposit $72.00: $325.45
+// expect: Interest 1%: $328.70
+
+fn deposit(balance: Real, amount: Real) -> Real {
+    ret balance + amount;
+}
+
+fn withdraw(balance: Real, amount: Real) -> Real {
+    if balance >= amount { ret balance - amount; }
+    ret balance;
+}
+
+fn applyInterest(balance: Real, rate: Real) -> Real {
+    ret balance * (1.0 + rate);
+}
+
+fn main() -> Void {
+    let balance: Real = 250.0;
+    fx { println("Starting balance: $", balance:0:2); }
+    balance = withdraw(balance, 163.0);
+    fx { println("Withdraw $163.00: $", balance:0:2); }
+    balance = deposit(balance, 101.0);
+    fx { println("Deposit $101.00: $", balance:0:2); }
+    balance = withdraw(balance, 175.0);
+    fx { println("Withdraw $175.00: $", balance:0:2); }
+    balance = deposit(balance, 116.0);
+    fx { println("Deposit $116.00: $", balance:0:2); }
+    balance = applyInterest(balance, 0.05);
+    fx { println("Interest 5%: $", balance:0:2); }
+    balance = withdraw(balance, 32.0);
+    fx { println("Withdraw $32.00: $", balance:0:2); }
+    balance = deposit(balance, 38.0);
+    fx { println("Deposit $38.00: $", balance:0:2); }
+    balance = deposit(balance, 58.0);
+    fx { println("Deposit $58.00: $", balance:0:2); }
+    balance = deposit(balance, 54.0);
+    fx { println("Deposit $54.00: $", balance:0:2); }
+    balance = deposit(balance, 72.0);
+    fx { println("Deposit $72.00: $", balance:0:2); }
+    balance = applyInterest(balance, 0.01);
+    fx { println("Interest 1%: $", balance:0:2); }
+    ret;
+}

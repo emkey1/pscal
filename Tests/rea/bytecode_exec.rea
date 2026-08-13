@@ -1,5 +1,0 @@
-int a = 1 + 2 * 3;
-bool b = a >= 7;
-str msg = "hi";
-a = -a + 4;
-

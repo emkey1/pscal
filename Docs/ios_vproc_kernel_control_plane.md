@@ -181,7 +181,7 @@ events.
   parking worker threads in a non-resumable join path.
 - Re-verified:
   - `Tests/run_ios_vproc_tests.sh`
-  - `Tests/exsh/exsh_interactive_test_harness.py` (all interactive signal
+  - `components/exsh/tests/exsh_interactive_test_harness.py` (all interactive signal
     scenarios pass).
 - Added runtime-origin control-signal dispatch coverage:
   - `runtime_request_ctrl_c_dispatches_to_foreground_job`

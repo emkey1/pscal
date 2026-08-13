@@ -1,4 +1,0 @@
-class Point { int x; int y; }
-// Allocate pointer to Point via new
-Point p = new Point();
-

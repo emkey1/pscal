@@ -1,7 +1,0 @@
-#!/usr/bin/env exsh
-
-if help -l | grep -q '^help[[:space:]]'; then
-  echo "help-builtin-present"
-else
-  echo "help-builtin-missing"
-fi

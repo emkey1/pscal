@@ -1,0 +1,16 @@
+// 140_bool_access_policy
+// Concepts: boolean operators && || ! in a pure predicate
+@pure
+fn canEnter(member: Bool, dayPass: Bool, banned: Bool, age: Int) -> Bool {
+    ret age >= 16 && (member || dayPass) && !banned;
+}
+
+fn main() -> Void {
+    fx {
+        println("p0: ", canEnter(true, false, false, 20));
+        println("p1: ", canEnter(false, true, false, 14));
+        println("p2: ", canEnter(true, false, true, 30));
+        println("p3: ", canEnter(false, false, false, 25));
+    }
+    ret;
+}

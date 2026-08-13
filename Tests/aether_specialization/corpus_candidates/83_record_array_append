@@ -1,0 +1,36 @@
+// a4_record_array  (wishlist 1)
+// expect: apple x 3
+// expect: pear x 5
+// expect: total qty = 8
+
+type Item {
+    name: Text;
+    qty: Int;
+}
+
+fn main() -> Void {
+    let items: Item[] = [];
+
+    let a: Item = new Item();
+    a.name = "apple";
+    a.qty = 3;
+    let b: Item = new Item();
+    b.name = "pear";
+    b.qty = 5;
+
+    items = items + [a];
+    items = items + [b];
+
+    let total: Int = 0;
+    loop i in 0..length(items) {
+        let it: Item = items[i];
+        total = total + it.qty;
+        fx {
+            println(it.name, " x ", it.qty);
+        }
+    }
+    fx {
+        println("total qty = ", total);
+    }
+    ret;
+}

@@ -23,10 +23,10 @@ The SDL runtime links against SDL_image to provide PNG export support. When the 
 After building, launch the demo from the repository root:
 
 ```
-./build/bin/rea Examples/rea/sdl/landscape
+./build/bin/rea components/rea/examples/sdl/landscape
 ```
 
-The script prints the active controls on startup and opens a 1024×768 window. Regenerate terrain with different seeds by passing an integer argument on the command line (for example `./build/bin/rea Examples/rea/sdl/landscape 42`).
+The script prints the active controls on startup and opens a 1024×768 window. Regenerate terrain with different seeds by passing an integer argument on the command line (for example `./build/bin/rea components/rea/examples/sdl/landscape 42`).
 
 ## Controls
 

@@ -1,0 +1,39 @@
+// 125_contract_normalize_levels
+// Concepts: @pre/@post contracts on a clamping helper (@post references result),
+// a pure banding helper, direct calls, totals
+// expect: 30 => 30 / low
+// expect: 150 => 100 / high
+// expect: 65 => 65 / mid
+// expect: 90 => 90 / high
+// expect: total = 285
+
+@pre raw >= 0
+@post result <= 100
+fn normalizeLevel(raw: Int) -> Int {
+    if raw > 100 { ret 100; }
+    ret raw;
+}
+
+@pure
+fn band(level: Int) -> Text {
+    if level >= 80 { ret "high"; }
+    if level >= 40 { ret "mid"; }
+    ret "low";
+}
+
+fn main() -> Void {
+    let a: Int = normalizeLevel(30);
+    let b: Int = normalizeLevel(150);
+    let c: Int = normalizeLevel(65);
+    let d: Int = normalizeLevel(90);
+
+    fx {
+        println("30 => ", a, " / ", band(a));
+        println("150 => ", b, " / ", band(b));
+        println("65 => ", c, " / ", band(c));
+        println("90 => ", d, " / ", band(d));
+        println("total = ", a + b + c + d);
+    }
+
+    ret;
+}

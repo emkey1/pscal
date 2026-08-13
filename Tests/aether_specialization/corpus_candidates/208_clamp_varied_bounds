@@ -1,0 +1,15 @@
+// clamp_varied_bounds
+// The 3-arg builtin clamp(value, lo, hi) works for any bounds, not just 0..100.
+// expect: 50
+// expect: 20
+// expect: 80
+// expect: -3
+fn main() -> Void {
+    fx {
+        println(clamp(50, 0, 100));
+        println(clamp(8, 20, 80));
+        println(clamp(95, 20, 80));
+        println(clamp(-3, -10, 10));
+    }
+    ret;
+}
