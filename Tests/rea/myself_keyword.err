@@ -8,13 +8,13 @@ Offset Line Opcode           Operand  Value / Target (Args)
 
 --- Procedure dummy.test (at 0010) ---
 0010    4 CONST_FALSE
-0011    | SET_LOCAL           1 (slot)
+0011    | SET_LOCAL           2 (slot)
 0013    | GET_LOCAL           0 (slot)
 0015    | LOAD_FIELD_VALUE    2 (index)
 0017    | CONST_0
 0018    | EQUAL
-0019    | SET_LOCAL           1 (slot)
-0021    5 GET_LOCAL           1 (slot)
+0019    | SET_LOCAL           2 (slot)
+0021    5 GET_LOCAL           2 (slot)
 0023    | JUMP_IF_FALSE       7 (to 0033)
 0026    | CONST_1
 0027    | GET_LOCAL           0 (slot)
