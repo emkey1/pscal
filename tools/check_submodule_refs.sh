@@ -14,7 +14,7 @@ Modes:
 
 Ref selection:
   --ref <git-ref>     may be provided multiple times (default: HEAD)
-  --protected-refs    shorthand for --ref <remote>/main and --ref <remote>/devel
+  --protected-refs    shorthand for --ref <remote>/main
   --remote <name>     remote name used by --protected-refs (default: origin)
 EOF
 }
@@ -74,7 +74,7 @@ if [[ ! -f .gitmodules ]]; then
 fi
 
 if [[ "$protected_refs" -eq 1 ]]; then
-    refs+=("${remote_name}/main" "${remote_name}/devel")
+    refs+=("${remote_name}/main")
 fi
 
 if [[ "${#refs[@]}" -eq 0 ]]; then

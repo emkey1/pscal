@@ -4,12 +4,13 @@ Summary
 - What does this change do and why?
 
 Checklist
-- Base branch is `devel` (feature → devel). For releases, use `devel` → `main`.
-- CI passes (build, tests, examples).
+- Base branch is `main`. Branch from `main`, PR back into `main`.
+- CI passes (build, tests, examples, iOS build).
 - Scope is minimal and focused.
 - Docs updated if behavior or public APIs changed.
 
 Notes
-- PRs targeting `main` from any branch other than `devel` will be rejected by CI.
-- Please avoid long‑running feature branches; prefer smaller, incremental PRs.
-
+- Component code lives in the `components/` submodules, not in this repo. If your
+  change touches a frontend or the VM, open it against the component repo
+  (`pscal-core`, `rea`, `aether`, `clike`, `pascal`, `exsh`) and bump the gitlink here.
+- Please avoid long-running feature branches; prefer smaller, incremental PRs.
