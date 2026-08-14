@@ -90,11 +90,11 @@ git -C "$SUB_WORK" commit -qm "submodule v2"
 git -C "$SUB_WORK" push -q origin main
 NEW_SUB_SHA="$(git -C "$SUB_WORK" rev-parse HEAD)"
 
-git -C "$SUPER_WORK" checkout -qb devel
+git -C "$SUPER_WORK" checkout -qb topic
 git -C "$SUPER_WORK/deps/sub" fetch -q origin
 git -C "$SUPER_WORK/deps/sub" checkout -q "$NEW_SUB_SHA"
 git -C "$SUPER_WORK" add deps/sub
-git -C "$SUPER_WORK" commit -qm "update submodule on devel"
+git -C "$SUPER_WORK" commit -qm "update submodule on topic"
 
 git -C "$SUPER_WORK" checkout -qb broken
 BAD_SHA="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
@@ -109,11 +109,11 @@ run_expect_success \
     bash -lc "cd \"$SUPER_CLONE\" && \"$CHECK_SCRIPT\" --ref origin/main"
 
 run_expect_success \
-    "multi-ref check succeeds for origin/main + origin/devel" \
-    bash -lc "cd \"$SUPER_CLONE\" && \"$CHECK_SCRIPT\" --ref origin/main --ref origin/devel"
+    "multi-ref check succeeds for origin/main + origin/topic" \
+    bash -lc "cd \"$SUPER_CLONE\" && \"$CHECK_SCRIPT\" --ref origin/main --ref origin/topic"
 
 run_expect_success \
-    "protected-refs shorthand checks origin/main and origin/devel" \
+    "protected-refs shorthand checks origin/main" \
     bash -lc "cd \"$SUPER_CLONE\" && \"$CHECK_SCRIPT\" --protected-refs --remote origin"
 
 run_expect_failure \

@@ -4,22 +4,26 @@ Thanks for your interest in contributing to Pscal! This document explains the br
 
 ## Branch Strategy and PR Policy
 
-- Default branch: `devel` (integration branch).
-  - Open pull requests from a short‑lived feature branch into `devel`.
-  - CI runs the full test suites and example compilation on `devel`.
-- Release branch: `main` (stable releases/tags only).
-  - Promote to `main` via a PR whose head is `devel` and base is `main`.
-  - CI guards will reject any PR into `main` that is not `devel` → `main`.
-- Do not merge `main` → `devel`.
-  - CI guards block this flow; close and retarget to `devel` instead.
+- Default branch: `main`. All work branches from `main` and merges back into it.
+  - CI runs the build, the ctest suites, example compilation, and an iOS build
+    on every pull request.
+- Releases are cut as tags on `main` (see `RELEASE_NOTES_*.md`).
 
 A simple flow:
 
-1) Create a topic branch from `devel`, e.g. `feature/xyz`.
+1) Create a topic branch from `main`, e.g. `feature/xyz`.
 2) Commit your changes and ensure tests/examples pass locally.
-3) Open a PR: base = `devel`, head = `feature/xyz`.
-4) After review and green CI, merge into `devel`.
-5) When ready to release, open a PR: base = `main`, head = `devel`.
+3) Open a PR: base = `main`, head = `feature/xyz`.
+4) After review and green CI, merge into `main`.
+
+## Where the code lives
+
+This repository is a thin umbrella. The languages and runtime live in the
+`components/` submodules — `pscal-core`, `rea`, `aether`, `clike`, `pascal`,
+`exsh` — each its own repository. A change to a frontend or the VM belongs in
+the component repo; the umbrella then records the new gitlink. Building here
+compiles the submodule working trees directly, so you can edit
+`components/<name>/` and rebuild without any extra step.
 
 ## Building
 
