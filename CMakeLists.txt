@@ -814,9 +814,26 @@ if(SDL)
                     endif()
                 endif()
                 if(_PSCAL_SDL_FOUND)
-                    pkg_check_modules(PC_SDL_IMAGE REQUIRED SDL2_image)
-                    pkg_check_modules(PC_SDL_MIXER REQUIRED SDL2_mixer)
-                    pkg_check_modules(PC_SDL_TTF REQUIRED SDL2_ttf)
+                    # QUIET, not REQUIRED: SDL2 core can be installed without its
+                    # satellites, and a hard failure here aborts configure instead of
+                    # falling through to the "disable SDL" path below. This mirrors the
+                    # SDL3 branch above. See issue #1335.
+                    pkg_check_modules(PC_SDL_IMAGE QUIET SDL2_image)
+                    pkg_check_modules(PC_SDL_MIXER QUIET SDL2_mixer)
+                    pkg_check_modules(PC_SDL_TTF QUIET SDL2_ttf)
+                    if(NOT (PC_SDL_IMAGE_FOUND AND PC_SDL_MIXER_FOUND AND PC_SDL_TTF_FOUND))
+                        set(_PSCAL_SDL_MISSING_SATELLITES "")
+                        if(NOT PC_SDL_IMAGE_FOUND)
+                            list(APPEND _PSCAL_SDL_MISSING_SATELLITES SDL2_image)
+                        endif()
+                        if(NOT PC_SDL_MIXER_FOUND)
+                            list(APPEND _PSCAL_SDL_MISSING_SATELLITES SDL2_mixer)
+                        endif()
+                        if(NOT PC_SDL_TTF_FOUND)
+                            list(APPEND _PSCAL_SDL_MISSING_SATELLITES SDL2_ttf)
+                        endif()
+                        set(_PSCAL_SDL_FOUND FALSE)
+                    endif()
                 endif()
             endif()
 
@@ -833,7 +850,17 @@ if(SDL)
         if(release)
             message(FATAL_ERROR "-Drelease requires SDL development files so SDL-dependent builtins can be enabled.")
         else()
-            message(WARNING "SDL development files not found; disabling SDL support. Re-run with -DSDL=OFF to silence this warning.")
+            if(_PSCAL_SDL_MISSING_SATELLITES)
+                string(REPLACE ";" " " _PSCAL_SDL_MISSING_PRETTY "${_PSCAL_SDL_MISSING_SATELLITES}")
+                message(WARNING
+                    "SDL core was found, but these companion libraries are missing: "
+                    "${_PSCAL_SDL_MISSING_PRETTY}. Disabling SDL support.\n"
+                    "  macOS:  brew install sdl2_image sdl2_mixer sdl2_ttf\n"
+                    "  Debian: sudo apt install libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev\n"
+                    "Re-run with -DSDL=OFF to silence this warning.")
+            else()
+                message(WARNING "SDL development files not found; disabling SDL support. Re-run with -DSDL=OFF to silence this warning.")
+            endif()
             set(SDL OFF)
             set(SDL OFF CACHE BOOL "Enable SDL-based graphics and audio" FORCE)
         endif()
