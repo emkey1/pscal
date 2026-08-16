@@ -163,40 +163,50 @@ final class TerminalTabManager: ObservableObject {
     }
 
     func closeSelectedTab() {
-        let tab = selectedTab
+        closeTab(id: selectedId)
+    }
+
+    /// The root shell tab is the app's own session: closing it would leave the
+    /// window with nothing to show, so it is asked to exit rather than removed.
+    func isRootTab(_ id: UInt64) -> Bool {
+        id == shellId
+    }
+
+    func closeTab(id: UInt64) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let tab = tabs[index]
         if tab.id == shellId {
-            tabInitLog("closeSelectedTab root id=\(tab.id)")
+            tabInitLog("closeTab root id=\(tab.id)")
             if case .shell(let runtime) = tab.kind {
                 runtime.requestClose()
             }
             return
         }
-        guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
         switch tab.kind {
         case .shell(let runtime):
             if runtime.exitStatus == nil {
-                tabInitLog("closeSelectedTab request shell id=\(tab.id)")
+                tabInitLog("closeTab request shell id=\(tab.id)")
                 runtime.requestClose()
             }
         case .shellSession(let session):
             if session.exitStatus == nil {
-                tabInitLog("closeSelectedTab request shellSession id=\(tab.id)")
+                tabInitLog("closeTab request shellSession id=\(tab.id)")
                 session.requestClose()
             }
         case .ssh(let session):
             if session.exitStatus == nil {
-                tabInitLog("closeSelectedTab request ssh id=\(tab.id)")
+                tabInitLog("closeTab request ssh id=\(tab.id)")
                 session.requestClose()
             }
         case .sdl(let ownerTabId):
-            tabInitLog("closeSelectedTab request sdl id=\(tab.id) owner=\(ownerTabId)")
+            tabInitLog("closeTab request sdl id=\(tab.id) owner=\(ownerTabId)")
             if let ownerKind = kind(forTabId: ownerTabId) {
                 sendInterrupt(for: ownerKind)
             }
             pscalIOSRestoreTerminalWindowKey()
         }
         let removedId = removeTab(at: index)
-        tabInitLog("closeSelectedTab removed id=\(removedId) tabs=\(tabs.count)")
+        tabInitLog("closeTab removed id=\(removedId) tabs=\(tabs.count)")
     }
 
     @discardableResult
@@ -975,12 +985,19 @@ private struct TerminalTabBar: View {
                 ForEach(tabs) { tab in
                     TerminalTabButton(
                         title: tab.title,
-                        isSelected: tab.id == selectedId
-                    ) {
-                        if selectedId != tab.id {
-                            selectedId = tab.id
+                        isSelected: tab.id == selectedId,
+                        // The root shell tab has nothing to fall back to, so it
+                        // gets no close affordance.
+                        canClose: !TerminalTabManager.shared.isRootTab(tab.id),
+                        action: {
+                            if selectedId != tab.id {
+                                selectedId = tab.id
+                            }
+                        },
+                        onClose: {
+                            TerminalTabManager.shared.closeTab(id: tab.id)
                         }
-                    }
+                    )
                 }
                 Button(action: { _ = TerminalTabManager.shared.openShellTab() }) {
                     Image(systemName: "plus")
@@ -1024,24 +1041,43 @@ private struct TerminalTabBar: View {
 private struct TerminalTabButton: View {
     let title: String
     let isSelected: Bool
+    let canClose: Bool
     let action: () -> Void
+    let onClose: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(isSelected ? .primary : .secondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(isSelected ? Color(.systemBackground) : Color(.secondarySystemBackground))
-                )
+        HStack(spacing: 6) {
+            Button(action: action) {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(isSelected ? .primary : .secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(title)
+            .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : [.isButton])
+            .accessibilityHint(isSelected ? "Selected tab" : "Selects this tab")
+
+            if canClose {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(isSelected ? .secondary : Color(.tertiaryLabel))
+                        // Keep the glyph small but the tap target finger-sized.
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close \(title)")
+                .accessibilityHint("Closes this tab and ends its session")
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : [.isButton])
-        .accessibilityHint(isSelected ? "Selected tab" : "Selects this tab")
+        .padding(.leading, 12)
+        .padding(.trailing, canClose ? 6 : 12)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(isSelected ? Color(.systemBackground) : Color(.secondarySystemBackground))
+        )
     }
 }
 
