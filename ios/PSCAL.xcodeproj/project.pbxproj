@@ -320,6 +320,7 @@
 		};
 		5F73F4B42FCA5CB000EFC123 /* Bundle Toolchain Data */ = {
 			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
