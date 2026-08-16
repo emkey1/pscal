@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${ROOT}/build/ios-host"
 EXE="${BUILD_DIR}/bin/exsh"
+# The exsh corpus and harnesses live in the exsh submodule since the repo split.
+INTERACTIVE_HARNESS="${ROOT}/components/exsh/tests/exsh_interactive_test_harness.py"
 
 cmake -S "${ROOT}" -B "${BUILD_DIR}" \
   -DPSCAL_FORCE_IOS=ON \
@@ -16,4 +18,4 @@ cmake -S "${ROOT}" -B "${BUILD_DIR}" \
 
 cmake --build "${BUILD_DIR}" --target exsh
 
-RUN_VPROC_TESTS=1 python3 "${ROOT}/Tests/exsh/exsh_interactive_test_harness.py" --executable "${EXE}" "$@"
+RUN_VPROC_TESTS=1 python3 "${INTERACTIVE_HARNESS}" --executable "${EXE}" "$@"

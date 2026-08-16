@@ -26,10 +26,11 @@ tester:x:$(id -g):
 EOF
 
 export TEST_SYSROOT
+export EXSH
 
 expect <<'EOF'
 set timeout 30
-spawn /Users/mke/PBuild/build/ios-host/bin/exsh -c "export PSCALI_ETC_ROOT=$env(TEST_SYSROOT)/etc; export PSCAL_VPROC_TEST_CHILD_MODE=authprompt_hold; scp -S pscal-vproc-test-child tester@local:/tmp/none /tmp"
+spawn $env(EXSH) -c "export PSCALI_ETC_ROOT=$env(TEST_SYSROOT)/etc; export PSCAL_VPROC_TEST_CHILD_MODE=authprompt_hold; scp -S pscal-vproc-test-child tester@local:/tmp/none /tmp"
 
 expect {
   -re {vproc-test-child password:} {}

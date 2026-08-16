@@ -4,7 +4,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${ROOT}/build"
 OUT="${BUILD_DIR}/ios_scp_prompt_regression_test"
+# The vproc/tty platform layer lives in pscal-core since the components split.
+CORE="${ROOT}/components/pscal-core"
 INCLUDE_DIRS=(
+  "-I${CORE}/src"
+  "-I${CORE}"
   "-I${ROOT}/src"
   "-I${ROOT}"
 )
@@ -12,16 +16,16 @@ INCLUDE_DIRS=(
 mkdir -p "${BUILD_DIR}"
 
 VPROC_SOURCES=(
-  "${ROOT}/src/ios/vproc.c"
-  "${ROOT}/src/common/path_virtualization.c"
-  "${ROOT}/src/common/path_truncate.c"
-  "${ROOT}/src/common/runtime_tty.c"
+  "${CORE}/src/runtime/vproc/vproc.c"
+  "${CORE}/src/common/path_virtualization.c"
+  "${CORE}/src/common/path_truncate.c"
+  "${CORE}/src/common/runtime_tty.c"
   "${ROOT}/src/ios/runtime_session_stub.c"
-  "${ROOT}/src/ios/tty/ish_compat.c"
-  "${ROOT}/src/ios/tty/pscal_fd.c"
-  "${ROOT}/src/ios/tty/pscal_tty.c"
-  "${ROOT}/src/ios/tty/pscal_pty.c"
-  "${ROOT}/src/ios/tty/pscal_tty_host.c"
+  "${CORE}/src/runtime/vproc/tty/ish_compat.c"
+  "${CORE}/src/runtime/vproc/tty/pscal_fd.c"
+  "${CORE}/src/runtime/vproc/tty/pscal_tty.c"
+  "${CORE}/src/runtime/vproc/tty/pscal_pty.c"
+  "${CORE}/src/runtime/vproc/tty/pscal_tty_host.c"
   "${ROOT}/Tests/ios_vproc/test_smallclue_applets_stub.c"
 )
 
