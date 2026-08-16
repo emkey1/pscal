@@ -20986,6 +20986,22 @@ hterm.VT.OSC['10'] = function(parseState) {
     return;
   }
 
+  // '?' queries the current value, the same convention OSC 4 follows. Without
+  // this the sequence is silently swallowed and anything that waits for the
+  // reply hangs forever.
+  if (args[0] == '?') {
+    args.shift();
+    const reply = lib.colors.rgbToX11(this.terminal.getForegroundColor());
+    if (reply) {
+      this.terminal.io.sendString('\x1b]10;' + reply + '\x07');
+    }
+    if (args.length > 0) {
+      parseState.args[0] = args.join(';');
+      hterm.VT.OSC['11'].apply(this, [parseState]);
+    }
+    return;
+  }
+
   const colorX11 = lib.colors.x11ToCSS(args.shift());
   if (colorX11) {
     this.terminal.setForegroundColor(colorX11);
@@ -21011,6 +21027,20 @@ hterm.VT.OSC['11'] = function(parseState) {
     return;
   }
 
+  // See OSC 10: '?' reports the current value instead of setting one.
+  if (args[0] == '?') {
+    args.shift();
+    const reply = lib.colors.rgbToX11(this.terminal.getBackgroundColor());
+    if (reply) {
+      this.terminal.io.sendString('\x1b]11;' + reply + '\x07');
+    }
+    if (args.length > 0) {
+      parseState.args[0] = args.join(';');
+      hterm.VT.OSC['12'].apply(this, [parseState]);
+    }
+    return;
+  }
+
   const colorX11 = lib.colors.x11ToCSS(args.shift());
   if (colorX11) {
     this.terminal.setBackgroundColor(colorX11);
@@ -21033,6 +21063,15 @@ hterm.VT.OSC['12'] = function(parseState) {
   // OSC sequences.
   const args = parseState.args[0].split(';');
   if (!args) {
+    return;
+  }
+
+  // See OSC 10: '?' reports the current value instead of setting one.
+  if (args[0] == '?') {
+    const reply = lib.colors.rgbToX11(this.terminal.getCursorColor());
+    if (reply) {
+      this.terminal.io.sendString('\x1b]12;' + reply + '\x07');
+    }
     return;
   }
 
