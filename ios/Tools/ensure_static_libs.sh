@@ -3,6 +3,18 @@ set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
+# When this runs from inside an Xcode build (script phase or scheme pre-action)
+# the environment carries every platform's deployment target at once. clang
+# rejects that outright -- "conflicting deployment targets, both '1.3' and
+# '15.6' are present in environment" -- so CMake's compiler probe fails and the
+# whole configure step dies before a single archive is produced. The iOS
+# toolchain file sets the deployment target itself, so drop them all and let it
+# decide. SDKROOT goes too: it points at whichever SDK Xcode is building, which
+# is not necessarily the one this preset targets.
+unset IPHONEOS_DEPLOYMENT_TARGET MACOSX_DEPLOYMENT_TARGET TVOS_DEPLOYMENT_TARGET \
+      WATCHOS_DEPLOYMENT_TARGET XROS_DEPLOYMENT_TARGET DRIVERKIT_DEPLOYMENT_TARGET \
+      SDKROOT 2>/dev/null || true
+
 sdk_name="${SDK_NAME:-}"
 configuration="${CONFIGURATION:-Debug}"
 config_variant="$(printf '%s' "${configuration}" | /usr/bin/tr '[:upper:]' '[:lower:]')"

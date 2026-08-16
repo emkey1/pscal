@@ -6,6 +6,24 @@
       parallelizeBuildables = "YES"
       buildImplicitDependencies = "YES"
       buildArchitectures = "Automatic">
+      <PreActions>
+         <ExecutionAction
+            ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
+            <ActionContent
+               title = "Ensure PSCAL Static Libs"
+               scriptText = "# The app links the SDL2 satellites and PSCAL archives by absolute path,&#10;# and Xcode validates those inputs while planning the build -- before the&#10;# in-target &quot;Ensure PSCAL Static Libs&quot; phase gets a chance to create them.&#10;# On a tree that has not built this sdk/configuration yet that fails with a&#10;# bare &quot;Command Ld failed&quot;. Provision them here instead: pre-actions run&#10;# before planning, so the archives exist by the time the linker is set up.&#10;set -euo pipefail&#10;&quot;${PROJECT_DIR}/Tools/ensure_static_libs.sh&quot;&#10;">
+               <EnvironmentBuildable>
+                  <BuildableReference
+                     BuildableIdentifier = "primary"
+                     BlueprintIdentifier = "145F4FBD2BE0719A00603B3F"
+                     BuildableName = "PSCAL.app"
+                     BlueprintName = "PSCALApp"
+                     ReferencedContainer = "container:PSCAL.xcodeproj">
+                  </BuildableReference>
+               </EnvironmentBuildable>
+            </ActionContent>
+         </ExecutionAction>
+      </PreActions>
       <BuildActionEntries>
          <BuildActionEntry
             buildForTesting = "YES"
