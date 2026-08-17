@@ -64,6 +64,12 @@ window.exports = {};
 term.io.push();
 term.reset();
 
+// Rows scrolled off the top are retained as detached DOM nodes, so the
+// scrollback has to be capped or a long-lived session grows the web content
+// process until iOS kills the app. Keep it well above a screenful of history.
+const SCROLLBACK_ROWS = 5000;
+term.setScrollbackLimit(SCROLLBACK_ROWS);
+
 let oldProps = {};
 function syncProp(name, value) {
     if (oldProps[name] !== value)
@@ -343,6 +349,8 @@ exports.getCharacterSize = () => {
 };
 
 exports.clearScrollback = () => term.clearScrollback();
+exports.setScrollbackLimit = (rows) => term.setScrollbackLimit(rows);
+exports.scrollbackRowCount = () => term.scrollbackRows_.length;
 exports.setUserGesture = () => term.accessibilityReader_.hasUserGesture = true;
 
 hterm.openUrl = (url) => native.openLink(url);

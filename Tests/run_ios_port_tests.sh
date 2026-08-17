@@ -12,3 +12,4 @@ trap 'popd >/dev/null' EXIT
 
 bash ./run_ios_vproc_tests.sh
 bash ./run_ios_openssh_shim_tests.sh
+bash ./run_ios_terminalweb_tests.sh
