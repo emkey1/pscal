@@ -123,12 +123,22 @@ if(PSCAL_PLATFORM_IOS AND NOT TARGET pscal_common_frontend_shim)
 endif()
 
 # ---- Version Generation Logic ----
-string(TIMESTAMP CURRENT_YEAR "%Y")
-string(TIMESTAMP CURRENT_MONTH "%m")
-string(TIMESTAMP CURRENT_DAY "%d")
-string(TIMESTAMP CURRENT_HOUR "%H")
-string(TIMESTAMP CURRENT_MINUTE "%M")
-set(BASE_VERSION "${CURRENT_YEAR}${CURRENT_MONTH}${CURRENT_DAY}.${CURRENT_HOUR}${CURRENT_MINUTE}")
+# The wall-clock build stamp is cached per build directory rather than recomputed
+# on every configure. PROGRAM_VERSION below is a directory-scope compile
+# definition applied to every target, so a stamp that changed with the clock
+# changed the command line for the entire tree, and ninja rebuilt all of it.
+# ios/Tools/ensure_static_libs.sh re-configures on every Xcode build, which made
+# that a mass recompile roughly once a minute -- long enough that the Xcode phase
+# looked hung. Caching makes repeat configures of the same build directory
+# stable; a fresh build directory still gets a fresh stamp, and
+# -DPSCAL_BUILD_STAMP=<value> overrides it (pass -UPSCAL_BUILD_STAMP to retake
+# the current time).
+if(NOT PSCAL_BUILD_STAMP)
+    string(TIMESTAMP _pscal_build_stamp "%Y%m%d.%H%M")
+    set(PSCAL_BUILD_STAMP "${_pscal_build_stamp}" CACHE STRING
+        "Wall-clock stamp baked into PROGRAM_VERSION; fixed per build directory")
+endif()
+set(BASE_VERSION "${PSCAL_BUILD_STAMP}")
 option(RELEASE_BUILD "Build as a release version (appends _REL)" OFF)
 option(release "Enable the PSCAL release profile (all builtins, sans dascal)" OFF)
 if(release)
@@ -1807,7 +1817,21 @@ if(PSCAL_PLATFORM_IOS)
 
         set(_pscal_micro_embed_lib "${CMAKE_BINARY_DIR}/libpscal_micro_embed.a")
         set(_pscal_micro_embed_hdr "${CMAKE_BINARY_DIR}/libpscal_micro_embed.h")
-        file(GLOB_RECURSE _pscal_micro_embed_go_sources CONFIGURE_DEPENDS
+        # Deliberately NOT CONFIGURE_DEPENDS. That option makes CMake emit a
+        # VerifyGlobs rule whose input (VerifyGlobs.cmake_force) is a phony that
+        # never exists, so the rule runs on every build, rewrites
+        # CMakeFiles/cmake.verify_globs, and that in turn is an input to the
+        # build.ninja regeneration rule -- so *every* build re-ran CMake and
+        # then rebuilt an unstable subset of objects. It made the Xcode "Ensure
+        # PSCAL Static Libs" phase alternate between a ~19s exsh/SDL rebuild and
+        # a ~2.5s libgit2 rebuild forever, and since Xcode buffers script-phase
+        # output the first device build of a preset looked like a hang.
+        #
+        # third-party/micro is a pinned submodule, so the file list only moves
+        # when the gitlink does, which means a reconfigure anyway. Edits to
+        # existing .go files still rebuild the archive; only added or removed
+        # files go unnoticed until the next configure.
+        file(GLOB_RECURSE _pscal_micro_embed_go_sources
             "${CMAKE_SOURCE_DIR}/third-party/micro/cmd/*.go"
             "${CMAKE_SOURCE_DIR}/third-party/micro/internal/*.go"
         )

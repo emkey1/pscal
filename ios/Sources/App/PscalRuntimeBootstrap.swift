@@ -577,6 +577,15 @@ final class PscalRuntimeBootstrap: ObservableObject, @unchecked Sendable {
     }
 
     deinit {
+        // The block captures self weakly, so NotificationCenter never kept this
+        // instance alive -- but the registration outlives it, so without this
+        // every closed tab left a dead observer behind for appearance changes to
+        // fan out to.
+        if let observer = appearanceObserver {
+            NotificationCenter.default.removeObserver(observer)
+            appearanceObserver = nil
+        }
+
         // Unregister
         if let ctx = runtimeContext {
             PscalRuntimeBootstrap.registryLock.lock()

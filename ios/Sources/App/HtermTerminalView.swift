@@ -172,6 +172,13 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
 
     private static let terminalScheme = "pscal-terminal"
     private static let schemeHandler = TerminalResourceSchemeHandler()
+    private var memoryPressureSource: DispatchSourceMemoryPressure?
+    private var memoryWarningObserver: NSObjectProtocol?
+    private var releaseRequestObserver: NSObjectProtocol?
+    // Rows of scrollback to keep when the system reports pressure. Enough to
+    // scroll back over the last command or two, rather than nothing.
+    private let scrollbackRowsUnderWarning = 1000
+    private let scrollbackRowsUnderCriticalPressure = 200
     let webView: WKWebView
     private let userContentController: WKUserContentController
     private var scriptMessageBridges: [WeakScriptMessageHandler] = []
@@ -250,10 +257,15 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         webView.scrollView.canCancelContentTouches = false
         webView.scrollView.panGestureRecognizer.isEnabled = false
         webView.navigationDelegate = self
+        startMemoryPressureMonitoring()
         loadTerminalPage()
     }
 
     deinit {
+        memoryPressureSource?.cancel()
+        for observer in [memoryWarningObserver, releaseRequestObserver].compactMap({ $0 }) {
+            NotificationCenter.default.removeObserver(observer)
+        }
         let controller = userContentController
         let names = HandlerName.allCases.map(\.rawValue)
         if Thread.isMainThread {
@@ -279,6 +291,73 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
 
     private func logTabInit(_ message: String) {
         tabInitLog("Hterm[\(instanceId)] \(message)")
+    }
+
+    /// Posted to ask every terminal to give its scrollback back now, without
+    /// waiting for the system to report pressure. Raised from App Diagnostics.
+    static let releaseScrollbackRequest = Notification.Name("com.pscal.terminal.releaseScrollbackRequest")
+
+    /// Three signals, because none covers the others. The dispatch source is the
+    /// kernel's memorystatus pressure, which arrives early on a device but
+    /// reflects host pressure under the simulator; the UIKit notification is the
+    /// documented app-level warning; and the explicit request is what the
+    /// diagnostics screen raises, since the simulator will not deliver either of
+    /// the first two on demand. All funnel into the same release.
+    private func startMemoryPressureMonitoring() {
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical],
+                                                            queue: .main)
+        // Read the event off the stored source rather than capturing `source`
+        // here, which would retain it from its own handler.
+        source.setEventHandler { [weak self] in
+            guard let self, let event = self.memoryPressureSource?.data else { return }
+            self.releaseScrollback(critical: event.contains(.critical))
+        }
+        memoryPressureSource = source
+        source.activate()
+
+        memoryWarningObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.releaseScrollback(critical: false)
+        }
+
+        releaseRequestObserver = NotificationCenter.default.addObserver(
+            forName: Self.releaseScrollbackRequest,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.releaseScrollback(critical: false)
+        }
+    }
+
+    /// Give most of the scrollback back when memory is short.
+    ///
+    /// hterm keeps every row that scrolls off the top as a detached DOM node, so
+    /// the scrollback is by far the largest reclaimable thing a terminal tab
+    /// holds (see Docs/ios_terminal_scrollback.md). The cap in term.js keeps it
+    /// bounded in normal use; this is the backstop for when the system is
+    /// already short of memory and would otherwise kill us holding it.
+    private func releaseScrollback(critical: Bool) {
+        guard isLoaded else {
+            runtimeDebugLog("[Hterm \(instanceId)] memory pressure (critical=\(critical)) ignored, page not loaded")
+            return
+        }
+        runtimeDebugLog("[Hterm \(instanceId)] memory pressure signalled (critical=\(critical))")
+        let keepRows = critical ? scrollbackRowsUnderCriticalPressure : scrollbackRowsUnderWarning
+        webView.evaluateJavaScript("exports.releaseMemory(\(keepRows))") { [weak self] result, error in
+            guard let self else { return }
+            if let error {
+                NSLog("Hterm[%d]: memory pressure scrollback release failed: %@",
+                      self.instanceId, error.localizedDescription)
+                return
+            }
+            let counts = (result as? [NSNumber])?.map(\.intValue) ?? []
+            let message = "[Hterm \(self.instanceId)] \(critical ? "critical" : "warning") memory pressure, scrollback \(counts.first ?? -1) -> \(counts.count > 1 ? counts[1] : -1) rows"
+            runtimeDebugLog(message)
+            NSLog("%@", message)
+        }
     }
 
     private func pendingOutputSize() -> Int {

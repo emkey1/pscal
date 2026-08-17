@@ -816,6 +816,7 @@ struct AppDiagnosticsView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var runner = AppDiagnosticsRunner()
     @State private var copiedReport: Bool = false
+    @State private var releasedScrollback: Bool = false
 
     var body: some View {
         NavigationView {
@@ -860,6 +861,25 @@ struct AppDiagnosticsView: View {
                             .padding(.vertical, 4)
                         }
                     }
+                }
+
+                Section(header: Text("Memory"),
+                        footer: Text("Terminals keep scrolled-off rows so you can scroll back. Releasing drops all but the most recent, which is also what happens automatically when the system reports memory pressure.")) {
+                    Button(releasedScrollback ? "Scrollback Released" : "Release Terminal Scrollback") {
+                        NotificationCenter.default.post(name: HtermTerminalController.releaseScrollbackRequest,
+                                                        object: nil)
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        UIAccessibility.post(notification: .announcement, argument: "Terminal scrollback released")
+                        withAnimation {
+                            releasedScrollback = true
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            withAnimation {
+                                releasedScrollback = false
+                            }
+                        }
+                    }
+                    .accessibilityHint("Frees memory by discarding older terminal scrollback")
                 }
 
                 if !runner.report.isEmpty {
