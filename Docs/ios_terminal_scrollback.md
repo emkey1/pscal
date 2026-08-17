@@ -73,6 +73,40 @@ Result for the same 200,000-line run in the simulator:
 | settled after the run | 279 MB | 141 MB |
 | retained | **+109 MB** | **none** |
 
+## Releasing under memory pressure
+
+The cap bounds normal use; the backstop is for when the system is already short
+of memory. `HtermTerminalController` listens on three signals and funnels them
+all into `releaseScrollback(critical:)`, which calls
+`exports.releaseMemory(keepRows)`:
+
+- a `DispatchSource` memory-pressure source (`.warning` and `.critical`) — the
+  kernel's memorystatus pressure, which arrives early on a device but reflects
+  *host* pressure under the simulator
+- `UIApplication.didReceiveMemoryWarningNotification` — the documented app-level
+  warning
+- `HtermTerminalController.releaseScrollbackRequest` — raised by the "Release
+  Terminal Scrollback" button in App Diagnostics
+
+Warning keeps 1000 rows, critical keeps 200. `releaseMemory` force-trims to that
+floor and then restores the normal cap, so history accumulates again from there
+rather than being left uncapped or permanently short. `releaseMemory(0)` wipes
+the scrollback outright — it deliberately does not go through
+`setScrollbackLimit(0)`, which means *unbounded*.
+
+The explicit request exists because neither of the first two can be raised on
+demand in the simulator: `Debug > Simulate Memory Warning` does not deliver
+(nor do the `com.apple.system.*` Darwin notifications), and the dispatch source
+follows the host. So verify the path with the diagnostics button and confirm the
+line in `Documents/var/log/pscal_runtime.log`:
+
+    [Hterm 1] memory pressure signalled (critical=false)
+    [Hterm 1] warning memory pressure, scrollback 5178 -> 1000 rows
+
+Note that web content RSS will not drop promptly when it does — WebKit does not
+return freed pages to the OS straight away. The row count is the meaningful
+measure.
+
 ## Testing
 
 `Tests/run_ios_terminalweb_tests.sh` (run by `Tests/run_ios_port_tests.sh`) is a

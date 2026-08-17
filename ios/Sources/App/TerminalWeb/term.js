@@ -351,6 +351,25 @@ exports.getCharacterSize = () => {
 exports.clearScrollback = () => term.clearScrollback();
 exports.setScrollbackLimit = (rows) => term.setScrollbackLimit(rows);
 exports.scrollbackRowCount = () => term.scrollbackRows_.length;
+
+// Hand most of the scrollback back when the system is short of memory. The
+// retained rows are the largest reclaimable thing this page holds, so keep a
+// little recent history and drop the rest rather than be killed holding it.
+// The normal cap is restored afterwards -- restoring it does not bring rows
+// back, it just lets history accumulate again from here.
+exports.releaseMemory = (keepRows) => {
+    const keep = Math.max(0, Math.floor(Number(keepRows) || 0));
+    const before = term.scrollbackRows_.length;
+    if (keep === 0) {
+        // setScrollbackLimit(0) means "unbounded", so wipe explicitly instead.
+        term.clearScrollback();
+    } else {
+        const cap = term.scrollbackLimit_;
+        term.setScrollbackLimit(keep);
+        term.setScrollbackLimit(cap);
+    }
+    return [before, term.scrollbackRows_.length];
+};
 exports.setUserGesture = () => term.accessibilityReader_.hasUserGesture = true;
 
 hterm.openUrl = (url) => native.openLink(url);
