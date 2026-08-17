@@ -14162,6 +14162,9 @@ hterm.Terminal = function({profileId} = {}) {
   // The rows that have scrolled off screen and are no longer addressable.
   this.scrollbackRows_ = [];
 
+  // The most rows scrollbackRows_ may retain; see trimScrollback_().
+  this.scrollbackLimit_ = hterm.Terminal.DEFAULT_SCROLLBACK_LIMIT;
+
   // Saved tab stops.
   this.tabStops_ = [];
 
@@ -14295,6 +14298,25 @@ hterm.Terminal.cursorShape = {
   BEAM: 'BEAM',
   UNDERLINE: 'UNDERLINE',
 };
+
+/**
+ * Default number of rows retained in the scrollback buffer.
+ *
+ * Rows that scroll off the top of the screen are kept as detached <x-row> DOM
+ * nodes, and a row holds one node per run of text attributes within it, so
+ * retaining every row grows the renderer's memory for as long as the terminal
+ * keeps producing output.  Rows past this limit are dropped oldest-first by
+ * trimScrollback_().  Use setScrollbackLimit(0) for the unbounded behaviour.
+ */
+hterm.Terminal.DEFAULT_SCROLLBACK_LIMIT = 5000;
+
+/**
+ * How far the scrollback may run past its limit before rows are dropped.
+ *
+ * Dropping rows renumbers the rows that remain, which costs O(scrollback), so
+ * rows are dropped in batches to keep the amortized cost per output line flat.
+ */
+hterm.Terminal.SCROLLBACK_TRIM_SLACK = 256;
 
 /**
  * Clients should override this to be notified when the terminal is ready
@@ -15477,8 +15499,7 @@ hterm.Terminal.prototype.realizeHeight_ = function(rowCount) {
       deltaRows--;
     }
 
-    const ary = this.screen_.shiftRows(deltaRows);
-    this.scrollbackRows_.push.apply(this.scrollbackRows_, ary);
+    this.pushScrollbackRows_(this.screen_.shiftRows(deltaRows));
 
     // We just removed rows from the top of the screen, we need to update
     // the cursor to match.
@@ -15578,6 +15599,100 @@ hterm.Terminal.prototype.clearScrollback = function() {
 
   this.syncCursorPosition_();
   this.scrollPort_.invalidate();
+};
+
+/**
+ * Set the maximum number of rows retained in the scrollback buffer.
+ *
+ * @param {number} limit Rows to retain, or 0 for an unbounded scrollback.
+ */
+hterm.Terminal.prototype.setScrollbackLimit = function(limit) {
+  const value = Number(limit);
+  this.scrollbackLimit_ = (Number.isFinite(value) && value > 0)
+      ? Math.floor(value) : 0;
+  this.trimScrollback_(true);
+};
+
+/**
+ * Move rows that scrolled off the top of the screen into the scrollback buffer.
+ *
+ * Rows scrolled off the *alternate* screen are dropped instead of retained.
+ * The alternate screen has no scrollback (xterm and friends behave the same
+ * way), and full-screen applications repaint their whole screen continuously,
+ * so retaining those rows would grow memory for as long as the application
+ * runs and would leave that garbage behind after it exits.
+ *
+ * @param {!Array<!Node>} rows Rows shifted off the top of the screen.
+ */
+hterm.Terminal.prototype.pushScrollbackRows_ = function(rows) {
+  if (!rows.length || this.screen_ === this.alternateScreen_) {
+    return;
+  }
+
+  Array.prototype.push.apply(this.scrollbackRows_, rows);
+  this.trimScrollback_();
+};
+
+/**
+ * Drop the oldest scrollback rows once the buffer runs past its limit.
+ *
+ * Rows are addressed by their absolute index, so dropping rows from the front
+ * shifts the index of everything that remains: the surviving scrollback rows,
+ * the rows on both screens, the ScrollPort's row cache, and the scroll
+ * position all have to be brought back in step.
+ *
+ * @param {boolean=} force Trim down to the limit exactly, ignoring the slack
+ *     that normally batches this work.
+ */
+hterm.Terminal.prototype.trimScrollback_ = function(force = false) {
+  if (!this.scrollbackLimit_) {
+    return;
+  }
+
+  const excess = this.scrollbackRows_.length - this.scrollbackLimit_;
+  if (excess <= 0 ||
+      (!force && excess < hterm.Terminal.SCROLLBACK_TRIM_SLACK)) {
+    return;
+  }
+
+  const scrollPort = this.scrollPort_;
+  // Read the scroll position before the rows go away.
+  const wasScrolledEnd = scrollPort.isScrolledEnd;
+  const topRowIndex = scrollPort.getTopRowIndex();
+
+  const dropped = this.scrollbackRows_.splice(0, excess);
+
+  for (let i = 0; i < this.scrollbackRows_.length; i++) {
+    this.scrollbackRows_[i].rowIndex = i;
+  }
+  [this.primaryScreen_, this.alternateScreen_].forEach((screen) => {
+    this.renumberRows_(0, screen.rowsArray.length, screen);
+  });
+
+  // The row cache is keyed on the old indexes.
+  scrollPort.resetCache();
+
+  // A selection that reached into the rows we dropped no longer refers to
+  // anything in the document.
+  const selection = scrollPort.selection;
+  if (selection && selection.startRow &&
+      (dropped.indexOf(selection.startRow) != -1 ||
+       dropped.indexOf(selection.endRow) != -1)) {
+    selection.startRow = null;
+    selection.endRow = null;
+    selection.isMultiline = null;
+    selection.isCollapsed = null;
+  }
+
+  scrollPort.syncScrollHeight();
+  if (wasScrolledEnd) {
+    scrollPort.scrollRowToBottom(this.getRowCount());
+  } else {
+    // Keep the same content in view; a viewport inside the dropped range
+    // lands at the start of what is left.
+    scrollPort.scrollRowToTop(topRowIndex - excess);
+  }
+  scrollPort.scheduleInvalidate();
 };
 
 /**
@@ -16120,8 +16235,7 @@ hterm.Terminal.prototype.appendRows_ = function(count) {
 
   const extraRows = this.screen_.rowsArray.length - this.screenSize.height;
   if (extraRows > 0) {
-    const ary = this.screen_.shiftRows(extraRows);
-    Array.prototype.push.apply(this.scrollbackRows_, ary);
+    this.pushScrollbackRows_(this.screen_.shiftRows(extraRows));
     if (this.scrollPort_.isScrolledEnd) {
       this.scheduleScrollDown_();
     }
@@ -16146,7 +16260,7 @@ hterm.Terminal.prototype.insertRow_ = function() {
   const row = this.document_.createElement('x-row');
   row.appendChild(this.document_.createTextNode(''));
 
-  this.scrollbackRows_.push(this.screen_.shiftRow());
+  this.pushScrollbackRows_([this.screen_.shiftRow()]);
 
   const cursorRow = this.screen_.cursorPosition.row;
   this.screen_.insertRow(cursorRow, row);
