@@ -143,7 +143,7 @@ echo "=== building smallclue (native aarch64 glibc via setup_posix_env.sh) ==="
 # has broken in between builds before (e.g. commit 12a084d "Add chroot
 # applet" landed a table entry with no linked implementation). Bump this
 # deliberately, not implicitly.
-SMALLCLUE_PIN="${SMALLCLUE_PIN:-7911eec}"
+SMALLCLUE_PIN="${SMALLCLUE_PIN:-5cbb81d}"
 # --recurse-submodules, not a plain clone: smallclue's third-party deps
 # (openssh, libgit2, dvtm, nextvi, openrsync) are submodules now, and
 # fetch_dependencies.sh only knows how to re-download the ones that still have
@@ -225,11 +225,15 @@ cp /work/smallclue/smallclue "$LOCAL_OUT/bin/smallclue"
 #
 # The container is linux/arm64 and the binary is a static aarch64 glibc one, so
 # it runs here directly.
+# Invoked with NO arguments, deliberately. A stub prints its "not built"
+# line whatever it is given, so no-args is the one invocation guaranteed to
+# reach it -- keying this on --version made the check depend on an option the
+# applet might not implement, which is a second thing that can be wrong.
 for wired_applet in git rsync; do
-  if /work/smallclue/smallclue "$wired_applet" --version 2>&1 \
+  if /work/smallclue/smallclue "$wired_applet" 2>&1 \
        | grep -qiE "not built in this configuration|unavailable in this build|not enabled in this build"; then
     echo "FATAL: the $wired_applet applet is a stub in this build:"
-    /work/smallclue/smallclue "$wired_applet" --version 2>&1 | head -2
+    /work/smallclue/smallclue "$wired_applet" 2>&1 | head -2
     exit 1
   fi
 done
