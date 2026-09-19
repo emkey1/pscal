@@ -142,7 +142,7 @@ echo "=== building smallclue (native aarch64 glibc via setup_posix_env.sh) ==="
 # has broken in between builds before (e.g. commit 12a084d "Add chroot
 # applet" landed a table entry with no linked implementation). Bump this
 # deliberately, not implicitly.
-SMALLCLUE_PIN="${SMALLCLUE_PIN:-3291b11}"
+SMALLCLUE_PIN="${SMALLCLUE_PIN:-c8d7094}"
 # --recurse-submodules, not a plain clone: smallclue's third-party deps
 # (openssh, libgit2, dvtm, nextvi, openrsync) are submodules now, and
 # fetch_dependencies.sh only knows how to re-download the ones that still have
@@ -321,6 +321,30 @@ for applet in $APPLETS; do
   [ "$applet" = "exsh" ] && continue
   ln -sf smallclue "$RFS/usr/bin/$applet"
 done
+# su, sudo and passwd go to the NATIVE programs, not the applet symlinks the
+# loop above just made. SmallCLUE is a multicall binary: /usr/bin/smallclue
+# cannot be setuid-root, because it picks its applet from argv[0] and a setuid
+# copy would run `sh` as root for anyone. iSH-AOK ships these three as separate
+# native programs that can be setuid precisely because they can only ever be
+# themselves -- so without this, PATH finds the emulated applet, it is not
+# setuid, and the only answer a user ever gets is "must be setuid root".
+#
+# A wrapper rather than a bare symlink so the failure is graceful: on an
+# iSH-AOK too old to carry these, /AOK/native/sudo does not exist and a
+# dangling symlink would say "not found", where this falls back to the applet
+# and its own clearer message. The wrapper is NOT setuid and does not need to
+# be -- the privilege comes from exec'ing the native program, which carries
+# the bit itself.
+for suid_applet in su sudo passwd; do
+  rm -f "$RFS/usr/bin/$suid_applet"
+  cat > "$RFS/usr/bin/$suid_applet" <<WRAPPER
+#!/usr/bin/sh
+[ -x /AOK/native/$suid_applet ] && exec /AOK/native/$suid_applet "\$@"
+exec /usr/bin/smallclue $suid_applet "\$@"
+WRAPPER
+  chmod 755 "$RFS/usr/bin/$suid_applet"
+done
+
 [ -e "$RFS/usr/bin/sh" ] || { echo "Error: no sh applet"; exit 1; }
 [ -e "$RFS/usr/bin/init" ] || { echo "Error: no init applet"; exit 1; }
 
