@@ -43,6 +43,7 @@ apt-get update -qq >/tmp/apt.log 2>&1
 apt-get install -y --no-install-recommends \
     build-essential cmake git ca-certificates pkg-config curl wget python3 patch openssh-client xz-utils \
     zlib1g-dev libssl-dev libncurses-dev libc-ares-dev autoconf automake libtool file \
+    netbase \
     >>/tmp/apt.log 2>&1 || (tail -100 /tmp/apt.log; exit 1)
 echo APT_OK
 
@@ -446,9 +447,14 @@ chmod 644 "$RFS/etc/ssl/certs/ca-certificates.crt"
 # NOT /etc/nsswitch.conf: these binaries are statically linked, and giving
 # glibc an nsswitch.conf invites it to dlopen NSS modules this rootfs does not
 # have. Absent, it uses its built-in defaults, which is what we want.
-cp /etc/services "$RFS/etc/services"   2>/dev/null || true
-cp /etc/protocols "$RFS/etc/protocols" 2>/dev/null || true
-chmod 644 "$RFS/etc/services" "$RFS/etc/protocols" 2>/dev/null || true
+# netbase is what carries them, and the slim base image does not have it --
+# which is exactly why this was `|| true` once and shipped an image with
+# neither file in it. Copy them for real and say so if they are missing.
+for datafile in services protocols; do
+  cp "/etc/$datafile" "$RFS/etc/$datafile" \
+    || { echo "FATAL: /etc/$datafile missing from the build container (netbase not installed?)"; exit 1; }
+  chmod 644 "$RFS/etc/$datafile"
+done
 
 # sshd falls back without moduli, but then diffie-hellman-group-exchange is
 # simply unavailable; it is a data file the OpenSSH build already produced.
