@@ -498,7 +498,7 @@ EOF
 chmod 644 "$RFS/etc/os-release"
 
 cat > "$RFS/etc/profile" <<'EOF'
-export PATH=/usr/bin:/usr/local/sbin
+export PATH=/usr/bin
 export PSCAL_INSTALL_ROOT=/usr/local/pscal
 export PS1='\u@\h:\w\$ '
 EOF
@@ -506,34 +506,23 @@ chmod 644 "$RFS/etc/profile"
 
 # The one-time setup hint, in root's exsh rc.
 #
+# The provisioner itself lives at /AOK/tools/provision-ultimate-pscal.sh, with
+# the Alpine, Devuan and Arch ones -- served by iSH-AOK, never copied into an
+# image, so there is one copy and it is the app's. This only points at it, and
+# only when it is actually there: an iSH-AOK older than the script has no such
+# file, and telling someone to run something that does not exist is worse than
+# saying nothing.
+#
 # NOT /etc/profile: nothing in this image reads it. /etc/rc sets PATH and PS1
-# itself and then runs exsh, and exsh's startup file is ~/.exshrc -- so a line
-# added to /etc/profile is a write with no reader, which is exactly how the
-# first version of this went. A fresh image ships every account locked, and
-# nothing else on the system says what to do about it.
+# itself and then runs exsh, whose startup file is ~/.exshrc.
 cat >> "$RFS/root/.exshrc" <<'EOF'
 
-if [ ! -f /etc/pscal-provisioned ]; then
-    echo "Set this machine up (login, password, ssh):  provision-ultimate-pscal.sh"
+if [ ! -f /etc/pscal-provisioned ] && [ -f /AOK/tools/provision-ultimate-pscal.sh ]; then
+    echo "Set this machine up (login, password, ssh):"
+    echo "    sh /AOK/tools/provision-ultimate-pscal.sh"
 fi
 EOF
 chmod 644 "$RFS/root/.exshrc"
-
-# The provisioner, shipped IN the image as well as at /AOK/tools.
-#
-# /AOK is served by iSH-AOK itself, so the copy there is whatever the installed
-# app carries -- which on a build older than the script is nothing at all, and
-# "the provision script is missing" is not a debuggable message. Fetched from
-# the ish-AOK tree rather than kept as a second copy here, so there is still
-# exactly one source for it.
-echo "=== fetching the PSCAL provisioner from the iSH-AOK tree ==="
-PROVISIONER_URL="https://raw.githubusercontent.com/emkey1/ish-AOK/working/opt/AOK/tools/provision-ultimate-pscal.sh"
-mkdir -p "$RFS/usr/local/sbin"
-curl -fsSL "$PROVISIONER_URL" -o "$RFS/usr/local/sbin/provision-ultimate-pscal.sh" \
-  || { echo "FATAL: could not fetch $PROVISIONER_URL"; exit 1; }
-head -1 "$RFS/usr/local/sbin/provision-ultimate-pscal.sh" | grep -q '^#!/bin/sh' \
-  || { echo "FATAL: fetched provisioner is not a shell script"; exit 1; }
-chmod 755 "$RFS/usr/local/sbin/provision-ultimate-pscal.sh"
 
 # sshd_config: key-only auth by default. There is no /etc/shadow in this
 # rootfs at all, so password auth has nothing real to check against anyway
@@ -585,7 +574,7 @@ chmod +x "$RFS/etc/service/sshd/run"
 
 cat > "$RFS/etc/rc" <<'EOF'
 #!/usr/bin/sh
-export PATH=/usr/bin:/usr/local/sbin
+export PATH=/usr/bin
 export PSCAL_INSTALL_ROOT=/usr/local/pscal
 mount -t proc proc /proc 2>/dev/null
 mount -t sysfs sys /sys 2>/dev/null
