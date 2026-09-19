@@ -143,7 +143,7 @@ echo "=== building smallclue (native aarch64 glibc via setup_posix_env.sh) ==="
 # has broken in between builds before (e.g. commit 12a084d "Add chroot
 # applet" landed a table entry with no linked implementation). Bump this
 # deliberately, not implicitly.
-SMALLCLUE_PIN="${SMALLCLUE_PIN:-97be946}"
+SMALLCLUE_PIN="${SMALLCLUE_PIN:-2fb8219}"
 # --recurse-submodules, not a plain clone: smallclue's third-party deps
 # (openssh, libgit2, dvtm, nextvi, openrsync) are submodules now, and
 # fetch_dependencies.sh only knows how to re-download the ones that still have
@@ -214,6 +214,26 @@ fi
 ( cd /work/smallclue && AUTO_INSTALL_DEPS=1 bash setup_posix_env.sh >/tmp/setup-posix.log 2>&1 \
     || (echo "SETUP_POSIX_ENV FAIL"; tail -200 /tmp/setup-posix.log; exit 1) )
 cp /work/smallclue/smallclue "$LOCAL_OUT/bin/smallclue"
+
+# Applets that report themselves absent are worth catching HERE, not on a
+# device. `git` shipped for months saying "not built in this configuration
+# (libgit2 unavailable)" in an image whose smallclue had libgit2.a linked into
+# it -- the source file was simply missing from build_smallclue.sh's explicit
+# list, so a weak fallback was the only definition. Nothing in the build failed
+# and nothing said so. This runs the applet and reads what it says, which is
+# the only check that would have caught it.
+#
+# The container is linux/arm64 and the binary is a static aarch64 glibc one, so
+# it runs here directly.
+for wired_applet in git; do
+  if /work/smallclue/smallclue "$wired_applet" --version 2>&1 \
+       | grep -qiE "not built in this configuration|unavailable in this build|not enabled in this build"; then
+    echo "FATAL: the $wired_applet applet is a stub in this build:"
+    /work/smallclue/smallclue "$wired_applet" --version 2>&1 | head -2
+    exit 1
+  fi
+done
+echo "applet wiring check: git is real"
 
 # setup_posix_env.sh's OpenSSH build step also runs `make sshd` (real, full
 # server-side OpenSSH, not a stub) but never installs or applet-wires the
