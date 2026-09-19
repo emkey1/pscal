@@ -143,7 +143,7 @@ echo "=== building smallclue (native aarch64 glibc via setup_posix_env.sh) ==="
 # has broken in between builds before (e.g. commit 12a084d "Add chroot
 # applet" landed a table entry with no linked implementation). Bump this
 # deliberately, not implicitly.
-SMALLCLUE_PIN="${SMALLCLUE_PIN:-c8d7094}"
+SMALLCLUE_PIN="${SMALLCLUE_PIN:-1aafd62}"
 # --recurse-submodules, not a plain clone: smallclue's third-party deps
 # (openssh, libgit2, dvtm, nextvi, openrsync) are submodules now, and
 # fetch_dependencies.sh only knows how to re-download the ones that still have
@@ -414,10 +414,37 @@ nobody:x:65534:65534:nobody:/nonexistent:/usr/bin/false
 EOF
 cat > "$RFS/etc/group" <<'EOF'
 root:x:0:
+wheel:x:10:
 username:x:1000:
 sshd:x:100:
 nogroup:x:65534:
 EOF
+
+# /etc/sudoers. SmallCLUE's sudo authenticates the INVOKING user and then asks
+# this file whether they may run the command -- and with no file at all nobody
+# is authorised, which is the right default but a poor thing to ship. So ship
+# the conventional policy: root, and anyone in wheel. The provisioner puts the
+# login it creates into wheel.
+#
+# gid 10 for wheel is the BSD/Arch/Fedora number. Debian uses 27 for `sudo`
+# and has no wheel; this rootfs is not Debian and has no group to collide with,
+# so the more widely recognised name and number win.
+mkdir -p "$RFS/etc/sudoers.d"
+chmod 750 "$RFS/etc/sudoers.d"
+cat > "$RFS/etc/sudoers" <<'EOF'
+# Who may run what, as whom. See sudoers(5) -- SmallCLUE's sudo implements a
+# subset: user and %group entries, host lists, (runas) specs, NOPASSWD/PASSWD,
+# ALL or an explicit list of absolute command paths, #includedir, and
+# last-match-wins. Aliases, negation and globs are NOT implemented and a line
+# using them is skipped rather than guessed at.
+#
+# You are asked for YOUR OWN password, not root's.
+root   ALL=(ALL:ALL) ALL
+%wheel ALL=(ALL:ALL) ALL
+
+#includedir /etc/sudoers.d
+EOF
+chmod 440 "$RFS/etc/sudoers"
 # /etc/shadow: POSIX only specifies the FILE FORMAT, not which accounts must
 # exist -- that's a distro convention (LSB/Debian's base-passwd). A full
 # Debian-style base account list (daemon/bin/sys/mail/news/uucp/...) would
