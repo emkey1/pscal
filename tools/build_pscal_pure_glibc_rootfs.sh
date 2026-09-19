@@ -6,6 +6,15 @@
 # and the earlier i386 iSH port both use, just with a target glibc actually knows.
 set -euo pipefail
 OUT_DIR="${1:-/out}"
+
+# Every published image carries a version, because the iSH-AOK root picker
+# shows the two most recent PSCAL builds side by side (see that repo's
+# manifest.json "series"/"version" keys) and a user needs to be able to tell
+# which one they are looking at, both in the picker and from inside the guest
+# (/etc/pscal-release). Dotted date, not a counter: the interesting question
+# about a rootfs build is always "how old is it".
+PSCAL_ROOTFS_VERSION="${PSCAL_ROOTFS_VERSION:-$(date -u +%Y.%m.%d)}"
+ARCHIVE_NAME="pscal-rootfs-${PSCAL_ROOTFS_VERSION}-aarch64"
 # CRITICAL: all build/assembly work happens under a CONTAINER-LOCAL path,
 # never under $OUT_DIR directly. $OUT_DIR is a Docker bind mount back to
 # the macOS host, and Docker Desktop's bind-mount layer does NOT preserve
@@ -33,11 +42,55 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >/tmp/apt.log 2>&1
 apt-get install -y --no-install-recommends \
     build-essential cmake git ca-certificates pkg-config curl wget python3 patch openssh-client xz-utils \
-    zlib1g-dev libssl-dev libncurses-dev autoconf automake libtool \
+    zlib1g-dev libssl-dev libncurses-dev libc-ares-dev autoconf automake libtool file \
     >>/tmp/apt.log 2>&1 || (tail -100 /tmp/apt.log; exit 1)
 echo APT_OK
 
+echo "=== building static libcurl (HTTP only, OpenSSL, c-ares) ==="
+# aether forces PSCAL_CURL=ON, so pscal-core's find_package(CURL REQUIRED) is
+# now a hard dependency of one of the five frontends. Debian's own libcurl.a
+# is not usable here: `pkg-config --static --libs libcurl` drags in nghttp2,
+# idn2, rtmp, ssh2, psl, ldap/lber, krb5, zstd and brotli, and several of
+# those have no static archive in the archive at all. Build the libcurl this
+# image actually needs instead -- HTTP/HTTPS, OpenSSL, zlib, nothing else --
+# from the curl release PSCAL already vendors, so the guest's HTTP stack is
+# the same version PSCAL ships on iOS.
+#
+# --enable-ares is the load-bearing flag. Everything here is statically
+# linked against glibc, and static glibc's getaddrinfo() resolves DNS names by
+# dlopen()ing libnss_dns.so.2 at runtime -- a shared object this rootfs does
+# not contain and never will. c-ares speaks DNS itself, reading the
+# /etc/resolv.conf that iSH-AOK writes into the guest on every network change,
+# so hostnames resolve instead of failing the moment anything is fetched.
+mkdir -p /work/curl-build
+( cd /work/curl-build && /pbuild-curl/configure \
+    --prefix=/usr/local --disable-shared --enable-static \
+    --with-openssl --with-zlib --enable-ares \
+    --with-ca-bundle=/etc/ssl/certs/ca-certificates.crt \
+    --without-libpsl --without-libidn2 --without-nghttp2 --without-brotli \
+    --without-zstd --without-librtmp --without-libssh2 --without-libssh \
+    --disable-ldap --disable-ldaps --disable-docs \
+    --disable-ftp --disable-file --disable-dict --disable-telnet --disable-tftp \
+    --disable-pop3 --disable-imap --disable-smb --disable-smtp --disable-gopher \
+    --disable-mqtt --disable-rtsp \
+    >/tmp/curl-configure.log 2>&1 \
+    || (echo "CONFIGURE FAIL curl"; tail -60 /tmp/curl-configure.log; exit 1) )
+( cd /work/curl-build && make -j"$(nproc)" >/tmp/curl-build.log 2>&1 \
+    && make install >>/tmp/curl-build.log 2>&1 \
+    || (echo "BUILD FAIL curl"; tail -80 /tmp/curl-build.log; exit 1) )
+[ -f /usr/local/lib/libcurl.a ] || { echo "FATAL: libcurl.a not installed"; exit 1; }
+# FindCURL hands the consumer libcurl.a and nothing else, so the transitive
+# static dependencies have to be named somewhere the linker sees them AFTER
+# it. CMAKE_C_STANDARD_LIBRARIES is the end of the link line; linker flags
+# would land before the objects and be dropped.
+CURL_STATIC_DEPS="-lssl -lcrypto -lcares -lz"
+
 FRONTENDS="pascal aether rea clike exsh"
+# Provenance: which commit of each component this image was actually built
+# from. Written into the rootfs as /etc/pscal-release in step 2 -- a bug
+# report from a device is useless without it, and "main at some point" is not
+# an answer anyone can act on.
+PROVENANCE=""
 for repo in $FRONTENDS; do
   echo "=== building $repo ==="
   if [ "$repo" = "aether" ]; then
@@ -47,13 +100,27 @@ for repo in $FRONTENDS; do
     git clone --depth 1 "https://github.com/emkey1/$repo.git" "/work/$repo" \
       >/tmp/clone-$repo.log 2>&1 || (tail -50 /tmp/clone-$repo.log; exit 1)
   fi
+  # Only aether links libcurl (it forces PSCAL_CURL=ON); the other four leave
+  # pscal-core's networking stub in place, and naming curl's dependencies on
+  # their link lines would just pull OpenSSL into four binaries that never
+  # call it.
+  # An array, because the value is one argument containing spaces -- an
+  # unquoted string here splits at them and cmake reports "Unknown argument
+  # -lz".
+  EXTRA_CMAKE_ARGS=()
+  if [ "$repo" = "aether" ]; then
+    EXTRA_CMAKE_ARGS+=("-DCMAKE_C_STANDARD_LIBRARIES=$CURL_STATIC_DEPS")
+  fi
   ( cd "/work/$repo" && mkdir build && cd build && \
     cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-static" -DCMAKE_EXE_LINKER_FLAGS="-static" \
+      "${EXTRA_CMAKE_ARGS[@]}" \
       >/tmp/cmake-$repo.log 2>&1 || (echo "CMAKE FAIL $repo"; tail -100 /tmp/cmake-$repo.log; exit 1) )
   ( cd "/work/$repo/build" && cmake --build . -j"$(nproc)" >/tmp/build-$repo.log 2>&1 \
       || (echo "BUILD FAIL $repo"; tail -150 /tmp/build-$repo.log; exit 1) )
   find "/work/$repo/build" -maxdepth 1 -type f -executable -name "$repo" -exec cp {} "$LOCAL_OUT/bin/$repo" \;
   [ -f "$LOCAL_OUT/bin/$repo" ] || { echo "MISSING BINARY $repo"; exit 1; }
+  PROVENANCE="${PROVENANCE}${repo} $(git -C "/work/$repo" rev-parse --short=12 HEAD)
+"
 done
 
 echo "=== building smallclue (native aarch64 glibc via setup_posix_env.sh) ==="
@@ -62,11 +129,74 @@ echo "=== building smallclue (native aarch64 glibc via setup_posix_env.sh) ==="
 # has broken in between builds before (e.g. commit 12a084d "Add chroot
 # applet" landed a table entry with no linked implementation). Bump this
 # deliberately, not implicitly.
-SMALLCLUE_PIN=5fb94fa
-git clone https://github.com/emkey1/smallclue.git /work/smallclue \
+SMALLCLUE_PIN="${SMALLCLUE_PIN:-3291b11}"
+# --recurse-submodules, not a plain clone: smallclue's third-party deps
+# (openssh, libgit2, dvtm, nextvi, openrsync) are submodules now, and
+# fetch_dependencies.sh only knows how to re-download the ones that still have
+# a tarball fallback. A plain clone leaves the rest as empty directories and
+# the build fails several minutes later complaining about a missing ssh.c.
+git clone --recurse-submodules https://github.com/emkey1/smallclue.git /work/smallclue \
   >/tmp/clone-smallclue.log 2>&1 || (tail -80 /tmp/clone-smallclue.log; exit 1)
-( cd /work/smallclue && git checkout -q "$SMALLCLUE_PIN" ) \
-  || { echo "FATAL: could not check out smallclue pin $SMALLCLUE_PIN"; exit 1; }
+( cd /work/smallclue && git checkout -q "$SMALLCLUE_PIN" \
+    && git submodule update --init --recursive ) \
+  >>/tmp/clone-smallclue.log 2>&1 \
+  || { echo "FATAL: could not check out smallclue pin $SMALLCLUE_PIN"; tail -40 /tmp/clone-smallclue.log; exit 1; }
+PROVENANCE="${PROVENANCE}smallclue $(git -C /work/smallclue rev-parse --short=12 HEAD)
+"
+
+# git gives every file it writes the same checkout timestamp, in no particular
+# order, and OpenSSH's configure refuses to run at all if configure.ac or any
+# m4/*.m4 comes out newer than the generated configure ("newer than configure,
+# run autoreconf"). Whether a fresh clone builds is therefore a coin toss.
+# Restamp the generated files in dependency order -- one touch per line, since
+# `touch a b` gives both the SAME time and the comparison is strictly-newer.
+# Restamping beats running autoreconf: this tree is patched (ssh.c's main is
+# renamed for embedding) and regenerating it with whatever autoconf the base
+# image happens to ship invites a different failure.
+OPENSSH_DIR=/work/smallclue/third-party/openssh
+
+# Put upstream OpenSSH's plain globals back for this build. The fork spells
+# ~240 of them `__thread` so that AOK can run ssh as a NATIVE PROGRAM inside
+# the app, where the process is shared and every guest task needs its own
+# copy of the globals. Nothing in this image is embedded that way: smallclue
+# and sshd are ordinary executables the guest forks and execs, one process per
+# invocation, so thread-locality buys nothing here -- and it costs the whole
+# build, because the server side does not compile with it. auth2-methods.c
+# initialises static structs with &options.password_authentication and
+# friends, and the address of a thread-local is not a constant expression:
+# `make sshd` dies on six of them, unguarded, taking setup_posix_env.sh and
+# therefore the entire rootfs down with it.
+#
+# Every occurrence in this tree is a declaration specifier -- none in a string
+# or a comment -- so deleting the keyword is exactly the upstream spelling.
+find "$OPENSSH_DIR" \( -name '*.c' -o -name '*.h' \) \
+    -exec sed -i 's/\bextern __thread\b/extern/g; s/\bstatic __thread\b/static/g; s/\b__thread \b//g' {} +
+if grep -rq "__thread" "$OPENSSH_DIR" --include='*.c' --include='*.h'; then
+  echo "FATAL: __thread survived in the OpenSSH tree"
+  grep -rn "__thread" "$OPENSSH_DIR" --include='*.c' --include='*.h' | head -5
+  exit 1
+fi
+
+touch "$OPENSSH_DIR/configure.ac"
+touch "$OPENSSH_DIR"/m4/*.m4
+touch "$OPENSSH_DIR/aclocal.m4"
+touch "$OPENSSH_DIR/configure"
+touch "$OPENSSH_DIR/config.h.in"
+touch "$OPENSSH_DIR/Makefile.in"
+# smallclue main has not linked on Linux since df5c449: that commit added
+# src/spawn.c and moved core.c's fork+exec sites onto smallclueSpawn/
+# smallclueSpawnSimple, but build_smallclue.sh's source list is explicit, not a
+# glob, and the new file was never added to it -- so the link ends in six
+# undefined references after two hours of compiling. One line, in the same
+# alphabetical place the rest of the list uses. Drop this once the fix lands
+# upstream; the guard makes it a no-op the moment it does.
+if ! grep -q 'src/spawn\.c' /work/smallclue/build_smallclue.sh; then
+  sed -i 's|^\([[:space:]]*\)src/split_app\.c \\|\1src/spawn.c \\\n\1src/split_app.c \\|' \
+      /work/smallclue/build_smallclue.sh
+  grep -q 'src/spawn\.c' /work/smallclue/build_smallclue.sh \
+      || { echo "FATAL: could not add src/spawn.c to build_smallclue.sh's source list"; exit 1; }
+fi
+
 ( cd /work/smallclue && AUTO_INSTALL_DEPS=1 bash setup_posix_env.sh >/tmp/setup-posix.log 2>&1 \
     || (echo "SETUP_POSIX_ENV FAIL"; tail -200 /tmp/setup-posix.log; exit 1) )
 cp /work/smallclue/smallclue "$LOCAL_OUT/bin/smallclue"
@@ -106,6 +236,7 @@ RFS="$LOCAL_OUT/rootfs"
 rm -rf "$RFS"
 mkdir -p "$RFS/usr/bin" "$RFS/usr/local/pscal/bin" "$RFS/usr/local/pscal/pascal/lib" \
          "$RFS/usr/local/pscal/clike/lib" "$RFS/usr/local/lib/rea" "$RFS/etc/ssh" \
+         "$RFS/etc/ssl/certs" \
          "$RFS/etc/service/sshd" \
          "$RFS/tmp" "$RFS/var/empty" "$RFS/run" "$RFS/home/username" "$RFS/dev/shm" "$RFS/dev/pts" \
          "$RFS/proc" "$RFS/sys" "$RFS/root/.ssh"
@@ -205,6 +336,12 @@ sshd:*:::::::
 nobody:*:::::::
 EOF
 chmod 600 "$RFS/etc/shadow"
+# aether's libcurl was configured with --with-ca-bundle pointing here, so a
+# rootfs without this file can open a TLS connection and then refuse every
+# certificate on it. Debian's bundle, copied as-is.
+cp /etc/ssl/certs/ca-certificates.crt "$RFS/etc/ssl/certs/ca-certificates.crt"
+chmod 644 "$RFS/etc/ssl/certs/ca-certificates.crt"
+
 cat > "$RFS/etc/hosts" <<'EOF'
 127.0.0.1   localhost
 ::1         localhost ip6-localhost ip6-loopback
@@ -212,6 +349,34 @@ EOF
 cat > "$RFS/etc/hostname" <<'EOF'
 pscal-ish
 EOF
+
+# /etc/pscal-release: the image's own identity. The picker in iSH-AOK shows
+# the version, but once a root is imported and renamed the only way back to
+# "which build is this" is from inside the guest, so the exact commit of
+# every component goes here too.
+{
+  echo "PSCAL_ROOTFS_VERSION=$PSCAL_ROOTFS_VERSION"
+  echo "PSCAL_ROOTFS_BUILT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "PSCAL_ROOTFS_ARCH=aarch64"
+  echo "PSCAL_ROOTFS_LIBC=glibc"
+  echo
+  echo "# component commit"
+  printf '%s' "$PROVENANCE"
+} > "$RFS/etc/pscal-release"
+chmod 644 "$RFS/etc/pscal-release"
+
+# /etc/os-release is what anything generic asks first (including smallclue's
+# own `uname`-adjacent reporting and any script a user brings over from a
+# Debian root), so answer it rather than letting the lookup fail.
+cat > "$RFS/etc/os-release" <<EOF
+NAME="PSCAL"
+ID=pscal
+PRETTY_NAME="PSCAL + SmallCLUE $PSCAL_ROOTFS_VERSION"
+VERSION_ID="$PSCAL_ROOTFS_VERSION"
+VERSION="$PSCAL_ROOTFS_VERSION"
+HOME_URL="https://github.com/emkey1/pscal"
+EOF
+chmod 644 "$RFS/etc/os-release"
 
 cat > "$RFS/etc/profile" <<'EOF'
 export PATH=/usr/bin
@@ -372,9 +537,9 @@ echo "== Step 3/3: package as .tar.xz, container-local, then copy the finished a
 # that would silently reintroduce the exact same host-user-ownership bug
 # this whole restructure exists to avoid (non-root extraction on macOS
 # can't preserve root ownership either, same underlying limitation).
-( cd "$RFS" && XZ_OPT=-9 tar -cJf "$LOCAL_OUT/pscal-pure-aarch64-rootfs.tar.xz" . )
-cp "$LOCAL_OUT/pscal-pure-aarch64-rootfs.tar.xz" "$OUT_DIR/pscal-pure-aarch64-rootfs.tar.xz"
-echo "Wrote $OUT_DIR/pscal-pure-aarch64-rootfs.tar.xz"
-du -sh "$OUT_DIR/pscal-pure-aarch64-rootfs.tar.xz"
+( cd "$RFS" && XZ_OPT=-9 tar -cJf "$LOCAL_OUT/${ARCHIVE_NAME}.tar.xz" . )
+cp "$LOCAL_OUT/${ARCHIVE_NAME}.tar.xz" "$OUT_DIR/${ARCHIVE_NAME}.tar.xz"
+echo "Wrote $OUT_DIR/${ARCHIVE_NAME}.tar.xz"
+du -sh "$OUT_DIR/${ARCHIVE_NAME}.tar.xz"
 echo "--- ownership sanity check (must show uid=0 gid=0, not the host user) ---"
-tar -tvf --numeric-owner "$LOCAL_OUT/pscal-pure-aarch64-rootfs.tar.xz" 2>/dev/null | grep "var/empty" || true
+tar --numeric-owner -tvf "$LOCAL_OUT/${ARCHIVE_NAME}.tar.xz" 2>/dev/null | grep "var/empty" || true
