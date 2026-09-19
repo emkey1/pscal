@@ -100,21 +100,29 @@ for repo in $FRONTENDS; do
     git clone --depth 1 "https://github.com/emkey1/$repo.git" "/work/$repo" \
       >/tmp/clone-$repo.log 2>&1 || (tail -50 /tmp/clone-$repo.log; exit 1)
   fi
-  # Only aether links libcurl (it forces PSCAL_CURL=ON); the other four leave
-  # pscal-core's networking stub in place, and naming curl's dependencies on
-  # their link lines would just pull OpenSSL into four binaries that never
-  # call it.
-  # An array, because the value is one argument containing spaces -- an
-  # unquoted string here splits at them and cmake reports "Unknown argument
-  # -lz".
-  EXTRA_CMAKE_ARGS=()
-  if [ "$repo" = "aether" ]; then
-    EXTRA_CMAKE_ARGS+=("-DCMAKE_C_STANDARD_LIBRARIES=$CURL_STATIC_DEPS")
-  fi
+  # All five get libcurl, not just aether. pscal-core's PSCAL_CURL defaults to
+  # OFF and only aether forced it ON, which left the image shipping
+  # lib/rea/http and lib/clike/http.cl as dead weight -- a rea program calling
+  # Http.get died with "vmBuiltinHttpSession is unavailable: this build omits
+  # libcurl-based networking".
+  # An array, because CMAKE_C_STANDARD_LIBRARIES is one argument containing
+  # spaces -- an unquoted string here splits at them and cmake reports
+  # "Unknown argument -lz".
+  EXTRA_CMAKE_ARGS=(
+    "-DPSCAL_CURL=ON"
+    "-DCMAKE_C_STANDARD_LIBRARIES=$CURL_STATIC_DEPS"
+  )
   ( cd "/work/$repo" && mkdir build && cd build && \
     cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-static" -DCMAKE_EXE_LINKER_FLAGS="-static" \
       "${EXTRA_CMAKE_ARGS[@]}" \
       >/tmp/cmake-$repo.log 2>&1 || (echo "CMAKE FAIL $repo"; tail -100 /tmp/cmake-$repo.log; exit 1) )
+  # -DPSCAL_CURL=ON wins only because nothing in these trees set()s it FORCEd
+  # first, and a frontend that started doing so would go quietly back to the
+  # stub: a binary that builds, links and runs, and fails only once someone
+  # asks it to fetch something. pscal-core announces the real backend itself;
+  # insist on hearing it rather than trusting the flag.
+  grep -q "pscal-core: libcurl networking ENABLED" /tmp/cmake-$repo.log \
+    || { echo "FATAL: $repo configured WITHOUT libcurl networking despite -DPSCAL_CURL=ON"; exit 1; }
   ( cd "/work/$repo/build" && cmake --build . -j"$(nproc)" >/tmp/build-$repo.log 2>&1 \
       || (echo "BUILD FAIL $repo"; tail -150 /tmp/build-$repo.log; exit 1) )
   find "/work/$repo/build" -maxdepth 1 -type f -executable -name "$repo" -exec cp {} "$LOCAL_OUT/bin/$repo" \;
