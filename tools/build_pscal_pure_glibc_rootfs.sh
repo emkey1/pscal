@@ -143,7 +143,7 @@ echo "=== building smallclue (native aarch64 glibc via setup_posix_env.sh) ==="
 # has broken in between builds before (e.g. commit 12a084d "Add chroot
 # applet" landed a table entry with no linked implementation). Bump this
 # deliberately, not implicitly.
-SMALLCLUE_PIN="${SMALLCLUE_PIN:-2fb8219}"
+SMALLCLUE_PIN="${SMALLCLUE_PIN:-7911eec}"
 # --recurse-submodules, not a plain clone: smallclue's third-party deps
 # (openssh, libgit2, dvtm, nextvi, openrsync) are submodules now, and
 # fetch_dependencies.sh only knows how to re-download the ones that still have
@@ -225,7 +225,7 @@ cp /work/smallclue/smallclue "$LOCAL_OUT/bin/smallclue"
 #
 # The container is linux/arm64 and the binary is a static aarch64 glibc one, so
 # it runs here directly.
-for wired_applet in git; do
+for wired_applet in git rsync; do
   if /work/smallclue/smallclue "$wired_applet" --version 2>&1 \
        | grep -qiE "not built in this configuration|unavailable in this build|not enabled in this build"; then
     echo "FATAL: the $wired_applet applet is a stub in this build:"
@@ -233,7 +233,7 @@ for wired_applet in git; do
     exit 1
   fi
 done
-echo "applet wiring check: git is real"
+echo "applet wiring check: git and rsync are real"
 
 # setup_posix_env.sh's OpenSSH build step also runs `make sshd` (real, full
 # server-side OpenSSH, not a stub) but never installs or applet-wires the
