@@ -498,11 +498,34 @@ EOF
 chmod 644 "$RFS/etc/os-release"
 
 cat > "$RFS/etc/profile" <<'EOF'
-export PATH=/usr/bin
+export PATH=/usr/bin:/usr/local/sbin
 export PSCAL_INSTALL_ROOT=/usr/local/pscal
 export PS1='\u@\h:\w\$ '
+
+# One-time setup hint, shown until the machine has a login that is not root.
+# A fresh image ships every account locked, so the first thing anyone needs is
+# this script -- and nothing else on the system says so.
+if [ "$(id -u)" = 0 ] && [ ! -f /etc/pscal-provisioned ]; then
+    echo "Set this machine up (login, password, ssh):  provision-ultimate-pscal.sh"
+fi
 EOF
 chmod 644 "$RFS/etc/profile"
+
+# The provisioner, shipped IN the image as well as at /AOK/tools.
+#
+# /AOK is served by iSH-AOK itself, so the copy there is whatever the installed
+# app carries -- which on a build older than the script is nothing at all, and
+# "the provision script is missing" is not a debuggable message. Fetched from
+# the ish-AOK tree rather than kept as a second copy here, so there is still
+# exactly one source for it.
+echo "=== fetching the PSCAL provisioner from the iSH-AOK tree ==="
+PROVISIONER_URL="https://raw.githubusercontent.com/emkey1/ish-AOK/working/opt/AOK/tools/provision-ultimate-pscal.sh"
+mkdir -p "$RFS/usr/local/sbin"
+curl -fsSL "$PROVISIONER_URL" -o "$RFS/usr/local/sbin/provision-ultimate-pscal.sh" \
+  || { echo "FATAL: could not fetch $PROVISIONER_URL"; exit 1; }
+head -1 "$RFS/usr/local/sbin/provision-ultimate-pscal.sh" | grep -q '^#!/bin/sh' \
+  || { echo "FATAL: fetched provisioner is not a shell script"; exit 1; }
+chmod 755 "$RFS/usr/local/sbin/provision-ultimate-pscal.sh"
 
 # sshd_config: key-only auth by default. There is no /etc/shadow in this
 # rootfs at all, so password auth has nothing real to check against anyway
