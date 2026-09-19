@@ -512,6 +512,11 @@ chmod 644 "$RFS/etc/profile"
 # passwordless root login). No UsePAM directive at all -- this static
 # OpenSSH build has no PAM support compiled in, so the option is flatly
 # UNRECOGNIZED (not just a no-op) and sshd refuses to start with it present.
+#
+# AuthorizedKeysFile is RELATIVE, i.e. per-user, and that is the point: it
+# used to read /root/.ssh/authorized_keys, an absolute path, so every user's
+# keys were looked for in root's file. A key copied to ~/.ssh did nothing,
+# and root's file silently authorised logins as anybody.
 cat > "$RFS/etc/ssh/sshd_config" <<'EOF'
 Port 22
 PermitRootLogin prohibit-password
@@ -520,7 +525,7 @@ PermitEmptyPasswords no
 HostKey /etc/ssh/ssh_host_rsa_key
 HostKey /etc/ssh/ssh_host_ecdsa_key
 HostKey /etc/ssh/ssh_host_ed25519_key
-AuthorizedKeysFile /root/.ssh/authorized_keys
+AuthorizedKeysFile .ssh/authorized_keys
 Subsystem sftp internal-sftp
 EOF
 
