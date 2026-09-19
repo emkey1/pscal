@@ -264,6 +264,16 @@ mkdir -p "$RFS/usr/bin" "$RFS/usr/local/pscal/bin" "$RFS/usr/local/pscal/pascal/
          "$RFS/tmp" "$RFS/var/empty" "$RFS/var/log" "$RFS/run" "$RFS/home/username" "$RFS/dev/shm" "$RFS/dev/pts" \
          "$RFS/proc" "$RFS/sys" "$RFS/root/.ssh"
 chmod 1777 "$RFS/tmp"
+
+# sshd stats these FILES and will not create them, so an empty /var/log is not
+# enough -- it logged "lastlog_openseek: Couldn't stat /var/log/lastlog" on
+# every single login until these existed, and logout() failed for want of
+# utmp. Distros ship them empty for exactly this reason. Modes follow Debian's,
+# minus the utmp group this rootfs has no reason to invent.
+: > "$RFS/var/log/lastlog";  chmod 0644 "$RFS/var/log/lastlog"
+: > "$RFS/var/log/wtmp";     chmod 0644 "$RFS/var/log/wtmp"
+: > "$RFS/var/log/btmp";     chmod 0600 "$RFS/var/log/btmp"
+: > "$RFS/run/utmp";         chmod 0644 "$RFS/run/utmp"
 chmod 700 "$RFS/root/.ssh"
 # sshd's privsep chroot target: must be root-owned, not group/world-writable
 # (sshd refuses to start otherwise -- "must be owned by root and not group
@@ -271,6 +281,12 @@ chmod 700 "$RFS/root/.ssh"
 # root inside the container; chmod defensively regardless of base-image
 # umask defaults.
 chmod 0711 "$RFS/var/empty"
+# /var/run -> /run, the merged-run convention that matches this image's
+# merged-usr layout. Without it sshd cannot write /var/run/sshd.pid, and
+# glibc's _PATH_UTMP (/var/run/utmp) does not resolve either, so every logout
+# reported "syslogin_perform_logout: logout() returned an error" and `who`
+# and `last` had nothing to read. One symlink, both symptoms.
+ln -s ../run "$RFS/var/run"
 ln -s usr/bin "$RFS/bin"
 ln -s usr/bin "$RFS/sbin"
 ln -s bin "$RFS/usr/sbin"
@@ -328,6 +344,39 @@ for h in $SSHD_HELPERS; do
   chmod +x "$RFS/usr/local/libexec/$h"
 done
 
+# Examples, at the path the earlier musl spike used. That script staged them;
+# this one never did, so no published image has ever carried them -- and
+# nothing complained, because no frontend looks an examples path up. They are
+# reference material, which is exactly why their absence was invisible.
+#
+# Taken from the CLONES rather than a bind mount of the umbrella checkout, so
+# they match the exact commit whose binaries are in this image instead of
+# whatever the build host happened to have on disk.
+#
+# Everything except sdl/: this rootfs has no SDL, and those are 1.6 MB of
+# demos that could not run. Excluded by name rather than by listing what to
+# include, so a new category -- aether ships showcase/ -- arrives without
+# needing an edit here.
+for repo in $FRONTENDS; do
+  src="/work/$repo/examples"
+  if [ ! -d "$src" ]; then
+    echo "note: $repo ships no examples/ directory"
+    continue
+  fi
+  dest="$RFS/usr/local/pscal/examples/$repo"
+  mkdir -p "$dest"
+  cp -r "$src/." "$dest/"
+  find "$dest" -type d -name sdl -prune -exec rm -rf {} +
+  printf '  examples/%-7s %5s KB  %3s files\n' "$repo" \
+      "$(du -sk "$dest" | cut -f1)" "$(find "$dest" -type f | wc -l | tr -d ' ')"
+done
+if [ -z "$(find "$RFS/usr/local/pscal/examples" -type f 2>/dev/null | head -1)" ]; then
+  echo "FATAL: no examples were staged"; exit 1
+fi
+if find "$RFS/usr/local/pscal/examples" -type d -name sdl | grep -q .; then
+  echo "FATAL: sdl examples survived the prune"; exit 1
+fi
+
 cp /pbuild-lib/pascal/*.pl "$RFS/usr/local/pscal/pascal/lib/" 2>/dev/null || true
 cp /pbuild-lib/clike/*.cl "$RFS/usr/local/pscal/clike/lib/" 2>/dev/null || true
 find /pbuild-lib/rea -maxdepth 1 -type f ! -iname "README.md" -exec cp {} "$RFS/usr/local/lib/rea/" \; 2>/dev/null || true
@@ -366,6 +415,21 @@ chmod 600 "$RFS/etc/shadow"
 # certificate on it. Debian's bundle, copied as-is.
 cp /etc/ssl/certs/ca-certificates.crt "$RFS/etc/ssl/certs/ca-certificates.crt"
 chmod 644 "$RFS/etc/ssl/certs/ca-certificates.crt"
+
+# getservbyname/getprotobyname have nothing to read without these, so `ssh
+# host ssh` and anything naming a port by name fails in a way that looks like
+# a network problem. Plain data files, taken from the build container.
+# NOT /etc/nsswitch.conf: these binaries are statically linked, and giving
+# glibc an nsswitch.conf invites it to dlopen NSS modules this rootfs does not
+# have. Absent, it uses its built-in defaults, which is what we want.
+cp /etc/services "$RFS/etc/services"   2>/dev/null || true
+cp /etc/protocols "$RFS/etc/protocols" 2>/dev/null || true
+chmod 644 "$RFS/etc/services" "$RFS/etc/protocols" 2>/dev/null || true
+
+# sshd falls back without moduli, but then diffie-hellman-group-exchange is
+# simply unavailable; it is a data file the OpenSSH build already produced.
+cp /work/smallclue/third-party/openssh/moduli "$RFS/etc/ssh/moduli" 2>/dev/null \
+    && chmod 644 "$RFS/etc/ssh/moduli" || echo "note: no moduli in the OpenSSH tree"
 
 cat > "$RFS/etc/hosts" <<'EOF'
 127.0.0.1   localhost
