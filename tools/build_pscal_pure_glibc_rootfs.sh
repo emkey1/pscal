@@ -501,15 +501,23 @@ cat > "$RFS/etc/profile" <<'EOF'
 export PATH=/usr/bin:/usr/local/sbin
 export PSCAL_INSTALL_ROOT=/usr/local/pscal
 export PS1='\u@\h:\w\$ '
+EOF
+chmod 644 "$RFS/etc/profile"
 
-# One-time setup hint, shown until the machine has a login that is not root.
-# A fresh image ships every account locked, so the first thing anyone needs is
-# this script -- and nothing else on the system says so.
-if [ "$(id -u)" = 0 ] && [ ! -f /etc/pscal-provisioned ]; then
+# The one-time setup hint, in root's exsh rc.
+#
+# NOT /etc/profile: nothing in this image reads it. /etc/rc sets PATH and PS1
+# itself and then runs exsh, and exsh's startup file is ~/.exshrc -- so a line
+# added to /etc/profile is a write with no reader, which is exactly how the
+# first version of this went. A fresh image ships every account locked, and
+# nothing else on the system says what to do about it.
+cat >> "$RFS/root/.exshrc" <<'EOF'
+
+if [ ! -f /etc/pscal-provisioned ]; then
     echo "Set this machine up (login, password, ssh):  provision-ultimate-pscal.sh"
 fi
 EOF
-chmod 644 "$RFS/etc/profile"
+chmod 644 "$RFS/root/.exshrc"
 
 # The provisioner, shipped IN the image as well as at /AOK/tools.
 #
@@ -577,7 +585,7 @@ chmod +x "$RFS/etc/service/sshd/run"
 
 cat > "$RFS/etc/rc" <<'EOF'
 #!/usr/bin/sh
-export PATH=/usr/bin
+export PATH=/usr/bin:/usr/local/sbin
 export PSCAL_INSTALL_ROOT=/usr/local/pscal
 mount -t proc proc /proc 2>/dev/null
 mount -t sysfs sys /sys 2>/dev/null
