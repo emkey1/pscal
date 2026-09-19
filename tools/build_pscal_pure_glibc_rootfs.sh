@@ -111,6 +111,11 @@ for repo in $FRONTENDS; do
   EXTRA_CMAKE_ARGS=(
     "-DPSCAL_CURL=ON"
     "-DCMAKE_C_STANDARD_LIBRARIES=$CURL_STATIC_DEPS"
+    # Stamps `<frontend> -v` with the image it belongs to. The frontends take
+    # this rather than running `git describe` because the clones above are
+    # --depth 1 and a shallow clone has no tags; the matching git tag is pushed
+    # to each repo when the image is published.
+    "-DPSCAL_ROOTFS_TAG=pscal-rootfs-$PSCAL_ROOTFS_VERSION"
   )
   ( cd "/work/$repo" && mkdir build && cd build && \
     cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-static" -DCMAKE_EXE_LINKER_FLAGS="-static" \
@@ -225,15 +230,25 @@ cp /work/smallclue/third-party/openssh/sshd "$LOCAL_OUT/bin/sshd"
 # can override). Without it, sshd's listener starts fine (matching what
 # was tested so far) but every real connection fails immediately with
 # "/usr/local/libexec/sshd-session does not exist or is not executable".
-( cd /work/smallclue/third-party/openssh && make -j4 sshd-session \
-    >/tmp/build-sshd-session.log 2>&1 \
-    || (echo "BUILD FAIL sshd-session"; tail -100 /tmp/build-sshd-session.log; exit 1) )
-if [ ! -f /work/smallclue/third-party/openssh/sshd-session ]; then
-  echo "FATAL: sshd-session was not built"; exit 1
-fi
-cp /work/smallclue/third-party/openssh/sshd-session "$LOCAL_OUT/bin/sshd-session"
+# ...and 10.0 split the AUTHENTICATION phase out too, into sshd-auth. Both
+# published PSCAL images shipped sshd-session alone, so sshd started, listened,
+# accepted a TCP connection and then died with "/usr/local/libexec/sshd-auth
+# does not exist or is not executable" -- and `sshd -t` passes throughout,
+# because validating the config never execs a helper. ssh-sk-helper (FIDO) and
+# ssh-pkcs11-helper (smartcards) are the same shape of dependency on the client
+# side, so build the lot.
+SSHD_HELPERS="sshd-session sshd-auth ssh-sk-helper ssh-pkcs11-helper ssh-keysign"
+( cd /work/smallclue/third-party/openssh && make -j4 $SSHD_HELPERS \
+    >/tmp/build-sshd-helpers.log 2>&1 \
+    || (echo "BUILD FAIL sshd helpers"; tail -100 /tmp/build-sshd-helpers.log; exit 1) )
+for h in $SSHD_HELPERS; do
+  if [ ! -f "/work/smallclue/third-party/openssh/$h" ]; then
+    echo "FATAL: $h was not built"; exit 1
+  fi
+  cp "/work/smallclue/third-party/openssh/$h" "$LOCAL_OUT/bin/$h"
+done
 
-for f in $FRONTENDS smallclue sshd sshd-session; do
+for f in $FRONTENDS smallclue sshd $SSHD_HELPERS; do
   file "$LOCAL_OUT/bin/$f" | grep -q "statically linked" || { echo "FATAL: $f not statically linked"; file "$LOCAL_OUT/bin/$f"; exit 1; }
   file "$LOCAL_OUT/bin/$f" | grep -qi "aarch64" || { echo "FATAL: $f not aarch64"; file "$LOCAL_OUT/bin/$f"; exit 1; }
 done
@@ -246,7 +261,7 @@ mkdir -p "$RFS/usr/bin" "$RFS/usr/local/pscal/bin" "$RFS/usr/local/pscal/pascal/
          "$RFS/usr/local/pscal/clike/lib" "$RFS/usr/local/lib/rea" "$RFS/etc/ssh" \
          "$RFS/etc/ssl/certs" \
          "$RFS/etc/service/sshd" \
-         "$RFS/tmp" "$RFS/var/empty" "$RFS/run" "$RFS/home/username" "$RFS/dev/shm" "$RFS/dev/pts" \
+         "$RFS/tmp" "$RFS/var/empty" "$RFS/var/log" "$RFS/run" "$RFS/home/username" "$RFS/dev/shm" "$RFS/dev/pts" \
          "$RFS/proc" "$RFS/sys" "$RFS/root/.ssh"
 chmod 1777 "$RFS/tmp"
 chmod 700 "$RFS/root/.ssh"
@@ -308,8 +323,10 @@ chmod +x "$RFS/usr/bin/sshd"
 # itself as a fixed string (_PATH_SSHD_SESSION), not configurable via
 # sshd_config.
 mkdir -p "$RFS/usr/local/libexec"
-cp "$LOCAL_OUT/bin/sshd-session" "$RFS/usr/local/libexec/sshd-session"
-chmod +x "$RFS/usr/local/libexec/sshd-session"
+for h in $SSHD_HELPERS; do
+  cp "$LOCAL_OUT/bin/$h" "$RFS/usr/local/libexec/$h"
+  chmod +x "$RFS/usr/local/libexec/$h"
+done
 
 cp /pbuild-lib/pascal/*.pl "$RFS/usr/local/pscal/pascal/lib/" 2>/dev/null || true
 cp /pbuild-lib/clike/*.cl "$RFS/usr/local/pscal/clike/lib/" 2>/dev/null || true
@@ -538,6 +555,40 @@ cd "$HOME" 2>/dev/null || cd /root
 exit $?
 EOF
 chmod +x "$RFS/usr/bin/login"
+
+# Every helper path compiled into the shipped binaries must exist in the
+# rootfs. Derived from the binaries with `strings`, not from a list kept by
+# hand: a hand-written list is exactly what was wrong before -- OpenSSH 9.8
+# split out sshd-session and the list was updated, 10.0 split out sshd-auth and
+# it was not, and nothing noticed for two releases because `sshd -t` validates
+# the config without ever exec'ing a helper. When OpenSSH 11 splits something
+# else out, this fails the build instead of shipping a server that dies on the
+# first connection.
+# ssh-askpass is the one referenced path that is legitimately absent: OpenSSH
+# has no build target for it (it is an external X11 passphrase prompter), and
+# ssh only reaches for it when it has no terminal to ask on. Everything else
+# named by a binary is required. Keep this list to things OpenSSH genuinely
+# cannot build -- it is the escape hatch that could hide the next sshd-auth.
+OPTIONAL_HELPERS="ssh-askpass"
+echo "--- checking every compiled-in helper path exists ---"
+MISSING_HELPERS=0
+for bin in "$RFS/usr/bin/sshd" "$RFS/usr/local/libexec"/* "$RFS/usr/bin/smallclue"; do
+  [ -f "$bin" ] || continue
+  for want in $(strings "$bin" | grep -oE "/usr/local/libexec/[A-Za-z0-9._-]+" | sort -u); do
+    case " $OPTIONAL_HELPERS " in
+      *" $(basename "$want") "*) echo "optional, absent by design: $want"; continue ;;
+    esac
+    if [ ! -x "$RFS$want" ]; then
+      echo "MISSING: $want (referenced by ${bin#$RFS})"
+      MISSING_HELPERS=1
+    fi
+  done
+done
+if [ "$MISSING_HELPERS" -ne 0 ]; then
+  echo "FATAL: a binary references a helper this rootfs does not ship"
+  exit 1
+fi
+echo "all referenced helpers present"
 
 echo "== Step 3/3: package as .tar.xz, container-local, then copy the finished archive out =="
 # .tar.xz (not .tar.gz + a separate host-side xz repack) specifically so
