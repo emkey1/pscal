@@ -5,9 +5,11 @@ compiler (and, for the embedded-closure case, exsh) to get well-formed PSB3
 chunks, then splices in specific corruptions (truncation, bad jump targets,
 bad constant indices, a stack-underflow instruction sequence, an
 unknown-region runtime-backstop underflow, a control-flow join-point
-depth-check bypass, a malformed embedded shell-closure chunk, and a
-self-attested trusted-skip-verify flag) so run_corpus_tests.py can assert
-every one fails cleanly (no crash, nonzero exit) through pscalvm.
+depth-check bypass, a malformed embedded shell-closure chunk, a
+self-attested trusted-skip-verify flag, an underflow in a Pascal main block,
+and a top-level jump into a procedure body) so run_corpus_tests.py can assert
+every one fails cleanly (no crash, nonzero exit) through pscalvm, and, where
+a manifest entry names one, with the expected load-time diagnostic.
 
 Usage: python3 generate_corpus.py [--pascal-bin PATH] [--exsh-bin PATH] [--out DIR]
 """
@@ -35,7 +37,9 @@ OP_CONST_FALSE = 0x06
 OP_ADD = 0x08
 OP_JUMP_IF_FALSE = 0x1C
 OP_JUMP = 0x1D
+OP_CALL_USER_PROC = 0x52
 OP_CALL_HOST = 0x53
+OP_POP = 0x54
 OP_HALT = 0x59
 # VM 2.0 Phase 2b (plan §5.7): slot-addressed globals.
 OP_DEFINE_GLOBAL_SLOT = 0x64  # variable-length ("?"), no fixed entry in find_first_opcode's table
@@ -78,6 +82,26 @@ SHELL_CLOSURE_SRC = """myfunc() {
   echo "hello from closure"
 }
 myfunc
+"""
+
+# Pascal lays a program out as prologue; JUMP over each routine; main block;
+# HALT. The main block therefore sits after the last routine's start address,
+# and the verifier used to bound each routine's walk at the next routine's
+# address, so it never walked a main block at all. This fixture's main block
+# has a loop calling a procedure, the shape that hid a wrong CALL_USER_PROC
+# stack effect until CLike (whose main is a real routine) exercised it.
+MAIN_BLOCK_LOOP_SRC = """program MainBlockLoop;
+var i, n: integer;
+procedure Tick;
+begin
+  n := n + 1;
+end;
+begin
+  n := 0;
+  for i := 1 to 3 do
+    Tick;
+  writeln('ticks=', n);
+end.
 """
 
 # VM 2.0 Phase 2b (plan §5.7): a fixture with both a mutable global (x, gets
@@ -238,11 +262,17 @@ def rebuild_code_section(new_code, cache_count=0):
     return psb3.encode_varint(len(new_code)) + psb3.encode_varint(cache_count) + new_code
 
 
-def write_corpus(out_dir, name, data, expect_ok, note):
+def write_corpus(out_dir, name, data, expect_ok, note, expect_stderr=None):
+    """expect_stderr, when given, is a substring the rejection's stderr must
+    contain -- for cases where the runtime would also fail the chunk, so a
+    nonzero exit alone can't show that the verifier rejected it at load."""
     path = os.path.join(out_dir, name)
     with open(path, "wb") as f:
         f.write(data)
-    return {"file": name, "expect_ok": expect_ok, "note": note}
+    entry = {"file": name, "expect_ok": expect_ok, "note": note}
+    if expect_stderr is not None:
+        entry["expect_stderr"] = expect_stderr
+    return entry
 
 
 def main():
@@ -529,6 +559,54 @@ def main():
                                       "the enum member 'red' (a real const global); loads and verifies "
                                       "cleanly, must be rejected at runtime by SET_GSLOT's "
                                       "global_slot_is_const check"))
+
+    # --- Pascal main block: code reached only through the top-level JUMP over
+    # the procedures (MAIN_BLOCK_LOOP_SRC's comment has the layout). The
+    # unmodified fixture is a control that the main-block walk accepts a real
+    # loop around a procedure call. ---
+    with tempfile.TemporaryDirectory() as cache_e:
+        main_loop_bytes = compile_to_bc(args.pascal_bin, MAIN_BLOCK_LOOP_SRC, cache_e)
+    manifest.append(write_corpus(args.out, "golden_main_block_loop.bc", main_loop_bytes, True,
+                                  "unmodified control: a Pascal main block looping over a "
+                                  "procedure call must load and run"))
+    mpf = psb3.read_psb3(os.path.join(args.out, "golden_main_block_loop.bc"))
+    main_code, main_cache_count = code_section_payload(mpf.section(psb3.SEC_CODE))
+
+    # --- The loop body's CALL_USER_PROC (4 bytes) becomes four POPs on the empty
+    # stack. Only the top-level walk reaches it, so the old verifier loaded
+    # the chunk, and at runtime pop() reports the underflow but POP carries
+    # on: the program still exits 0. ---
+    call_pc = find_first_opcode(main_code, {OP_CALL_USER_PROC})
+    if call_pc is None:
+        print("warning: no CALL_USER_PROC found in main-block fixture; skipping "
+              "main_block_underflow.bc", file=sys.stderr)
+    else:
+        code5 = bytearray(main_code)
+        code5[call_pc:call_pc + 4] = bytes([OP_POP] * 4)
+        mutated = mpf.with_section(psb3.SEC_CODE, rebuild_code_section(bytes(code5), main_cache_count))
+        manifest.append(write_corpus(args.out, "main_block_underflow.bc", mutated.to_bytes(), False,
+                                      f"main block's CALL_USER_PROC at code pc {call_pc} replaced by "
+                                      "POP x4 against an empty stack; must be rejected at load, "
+                                      "not left to the runtime",
+                                      expect_stderr="POP requires stack depth >= 1 but have 0"))
+
+    # --- The prologue's JUMP over the procedure retargeted to the procedure's
+    # own first instruction, so the top level runs the body without a call
+    # and leaves through its RETURN. The old verifier dropped the edge for
+    # leaving the top-level segment and the program ran to exit 0. ---
+    jump_pc = find_first_opcode(main_code, {OP_JUMP})
+    if jump_pc is None:
+        print("warning: no JUMP found in main-block fixture; skipping "
+              "jump_into_procedure.bc", file=sys.stderr)
+    else:
+        code6 = bytearray(main_code)
+        code6[jump_pc + 1:jump_pc + 5] = (0).to_bytes(4, "big")  # lands on the next instruction
+        mutated = mpf.with_section(psb3.SEC_CODE, rebuild_code_section(bytes(code6), main_cache_count))
+        manifest.append(write_corpus(args.out, "jump_into_procedure.bc", mutated.to_bytes(), False,
+                                      f"top-level JUMP at code pc {jump_pc} retargeted onto procedure "
+                                      "tick's first instruction; must be rejected as entering a "
+                                      "routine without a call",
+                                      expect_stderr="without a call"))
 
     manifest_path = os.path.join(args.out, "manifest.json")
     import json
