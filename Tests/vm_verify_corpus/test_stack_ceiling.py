@@ -8,7 +8,8 @@ via the shared pscalVmStackCeilingValues() accessor in vm.h/vm.c) so the
 two never disagree. This is a standalone script rather than a
 generate_corpus.py manifest entry because exercising it needs a per-case
 environment override, which the manifest/run_corpus_tests.py pipeline
-does not model -- a 1M+-entry declared-depth fixture large enough to
+did not model when it was written (entries can carry an `env` now) -- a
+1M+-entry declared-depth fixture large enough to
 exceed the *default* ceiling would be an impractically large corpus file
 to commit, whereas a tiny fixture plus a lowered PSCAL_VM_MAX_STACK_VALUES
 exercises the identical code path.

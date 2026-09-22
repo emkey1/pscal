@@ -13,9 +13,12 @@ import argparse
 import os
 import subprocess
 import sys
+import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from run_corpus_tests import crash_signal  # noqa: E402
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-CRASH_SIGNALS = {4, 6, 8, 10, 11}  # SIGILL, SIGABRT, SIGFPE, SIGBUS, SIGSEGV
 
 
 def main():
@@ -35,7 +38,9 @@ def main():
     with open(args.seed, "rb") as f:
         seed = f.read()
 
-    tmp_path = os.path.join(os.path.dirname(__file__), "_fuzz_tmp.bc")
+    # Per-run file, so sweeps against two builds can run side by side.
+    fd, tmp_path = tempfile.mkstemp(prefix="fuzz_", suffix=".bc")
+    os.close(fd)
     total = 0
     crashes = []
     hangs = []
@@ -63,8 +68,9 @@ def main():
                     # crash/memory-safety issue, just noted separately.
                     hangs.append((byte_idx, bit))
                     continue
-                if proc.returncode < 0 and (-proc.returncode) in CRASH_SIGNALS:
-                    crashes.append((byte_idx, bit, -proc.returncode))
+                sig = crash_signal(proc.returncode)
+                if sig is not None:
+                    crashes.append((byte_idx, bit, sig))
                 elif proc.returncode == 0:
                     clean_ok += 1
                 else:
