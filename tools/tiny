@@ -694,15 +694,6 @@ def write_bytecode(builder: BytecodeBuilder, path: Path, vm_version: int, format
             if written < aligned:
                 f.write(b"\x00" * (aligned - written))
                 written = aligned
-        # Builtin lowercase mapping count (tiny backend does not emit metadata)
-        f.write(struct.pack("<i", 0))
-        # Procedure table uses the convention stored_proc_count = -(count + 1).
-        # The tiny frontend never emits procedures, so we write -1 to signal
-        # an empty table to match the VM loader's expectations.
-        f.write(struct.pack("<i", -1))
-        # Constant symbol table and type table counts (both zero for tiny)
-        f.write(struct.pack("<i", 0))
-        f.write(struct.pack("<i", 0))
 
 # ---------------------------------------------------------------------------
 # Main entry

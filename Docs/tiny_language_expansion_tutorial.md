@@ -132,7 +132,7 @@ Tiny currently treats truth as integer. Reusing int constants keeps everything s
 
 ### Hint
 
-Check `src/compiler/bytecode.h` for an existing modulo opcode before lowering manually.
+Check `components/pscal-core/src/compiler/opcodes.def` for an existing modulo opcode (`MOD`) before lowering manually.
 
 ## 6) Add block comments or line comments
 
