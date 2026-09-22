@@ -139,7 +139,7 @@ run_tiny_clike_fixture() {
         PSCALI_WORKSPACE_ROOT="$ROOT_DIR" "$VM_BIN" "$TINY_PBC" "$src" "$bytecode_file" \
             > "$compile_log" 2>&1 || compile_status=$?
     else
-        "$CLIKE_BIN" --no-cache "$TINY_CLIKE_SRC" "$src" "$bytecode_file" \
+        PSCALI_WORKSPACE_ROOT="$ROOT_DIR" "$CLIKE_BIN" --no-cache "$TINY_CLIKE_SRC" "$src" "$bytecode_file" \
             > "$compile_log" 2>&1 || compile_status=$?
     fi
 
