@@ -13,8 +13,9 @@
 
 ### 3.0 ISA Conventions
 
-- **104 opcodes** (`0x00`–`0x67`; `OPCODE_COUNT == 0x68`, VM 2.0 Phase 2b —
-  was 100/`0x63` through Phase 2a). Opcode values are pinned explicit
+- **105 opcodes** (`0x00`–`0x68`; `OPCODE_COUNT == 0x69`. VM 2.0 Phase 2b
+  took it from 100/`0x63` to 104/`0x67`, and `PUSH_TYPE_DEFAULT` (`0x68`)
+  was appended in 2026-09). Opcode values are pinned explicit
   ordinals in `opcodes.def` (not implicit enum-declaration order — that
   changed back in Phase 1a specifically so append-only opcode additions no
   longer renumber the whole page). `PSCAL_VM_VERSION` (Chapter 2) still
@@ -87,6 +88,7 @@
 | 0x05 | `CONST_TRUE` | `op` | `( -- true )` | Push boolean true |
 | 0x06 | `CONST_FALSE` | `op` | `( -- false )` | Push boolean false |
 | 0x07 | `PUSH_IMMEDIATE_INT8` | `op imm:i8` | `( -- n )` | Push sign-extended 8-bit immediate; the compiler's choice for small integer literals, saving a pool access |
+| 0x68 | `PUSH_TYPE_DEFAULT` | `op type:u8 tname:u16` | `( -- v )` | Push a fresh default value of the type registered as `constants[tname]`: `makeValueForType(type, lookupType(name))`, the same lookup `DEFINE_GLOBAL_SLOT` does for a global. The compiler emits it in place of `CONSTANT` for a record or interface default (locals, function results, record literals, field defaults), which carries type ASTs that the PSB3 constant codec cannot encode; the type table itself is serialized (TYPES section), so the chunk stays cacheable |
 | 0x1E | `SWAP` | `op` | `( a b -- b a )` | Exchange top two values |
 | 0x1F | `DUP` | `op` | `( a -- a a )` | Duplicate top of stack (deep copy for owned payloads) |
 | 0x54 | `POP` | `op` | `( a -- )` | Discard top of stack, freeing owned payloads; emitted after expression statements |
