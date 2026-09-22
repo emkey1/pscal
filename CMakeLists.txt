@@ -167,6 +167,39 @@ execute_process(
 if(NOT GIT_DESCRIBE_RESULT EQUAL 0 OR PSCAL_GIT_TAG STREQUAL "")
     set(PSCAL_GIT_TAG "untagged")
 endif()
+
+# Frontend versions. Each frontend executable reports its component's VERSION
+# (date of the last language-affecting change -- what its standalone and rootfs
+# builds report too) plus the component commit it was built from, e.g.
+# 2026-09-19-1+233cb06. VERSION is read at configure time and is a configure
+# dependency. The commit is regenerated on every build, into a header that only
+# that frontend's own sources include (core/build_info.h), so a new commit
+# recompiles the files that print it -- not the tree, which is why the stamp
+# above stays fixed per build directory.
+set(PSCAL_BUILD_COMMIT_DIR "${CMAKE_BINARY_DIR}/generated/build_commit")
+add_custom_target(pscal_build_commits
+    COMMAND "${CMAKE_COMMAND}"
+        "-DPSCAL_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DOUT_DIR=${PSCAL_BUILD_COMMIT_DIR}"
+        "-DCOMPONENTS=pascal,clike,rea,aether,exsh"
+        -P "${CMAKE_SOURCE_DIR}/cmake/PscalBuildCommit.cmake"
+    COMMENT "Recording frontend build commits"
+    VERBATIM)
+
+function(pscal_frontend_version target component)
+    set(version_file "${CMAKE_SOURCE_DIR}/components/${component}/VERSION")
+    if(EXISTS "${version_file}")
+        file(STRINGS "${version_file}" component_version LIMIT_COUNT 1)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${version_file}")
+        if(component_version)
+            target_compile_definitions(${target} PRIVATE
+                PSCAL_PROGRAM_VERSION_OVERRIDE="${component_version}")
+        endif()
+    endif()
+    add_dependencies(${target} pscal_build_commits)
+    target_include_directories(${target} PRIVATE "${PSCAL_BUILD_COMMIT_DIR}/${component}")
+    target_compile_definitions(${target} PRIVATE PSCAL_BUILD_COMMIT_HEADER=\"pscal_build_commit.h\")
+endfunction()
 # ---- End Version Generation Logic ----
 
 set(CMAKE_C_STANDARD 11)
@@ -2213,6 +2246,7 @@ endfunction()
 if(NOT PSCAL_PLATFORM_IOS)
     add_pscal_executable(pascal ${PASCAL_FRONTEND_SOURCES})
     target_compile_definitions(pascal PRIVATE FRONTEND_PASCAL)
+    pscal_frontend_version(pascal pascal)
 endif()
 pscal_add_static_library(pscal_pascal_static
     FRONTEND FRONTEND_PASCAL
@@ -2221,6 +2255,7 @@ pscal_add_static_library(pscal_pascal_static
 target_link_libraries(pscal_pascal_static PUBLIC pscal_core_static)
 if(NOT PSCAL_PLATFORM_IOS AND BUILD_DASCAL)
     add_pscal_executable(dascal ${PASCAL_FRONTEND_SOURCES})
+    pscal_frontend_version(dascal pascal)
 endif()
 if(PSCAL_BUILD_STATIC_LIBS AND BUILD_DASCAL)
     add_library(pscal_dascal_static STATIC src/dascal/shim.c)
@@ -2292,6 +2327,7 @@ list(APPEND SHELL_SOURCES ${EXSH_EXT_BUILTIN_SOURCES})
 # behavior can be exercised on macOS. Skip the executable for Mac Catalyst.
 if(NOT PSCAL_PLATFORM_IOS OR (PSCAL_FORCE_IOS AND NOT PSCAL_MACCATALYST))
     add_executable(exsh ${SHELL_SOURCES})
+    pscal_frontend_version(exsh exsh)
     target_link_libraries(exsh PRIVATE pscal_core_static)
     target_compile_definitions(exsh PRIVATE FRONTEND_SHELL)
     if(PSCAL_HAS_LIBCURL)
@@ -2379,6 +2415,7 @@ list(APPEND CLIKE_REPL_SOURCES ${CLIKE_SRC}/repl.c)
 
 if(NOT PSCAL_PLATFORM_IOS)
     add_executable(clike ${CLIKE_SOURCES})
+    pscal_frontend_version(clike clike)
     target_link_libraries(clike PRIVATE pscal_core_static)
     if(PSCAL_HAS_LIBCURL)
         if(TARGET CURL::libcurl)
@@ -2393,6 +2430,7 @@ if(NOT PSCAL_PLATFORM_IOS)
     endif()
 
     add_executable(clike-repl ${CLIKE_REPL_SOURCES})
+    pscal_frontend_version(clike-repl clike)
     target_link_libraries(clike-repl PRIVATE pscal_core_static)
     if(PSCAL_HAS_LIBCURL)
         if(TARGET CURL::libcurl)
@@ -2492,6 +2530,7 @@ set(REA_SOURCES
 if(NOT PSCAL_PLATFORM_IOS)
     add_executable(rea ${REA_SOURCES})
     target_compile_definitions(rea PRIVATE FRONTEND_REA)
+    pscal_frontend_version(rea rea)
     target_link_libraries(rea PRIVATE pscal_core_static)
     if(PSCAL_HAS_LIBCURL)
         if(TARGET CURL::libcurl)
@@ -2592,8 +2631,8 @@ if(NOT PSCAL_PLATFORM_IOS)
         PSCAL_FRONTEND_DISPLAY_NAME=\"Aether\"
         PSCAL_FRONTEND_USAGE_NAME=\"aether\"
         PSCAL_FRONTEND_COMPILER_ID=\"aether\"
-        PSCAL_FRONTEND_INSTALL_HOOKS=aetherInstallFrontendHooks
-        PSCAL_PROGRAM_VERSION_OVERRIDE="${AETHER_LANG_VERSION}")
+        PSCAL_FRONTEND_INSTALL_HOOKS=aetherInstallFrontendHooks)
+    pscal_frontend_version(aether aether)
     # Aether installs its parse/semantic/module + diagnostic hooks at startup via
     # reaSetFrontendHooks() (src/aether/state.c); main() calls the installer named
     # here, which also forces that TU to link inside the static library.
