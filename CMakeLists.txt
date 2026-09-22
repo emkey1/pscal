@@ -2809,6 +2809,21 @@ if(NOT PSCAL_PLATFORM_IOS)
     include(GNUInstallDirs)
     set(_pscal_runtime_root "${PSCAL_INSTALL_ROOT_DESTINATION}")
 
+    # cmake_install.cmake only defines CMAKE_INSTALL_PREFIX,
+    # CMAKE_INSTALL_CONFIG_NAME, CMAKE_INSTALL_COMPONENT and a few others;
+    # configure-time variables (CMAKE_BINARY_DIR, CMAKE_INSTALL_FULL_BINDIR,
+    # CMAKE_CONFIGURATION_TYPES, PSCAL_INSTALL_ROOT_DESTINATION, ...) are
+    # undefined there. The install(CODE [[...]]) blocks below are bracket-quoted,
+    # so nothing in them expands at configure time either, and each such
+    # variable silently reads as "". Bake the values they need in here, in a
+    # quoted install(CODE) where expansion does happen, and have the blocks use
+    # these names. Relative destinations stay relative so --prefix still applies.
+    get_property(_pscal_generator_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+    install(CODE "set(_pscal_binary_dir [==[${CMAKE_BINARY_DIR}]==])
+set(_pscal_multi_config [==[${_pscal_generator_multi_config}]==])
+set(_pscal_install_bindir [==[${CMAKE_INSTALL_BINDIR}]==])
+set(_pscal_install_root_destination [==[${PSCAL_INSTALL_ROOT_DESTINATION}]==])")
+
     install(TARGETS pascal pscalvm clike clike-repl rea aether
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
     if(BUILD_DASCAL)
@@ -2824,7 +2839,11 @@ if(NOT PSCAL_PLATFORM_IOS)
     # their login shell) by renaming the existing executable before installing the
     # new build. The backup is overwritten on subsequent installs.
     install(CODE [[
-        set(exsh_path "$ENV{DESTDIR}${CMAKE_INSTALL_FULL_BINDIR}/exsh")
+        if(IS_ABSOLUTE "${_pscal_install_bindir}")
+            set(exsh_path "$ENV{DESTDIR}${_pscal_install_bindir}/exsh")
+        else()
+            set(exsh_path "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/${_pscal_install_bindir}/exsh")
+        endif()
         if(EXISTS "${exsh_path}" OR IS_SYMLINK "${exsh_path}")
             set(exsh_backup "${exsh_path}.previous")
             if(EXISTS "${exsh_backup}" OR IS_SYMLINK "${exsh_backup}")
@@ -2856,20 +2875,14 @@ if(NOT PSCAL_PLATFORM_IOS)
                     USE_SOURCE_PERMISSIONS)
         endif()
     endforeach()
-    # CMAKE_BINARY_DIR is a configure-time variable and is NOT defined while
-    # cmake_install.cmake runs. The install(CODE [[...]]) blocks below are
-    # bracket-quoted, so nothing in them expands at configure time either --
-    # which left `--build "${CMAKE_BINARY_DIR}"` as `--build ""` at install
-    # time, and an empty build path silently falls back to the *current working
-    # directory*. That happened to work when the install was run from the build
-    # tree and failed everywhere else with "not a CMake build directory". Bake
-    # the path in here, in a quoted install(CODE) where expansion does happen,
-    # and have both blocks use it.
-    install(CODE "set(_pscal_binary_dir \"${CMAKE_BINARY_DIR}\")")
+    # _pscal_binary_dir and _pscal_multi_config come from the baked-in
+    # install(CODE) at the top of this section. (An unexpanded
+    # `--build "${CMAKE_BINARY_DIR}"` used to become `--build ""`, which falls
+    # back to the current working directory and failed outside the build tree.)
     if(PSCAL_CONFIGURED_EXAMPLES)
         install(CODE [[
             set(_pscal_build_cmd "${CMAKE_COMMAND}" --build "${_pscal_binary_dir}" --target configured_examples)
-            if(CMAKE_CONFIGURATION_TYPES)
+            if(_pscal_multi_config)
                 list(APPEND _pscal_build_cmd --config "${CMAKE_INSTALL_CONFIG_NAME}")
             endif()
             execute_process(COMMAND ${_pscal_build_cmd}
@@ -2900,7 +2913,7 @@ if(NOT PSCAL_PLATFORM_IOS)
     # best-effort rather than install-blocking.
     install(CODE [[
         set(_pscal_build_cmd "${CMAKE_COMMAND}" --build "${_pscal_binary_dir}" --target tiny_pbc)
-        if(CMAKE_CONFIGURATION_TYPES)
+        if(_pscal_multi_config)
             list(APPEND _pscal_build_cmd --config "${CMAKE_INSTALL_CONFIG_NAME}")
         endif()
         execute_process(COMMAND ${_pscal_build_cmd}
@@ -2909,8 +2922,7 @@ if(NOT PSCAL_PLATFORM_IOS)
             message(WARNING "tiny.pbc was not produced (tiny_pbc target); bin/tiny will fall back to interpreting tiny.clike directly")
         endif()
     ]])
-    # Next to bin/tiny, which looks for it there. (Install scripts never see
-    # PSCAL_INSTALL_ROOT_DESTINATION, so a [[...]] block cannot place it.)
+    # Next to bin/tiny, which looks for it there.
     install(FILES "${CMAKE_BINARY_DIR}/bin/tiny.pbc"
             DESTINATION "${_pscal_runtime_root}/bin"
             OPTIONAL)
@@ -2933,43 +2945,28 @@ if(NOT PSCAL_PLATFORM_IOS)
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/rea"
             USE_SOURCE_PERMISSIONS)
 
+    # Legacy per-language layout (the pre-2025-09 install.sh put the libraries
+    # there), which the runtime still uses: pscal_paths.h / runtime_paths.c
+    # point PSCAL_PASCAL_LIB_DIR and PSCAL_CLIKE_LIB_DIR at <root>/pascal/lib
+    # and <root>/clike/lib, and Pascal's unit lookup and clike's import lookup
+    # fall back to them when PASCAL_LIB_DIR / CLIKE_LIB_DIR are unset. rea/lib
+    # and misc mirror PSCAL_REA_LIB_DIR / PSCAL_MISC_DIR for older scripts. The
+    # link targets are relative so the links stay valid under DESTDIR staging.
     install(CODE [[
-        set(ps_root "")
-        if("${PSCAL_INSTALL_ROOT_DESTINATION}" STREQUAL ".")
+        if(_pscal_install_root_destination STREQUAL "."
+           OR _pscal_install_root_destination STREQUAL "")
             set(ps_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
-        elseif(IS_ABSOLUTE "${PSCAL_INSTALL_ROOT_DESTINATION}")
-            set(ps_root "$ENV{DESTDIR}${PSCAL_INSTALL_ROOT_DESTINATION}")
+        elseif(IS_ABSOLUTE "${_pscal_install_root_destination}")
+            set(ps_root "$ENV{DESTDIR}${_pscal_install_root_destination}")
         else()
-            if("${PSCAL_INSTALL_ROOT_DESTINATION}" STREQUAL "")
-                set(ps_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
-            else()
-                set(ps_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/${PSCAL_INSTALL_ROOT_DESTINATION}")
-            endif()
-        endif()
-        if(ps_root STREQUAL "")
-            return()
+            set(ps_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/${_pscal_install_root_destination}")
         endif()
 
-        set(compat_targets
-            "${ps_root}/lib/pascal"
-            "${ps_root}/lib/clike"
-            "${ps_root}/lib/rea"
-            "${ps_root}/lib/misc")
-        set(compat_links
-            "${ps_root}/pascal/lib"
-            "${ps_root}/clike/lib"
-            "${ps_root}/rea/lib"
-            "${ps_root}/misc")
-
-        list(LENGTH compat_targets compat_count)
-        if(compat_count EQUAL 0)
-            return()
-        endif()
-
-        math(EXPR compat_last "${compat_count} - 1")
-        foreach(idx RANGE 0 ${compat_last})
-            list(GET compat_targets ${idx} compat_target)
-            list(GET compat_links ${idx} compat_link)
+        set(compat_links   pascal/lib clike/lib rea/lib misc)
+        set(compat_targets lib/pascal lib/clike lib/rea lib/misc)
+        foreach(compat_link_rel compat_target_rel IN ZIP_LISTS compat_links compat_targets)
+            set(compat_link "${ps_root}/${compat_link_rel}")
+            set(compat_target "${ps_root}/${compat_target_rel}")
 
             if(NOT EXISTS "${compat_target}" AND NOT IS_SYMLINK "${compat_target}")
                 continue()
@@ -2980,7 +2977,9 @@ if(NOT PSCAL_PLATFORM_IOS)
 
             get_filename_component(compat_parent "${compat_link}" DIRECTORY)
             file(MAKE_DIRECTORY "${compat_parent}")
-            file(CREATE_LINK "${compat_target}" "${compat_link}" SYMBOLIC)
+            file(RELATIVE_PATH compat_value "${compat_parent}" "${compat_target}")
+            message(STATUS "Linking: ${compat_link} -> ${compat_value}")
+            file(CREATE_LINK "${compat_value}" "${compat_link}" SYMBOLIC)
         endforeach()
     ]])
 endif()
