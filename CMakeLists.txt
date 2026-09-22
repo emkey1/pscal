@@ -2758,7 +2758,7 @@ add_custom_target(configured_examples ALL
 # Precompile tiny (clike) to bytecode for runtime use (iOS/shell wrappers)
 add_custom_command(
     OUTPUT ${CMAKE_BINARY_DIR}/bin/tiny.pbc
-    COMMAND ${CMAKE_BINARY_DIR}/bin/clike ${CMAKE_SOURCE_DIR}/bin/tiny.clike ${CMAKE_BINARY_DIR}/bin/tiny.pbc
+    COMMAND ${CMAKE_BINARY_DIR}/bin/clike --emit-bytecode ${CMAKE_BINARY_DIR}/bin/tiny.pbc ${CMAKE_SOURCE_DIR}/bin/tiny.clike
     DEPENDS clike ${CMAKE_SOURCE_DIR}/bin/tiny.clike
     COMMENT "Building tiny.pbc"
     VERBATIM)
