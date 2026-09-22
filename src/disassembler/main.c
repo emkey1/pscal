@@ -760,8 +760,7 @@ int pscald_main(int argc, char* argv[]) {
 
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
-    if (!loadBytecodeFromFile(path, &chunk)) {
-        fprintf(stderr, "Failed to load bytecode from %s\n", path);
+    if (!loadBytecodeFromFile(path, &chunk)) {  // reports why itself
         PSCALD_RETURN(EXIT_FAILURE);
     }
 
@@ -780,7 +779,7 @@ int pscald_main(int argc, char* argv[]) {
         BytecodeChunk raw_chunk;
         initBytecodeChunk(&raw_chunk);
         if (!loadBytecodeFromFileUnlinked(path, &raw_chunk)) {
-            fprintf(stderr, "Failed to load bytecode from %s\n", path);
+            fprintf(stderr, "Failed to load bytecode from %s: %s\n", path, pscalCacheLastLoadError());
             freeBytecodeChunk(&chunk);
             if (globalSymbols) freeHashTable(globalSymbols);
             if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
