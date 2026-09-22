@@ -468,6 +468,7 @@
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"$(inherited)",
 					"-lpscal_core_static",
+					"-Wl,-U,_copyBuildVersion",
 					"-lpscal_exsh_static",
 					"-lpscal_pascal_static",
 					"-lpscal_clike_static",
@@ -524,6 +525,7 @@
 				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
 					"$(inherited)",
 					"-lpscal_core_static",
+					"-Wl,-U,_copyBuildVersion",
 					"-lpscal_exsh_static",
 					"-lpscal_pascal_static",
 					"-lpscal_clike_static",
@@ -580,6 +582,7 @@
 				"OTHER_LDFLAGS[sdk=macosx*]" = (
 					"$(inherited)",
 					"-lpscal_core_static",
+					"-Wl,-U,_copyBuildVersion",
 					"-lpscal_exsh_static",
 					"-lpscal_pascal_static",
 					"-lpscal_clike_static",
@@ -725,6 +728,7 @@
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"$(inherited)",
 					"-lpscal_core_static",
+					"-Wl,-U,_copyBuildVersion",
 					"-lpscal_exsh_static",
 					"-lpscal_pascal_static",
 					"-lpscal_clike_static",
@@ -781,6 +785,7 @@
 				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
 					"$(inherited)",
 					"-lpscal_core_static",
+					"-Wl,-U,_copyBuildVersion",
 					"-lpscal_exsh_static",
 					"-lpscal_pascal_static",
 					"-lpscal_clike_static",
@@ -835,6 +840,7 @@
 				"OTHER_LDFLAGS[sdk=macosx*]" = (
 					"$(inherited)",
 					"-lpscal_core_static",
+					"-Wl,-U,_copyBuildVersion",
 					"-lpscal_exsh_static",
 					"-lpscal_pascal_static",
 					"-lpscal_clike_static",
