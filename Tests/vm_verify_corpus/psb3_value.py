@@ -36,6 +36,32 @@ class EmbeddedClosure(Exception):
         self.code_len = code_len
 
 
+def _skip_ast(data, pos):
+    """Advances past one writeAst() record (cache.c): a presence byte, then
+    type u32, var_type u32, flags u8, an optional token (presence byte, type
+    u32, varint-length-prefixed text), i_val i32, left/right/extra, and an
+    i32 child count followed by the children."""
+    present = data[pos]
+    pos += 1
+    if not present:
+        return pos
+    pos += 4 + 4 + 1
+    if data[pos]:
+        pos += 1 + 4
+        ln, pos = psb3.decode_varint(data, pos)
+        pos += ln
+    else:
+        pos += 1
+    pos += 4
+    for _ in range(3):
+        pos = _skip_ast(data, pos)
+    child_count = struct.unpack_from("<i", data, pos)[0]
+    pos += 4
+    for _ in range(child_count):
+        pos = _skip_ast(data, pos)
+    return pos
+
+
 def _skip_value(data, pos):
     """Advances past one Value record starting at `pos`. Raises
     EmbeddedClosure the moment it sees a kind==1 pointer (callers that want
@@ -83,6 +109,8 @@ def _skip_value(data, pos):
             pos += ln
         elif kind == 3:
             pos += 8
+        elif kind == 4:  # nil pointer with its base type (format 4)
+            pos = _skip_ast(data, pos)
         else:
             raise ValueError(f"unknown pointer kind {kind} at pos {pos}")
     else:

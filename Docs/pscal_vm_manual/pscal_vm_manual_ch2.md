@@ -44,8 +44,8 @@ The header is written by `psb3Write()` (`cache.c`):
 
 ```
 [magic   u32le]  0x50534233 ('PSB3'; little-endian bytes on disk read "3BSP")
-[format_ver u16] container-format version (currently 3 as of VM 2.0 Phase 2b,
-                 up from 1; independent of the VM semantic version below —
+[format_ver u16] container-format version (currently 4, up from 1;
+                 independent of the VM semantic version below —
                  this axis can move without a VM version bump. The 1→2 bump
                  was CODE's cache_count field, §2.2 (the first section-shape
                  change since PSB3's introduction); 2→3 changed no section
@@ -54,7 +54,8 @@ The header is written by `psb3Write()` (`cache.c`):
                  (GET_GLOBAL/SET_GLOBAL/DEFINE_GLOBAL/...) that are
                  *structurally* still valid-looking under the new binary
                  (their opcodes.def entries are kept for legacy disassembly)
-                 but are no longer executable -- see §2.2's CODE entry)
+                 but are no longer executable -- see §2.2's CODE entry;
+                 3→4 added pointer kind 4 to CONS, see §2.2's CONS entry)
 [vm_ver  u16]    chunk->version (PSCAL_VM_VERSION at compile time)
 [flags   u32]    reserved, always 0 in this phase
 [section_count u32]
@@ -220,7 +221,30 @@ payload, all little-endian:
 | `TYPE_ENUM` | varint-length-prefixed name, then `ordinal` as `i32le` |
 | `TYPE_SET` | `set_size` as `i32le`, then that many `u64le` members |
 | `TYPE_ARRAY` | `dims` as `i32le`, `element_type` as `u32le`, per-dim `(lb, ub)` as `i32le` pairs, then elements recursively via `writeValue` |
-| `TYPE_POINTER` | delegated to `writePointerValue`/`readPointerValue` (unchanged kinds: 0=NULL, 1=embedded `ShellCompiledFunction`, 2=owned C string, 3=opaque address) |
+| `TYPE_POINTER` | delegated to `writePointerValue`/`readPointerValue`, a kind byte: 0=no pointer object, 1=embedded `ShellCompiledFunction`, 2=owned C string, 3=opaque address, 4=nil pointer followed by its base type AST (`writeAst`, a single `0` byte when untyped) |
+
+An array stores as many elements as the product of its dimension spans, and
+none when it has no dimensions: an empty dynamic array such as Aether's `[]`
+(`makeEmptyArray`: `dims` 0, bounds `0..-1`). The writer, reader and
+integrity hash share that count (`arrayCodecElementCount`). The reader used
+to expect one element for a dimensionless array, so every later constant was
+read one value late, the section ran out of bytes, and a chunk that pooled
+`[]` never loaded from the cache. An array's `is_dynamic` flag and element
+type are not stored.
+
+Kind 3 reads back with `OPAQUE_POINTER_SENTINEL` as its base type, which the
+VM dereferences as an AST when it reaches field access through the pointer.
+Format 3 wrote every nil pointer that way, so an Aether array-of-records
+literal crashed on its cached run. Kind 4 keeps a nil pointer's type as an
+AST copy, as the TYPES section stores types; the copy lives for the process,
+like the program AST in a fresh compile.
+
+A reader that rejects a file records why: which section, which constant, and
+the byte offset (`pscalCacheLastLoadError()`). `pscalvm` and `pscald` print
+the reason. A frontend prints `Warning: rejecting unreadable cached bytecode`
+when a cache entry's header and `META` parse but its body does not, since
+that means the writer and reader disagree. With `--verbose` it prints
+`Cache miss: <reason>` for every recompile.
 
 `TYPE_LONG_DOUBLE` is stored as a plain `double`, not the host's native
 `long double` width. Every deployment target in the fleet (macOS and Linux,
@@ -334,7 +358,8 @@ $ build/bin/pscalvm add2.bc
 ```
 
 Header + section directory (`xxd add2.bc`, first 96 bytes; regenerated post
-VM 2.0 Phase 2b — `format_ver` is now 3, explained below):
+VM 2.0 Phase 2b — `format_ver` 3, explained below. A current build writes
+`0400` there, format 4, §2.1):
 
 ```
 00000000: 3342 5350 0300 0900 0000 0000 0600 0000  3BSP............
