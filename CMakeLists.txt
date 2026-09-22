@@ -2926,7 +2926,9 @@ set(_pscal_install_root_destination [==[${PSCAL_INSTALL_ROOT_DESTINATION}]==])")
     install(FILES "${CMAKE_BINARY_DIR}/bin/tiny.pbc"
             DESTINATION "${_pscal_runtime_root}/bin"
             OPTIONAL)
-    # Tiny compiler runtime assets for iOS/iPadOS: install script plus minimal headers it loads.
+    # Tiny compiler runtime assets: install script plus minimal headers it loads.
+    # ios/Tools/bundle_tiny_assets.sh stages the same files into the iOS app
+    # bundle; keep the two lists in step.
     install(PROGRAMS bin/tiny
             DESTINATION "${_pscal_runtime_root}/bin"
             PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
