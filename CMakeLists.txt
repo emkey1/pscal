@@ -1305,6 +1305,7 @@ set(SMALLCLUE_SOURCES
     src/smallclue/src/split_app.c
     src/smallclue/src/tac_app.c
     src/smallclue/src/tar_app.c
+    src/smallclue/src/spawn.c
 )
 
 if(PSCAL_PLATFORM_IOS OR APPLE)
@@ -1971,6 +1972,12 @@ if(PSCAL_HAS_LIBGIT2 AND PSCAL_LIBGIT2_TARGET)
     target_link_libraries(pscal_core_static PUBLIC ${PSCAL_LIBGIT2_TARGET})
 endif()
 target_compile_definitions(pscal_core_static PRIVATE PSCAL_NO_CLI_ENTRYPOINTS)
+if(APPLE)
+    # smallclue's `version` weakly references copyBuildVersion(), which only
+    # iSH-AOK defines. ELF linkers leave an absent weak symbol NULL; ld64
+    # rejects it unless told it may stay undefined.
+    target_link_options(pscal_core_static INTERFACE "LINKER:-U,_copyBuildVersion")
+endif()
 if(PSCAL_VM_CODE_PROTECT)
     target_compile_definitions(pscal_core_static PRIVATE PSCAL_VM_CODE_PROTECT)
     message(STATUS "pscal-core: VM CODE-section mprotect ENABLED")
