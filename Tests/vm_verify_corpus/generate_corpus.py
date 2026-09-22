@@ -11,11 +11,19 @@ and a top-level jump into a procedure body) so run_corpus_tests.py can assert
 every one fails cleanly (no crash, nonzero exit) through pscalvm, and, where
 a manifest entry names one, with the expected load-time diagnostic.
 
-Usage: python3 generate_corpus.py [--pascal-bin PATH] [--exsh-bin PATH] [--out DIR]
+The runtime-backstop cases are chunks the verifier accepts or is told to
+skip: stack faults behind a call whose effect it can't resolve, and
+CALL_METHOD dispatch through a V-table (no compiler emits CALL_METHOD, so
+those are assembled with pscalasm). They must stop with the runtime's own
+diagnostic.
+
+Usage: python3 generate_corpus.py [--pascal-bin PATH] [--exsh-bin PATH]
+                                  [--pscalasm-bin PATH] [--out DIR]
 """
 
 import argparse
 import glob
+import json
 import os
 import struct
 import subprocess
@@ -33,10 +41,18 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 # _Static_asserts there, so this is low-risk).
 OP_CONSTANT = 0x01
 OP_CONSTANT16 = 0x02
+OP_CONST_0 = 0x03
 OP_CONST_FALSE = 0x06
 OP_ADD = 0x08
 OP_JUMP_IF_FALSE = 0x1C
 OP_JUMP = 0x1D
+OP_GET_FIELD_ADDRESS = 0x39
+OP_GET_FIELD_ADDRESS16 = 0x3A
+OP_GET_FIELD_ADDRESS_KEEP = 0x3B
+OP_GET_FIELD_ADDRESS_KEEP16 = 0x3C
+OP_GET_CHAR_ADDRESS = 0x43
+OP_GET_FIELD_OFFSET = 0x4C
+OP_GET_FIELD_OFFSET16 = 0x4D
 OP_CALL_USER_PROC = 0x52
 OP_CALL_HOST = 0x53
 OP_POP = 0x54
@@ -262,23 +278,131 @@ def rebuild_code_section(new_code, cache_count=0):
     return psb3.encode_varint(len(new_code)) + psb3.encode_varint(cache_count) + new_code
 
 
-def write_corpus(out_dir, name, data, expect_ok, note, expect_stderr=None):
+def write_corpus(out_dir, name, data, expect_ok, note, expect_stderr=None,
+                 expect_stdout=None, env=None):
     """expect_stderr, when given, is a substring the rejection's stderr must
     contain -- for cases where the runtime would also fail the chunk, so a
-    nonzero exit alone can't show that the verifier rejected it at load."""
+    nonzero exit alone can't show that the verifier rejected it at load (or,
+    for a runtime-backstop case, that the runtime check is what stopped it).
+    expect_stdout is a substring a control's stdout must contain, and env
+    holds extra environment variables for pscalvm."""
     path = os.path.join(out_dir, name)
     with open(path, "wb") as f:
         f.write(data)
     entry = {"file": name, "expect_ok": expect_ok, "note": note}
     if expect_stderr is not None:
         entry["expect_stderr"] = expect_stderr
+    if expect_stdout is not None:
+        entry["expect_stdout"] = expect_stdout
+    if env:
+        entry["env"] = env
     return entry
+
+
+# Byte length of each instruction the hand-assembled fixtures use (operand
+# specs from opcodes.def); pscalasm's `code` directive needs the exact total.
+ASM_INSTRUCTION_LEN = {
+    "ALLOC_OBJECT": 2, "CALL_BUILTIN_PROC": 6, "CALL_METHOD": 3, "CONST_1": 1,
+    "CONSTANT": 2, "DEFINE_GLOBAL_SLOT": 6, "GET_FIELD_OFFSET": 2,
+    "GET_GSLOT_ADDRESS": 3, "HALT": 1, "JUMP": 5, "RETURN": 1, "SET_INDIRECT": 1,
+}
+
+
+def asm_quote(text):
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def asm_source(constants, insts, procedures=(), types=(), builtins=()):
+    """PSCALASM2 source (format: src/disassembler/assembler_main.c). `insts`
+    holds "MNEMONIC operands" strings and "label NAME" markers; multi-byte
+    operands are written one byte per token, as pscald --emit-asm does."""
+    code_len = sum(ASM_INSTRUCTION_LEN[i.split()[0]] for i in insts if not i.startswith("label "))
+    lines = ["PSCALASM2", "version 9", f"constants {len(constants)}"]
+    lines += [f"const {i} {c}" for i, c in enumerate(constants)]
+    lines.append(f"builtin_map {len(builtins)}")
+    lines += [f"builtin {a} {b}" for a, b in builtins]
+    lines.append("const_symbols 0")
+    if types:
+        lines.append(f"types {len(types)}")
+        lines += [f"type {asm_quote(name)} {asm_quote(body)}" for name, body in types]
+    lines.append(f"procedures {len(procedures)}")
+    lines += [f"proc {i} {p}" for i, p in enumerate(procedures)]
+    lines.append(f"code {code_len}")
+    lines += [i if i.startswith("label ") else f"inst 1 {i}" for i in insts]
+    lines.append("end")
+    return "\n".join(lines) + "\n"
+
+
+def assemble(pscalasm_bin, source):
+    with tempfile.TemporaryDirectory() as tmp:
+        src_path = os.path.join(tmp, "prog.asm")
+        out_path = os.path.join(tmp, "prog.pbc")
+        with open(src_path, "w") as f:
+            f.write(source)
+        proc = subprocess.run([pscalasm_bin, src_path, out_path],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        if proc.returncode != 0:
+            raise RuntimeError(f"pscalasm failed: {proc.stderr.decode(errors='replace')}")
+        with open(out_path, "rb") as f:
+            return f.read()
+
+
+# A record type whose one field is named __vtable, the name CALL_METHOD looks
+# the V-table up by (a class record type as rea's parser declares it).
+# ALLOC_OBJECT's fields have no names, so a receiver has to be a global of
+# this type, addressed with GET_GSLOT_ADDRESS.
+VTABLE_RECORD_TYPE = json.dumps({
+    "node_type": "RECORD_TYPE",
+    "token": {"type": "IDENTIFIER", "value": "Obj"},
+    "var_type_annotated": "VOID",
+    "children": [{
+        "node_type": "VAR_DECL",
+        "var_type_annotated": "POINTER",
+        "right": {"node_type": "POINTER_TYPE", "var_type_annotated": "POINTER"},
+        "children": [{
+            "node_type": "VARIABLE",
+            "token": {"type": "IDENTIFIER", "value": "__vtable"},
+            "var_type_annotated": "POINTER",
+        }],
+    }],
+}, separators=(",", ":"))
+
+CALL_METHOD_OUTPUT = "method ran"
+
+
+def call_method_source(vtable_entry, method_index=0, filler=0, receiver="record"):
+    """The main block stores a one-entry INT32 V-table in a record global's
+    __vtable field and calls method `method_index` through it with no
+    arguments. The chunk's only procedure prints CALL_METHOD_OUTPUT.
+    `filler` unreachable HALTs sit in front of the procedure to push its
+    address up; `vtable_entry(address)` gives the value stored in the
+    V-table. receiver="alloc" uses an ALLOC_OBJECT object instead."""
+    head = ["DEFINE_GLOBAL_SLOT 0 0 6 0 1",  # global "obj" of record type "Obj"
+            "JUMP @main"]
+    head += ["HALT"] * filler
+    method_address = sum(ASM_INSTRUCTION_LEN[i.split()[0]] for i in head)
+    # Builtin 181 is "write" today; if the registry moves, the VM goes by
+    # the name constant instead (see CALL_BUILTIN_PROC in vm.c).
+    method = ["label speak", "CONST_1", "CONSTANT 3", "CALL_BUILTIN_PROC 0 181 0 4 2", "RETURN"]
+    if receiver == "record":
+        main = ["GET_GSLOT_ADDRESS 0 0", "GET_FIELD_OFFSET 0", "CONSTANT 2", "SET_INDIRECT",
+                "GET_GSLOT_ADDRESS 0 0"]
+    else:
+        main = ["ALLOC_OBJECT 1"]
+    main = ["label main"] + main + [f"CALL_METHOD {method_index} 0", "HALT"]
+    constants = ['4 "obj"', '4 "Obj"',
+                 f"11 dims 1 elem 2 bounds 0 0 values 1 {vtable_entry(method_address)}",
+                 f'4 "{CALL_METHOD_OUTPUT}"', '4 "write"']
+    return asm_source(constants, head + method + main,
+                      procedures=[f'"obj.speak" {method_address} 0 0 1 1 -1'],
+                      types=[("Obj", VTABLE_RECORD_TYPE)], builtins=[(4, 4)])
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pascal-bin", default=os.path.join(REPO_ROOT, "build", "bin", "pascal"))
     ap.add_argument("--exsh-bin", default=os.path.join(REPO_ROOT, "build", "bin", "exsh"))
+    ap.add_argument("--pscalasm-bin", default=os.path.join(REPO_ROOT, "build", "bin", "pscalasm"))
     ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "corpus"))
     args = ap.parse_args()
 
@@ -574,8 +698,9 @@ def main():
 
     # --- The loop body's CALL_USER_PROC (4 bytes) becomes four POPs on the empty
     # stack. Only the top-level walk reaches it, so the old verifier loaded
-    # the chunk, and at runtime pop() reports the underflow but POP carries
-    # on: the program still exits 0. ---
+    # the chunk, and at runtime pop() reported the underflow but POP carried
+    # on and the program exited 0 (main_block_underflow_no_verify.bc below
+    # covers that runtime path). ---
     call_pc = find_first_opcode(main_code, {OP_CALL_USER_PROC})
     if call_pc is None:
         print("warning: no CALL_USER_PROC found in main-block fixture; skipping "
@@ -589,6 +714,13 @@ def main():
                                       "POP x4 against an empty stack; must be rejected at load, "
                                       "not left to the runtime",
                                       expect_stderr="POP requires stack depth >= 1 but have 0"))
+        manifest.append(write_corpus(args.out, "main_block_underflow_no_verify.bc", mutated.to_bytes(),
+                                      False,
+                                      "main_block_underflow.bc run with the verifier skipped: the "
+                                      "runtime must stop at the failed pop, where it used to report "
+                                      "the underflow and exit 0",
+                                      expect_stderr="Stack underflow (pop from empty stack)",
+                                      env={"PSCAL_VM_SKIP_VERIFY": "1"}))
 
     # --- The prologue's JUMP over the procedure retargeted to the procedure's
     # own first instruction, so the top level runs the body without a call
@@ -608,8 +740,95 @@ def main():
                                       "routine without a call",
                                       expect_stderr="without a call"))
 
+    # --- Runtime backstop for stack faults the verifier can't see. CALL_HOST
+    # leaves the abstract depth unknown (see unknown_region_fast_pop_underflow.bc),
+    # so nothing after it is depth-checked at load and the runtime has to
+    # stop the program itself. push()/pop() report a fault without returning
+    # one; the VM used to carry on, and at top level halt with exit 0. The
+    # in-place operand handlers (GET_FIELD_*, GET_CHAR_ADDRESS) had no check
+    # at all and read the Value below vm->stack. ---
+    def host_tainted(tail):
+        return tpf.with_section(psb3.SEC_CODE, rebuild_code_section(
+            bytes([OP_CALL_HOST, HOST_FN_QUIT_REQUESTED]) + bytes(tail))).with_section(
+            psb3.SEC_LINE, psb3.encode_varint(1) + psb3.encode_varint(0) + psb3.encode_svarint(1))
+
+    manifest.append(write_corpus(args.out, "unknown_region_pop_underflow.bc",
+                                  host_tainted([OP_POP, OP_POP, OP_HALT]).to_bytes(), False,
+                                  "CALL_HOST (depth unknown, really 1) then POP;POP: the second pop "
+                                  "underflows and must stop the program, not exit 0",
+                                  expect_stderr="Stack underflow (pop from empty stack)"))
+    loop_disp = (-1 - 5) & 0xFFFFFFFF  # JUMP back onto the CONST_0 just before it
+    manifest.append(write_corpus(args.out, "unknown_region_push_overflow.bc",
+                                  host_tainted([OP_CONST_0, OP_JUMP] + list(loop_disp.to_bytes(4, "big"))).to_bytes(),
+                                  False,
+                                  "CALL_HOST then CONST_0 in a loop: push() hits the (lowered) stack "
+                                  "ceiling and must stop the program, not exit 0",
+                                  expect_stderr="Stack overflow", env={"PSCAL_VM_MAX_STACK_VALUES": "64"}))
+    for opname, opcode, operands, depth in [
+        ("GET_FIELD_OFFSET", OP_GET_FIELD_OFFSET, [0], 1),
+        ("GET_FIELD_OFFSET16", OP_GET_FIELD_OFFSET16, [0, 0], 1),
+        ("GET_FIELD_ADDRESS", OP_GET_FIELD_ADDRESS, [0], 1),
+        ("GET_FIELD_ADDRESS16", OP_GET_FIELD_ADDRESS16, [0, 0], 1),
+        ("GET_FIELD_ADDRESS_KEEP", OP_GET_FIELD_ADDRESS_KEEP, [0], 1),
+        ("GET_FIELD_ADDRESS_KEEP16", OP_GET_FIELD_ADDRESS_KEEP16, [0, 0], 1),
+        ("GET_CHAR_ADDRESS", OP_GET_CHAR_ADDRESS, [], 2),
+    ]:
+        # Leave depth-1 values: none for the field ops, the index for GET_CHAR_ADDRESS.
+        tail = ([OP_POP] if depth == 1 else []) + [opcode] + operands + [OP_HALT]
+        manifest.append(write_corpus(args.out, f"unknown_region_{opname.lower()}_underflow.bc",
+                                      host_tainted(tail).to_bytes(), False,
+                                      f"CALL_HOST then {opname} with {depth - 1} value(s) on the "
+                                      "stack: must be refused before it reads below vm->stack",
+                                      expect_stderr=f"{opname} requires stack depth >= {depth} but have {depth - 1}"))
+
+    # --- CALL_METHOD. Its target comes out of a V-table, which is program
+    # data, so the verifier can't check it and the VM must: the target has
+    # to be the entry of a procedure in the chunk. It used to be truncated
+    # to 16 bits (a method at pc >= 65536 was unreachable, and a V-table
+    # value 65536 above a real method ran that method), the method index
+    # wasn't bounds-checked against the V-table, and an ALLOC_OBJECT receiver,
+    # whose fields have no names, crashed the field lookup. No compiler emits
+    # CALL_METHOD, so these are hand-assembled; call_method_source() has the
+    # layout. ---
+    if not os.path.exists(args.pscalasm_bin):
+        print(f"warning: pscalasm binary not found at {args.pscalasm_bin}; skipping the "
+              "CALL_METHOD cases", file=sys.stderr)
+    else:
+        def method_case(name, expect_ok, note, **kw):
+            expect = {}
+            if expect_ok:
+                expect["expect_stdout"] = CALL_METHOD_OUTPUT
+            else:
+                expect["expect_stderr"] = kw.pop("expect_stderr")
+            data = assemble(args.pscalasm_bin, call_method_source(**kw))
+            manifest.append(write_corpus(args.out, name, data, expect_ok, note, **expect))
+
+        method_case("golden_call_method.bc", True,
+                    "control: CALL_METHOD through a one-entry V-table runs the method",
+                    vtable_entry=lambda addr: addr)
+        method_case("golden_call_method_above_64k.bc", True,
+                    "control: the method's entry is past pc 65535 and must still be reached",
+                    vtable_entry=lambda addr: addr, filler=65600)
+        method_case("call_method_truncated_alias.bc", False,
+                    "V-table entry is the method's address + 65536, past the end of the code; the "
+                    "old 16-bit target ran the method anyway",
+                    vtable_entry=lambda addr: addr + 65536,
+                    expect_stderr="V-table entry 0 is not a code address")
+        method_case("call_method_not_entry.bc", False,
+                    "V-table entry is an instruction inside the method, not its entry",
+                    vtable_entry=lambda addr: addr + 1,
+                    expect_stderr="is not a procedure entry")
+        method_case("call_method_index_out_of_range.bc", False,
+                    "method index 7 against a one-entry V-table: must not read past the array",
+                    vtable_entry=lambda addr: addr, method_index=7,
+                    expect_stderr="Method index 7 is outside the 1-entry V-table")
+        method_case("call_method_unnamed_fields.bc", False,
+                    "receiver made by ALLOC_OBJECT, whose fields have no names; the lookup "
+                    "used to crash on them",
+                    vtable_entry=lambda addr: addr, receiver="alloc",
+                    expect_stderr="Object missing V-table")
+
     manifest_path = os.path.join(args.out, "manifest.json")
-    import json
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
 

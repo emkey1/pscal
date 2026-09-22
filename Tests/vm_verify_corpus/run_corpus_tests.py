@@ -3,7 +3,9 @@
 §5.5) through pscalvm and checks that every entry behaves as its manifest
 expects: golden controls load and run (exit 0), corrupt entries are
 rejected cleanly (nonzero exit, no crash signal -- never a segfault/abort),
-with the entry's expect_stderr text in stderr when the manifest names one.
+with the entry's expect_stderr text in stderr when the manifest names one. A
+control's expect_stdout must appear in stdout, and an entry's env is added to
+pscalvm's environment.
 
 Usage: python3 run_corpus_tests.py [--pscalvm-bin PATH] [--corpus DIR]
 """
@@ -16,8 +18,20 @@ import sys
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-# Negative return codes from subprocess mean "killed by signal -N" on POSIX.
 CRASH_SIGNALS = {4, 6, 8, 10, 11}  # SIGILL, SIGABRT, SIGFPE, SIGBUS, SIGSEGV
+
+
+def crash_signal(returncode):
+    """The crash signal behind a pscalvm exit status, or None. A negative
+    return code means "killed by signal -N". The VM also traps SIGSEGV and
+    SIGABRT to restore the terminal and then exits 128 + the signal
+    (vmSignalHandler in backend_ast/builtin.c), so a crash can arrive as an
+    ordinary exit status too."""
+    if returncode < 0 and -returncode in CRASH_SIGNALS:
+        return -returncode
+    if returncode - 128 in CRASH_SIGNALS:
+        return returncode - 128
+    return None
 
 
 def main():
@@ -40,21 +54,29 @@ def main():
     failures = []
     for entry in manifest:
         path = os.path.join(args.corpus, entry["file"])
-        proc = subprocess.run([args.pscalvm_bin, path],
+        env = dict(os.environ)
+        env.update(entry.get("env", {}))
+        proc = subprocess.run([args.pscalvm_bin, path], env=env,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
-        crashed = proc.returncode < 0 and (-proc.returncode) in CRASH_SIGNALS
+        sig = crash_signal(proc.returncode)
         ok = proc.returncode == 0
 
-        if crashed:
-            failures.append(f"{entry['file']}: CRASHED (signal {-proc.returncode}) -- {entry['note']}")
-            print(f"[CRASH] {entry['file']} (signal {-proc.returncode})")
+        if sig is not None:
+            failures.append(f"{entry['file']}: CRASHED (signal {sig}) -- {entry['note']}")
+            print(f"[CRASH] {entry['file']} (signal {sig})")
             continue
 
         if entry["expect_ok"]:
+            want_out = entry.get("expect_stdout")
+            stdout = proc.stdout.decode(errors="replace")
             if not ok:
                 failures.append(f"{entry['file']}: expected clean success, got exit {proc.returncode} "
                                  f"-- stderr: {proc.stderr.decode(errors='replace')[:200]}")
                 print(f"[FAIL] {entry['file']} (expected success, exit={proc.returncode})")
+            elif want_out is not None and want_out not in stdout:
+                failures.append(f"{entry['file']}: ran, but stdout lacks {want_out!r} "
+                                 f"-- stdout: {stdout[:200]}")
+                print(f"[FAIL] {entry['file']} (ran, but not with {want_out!r})")
             else:
                 print(f"[PASS] {entry['file']} (loaded and ran)")
         else:

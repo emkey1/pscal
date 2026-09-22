@@ -592,6 +592,58 @@ the runtime backstop reports this case without stopping it. Manifest
 entries can now name the stderr text a rejection must carry, for cases
 where a nonzero exit alone can't show the chunk was rejected at load.
 
+**Runtime backstop follow-up (2026-09-22):** the runtime checks the verifier
+leaves to the VM, in unknown-depth regions and for CALL_METHOD's target,
+were weaker than this section says. All fixed in `vm.c`:
+
+- *A reported fault didn't stop the program.* `push()`/`pop()`/`peek()`
+  can't return an error, so on a fault they call `runtimeError()` and hand
+  back nil. `runtimeError()` sets `abort_requested`, and the dispatch loop
+  handled that flag like an exit or an interrupt: it unwound one frame,
+  cleared the flag and carried on, and at top level it halted with
+  `INTERPRET_OK`. So a POP on an empty stack, or a push past the stack
+  ceiling, after a CALL_HOST printed its error and the program exited 0,
+  with the verifier on. So did any handler that reports and falls through
+  (SET_INDIRECT's type mismatches, for one). `runtimeError()` now also sets
+  `runtime_error_raised`, and the loop returns `INTERPRET_RUNTIME_ERROR`
+  before the next instruction while `abort_requested` is still set. Code
+  that clears the abort after reporting (the shell recovers from some
+  builtin failures that way) carries on as before.
+- *Handlers with no check at all.* GET_FIELD_OFFSET/16,
+  GET_FIELD_ADDRESS/16, GET_FIELD_ADDRESS_KEEP/16 and GET_CHAR_ADDRESS
+  use their operand in place through `vm->stackTop - 1` and never looked at
+  the depth, so in an unknown region they read the Value below `vm->stack`,
+  the start of the stack's mmap. They check the depth first now, as DUP and
+  SWAP already did.
+- *CALL_METHOD.* The target from the V-table was stored in a `uint16_t`, so
+  a method at pc >= 65536 couldn't be called and a V-table value 65536 past
+  a real method ran that method. The method index wasn't checked against
+  the V-table's length, and an ALLOC_OBJECT object (whose fields have no
+  names) crashed the `__vtable` lookup in `strcmp`. The target is now full
+  width and must be the resolved method's `bytecode_address`, as CALL,
+  CALL_INDIRECT and PROC_CALL_INDIRECT already require of theirs. No
+  compiler emits CALL_METHOD (virtual calls compile to GET_INDIRECT loads
+  plus PROC_CALL_INDIRECT), so only hand-built bytecode reaches it.
+
+`Tests/vm_verify_corpus/` adds 16 cases the verifier accepts or is told to
+skip (entries can now set `env`, and a control can require `expect_stdout`):
+the main-block underflow with `PSCAL_VM_SKIP_VERIFY=1`, a pop underflow and
+a push overflow behind CALL_HOST, one case per in-place handler, and six
+CALL_METHOD chunks assembled with `pscalasm` (two controls, one of them
+with its method past pc 65535). The unmodified VM fails 15 of them. The one
+it passes is the control whose method sits below pc 65536.
+
+The corpus runner and the fuzz sweep couldn't see a crash either: the VM
+traps SIGSEGV and SIGABRT to restore the terminal and then exits 128 + the
+signal (`vmSignalHandler` in `backend_ast/builtin.c`), and both scripts only
+counted a negative return code, so the old VM's segfault on
+`call_method_unnamed_fields.bc` read as a clean rejection. Both count either
+form now. Re-run on today's `golden_hello.bc` (3968 flip points), the sweep
+finds 0 crashes, 5 hangs and identical results on the old VM and the new
+one, so the blind spot hadn't hidden a crash there. The sweep also wrote
+every mutant to one fixed file, so two sweeps run side by side corrupted
+each other's input; it uses a file per run now.
+
 ### 5.6 Phase 2a: Inline caches move to a side-table
 
 - New encoding: `GET_GLOBAL name:u16 cache_id:u16` (5 bytes vs today's 10).
