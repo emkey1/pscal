@@ -56,54 +56,107 @@ str defaultOutPath(str src) {
   return src + ".pbc";
 }
 
+str trimStr(str s) {
+  int a = 1; int b = length(s);
+  while (a <= b && copy(s, a, 1) <= " ") a = a + 1;
+  while (b >= a && copy(s, b, 1) <= " ") b = b - 1;
+  return copy(s, a, b - a + 1);
+}
+
+// Value of a decimal or 0x-prefixed hex literal; -1 if s is not one.
+int parseIntLiteral(str s) {
+  int n = length(s);
+  if (n == 0) return -1;
+  int v = 0;
+  if (n > 2 && (copy(s, 1, 2) == "0x" || copy(s, 1, 2) == "0X")) {
+    for (int i = 3; i <= n; i = i + 1) {
+      str d = copy(s, i, 1);
+      int dv;
+      if (d >= "0" && d <= "9") dv = ord(d) - ord("0");
+      else if (d >= "a" && d <= "f") dv = ord(d) - ord("a") + 10;
+      else if (d >= "A" && d <= "F") dv = ord(d) - ord("A") + 10;
+      else return -1;
+      v = v * 16 + dv;
+    }
+    return v;
+  }
+  for (int i = 1; i <= n; i = i + 1) {
+    str d = copy(s, i, 1);
+    if (d < "0" || d > "9") return -1;
+    v = v * 10 + ord(d) - ord("0");
+  }
+  return v;
+}
+
+// Header scanning. Every builtin call on a buffer costs time in proportion to
+// its length, so these step through a header a line (or a match) at a time,
+// never a character at a time.
+str scanRest = "";
+str nextLine() {
+  int nl = pos("\n", scanRest);
+  str line;
+  if (nl == 0) { line = scanRest; scanRest = ""; }
+  else { line = copy(scanRest, 1, nl - 1); scanRest = copy(scanRest, nl + 1, length(scanRest) - nl); }
+  return line;
+}
+
+// The integer in the first "#define <name> <digits>" in buf (a trailing u/L
+// suffix is ignored); -1 if there is none.
+int defineValue(str buf, str name) {
+  str key = "#define " + name;
+  str rest = buf;
+  str tail = "";
+  while (1) {
+    int p = pos(key, rest);
+    if (p == 0) return -1;
+    rest = copy(rest, p + length(key), length(rest) - p - length(key) + 1);
+    str c = copy(rest, 1, 1);
+    if (c == " " || c == "\t") { tail = copy(rest, 1, 32); break; }
+    // else a longer name that merely starts with this one; keep looking
+  }
+  int n = length(tail);
+  int k = 1;
+  while (k <= n && (copy(tail, k, 1) == " " || copy(tail, k, 1) == "\t")) k = k + 1;
+  int start = k;
+  while (k <= n && copy(tail, k, 1) >= "0" && copy(tail, k, 1) <= "9") k = k + 1;
+  if (k == start) return -1;
+  return atoi(copy(tail, start, k - start));
+}
+
 // --------- Opcode loader ---------
+// compiler/opcodes.def is the single source of truth for the opcode page.
+// Each entry is OP(name, value, operands, stack_in, stack_out), and the
+// values are pinned rather than positional, so they are read from the entry.
 const int MAX_OPS = 512;
 str opNames[MAX_OPS];
+int opValues[MAX_OPS];
 int opCount = 0;
-int inlineCacheSlotSize = 8;
 
 void loadOpcodes(str root) {
-  str header = coreHeader(root, "compiler/bytecode.h");
+  str header = coreHeader(root, "compiler/opcodes.def");
   if (!fileexists(header)) {
-    printf("tiny: bytecode.h missing at %s\n", header);
+    printf("tiny: opcodes.def missing at %s\n", header);
     halt(1);
   }
-  str buf = readFile(header);
-  int inEnum = 0;
-  int i = 1; int len = length(buf);
-  while (i <= len) {
-    int j = i;
-    while (j <= len && copy(buf, j, 1) != "\n") j = j + 1;
-    int llen = j - i;
-    str line = copy(buf, i, llen);
-    i = j + 1;
-    int p = 1; while (p <= llen && copy(line, p, 1) <= " ") p = p + 1;
-    str trimmed = copy(line, p, llen - p + 1);
-    if (length(trimmed) >= 2 && copy(trimmed, 1, 2) == "//") continue; // skip comments
-    if (pos("#define GLOBAL_INLINE_CACHE_SLOT_SIZE", trimmed) == 1) {
-      int k = length("#define GLOBAL_INLINE_CACHE_SLOT_SIZE") + 1;
-      while (k <= length(trimmed) && copy(trimmed, k, 1) == " ") k = k + 1;
-      int start = k;
-      while (k <= length(trimmed) && copy(trimmed, k, 1) >= "0" && copy(trimmed, k, 1) <= "9") k = k + 1;
-      if (k > start) inlineCacheSlotSize = atoi(copy(trimmed, start, k - start));
-      continue;
-    }
-    if (pos("typedef enum", trimmed) == 1) { inEnum = 1; continue; }
-    if (!inEnum) continue;
-    if (trimmed == "}") { break; }
-    int comma = pos(",", trimmed);
+  scanRest = readFile(header);
+  while (length(scanRest) > 0) {
+    str line = trimStr(nextLine());
+    if (pos("OP(", line) != 1) continue;
+    str rest = copy(line, 4, length(line) - 3);
+    int comma = pos(",", rest);
     if (comma == 0) continue;
-    str name = copy(trimmed, 1, comma - 1);
-    int k = length(name);
-    while (k > 0 && copy(name, k, 1) <= " ") { name = copy(name, 1, k - 1); k = k - 1; }
-    if (opCount < MAX_OPS) { opNames[opCount] = name; opCount = opCount + 1; }
+    str name = trimStr(copy(rest, 1, comma - 1));
+    rest = copy(rest, comma + 1, length(rest) - comma);
+    comma = pos(",", rest);
+    if (comma == 0) continue;
+    int value = parseIntLiteral(trimStr(copy(rest, 1, comma - 1)));
+    if (value < 0) continue;
+    if (opCount < MAX_OPS) { opNames[opCount] = name; opValues[opCount] = value; opCount = opCount + 1; }
   }
 }
 
 int opcode(str name) {
-  for (int i = 0; i < opCount; i = i + 1) if (opNames[i] == name) return i;
-  str pref = "OP_" + name;
-  for (int i = 0; i < opCount; i = i + 1) if (opNames[i] == pref) return i;
+  for (int i = 0; i < opCount; i = i + 1) if (opNames[i] == name) return opValues[i];
   printf("Unknown opcode %s\n", name); halt(1); return -1;
 }
 
@@ -111,35 +164,26 @@ int opcode(str name) {
 int TYPE_INTEGER = 0;
 int TYPE_STRING = 0;
 
+// The VarType enum lives in core/var_type.h.
 void loadTypeTags(str root) {
-  str header = coreHeader(root, "core/types.h");
+  str header = coreHeader(root, "core/var_type.h");
   if (!fileexists(header)) {
     // iOS workspace refresh can temporarily miss this header; use
     // canonical defaults (TYPE_INT32=2, TYPE_STRING=4) as fallback.
     TYPE_INTEGER = 2;
     TYPE_STRING = 4;
-    printf("tiny: warning: types.h missing at %s (using fallback tags)\n", header);
+    printf("tiny: warning: var_type.h missing at %s (using fallback tags)\n", header);
     return;
   }
 
-  str buf = readFile(header);
+  scanRest = readFile(header);
   int inEnum = 0;
   int idx = 0;
-  int i = 1;
-  int len = length(buf);
   TYPE_INTEGER = 0;
   TYPE_STRING = 0;
 
-  while (i <= len) {
-    int j = i;
-    while (j <= len && copy(buf, j, 1) != "\n") j = j + 1;
-    int llen = j - i;
-    str line = copy(buf, i, llen);
-    i = j + 1;
-
-    int p = 1;
-    while (p <= llen && copy(line, p, 1) <= " ") p = p + 1;
-    str trimmed = copy(line, p, llen - p + 1);
+  while (length(scanRest) > 0) {
+    str trimmed = trimStr(nextLine());
     if (length(trimmed) >= 2 && copy(trimmed, 1, 2) == "//") continue;
 
     if (pos("typedef enum", trimmed) == 1) {
@@ -155,21 +199,10 @@ void loadTypeTags(str root) {
     str entry = copy(trimmed, 1, comma - 1);
     int eq = pos("=", entry);
     if (eq > 0) {
-      str rhs = copy(entry, eq + 1, length(entry) - eq);
-      int rp = 1;
-      while (rp <= length(rhs) && copy(rhs, rp, 1) == " ") rp = rp + 1;
-      idx = atoi(copy(rhs, rp, length(rhs) - rp + 1));
+      idx = atoi(trimStr(copy(entry, eq + 1, length(entry) - eq)));
       entry = copy(entry, 1, eq - 1);
     }
-
-    int ep = 1;
-    while (ep <= length(entry) && copy(entry, ep, 1) == " ") ep = ep + 1;
-    entry = copy(entry, ep, length(entry) - ep + 1);
-    int ek = length(entry);
-    while (ek > 0 && copy(entry, ek, 1) <= " ") {
-      entry = copy(entry, 1, ek - 1);
-      ek = ek - 1;
-    }
+    entry = trimStr(entry);
 
     if (entry == "TYPE_INT32" || entry == "TYPE_INTEGER") TYPE_INTEGER = idx;
     if (entry == "TYPE_STRING") TYPE_STRING = idx;
@@ -209,7 +242,12 @@ int code[MAX_CODE];
 int codeLen = 0;
 void emit(int b) { code[codeLen] = b & 255; codeLen = codeLen + 1; }
 void emitShort(int v) { emit((v >> 8) & 255); emit(v & 255); }
-void emitICS() { for (int i = 0; i < inlineCacheSlotSize; i = i + 1) emit(0); }
+// Jump displacements are big-endian i32, relative to the next instruction.
+void emitInt32(int v) { emit((v >> 24) & 255); emit((v >> 16) & 255); emit((v >> 8) & 255); emit(v & 255); }
+void patchInt32(int at, int v) {
+  code[at] = (v >> 24) & 255; code[at + 1] = (v >> 16) & 255;
+  code[at + 2] = (v >> 8) & 255; code[at + 3] = v & 255;
+}
 
 // --------- Tokenizer / Parser ---------
 const int MAX_TOK = 4096;
@@ -292,15 +330,20 @@ int parseFactor(){ str t=curType(); if(t=="("){ consume("("); int n=parseExpr();
 str vars[MAX_TOK]; int varCount=0;
 int varIdx(str name){ for(int i=0;i<varCount;i=i+1) if(vars[i]==name) return i; return -1; }
 void collectVars(int node){ int t=nType[node]; if(t==N_VAR||t==N_READ||t==N_ASSIGN){ str nm=nS[node]; if(varIdx(nm)<0){ vars[varCount]=nm; varCount=varCount+1; } } for(int i=0;i<nChildCount[node];i=i+1) collectVars(nChildren[node][i]); }
+// Globals are defined, and their names pooled, in sorted order (as tools/tiny does).
+void sortVars(){ for(int i=1;i<varCount;i=i+1){ str v=vars[i]; int j=i-1; while(j>=0 && v<vars[j]){ vars[j+1]=vars[j]; j=j-1; } vars[j+1]=v; } }
 
 // Codegen helpers
 int nameConstIdx[MAX_TOK];
 int readConst, writeConst, trueConst, falseConst, typeIntConst;
 
+// Globals are slot-addressed. The compiler writes a constant-pool NAME index
+// in each u16 slot field, and the VM's load-time link step
+// (compiler/bytecode_link.c) rewrites it into the resolved slot index.
 void emitConst(int idx){ if(idx<=255){ emit(opcode("CONSTANT")); emit(idx);} else { emit(opcode("CONSTANT16")); emitShort(idx);} }
-void emitDefine(str name){ int idx=nameConstIdx[varIdx(name)]; if(idx<=255){ emit(opcode("DEFINE_GLOBAL")); emit(idx);} else { emit(opcode("DEFINE_GLOBAL16")); emitShort(idx);} emit(TYPE_INTEGER); emitShort(typeIntConst); }
-void emitGetGlobal(str name){ int idx=nameConstIdx[varIdx(name)]; if(idx<=255){ emit(opcode("GET_GLOBAL")); emit(idx);} else { emit(opcode("GET_GLOBAL16")); emitShort(idx);} emitICS(); }
-void emitGetGlobalAddr(str name){ int idx=nameConstIdx[varIdx(name)]; if(idx<=255){ emit(opcode("GET_GLOBAL_ADDRESS")); emit(idx);} else { emit(opcode("GET_GLOBAL_ADDRESS16")); emitShort(idx);} }
+void emitDefine(str name){ emit(opcode("DEFINE_GLOBAL_SLOT")); emitShort(nameConstIdx[varIdx(name)]); emit(TYPE_INTEGER); emitShort(typeIntConst); }
+void emitGetGlobal(str name){ emit(opcode("GET_GSLOT")); emitShort(nameConstIdx[varIdx(name)]); }
+void emitGetGlobalAddr(str name){ emit(opcode("GET_GSLOT_ADDRESS")); emitShort(nameConstIdx[varIdx(name)]); }
 
 void compileExpr(int node){ int t=nType[node]; if(t==N_NUM){ emitConst(addConstInt(nA[node])); return; } if(t==N_VAR){ emitGetGlobal(nS[node]); return; } if(t==N_BINOP){ compileExpr(nChildren[node][0]); compileExpr(nChildren[node][1]); str op=nS[node]; if(op=="+") emit(opcode("ADD")); else if(op=="-") emit(opcode("SUBTRACT")); else if(op=="*") emit(opcode("MULTIPLY")); else if(op=="/") emit(opcode("DIVIDE")); else if(op=="<") emit(opcode("LESS")); else if(op=="=") emit(opcode("EQUAL")); else { printf("Unknown op %s\n", op); halt(1);} return; } printf("Bad expr node %d\n", t); halt(1); }
 
@@ -339,25 +382,19 @@ void compileStmt(int node){
     compileExpr(nChildren[node][0]);
     emit(opcode("JUMP_IF_FALSE"));
     int jElse = codeLen;
-    emitShort(0);
+    emitInt32(0);
     int thenNode = nChildren[node][1];
     for (int i = 0; i < nChildCount[thenNode]; i = i + 1) compileStmt(nChildren[thenNode][i]);
     if (nChildCount[node] > 2) {
       emit(opcode("JUMP"));
       int jEnd = codeLen;
-      emitShort(0);
-      int off = codeLen - (jElse + 2);
-      code[jElse] = (off >> 8) & 255;
-      code[jElse + 1] = off & 255;
+      emitInt32(0);
+      patchInt32(jElse, codeLen - (jElse + 4));
       int elseNode = nChildren[node][2];
       for (int i = 0; i < nChildCount[elseNode]; i = i + 1) compileStmt(nChildren[elseNode][i]);
-      off = codeLen - (jEnd + 2);
-      code[jEnd] = (off >> 8) & 255;
-      code[jEnd + 1] = off & 255;
+      patchInt32(jEnd, codeLen - (jEnd + 4));
     } else {
-      int off = codeLen - (jElse + 2);
-      code[jElse] = (off >> 8) & 255;
-      code[jElse + 1] = off & 255;
+      patchInt32(jElse, codeLen - (jElse + 4));
     }
     return;
   }
@@ -367,8 +404,7 @@ void compileStmt(int node){
     for (int i = 0; i < nChildCount[body]; i = i + 1) compileStmt(nChildren[body][i]);
     compileExpr(nChildren[node][1]);
     emit(opcode("JUMP_IF_FALSE"));
-    int back = loopStart - (codeLen + 2);
-    emitShort(back);
+    emitInt32(loopStart - (codeLen + 4));
     return;
   }
   printf("Bad stmt node %d\n", t);
@@ -382,89 +418,152 @@ void compileProgram(int rootNode){
   emitConst(trueConst); emit(opcode("CALL_BUILTIN")); emitShort(writeConst); emit(1); emit(opcode("HALT"));
 }
 
-// --------- VM version ---------
+// --------- VM and container versions ---------
 int vmVersion(str root){
   str verPath = coreHeader(root, "core/version.h");
   if (!fileexists(verPath)) {
     printf("tiny: version.h missing at %s\n", verPath);
     halt(1);
   }
-  str buf = readFile(verPath);
-  int i = 1;
-  int n = length(buf);
-  while (i <= n) {
-    int j = i;
-    while (j <= n && copy(buf, j, 1) != "\n") j = j + 1;
-    str line = copy(buf, i, j - i);
-    if (pos("PSCAL_VM_VERSION", line) > 0) {
-      int k = pos("PSCAL_VM_VERSION", line) + length("PSCAL_VM_VERSION");
-      while (k <= length(line) && copy(line, k, 1) == " ") k = k + 1;
-      int start = k;
-      while (k <= length(line) && copy(line, k, 1) >= "0" && copy(line, k, 1) <= "9") k = k + 1;
-      return atoi(copy(line, start, k - start));
-    }
-    i = j + 1;
+  int v = defineValue(readFile(verPath), "PSCAL_VM_VERSION");
+  if (v < 0) {
+    printf("VM version not found\n");
+    halt(1);
   }
-  printf("VM version not found\n");
-  halt(1);
-  return 0;
+  return v;
 }
 
-// --------- Serialization into a byte stream (binary-safe) ---------
-void msAppendByte(mstream ms, int b){ mstreamappendbyte(ms, b & 255); }
-void msAppendLE(mstream ms, long long v, int bytes){
-  long long cur = v;
-  for (int i = 0; i < bytes; i = i + 1) {
-    int b = (int)(cur % 256);
-    if (b < 0) b = b + 256;
-    msAppendByte(ms, b);
-    if (cur >= 0) cur = cur / 256;
-    else cur = (cur - 255) / 256;
+// PSB3_FORMAT_VERSION is the container-format epoch, distinct from the VM
+// version above; it is defined in core/cache.c, next to the PSB3 reader and
+// writer. An installed runtime carries headers only, so there it falls back
+// to the epoch this writer implements. A file of any other epoch is rejected
+// when the VM loads it, not misread.
+const int PSB3_FORMAT_EPOCH = 3;
+
+int formatVersion(str root){
+  str cachePath = coreHeader(root, "core/cache.c");
+  if (!fileexists(cachePath)) return PSB3_FORMAT_EPOCH;
+  int v = defineValue(readFile(cachePath), "PSB3_FORMAT_VERSION");
+  if (v < 0) {
+    printf("tiny: PSB3_FORMAT_VERSION not found in %s\n", cachePath);
+    halt(1);
   }
-}
-void msAppend32(mstream ms, int v){
-  msAppendLE(ms, (long long)v, 4);
-}
-void msAppend64(mstream ms, long long v){
-  msAppendLE(ms, v, 8);
+  return v;
 }
 
-void writePbc(str outPath, int version){
-  mstream ms = mstreamcreate();
-  int magic = 1347633714; // 0x50534232 ('PSB2'), written little-endian
-  msAppend32(ms, magic);
-  msAppend32(ms, version);
-  msAppend64(ms, 0); // source_hash
-  msAppend64(ms, 0); // combined_hash
-  str pathLit = "tiny";
-  msAppend32(ms, -length(pathLit));
-  for (int i = 1; i <= length(pathLit); i = i + 1) msAppendByte(ms, ord(pathLit[i]));
-  msAppend32(ms, codeLen);
-  msAppend32(ms, constCount);
-  for(int i=0;i<codeLen;i=i+1) msAppendByte(ms, code[i]);
-  for(int i=0;i<codeLen;i=i+1) msAppend32(ms, 0); // lines
-  for(int i=0;i<constCount;i=i+1){
-    msAppend32(ms, constType[i]);
-    if (constType[i]==TYPE_INTEGER) {
-      long long v = atoi(constVal[i]);
-      msAppend64(ms, v);
+// --------- PSB3 container ---------
+// Mirrors psb3Write() in core/cache.c: a 16-byte header (magic 'PSB3',
+// u16 format version, u16 VM version, u32 flags, u32 section count), a
+// directory of (fourcc id, offset, length) u32 triples, then the section
+// bodies, each starting on an 8-byte boundary. Header and directory fields
+// are little-endian; section bodies use unsigned LEB128 varints.
+const int MAX_SEC_BYTES = 262144;
+int secBytes[MAX_SEC_BYTES];
+int secBytesLen = 0;
+str secId[8];
+int secStart[8];
+int secSize[8];
+int secCount = 0;
+
+void sByte(int b){ secBytes[secBytesLen] = b & 255; secBytesLen = secBytesLen + 1; }
+void sVarint(int v){
+  while (v >= 128) { sByte((v & 127) | 128); v = v >> 7; }
+  sByte(v);
+}
+void sLE(long long v, int bytes){
+  for (int i = 0; i < bytes; i = i + 1) { sByte((int)(v & 255)); v = v >> 8; }
+}
+void beginSection(str id){ secId[secCount] = id; secStart[secCount] = secBytesLen; }
+void endSection(){ secSize[secCount] = secBytesLen - secStart[secCount]; secCount = secCount + 1; }
+
+void buildSections(){
+  secBytesLen = 0; secCount = 0;
+
+  beginSection("CODE");
+  sVarint(codeLen);
+  sVarint(0); // cache_count: slot-addressed globals need no access caches
+  for (int i = 0; i < codeLen; i = i + 1) sByte(code[i]);
+  endSection();
+
+  // tiny tracks no source lines: one run at line 0 covering the whole chunk,
+  // as (run_count, pc_delta, zigzag line_delta).
+  beginSection("LINE");
+  if (codeLen == 0) sVarint(0);
+  else { sVarint(1); sVarint(0); sVarint(0); }
+  endSection();
+
+  // Each constant: u32 type tag, then an i64 for an integer, or a presence
+  // byte and a varint-length-prefixed string.
+  beginSection("CONS");
+  sVarint(constCount);
+  for (int i = 0; i < constCount; i = i + 1) {
+    sLE(constType[i], 4);
+    if (constType[i] == TYPE_INTEGER) {
+      sLE(atoi(constVal[i]), 8);
     } else {
       str s = constVal[i];
-      if (s == "") { msAppend32(ms, -1); }
-      else {
-        int len = length(s);
-        msAppend32(ms, len);
-        for (int j = 1; j <= len; j = j + 1) msAppendByte(ms, ord(s[j]));
-      }
+      sByte(1);
+      sVarint(length(s));
+      for (int j = 1; j <= length(s); j = j + 1) sByte(ord(s[j]));
     }
   }
-  // Footers expected by pscalvm loader (mirror python tiny):
-  // builtin lowercase mapping count, stored_proc_count (negative signals empty),
-  // constant symbol table count, type table count.
-  msAppend32(ms, 0);   // builtin lowercase mapping count
-  msAppend32(ms, -1);  // stored_proc_count = -(count+1); empty => -1
-  msAppend32(ms, 0);   // const symbol table count
-  msAppend32(ms, 0);   // type table count
+  endSection();
+
+  // No builtin lowercase-map entries; the fingerprint of an empty map is the
+  // FNV1A64_OFFSET value cache.c starts from.
+  beginSection("BMAP");
+  sVarint(0);
+  sLE(1469598103934665603, 8);
+  endSection();
+
+  beginSection("PROC");
+  sVarint(0); // procedures
+  sVarint(0); // constant globals
+  endSection();
+
+  beginSection("TYPE");
+  sVarint(0);
+  endSection();
+}
+
+void msAppendByte(mstream ms, int b){ mstreamappendbyte(ms, b & 255); }
+void msAppendLE(mstream ms, int v, int bytes){
+  for (int i = 0; i < bytes; i = i + 1) { msAppendByte(ms, v & 255); v = v >> 8; }
+}
+void msPadTo(mstream ms, int written, int target){
+  for (int i = written; i < target; i = i + 1) msAppendByte(ms, 0);
+}
+int align8(int n){ return (n + 7) / 8 * 8; }
+
+void writePbc(str outPath, int vmVer, int formatVer){
+  buildSections();
+  int offsets[8];
+  int written = 16 + secCount * 12;
+  int running = align8(written);
+  for (int i = 0; i < secCount; i = i + 1) {
+    offsets[i] = running;
+    running = align8(running + secSize[i]);
+  }
+
+  mstream ms = mstreamcreate();
+  msAppendLE(ms, 1347633715, 4); // 0x50534233 'PSB3', so the file starts "3BSP"
+  msAppendLE(ms, formatVer, 2);
+  msAppendLE(ms, vmVer, 2);
+  msAppendLE(ms, 0, 4); // flags: reserved
+  msAppendLE(ms, secCount, 4);
+  for (int i = 0; i < secCount; i = i + 1) {
+    str id = secId[i];
+    for (int c = 1; c <= 4; c = c + 1) msAppendByte(ms, ord(id[c]));
+    msAppendLE(ms, offsets[i], 4);
+    msAppendLE(ms, secSize[i], 4);
+  }
+  for (int i = 0; i < secCount; i = i + 1) {
+    msPadTo(ms, written, offsets[i]);
+    for (int k = 0; k < secSize[i]; k = k + 1) msAppendByte(ms, secBytes[secStart[i] + k]);
+    written = offsets[i] + secSize[i];
+    msPadTo(ms, written, align8(written));
+    written = align8(written);
+  }
   mstreamsavetofile(&ms, outPath);
   mstreamfree(&ms);
 }
@@ -480,12 +579,14 @@ int main(){
   loadOpcodes(root);
   loadTypeTags(root);
   int version = vmVersion(root);
+  int format = formatVersion(root);
   str source = readFile(srcPath);
   // reset per compilation
   nCount = 0; varCount = 0; constCount = 0; codeLen = 0;
   tokenize(source);
   int ast = parseProgram();
   collectVars(ast);
+  sortVars();
   readConst = addConstStr("read");
   writeConst = addConstStr("write");
   trueConst = addConstInt(1);
@@ -493,6 +594,6 @@ int main(){
   typeIntConst = addConstStr("integer");
   for (int i=0;i<varCount;i=i+1) nameConstIdx[i] = addConstStr(vars[i]);
   compileProgram(ast);
-  writePbc(outPath, version);
+  writePbc(outPath, version, format);
   return 0;
 }

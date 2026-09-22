@@ -2907,19 +2907,13 @@ if(NOT PSCAL_PLATFORM_IOS)
             RESULT_VARIABLE _pscal_tiny_pbc_result)
         if(NOT _pscal_tiny_pbc_result EQUAL 0 OR NOT EXISTS "${_pscal_binary_dir}/bin/tiny.pbc")
             message(WARNING "tiny.pbc was not produced (tiny_pbc target); bin/tiny will fall back to interpreting tiny.clike directly")
-        else()
-            set(_pscal_tiny_pbc_root "")
-            if("${PSCAL_INSTALL_ROOT_DESTINATION}" STREQUAL "." OR "${PSCAL_INSTALL_ROOT_DESTINATION}" STREQUAL "")
-                set(_pscal_tiny_pbc_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
-            elseif(IS_ABSOLUTE "${PSCAL_INSTALL_ROOT_DESTINATION}")
-                set(_pscal_tiny_pbc_root "$ENV{DESTDIR}${PSCAL_INSTALL_ROOT_DESTINATION}")
-            else()
-                set(_pscal_tiny_pbc_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/${PSCAL_INSTALL_ROOT_DESTINATION}")
-            endif()
-            file(INSTALL "${_pscal_binary_dir}/bin/tiny.pbc"
-                 DESTINATION "${_pscal_tiny_pbc_root}/bin")
         endif()
     ]])
+    # Next to bin/tiny, which looks for it there. (Install scripts never see
+    # PSCAL_INSTALL_ROOT_DESTINATION, so a [[...]] block cannot place it.)
+    install(FILES "${CMAKE_BINARY_DIR}/bin/tiny.pbc"
+            DESTINATION "${_pscal_runtime_root}/bin"
+            OPTIONAL)
     # Tiny compiler runtime assets for iOS/iPadOS: install script plus minimal headers it loads.
     install(PROGRAMS bin/tiny
             DESTINATION "${_pscal_runtime_root}/bin"
@@ -2927,8 +2921,10 @@ if(NOT PSCAL_PLATFORM_IOS)
                         GROUP_READ GROUP_EXECUTE
                         WORLD_READ WORLD_EXECUTE)
     install(FILES components/pscal-core/src/compiler/bytecode.h
+                  components/pscal-core/src/compiler/opcodes.def
             DESTINATION "${_pscal_runtime_root}/src/compiler")
     install(FILES components/pscal-core/src/core/version.h
+                  components/pscal-core/src/core/var_type.h
             DESTINATION "${_pscal_runtime_root}/src/core")
     install(DIRECTORY Tests/libs/
             DESTINATION "${_pscal_runtime_root}/etc/tests"
