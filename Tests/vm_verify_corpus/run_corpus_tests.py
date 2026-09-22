@@ -2,7 +2,8 @@
 """Runs the Phase 1e verifier's malformed-.bc corpus (Docs/pscal_vm2_plan.md
 §5.5) through pscalvm and checks that every entry behaves as its manifest
 expects: golden controls load and run (exit 0), corrupt entries are
-rejected cleanly (nonzero exit, no crash signal -- never a segfault/abort).
+rejected cleanly (nonzero exit, no crash signal -- never a segfault/abort),
+with the entry's expect_stderr text in stderr when the manifest names one.
 
 Usage: python3 run_corpus_tests.py [--pscalvm-bin PATH] [--corpus DIR]
 """
@@ -57,10 +58,16 @@ def main():
             else:
                 print(f"[PASS] {entry['file']} (loaded and ran)")
         else:
+            stderr = proc.stderr.decode(errors="replace")
+            want = entry.get("expect_stderr")
             if ok:
                 failures.append(f"{entry['file']}: expected clean rejection, but it ran successfully "
                                  f"({entry['note']})")
                 print(f"[FAIL] {entry['file']} (expected rejection, got exit 0)")
+            elif want is not None and want not in stderr:
+                failures.append(f"{entry['file']}: rejected (exit {proc.returncode}) but stderr lacks "
+                                 f"{want!r} -- stderr: {stderr[:200]}")
+                print(f"[FAIL] {entry['file']} (rejected, but not with {want!r})")
             else:
                 print(f"[PASS] {entry['file']} (rejected cleanly, exit={proc.returncode})")
 

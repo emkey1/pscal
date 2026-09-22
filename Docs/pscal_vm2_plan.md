@@ -547,6 +547,51 @@ re-run on a fresh Release build: delta -1.9ms (still noise-dominated, same
 conclusion as the original measurement); `run_vm_bench.py` shows no
 execution-time regression either.
 
+**Coverage follow-up (2026-09-22):** pass 3 ended each procedure's segment
+at the next procedure's address and dropped any edge that left a segment.
+Pascal-family compilers lay a program out as prologue, a JUMP over each
+routine, then the main block, so every Pascal main block (and the body of
+every routine with nested routines) sat past some other routine's start
+and was reachable only through a dropped edge. None of it was ever
+stack-checked, which is how a wrong `CALL_USER_PROC` effect (pscal-core
+feb715d) went unseen until CLike, whose `main` is a real routine, loaded
+from cache. Pass 3 now walks from each entry point (pc 0, every procedure
+address, every `THREAD_CREATE` target) and follows control flow anywhere
+in the chunk. Every reachable instruction belongs to exactly one entry.
+Control that falls off the end of the code, or reaches another entry's
+code other than by a call, is rejected, which also keeps the pass linear.
+
+Swept by compiling every Pascal, CLike, Rea and Aether test and example
+program (718 that compile), verifying each fresh chunk and again after a
+cache round trip. The share of instructions walked went from 79.4% / 94.5%
+/ 83.7% / 90.7% to 99.8% / 98.3% / 86.4% / 94.5% on the same files. The
+remainder is dead code: implicit `RETURN` tails after explicit returns,
+and duplicate method bodies compiled at call sites. The sweep turned up
+two real bugs, both fixed:
+
+- *Codegen.* A `use`d / `#import`ed file's own `main()` call (written for
+  its standalone self-test, or injected by the parser) was compiled into
+  module initialisation, where it bound to the importer's `main` by bare
+  name. The call site then compiled that body inline with no JUMP around
+  it. The program's top level ran into the body and returned out of the
+  program, so the importer's prologue never ran (an importer's global read
+  as "undefined"). The rea and aether parsers now drop a dependency's
+  entry invocation, and the compiler jumps over a routine it compiles at a
+  top-level call site.
+- *Pass 2.* A text or untyped file's element-type name is the sentinel
+  `0xFFFF` (in `DEFINE_GLOBAL*`'s `TYPE_FILE` payload and `INIT_LOCAL_FILE`),
+  which the VM honours and the verifier rejected as out of range. Every
+  cached chunk declaring such a file was discarded and recompiled on every
+  run.
+
+`Tests/vm_verify_corpus/` adds `golden_main_block_loop.bc` (a main block
+looping over a procedure call must load and run), `main_block_underflow.bc`
+and `jump_into_procedure.bc`. The old verifier loaded both corrupt chunks
+and they exited 0: `pop()` reports an underflow but `POP` carries on, so
+the runtime backstop reports this case without stopping it. Manifest
+entries can now name the stderr text a rejection must carry, for cases
+where a nonzero exit alone can't show the chunk was rejected at load.
+
 ### 5.6 Phase 2a: Inline caches move to a side-table
 
 - New encoding: `GET_GLOBAL name:u16 cache_id:u16` (5 bytes vs today's 10).
