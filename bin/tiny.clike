@@ -37,6 +37,16 @@ str resolveRoot() {
   return root;
 }
 
+// VM headers live at <root>/src/... in an installed runtime and under
+// <root>/components/pscal-core/src/... in a source checkout.
+str coreHeader(str root, str rel) {
+  str installed = root + "/src/" + rel;
+  if (fileexists(installed)) return installed;
+  str checkout = root + "/components/pscal-core/src/" + rel;
+  if (fileexists(checkout)) return checkout;
+  return installed;
+}
+
 // Derive default output path: replace trailing .tiny with .pbc, else append .pbc
 str defaultOutPath(str src) {
   int len = length(src);
@@ -53,7 +63,7 @@ int opCount = 0;
 int inlineCacheSlotSize = 8;
 
 void loadOpcodes(str root) {
-  str header = root + "/src/compiler/bytecode.h";
+  str header = coreHeader(root, "compiler/bytecode.h");
   if (!fileexists(header)) {
     printf("tiny: bytecode.h missing at %s\n", header);
     halt(1);
@@ -102,7 +112,7 @@ int TYPE_INTEGER = 0;
 int TYPE_STRING = 0;
 
 void loadTypeTags(str root) {
-  str header = root + "/src/core/types.h";
+  str header = coreHeader(root, "core/types.h");
   if (!fileexists(header)) {
     // iOS workspace refresh can temporarily miss this header; use
     // canonical defaults (TYPE_INT32=2, TYPE_STRING=4) as fallback.
@@ -212,7 +222,7 @@ void tokenize(str src) {
   tokPos = 0;
   // strip {comments}
   while (1) {
-    int a = pos(src, "{"); int b = pos(src, "}");
+    int a = pos("{", src); int b = pos("}", src);
     if (a > 0 && b > a) src = copy(src, 1, a - 1) + " " + copy(src, b + 1, length(src) - b);
     else break;
   }
@@ -374,7 +384,7 @@ void compileProgram(int rootNode){
 
 // --------- VM version ---------
 int vmVersion(str root){
-  str verPath = root + "/src/core/version.h";
+  str verPath = coreHeader(root, "core/version.h");
   if (!fileexists(verPath)) {
     printf("tiny: version.h missing at %s\n", verPath);
     halt(1);
