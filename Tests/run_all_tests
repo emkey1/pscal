@@ -44,6 +44,11 @@ bash ./run_clike_tests.sh
 echo "CLike Tests End"
 echo
 echo "====================================="
+echo "Running pscalvm Frontend Agreement Tests"
+bash ./run_pscalvm_frontend_tests.sh
+echo "pscalvm Frontend Agreement Tests End"
+echo
+echo "====================================="
 echo "Running exsh Tests"
 bash ./run_exsh_tests.sh
 echo "exsh Tests End"

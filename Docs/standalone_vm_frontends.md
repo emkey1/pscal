@@ -13,7 +13,16 @@ itself, see [`pscal_vm_overview.md`](pscal_vm_overview.md).
    typed constants referenced by index.
 3. **Write the `.pbc` file.** Serialize the bytecode, constants and metadata to
    disk.
-4. **Run with `pscalvm`.** Execute the resulting file just like bytecode
+4. **Say which conventions the chunk expects.** The PSB3 header's `flags` word
+   carries a `FrontendKind` in its low byte (Chapter 2 §2.1 of the VM manual).
+   It is what tells `pscalvm` whether your strings index from 0 or from 1, and
+   which wording array-bounds errors use. Leaving it 0 (`UNKNOWN`) selects the
+   Pascal-compatible defaults, which is what `tools/tiny` does and what every
+   pre-2026-09 `.pbc` file means. A frontend whose strings are 0-based *must*
+   set it, or `pscalvm` will run its bytecode a character off: `s[0]` raises
+   "String index 0 out of bounds" and `copy()`/`pos()` come back off by one
+   with no error at all.
+5. **Run with `pscalvm`.** Execute the resulting file just like bytecode
    produced by the main Pascal compiler.
 
 ## Step-by-step: the tiny compiler (Python)

@@ -1,0 +1,11 @@
+// rea, like clike, keeps Pascal's 1-based strings. Same guard as the clike
+// fixture: recording the frontend in the PSB3 header must leave rea where it
+// was, not sweep it into the 0-based group with Aether and the shell.
+int main() {
+    str s = "abcdef";
+    writeln("first=", s[1], " last=", s[6]);
+    writeln("length=", length(s));
+    writeln("copy=", copy(s, 1, 3));
+    writeln("pos_hit=", pos("c", s), " pos_miss=", pos("z", s));
+    return 0;
+}

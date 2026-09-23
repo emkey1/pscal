@@ -438,7 +438,7 @@ int vmVersion(str root){
 // writer. An installed runtime carries headers only, so there it falls back
 // to the epoch this writer implements. A file of any other epoch is rejected
 // when the VM loads it, not misread.
-const int PSB3_FORMAT_EPOCH = 3;
+const int PSB3_FORMAT_EPOCH = 5;
 
 int formatVersion(str root){
   str cachePath = coreHeader(root, "core/cache.c");
@@ -549,7 +549,11 @@ void writePbc(str outPath, int vmVer, int formatVer){
   msAppendLE(ms, 1347633715, 4); // 0x50534233 'PSB3', so the file starts "3BSP"
   msAppendLE(ms, formatVer, 2);
   msAppendLE(ms, vmVer, 2);
-  msAppendLE(ms, 0, 4); // flags: reserved
+  // flags: bits 0..7 are the FrontendKind the chunk expects (cache.c's
+  // PSB3_FLAG_FRONTEND_MASK), bits 8..31 reserved. 0 is FRONTEND_KIND_UNKNOWN
+  // -- tiny indexes strings from 1 like Pascal, so the Pascal-compatible
+  // defaults an unrecorded frontend gets are exactly right for it.
+  msAppendLE(ms, 0, 4);
   msAppendLE(ms, secCount, 4);
   for (int i = 0; i < secCount; i = i + 1) {
     str id = secId[i];

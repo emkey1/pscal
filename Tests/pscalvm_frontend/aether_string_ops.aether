@@ -1,0 +1,21 @@
+// Aether indexes Text from 0; Pascal, rea and clike index from 1. Running this
+// chunk's .bc under `pscalvm` used to apply Pascal's rules to it, because the
+// PSB3 container recorded no frontend and pscalvm had to guess. Three separate
+// things went wrong, and only the first was loud:
+//   s[0]            -> "String index 0 out of bounds", a hard runtime error
+//   copy(s, 1, 3)   -> "abc" instead of "bcd", silently
+//   pos("c", s)     -> 3 instead of 2, and a miss reported as 0 rather than -1
+// `loop ch in s` lowers to an s[i] walk from 0, so it hit the first of those.
+fn main() -> Void {
+    let s: Text = "abcdef";
+    fx {
+        println("first=", s[0], " last=", s[5]);
+        println("length=", length(s));
+        println("copy=", copy(s, 1, 3));
+        println("pos_hit=", pos("c", s), " pos_miss=", pos("z", s));
+        let rev: Text = "";
+        loop ch in s { rev = ch + rev; }
+        println("reversed=", rev);
+    }
+    ret;
+}

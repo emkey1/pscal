@@ -44,7 +44,7 @@ The header is written by `psb3Write()` (`cache.c`):
 
 ```
 [magic   u32le]  0x50534233 ('PSB3'; little-endian bytes on disk read "3BSP")
-[format_ver u16] container-format version (currently 4, up from 1;
+[format_ver u16] container-format version (currently 5, up from 1;
                  independent of the VM semantic version below —
                  this axis can move without a VM version bump. The 1→2 bump
                  was CODE's cache_count field, §2.2 (the first section-shape
@@ -55,14 +55,65 @@ The header is written by `psb3Write()` (`cache.c`):
                  *structurally* still valid-looking under the new binary
                  (their opcodes.def entries are kept for legacy disassembly)
                  but are no longer executable -- see §2.2's CODE entry;
-                 3→4 added pointer kind 4 to CONS, see §2.2's CONS entry)
+                 3→4 added pointer kind 4 to CONS, see §2.2's CONS entry;
+                 4→5 gave `flags` its frontend field, below)
 [vm_ver  u16]    chunk->version (PSCAL_VM_VERSION at compile time)
-[flags   u32]    reserved, always 0 in this phase
+[flags   u32]    bits 0..7: the FrontendKind that compiled this chunk
+                 (PSB3_FLAG_FRONTEND_MASK); bits 8..31 reserved, always 0
 [section_count u32]
 section_count × { id:u32  offset:u32  length:u32 }   ; the section directory
 <pad to 8-byte boundary>
 section bodies, each starting on an 8-byte boundary
 ```
+
+**The frontend field** (`flags` bits 0..7, container format 5). Which
+frontend's source-language conventions the chunk is to be *executed* under —
+the numeric `FrontendKind` codes in `common/frontend_kind.h`, which are
+on-disk format and append-only:
+
+| Code | Kind | Strings index from |
+|---|---|---|
+| 0 | `FRONTEND_KIND_UNKNOWN` | 1 (the Pascal-compatible default) |
+| 1 | `FRONTEND_KIND_PASCAL` | 1 |
+| 2 | `FRONTEND_KIND_REA` | 1 |
+| 3 | `FRONTEND_KIND_AETHER` | 0 |
+| 4 | `FRONTEND_KIND_CLIKE` | 1 |
+| 5 | `FRONTEND_KIND_SHELL` | 0 |
+
+This exists for the one host that has no frontend of its own. A frontend
+running its own program already knows its conventions and pushes them
+(`frontendPushKind()`), but `pscalvm prog.bc` is handed a chunk and nothing
+else, and used to assume Pascal. For a chunk an Aether or shell frontend
+compiled, that assumption is wrong in three separate ways: `s[0]` raised
+"String index 0 out of bounds" where the frontend printed the first
+character, `copy()`/`pos()` returned answers off by one *with no error at
+all*, and array-bounds failures printed the terse Pascal wording instead of
+Aether's coded `ARR-003` diagnostic. `pscalvm` now reads this field and
+adopts the recorded kind before executing (`vm_main.c`).
+
+The field lives in the fixed header rather than in a section because `META`
+— the obvious alternative home for provenance — is cache-only and absent
+from the explicit `.bc` files `saveBytecodeToFile()` writes, which are
+exactly the files `pscalvm` is handed.
+
+`psb3ParseHeader()` rejects a code no `FrontendKind` claims, before any
+section body is parsed, rather than rounding it down to Pascal: the value
+decides how the chunk runs, so an unrecognised one is a file from a future
+build, and guessing is the silent miscompile the field exists to prevent.
+Code 0 is not a guess but a statement that the producer doesn't track the
+axis — what a hand-written `.asm` or `tools/tiny` writes — and every
+frontend predicate already treats `UNKNOWN` exactly like Pascal, so those
+artifacts behave as they always have.
+
+Producers: each frontend stamps `frontendGetKind()` onto the chunk in
+`initBytecodeChunk()`, so the cache and `.bc` writers pick it up for free.
+`pscalasm` is the exception — it assembles chunks that belong to no
+frontend, so it defaults to `UNKNOWN` and takes an optional `frontend
+<name>` directive instead; `pscald --emit-asm` emits that directive for any
+chunk that names a frontend, which is what keeps a disassemble/reassemble
+round trip from quietly turning an Aether chunk into a Pascal one.
+`pscaljson2bc` takes `--frontend <kind>`, because AST JSON does not record
+which frontend produced it.
 
 Every multi-byte integer in the container — the header, the directory, and
 every section body — goes through explicit little-endian helpers
