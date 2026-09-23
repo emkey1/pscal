@@ -104,7 +104,8 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0035    1 RETURN
 == End Disassembly: /tmp/foo1 ==
 
-Constants (7):\n  0000: STR   "main"
+Constants (7):
+  0000: STR   "main"
   0001: INT   5
   0002: INT   0
   0003: STR   "a = "

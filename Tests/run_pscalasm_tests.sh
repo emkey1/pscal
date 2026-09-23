@@ -1316,10 +1316,150 @@ run_negative_source_compile_tests() {
         "rea"
 }
 
+# The plain listing (pscald <file>, and every frontend's --dump-bytecode) has
+# a display form for each constant type the cache stores, both in the
+# Constants table and in a CONSTANT instruction's operand column, and the
+# table's header ends its own line.
+run_listing_constant_forms_test() {
+    local tmpd
+    tmpd="$(mktemp -d)"
+    trap 'rm -rf "$tmpd"' RETURN
+
+    cat > "$tmpd/forms.asm" <<'EOF'
+PSCALASM2
+version 9
+constants 36
+const 0 2 -42
+const 1 8 200
+const 2 9 65535
+const 3 12 1
+const 4 18 -128
+const 5 20 -32768
+const 6 23 -9223372036854775808
+const 7 28 7
+const 8 19 255
+const 9 21 65535
+const 10 22 4294967295
+const 11 24 18446744073709551615
+const 12 3 3.5
+const 13 4 "hi\n"
+const 14 30 "wide"
+const 15 5 65
+const 16 5 7
+const 17 29 955
+const 18 27
+const 19 1
+const 20 13 null
+const 21 13 bytes 3 1 0 255
+const 22 10 "Color" 2
+const 23 14 12 1 2 3 4 5 9 11 12 20 21 22 23
+const 24 14 0
+const 25 11 dims 1 elem 2 bounds 1 12 values 12 1 2 3 4 5 6 7 8 9 10 11 12
+const 26 11 dims 0 elem 23 bounds values 0
+const 27 11 dims 2 elem 4 bounds 1 2 1 2 values 4 "a" "b" "c" "d"
+const 28 11 dims 1 elem 11 bounds 0 1 typed_values 2 11 dims 1 elem 2 bounds 0 1 values 2 1 2 5 120
+const 29 15 null
+const 30 15 charptr "hello-pointer"
+const 31 15 opaque_addr 4660
+const 32 15 typed_nil none
+const 33 15 typed_nil "{\"node_type\":\"TYPE_REFERENCE\",\"token\":{\"type\":\"IDENTIFIER\",\"value\":\"Point\"},\"var_type_annotated\":\"RECORD\",\"var_type_id\":6}"
+const 34 15 typed_nil "{\"node_type\":\"RECORD_TYPE\",\"var_type_annotated\":\"VOID\",\"var_type_id\":1}"
+const 35 31
+builtin_map 0
+const_symbols 0
+procedures 0
+code 11
+inst 0 CONSTANT 6
+inst 2 CONSTANT 11
+inst 4 CONSTANT 17
+inst 6 CONSTANT 23
+inst 8 CONSTANT 27
+inst 10 HALT
+end
+EOF
+
+    cat > "$tmpd/forms.expect" <<'EOF'
+0000    0 CONSTANT            6 '-9223372036854775808'
+0002    2 CONSTANT           11 '18446744073709551615'
+0004    4 CONSTANT           17 'λ'
+0006    6 CONSTANT           23 '[1..5, 9, 11, 12, 20..23]'
+0008    8 CONSTANT           27 'array[1..2, 1..2] of STRING = ("a", "b", "c", "d")'
+Constants (36):
+  0000: INT   -42
+  0001: BYTE  200
+  0002: WORD  65535
+  0003: BOOL  true
+  0004: INT8  -128
+  0005: INT16 -32768
+  0006: INT64 -9223372036854775808
+  0007: THREAD 7
+  0008: UINT8 255
+  0009: UINT16 65535
+  0010: UINT32 4294967295
+  0011: UINT64 18446744073709551615
+  0012: REAL  3.500000
+  0013: STR   "hi\n"
+  0014: STR   "wide"
+  0015: CHAR  'A'
+  0016: CHAR  #7
+  0017: CHAR  'λ'
+  0018: NIL
+  0019: VOID
+  0020: MSTREAM mstream(nil)
+  0021: MSTREAM mstream(3 bytes)
+  0022: ENUM  Color(2)
+  0023: SET   [1..5, 9, 11, 12, 20..23]
+  0024: SET   []
+  0025: ARRAY array[1..12] of INTEGER = (1, 2, 3, 4, 5, 6, 7, 8, ... 4 more)
+  0026: ARRAY array of INT64 = ()
+  0027: ARRAY array[1..2, 1..2] of STRING = ("a", "b", "c", "d")
+  0028: ARRAY array[0..1] of ARRAY = (array[0..1] of INTEGER = (1, 2), 'x')
+  0029: PTR   nil
+  0030: PTR   charptr "hello-pointer"
+  0031: PTR   opaque 0x1234
+  0032: PTR   nil
+  0033: PTR   nil ^Point
+  0034: PTR   nil ^RECORD_TYPE
+  0035: TASK  task(unset)
+EOF
+
+    if ! "$PSCALASM_BIN" "$tmpd/forms.asm" "$tmpd/forms.pbc"; then
+        fail_with_details "pscald_listing_constants" "listing shows every constant form" "assembly failed"
+        trap - RETURN
+        rm -rf "$tmpd"
+        return
+    fi
+
+    if ! "$PSCALD_BIN" "$tmpd/forms.pbc" > /dev/null 2> "$tmpd/forms.disasm"; then
+        fail_with_details "pscald_listing_constants" "listing shows every constant form" "pscald failed:\n$(cat "$tmpd/forms.disasm")"
+        trap - RETURN
+        rm -rf "$tmpd"
+        return
+    fi
+    grep -E '^[0-9]{4} .*CONSTANT|^Constants|^  [0-9]{4}: ' "$tmpd/forms.disasm" > "$tmpd/forms.actual" || true
+
+    set +e
+    local diff_output
+    diff_output="$(diff -u "$tmpd/forms.expect" "$tmpd/forms.actual")"
+    local diff_status=$?
+    set -e
+    if [ $diff_status -ne 0 ]; then
+        fail_with_details "pscald_listing_constants" "listing shows every constant form" "listing mismatch:\n$diff_output"
+        trap - RETURN
+        rm -rf "$tmpd"
+        return
+    fi
+
+    harness_report PASS "pscald_listing_constants" "listing shows every constant form"
+    trap - RETURN
+    rm -rf "$tmpd"
+}
+
 run_pscalasm_unit_tests() {
     run_minimal_pscalasm2_test
     run_operand_validation_test
     run_legacy_block_compat_test
+    run_listing_constant_forms_test
 }
 
 run_pscalasm_roundtrip_tests() {

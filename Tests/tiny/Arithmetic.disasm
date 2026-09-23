@@ -18,7 +18,8 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0034    | HALT
 == End Disassembly: tiny/Arithmetic.pbc ==
 
-Constants (8):\n  0000: STR   "read"
+Constants (8):
+  0000: STR   "read"
   0001: STR   "write"
   0002: INT   1
   0003: INT   0
