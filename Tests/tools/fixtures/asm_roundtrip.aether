@@ -1,0 +1,35 @@
+// Round-trips through `pscald --emit-asm | pscalasm` (Tests/run_pscalasm_tests.sh).
+// Each line below puts a constant or procedure in the chunk that pscald or
+// pscalasm once rejected. Nothing here indexes a Text, so pscalvm runs this
+// chunk the same whichever string base it applies.
+type Item {
+    name: Text = "unnamed";
+    qty: Int = 0;
+}
+
+// A procedure whose return type (UNICODESTRING) sorts after TYPE_THREAD.
+fn describe(it: Item) -> Text {
+    ret it.name + " x" + inttostr(it.qty);
+}
+
+fn main() -> Void {
+    let greeting: Text = "héllo";                  // UNICODESTRING constant
+    let names: Text[] = ["ada", "bob"];             // array of UNICODESTRING
+    let grid: Int[][] = [[1, 2], [3, 4]];           // array of ARRAY
+    let none: Int[] = [];                           // array with no dimensions
+    // Array of nil pointers typed by Item's record AST, Text field and all.
+    let items: Item[] = [new Item { name: "bolt", qty: 4 }, new Item { name: "nut", qty: 9 }];
+    let buf: MStream = mstreamcreate();             // MEMORY_STREAM constant
+
+    none = none + [7];
+    fx {
+        println(greeting);
+        println(names[0], " ", names[1]);
+        println(grid[1][0] + grid[0][1]);
+        println(length(none), " ", none[0]);
+        println(describe(items[0]), ", ", describe(items[1]));
+        println(length(mstreambuffer(buf)));
+    }
+    mstreamfree(buf);
+    ret;
+}

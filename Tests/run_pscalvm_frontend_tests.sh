@@ -69,6 +69,7 @@ run_case() {
     local front_rc=0 vm_rc=0
 
     HOME="$case_home" "$frontend_bin" "$fixture" >"$front_out" 2>"$front_err" || front_rc=$?
+    echo "$front_rc" >"$WORK_DIR/$test_id.front.rc"
 
     # One fixture per private HOME, so the cache holds exactly one entry.
     local bc_files=("$case_home"/.pscal/bc_cache/*.bc)
@@ -108,18 +109,74 @@ run_case() {
     else
         harness_report FAIL "$test_id" "$frontend vs pscalvm on $(basename "$fixture")" "${details[@]}"
     fi
+
+    run_rebuilt_check "$test_id" "$frontend" "$fixture" "$bc"
+}
+
+# The same frontend's own chunk, rebuilt from text by `pscald --emit-asm |
+# pscalasm`, must still run as that frontend does: the rebuild has to carry
+# every constant (every Aether Text local is a UNICODESTRING) and the
+# `frontend` directive. aether_string_ops reads s[0], so a rebuild that fell
+# back to Pascal's 1-based strings fails it.
+run_rebuilt_check() {
+    local test_id="$1_rebuilt" frontend="$2" fixture="$3" bc="$4"
+    local description="pscald|pscalasm rebuild of $(basename "$fixture") runs as $frontend"
+    local details=() status="PASS"
+
+    if [ ! -x "$PSCALD_BIN" ] || [ ! -x "$PSCALASM_BIN" ]; then
+        harness_report SKIP "$test_id" "$description" "missing $PSCALD_BIN or $PSCALASM_BIN"
+        return
+    fi
+
+    local asm="$WORK_DIR/$test_id.asm" rebuilt="$WORK_DIR/$test_id.bc"
+    if ! "$PSCALD_BIN" --emit-asm "$bc" >"$asm" 2>"$WORK_DIR/$test_id.emit.err"; then
+        harness_report FAIL "$test_id" "$description" "pscald --emit-asm failed" \
+            "$(grep '^pscald' "$WORK_DIR/$test_id.emit.err")"
+        return
+    fi
+    if ! "$PSCALASM_BIN" "$asm" "$rebuilt" >"$WORK_DIR/$test_id.asm.err" 2>&1; then
+        harness_report FAIL "$test_id" "$description" "pscalasm failed" \
+            "$(cat "$WORK_DIR/$test_id.asm.err")"
+        return
+    fi
+
+    local want_code actual_code
+    want_code="$(frontend_code "$frontend")"
+    actual_code="$(read_frontend_byte "$rebuilt")"
+    if [ "$actual_code" != "$want_code" ]; then
+        status="FAIL"
+        details+=("rebuilt frontend field is $actual_code, expected $want_code ($frontend)")
+    fi
+
+    local rc=0 front_rc=0 stream diff_output
+    "$VM_BIN" "$rebuilt" >"$WORK_DIR/$test_id.out" 2>"$WORK_DIR/$test_id.err" || rc=$?
+    front_rc="$(cat "$WORK_DIR/$1.front.rc")"
+    if [ "$front_rc" -ne "$rc" ]; then
+        status="FAIL"
+        details+=("exit status differs: $frontend $front_rc, rebuilt chunk $rc")
+    fi
+    for stream in out err; do
+        diff_output="$(diff -u "$WORK_DIR/$1.front.$stream" "$WORK_DIR/$test_id.$stream")"
+        if [ -n "$diff_output" ]; then
+            status="FAIL"
+            details+=("std$stream differs:" "$diff_output")
+        fi
+    done
+
+    if [ "$status" = "PASS" ]; then
+        harness_report PASS "$test_id" "$description"
+    else
+        harness_report FAIL "$test_id" "$description" "${details[@]}"
+    fi
 }
 
 # `pscald --emit-asm | pscalasm` is the one path that rebuilds a chunk from
 # text rather than copying its bytes, so it is the one path that can drop the
 # frontend field. The .asm carries it as a `frontend` directive.
 #
-# Hand-written rather than dumped from a real Aether chunk: `pscald --emit-asm`
-# cannot emit a UNICODESTRING constant yet ("unsupported constant type in
-# --emit-asm"), which every Aether Text local produces, so no frontend's own
-# output can round-trip through it today. That gap is about which constant
-# types emitAsmV2() covers and is unrelated to the frontend field, so this case
-# tests the field on bytecode emitAsmV2() can already handle.
+# run_rebuilt_check round-trips each fixture's real chunk. This case stays
+# hand-written because it needs one set of code bytes to run under two
+# frontends, as the control below does.
 #
 # The five instructions index a string at 0, which is the whole point: the same
 # code bytes run clean under `frontend aether` and fail with "String index (0)

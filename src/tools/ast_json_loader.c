@@ -1,5 +1,6 @@
 // A lightweight JSON parser sufficient to consume the AST JSON produced
-// by dumpASTJSON() in src/ast/ast.c and reconstruct the AST.
+// by dumpASTJSON() in src/ast/ast.c and reconstruct the AST, and the exact
+// form pscald writes for pscalasm (see loadASTFromJSONExact).
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +15,7 @@ typedef struct {
     const char* s;
     size_t i;
     size_t n;
+    int exact;  // loadASTFromJSONExact: take every field as written
 } J;
 
 static void skip_ws(J* j) {
@@ -112,8 +114,12 @@ static int parse_null(J* j) {
     return 0;
 }
 
+/* The three lookups below walk their enum up to its last member (TOKEN_GOTO,
+ * AST_GOTO, TYPE_CHANNEL in core/types.h and core/var_type.h). Each stopped
+ * short once members were appended after it, so a name past the old bound
+ * silently fell back to the default. */
 static TokenType tokenTypeFromString(const char* s) {
-    for (int t = TOKEN_PROGRAM; t <= TOKEN_AT; t++) {
+    for (int t = TOKEN_PROGRAM; t <= TOKEN_GOTO; t++) {
         if (strcmp(tokenTypeToString((TokenType)t), s) == 0) return (TokenType)t;
     }
     // Fallback
@@ -121,14 +127,17 @@ static TokenType tokenTypeFromString(const char* s) {
 }
 
 static ASTNodeType astTypeFromString(const char* s) {
-    for (int t = AST_NOOP; t <= AST_NEW; t++) {
+    for (int t = AST_NOOP; t <= AST_GOTO; t++) {
         if (strcmp(astTypeToString((ASTNodeType)t), s) == 0) return (ASTNodeType)t;
     }
     return AST_NOOP;
 }
 
+/* This one stopped at TYPE_THREAD, so UNICODESTRING, WIDECHAR, TASK and
+ * CHANNEL loaded as UNKNOWN: an Aether record's Text field lost its type in any
+ * AST that went through JSON, which is how pscalasm rebuilds a chunk's types. */
 static VarType varTypeFromString(const char* s) {
-    for (int t = TYPE_UNKNOWN; t <= TYPE_THREAD; t++) {
+    for (int t = TYPE_UNKNOWN; t <= TYPE_CHANNEL; t++) {
         if (strcmp(varTypeToString((VarType)t), s) == 0) return (VarType)t;
     }
     return TYPE_UNKNOWN;
@@ -154,7 +163,9 @@ static AST* parse_ast_object(J* j) {
     ASTNodeType node_type = AST_NOOP;
     Token* tok = NULL;
     VarType vtype = TYPE_UNKNOWN;
-    int by_ref = 0, is_inline = 0, is_global_scope = 0;
+    long long vtype_id = -1;
+    int have_vtype = 0;
+    int by_ref = 0, is_inline = 0, is_global_scope = 0, is_virtual = 0;
     int i_val = 0;
     // Children to set after creating node
     AST* left = NULL; AST* right = NULL; AST* extra = NULL; AST* third = NULL;
@@ -222,10 +233,17 @@ static AST* parse_ast_object(J* j) {
             free(ttype); free(tvalue);
         } else if (strcmp(key, "var_type_annotated") == 0) {
             char* v = parse_string(j); vtype = v ? varTypeFromString(v) : TYPE_UNKNOWN; free(v);
+            have_vtype = 1;
         } else if (strcmp(key, "by_ref") == 0) {
             int b; if (parse_bool(j,&b)) by_ref = b; else (void)parse_null(j);
+        } else if (strcmp(key, "var_type_id") == 0) {
+            // Numeric, so it can say FLOAT: FLOAT and DOUBLE share the name REAL.
+            vtype_id = parse_integer(j);
+            have_vtype = 1;
         } else if (strcmp(key, "is_inline") == 0) {
             int b; if (parse_bool(j,&b)) is_inline = b; else (void)parse_null(j);
+        } else if (strcmp(key, "is_virtual") == 0) {
+            int b; if (parse_bool(j,&b)) is_virtual = b; else (void)parse_null(j);
         } else if (strcmp(key, "i_val") == 0) {
             i_val = (int)parse_integer(j);
         } else if (strcmp(key, "is_global_scope") == 0) {
@@ -308,7 +326,7 @@ static AST* parse_ast_object(J* j) {
     // (which is what the Pascal compiler expects).  This leads to missing
     // bodies during bytecode compilation and, in older builds, crashes.  Detect
     // this layout and normalize it by moving the body to `extra` if needed.
-    if (node_type == AST_FUNCTION_DECL && extra == NULL && right &&
+    if (!j->exact && node_type == AST_FUNCTION_DECL && extra == NULL && right &&
         right->type == AST_COMPOUND) {
         extra = right;
         right = NULL;
@@ -316,9 +334,12 @@ static AST* parse_ast_object(J* j) {
 
     AST* node = newASTNode(node_type, tok);
     if (tok) { freeToken(tok); tok = NULL; }
-    if (vtype != TYPE_UNKNOWN) setTypeAST(node, vtype);
+    if (vtype_id >= TYPE_UNKNOWN && vtype_id <= TYPE_CHANNEL) vtype = (VarType)vtype_id;
+    // Exact mode keeps a stated UNKNOWN; without one, newASTNode's VOID stays.
+    if (j->exact ? have_vtype : vtype != TYPE_UNKNOWN) setTypeAST(node, vtype);
     node->by_ref = by_ref;
     node->is_inline = is_inline;
+    node->is_virtual = is_virtual;
     node->is_global_scope = is_global_scope;
     node->i_val = i_val;
     if (unit_list && node->type == AST_USES_CLAUSE) node->unit_list = unit_list; else if (unit_list) freeList(unit_list);
@@ -337,7 +358,7 @@ static AST* parse_ast_object(J* j) {
     // Pascal shape: names as children, type on right. When token holds the
     // declared identifier and there are no children yet, create a child node
     // for the name and clear the VAR_DECL's own token to avoid confusion.
-    if (node->type == AST_VAR_DECL && node->token && node->child_count == 0) {
+    if (!j->exact && node->type == AST_VAR_DECL && node->token && node->child_count == 0) {
         Token* nameTok = newToken(node->token->type,
                                   node->token->value ? node->token->value : NULL,
                                   node->token->line,
@@ -358,7 +379,7 @@ static AST* parse_ast_object(J* j) {
     // - clike uses 'exit([code])' to terminate the program; map it to the VM's
     //   'halt' builtin so an optional exit code is supported. This avoids the
     //   Pascal compiler's 'exit' semantics (function-exit) and related errors.
-    if (node->type == AST_PROCEDURE_CALL && node->token && node->token->value) {
+    if (!j->exact && node->type == AST_PROCEDURE_CALL && node->token && node->token->value) {
         if (strcasecmp(node->token->value, "exit") == 0) {
             free(node->token->value);
             node->token->value = strdup("halt");
@@ -367,7 +388,7 @@ static AST* parse_ast_object(J* j) {
 
     // Ensure string literal contents use actual characters, not backslash escapes.
     // Some producers double-escape within JSON; defensively unescape here.
-    if (node->type == AST_STRING && node->token && node->token->value) {
+    if (!j->exact && node->type == AST_STRING && node->token && node->token->value) {
         char* s = node->token->value;
         char* w = s; // write index
         for (char* r = s; *r; ++r) {
@@ -425,9 +446,16 @@ static AST* parse_ast_node(J* j) {
     return NULL;
 }
 
+AST* loadASTFromJSONExact(const char* json_text) {
+    if (!json_text) return NULL;
+    J j = { json_text, 0, strlen(json_text), 1 };
+    skip_ws(&j);
+    return parse_ast_node(&j);
+}
+
 AST* loadASTFromJSON(const char* json_text) {
     if (!json_text) return NULL;
-    J j = { json_text, 0, strlen(json_text) };
+    J j = { json_text, 0, strlen(json_text), 0 };
     skip_ws(&j);
     AST* root = parse_ast_node(&j);
     if (root && root->type == AST_PROGRAM && !root->right && root->child_count > 0) {

@@ -9,6 +9,7 @@ VM_BIN="$ROOT_DIR/build/bin/pscalvm"
 PASCAL_BIN="$ROOT_DIR/build/bin/pascal"
 CLIKE_BIN="$ROOT_DIR/build/bin/clike"
 REA_BIN="$ROOT_DIR/build/bin/rea"
+AETHER_BIN="$ROOT_DIR/build/bin/aether"
 
 . "$SCRIPT_DIR/tools/harness_utils.sh"
 harness_init
@@ -1035,15 +1036,15 @@ run_real_source_roundtrip_test() {
         return
     fi
 
-    if ! "$VM_BIN" "$original_pbc" > "$tmpd/original.out"; then
-        fail_with_details "$test_id" "$description" "pscalvm failed on original compiled bytecode"
+    if ! "$VM_BIN" "$original_pbc" > "$tmpd/original.out" 2> "$tmpd/original.err"; then
+        fail_with_details "$test_id" "$description" "pscalvm failed on original compiled bytecode:\n$(cat "$tmpd/original.err")"
         trap - RETURN
         rm -rf "$tmpd"
         return
     fi
 
-    if ! "$VM_BIN" "$rebuilt_pbc" > "$tmpd/rebuilt.out"; then
-        fail_with_details "$test_id" "$description" "pscalvm failed on rebuilt bytecode"
+    if ! "$VM_BIN" "$rebuilt_pbc" > "$tmpd/rebuilt.out" 2> "$tmpd/rebuilt.err"; then
+        fail_with_details "$test_id" "$description" "pscalvm failed on rebuilt bytecode:\n$(cat "$tmpd/rebuilt.err")"
         trap - RETURN
         rm -rf "$tmpd"
         return
@@ -1051,11 +1052,29 @@ run_real_source_roundtrip_test() {
 
     set +e
     local diff_output
-    diff_output="$(diff -u "$tmpd/original.out" "$tmpd/rebuilt.out")"
+    diff_output="$(diff -u "$tmpd/original.out" "$tmpd/rebuilt.out" && diff -u "$tmpd/original.err" "$tmpd/rebuilt.err")"
     local diff_status=$?
     set -e
     if [ $diff_status -ne 0 ]; then
         fail_with_details "$test_id" "$description" "VM output mismatch:\n$diff_output"
+        trap - RETURN
+        rm -rf "$tmpd"
+        return
+    fi
+
+    # What this program prints covers only part of the chunk, so compare the
+    # chunks themselves: every constant, procedure and type must come back bit
+    # for bit. META is cache bookkeeping (source path and hash) that pscalasm
+    # does not write. TYPE is compared as the loader keeps it, because a
+    # frontend can register a type name twice and the rebuilt chunk lists it
+    # once.
+    set +e
+    diff_output="$(python3 "$SCRIPT_DIR/tools/psb3_compare.py" --ignore META --types-as-loaded \
+        "$original_pbc" "$rebuilt_pbc" 2>&1)"
+    diff_status=$?
+    set -e
+    if [ $diff_status -ne 0 ]; then
+        fail_with_details "$test_id" "$description" "rebuilt chunk differs from the original:\n$diff_output"
         trap - RETURN
         rm -rf "$tmpd"
         return
@@ -1147,6 +1166,49 @@ run_real_source_roundtrip_tests() {
         "components/rea/tests/rea/constructor_default.rea" \
         "rea" \
         "in_place"
+
+    # Interface dispatch needs each method's is_virtual and the interface
+    # type's i_val, which only reach pscalasm through pscald's exact type JSON.
+    run_real_source_roundtrip_test \
+        "pscalasm_source_roundtrip_pascal_interface" \
+        "source->bytecode cache round-trip (pascal interfaces)" \
+        "pascal" \
+        "$PASCAL_BIN" \
+        "components/pascal/tests/Pascal/InterfaceDispatch" \
+        "pas" \
+        "in_place"
+
+    # A closure that outlives its maker, whose routine must keep the PROC
+    # section's escapes flag.
+    run_real_source_roundtrip_test \
+        "pscalasm_source_roundtrip_pascal_closure" \
+        "source->bytecode cache round-trip (pascal escaping closure)" \
+        "pascal" \
+        "$PASCAL_BIN" \
+        "components/pascal/tests/Pascal/ProcPtrReturnClosureTest" \
+        "pas" \
+        "in_place"
+
+    # An array whose element type is UNICODESTRING but whose elements are
+    # STRING, which only pscald's typed_values form can carry.
+    run_real_source_roundtrip_test \
+        "pscalasm_source_roundtrip_rea_string_array" \
+        "source->bytecode cache round-trip (rea string array literal)" \
+        "rea" \
+        "$REA_BIN" \
+        "components/rea/tests/rea/array_literal_init.rea" \
+        "rea" \
+        "in_place"
+
+    # Every constant kind and procedure type pscald or pscalasm used to
+    # reject in a real Aether chunk; see the fixture's comments.
+    run_real_source_roundtrip_test \
+        "pscalasm_source_roundtrip_aether" \
+        "source->bytecode cache round-trip (aether)" \
+        "aether" \
+        "$AETHER_BIN" \
+        "Tests/tools/fixtures/asm_roundtrip.aether" \
+        "aether"
 }
 
 run_negative_source_compile_test() {

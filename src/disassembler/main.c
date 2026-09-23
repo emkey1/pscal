@@ -166,6 +166,91 @@ static void printEscapedQuoted(FILE *out, const char *text) {
     fputc('"', out);
 }
 
+static void printJsonString(FILE *out, const char *text) {
+    fputc('"', out);
+    for (const unsigned char *p = (const unsigned char *)(text ? text : ""); *p; ++p) {
+        switch (*p) {
+            case '"':  fputs("\\\"", out); break;
+            case '\\': fputs("\\\\", out); break;
+            case '\n': fputs("\\n", out); break;
+            case '\r': fputs("\\r", out); break;
+            case '\t': fputs("\\t", out); break;
+            default:
+                if (*p < 0x20) {
+                    fprintf(out, "\\u%04x", (unsigned)*p);
+                } else {
+                    fputc((int)*p, out);
+                }
+                break;
+        }
+    }
+    fputc('"', out);
+}
+
+/* One AST as compact JSON holding every field core/cache.c's writeAst()
+ * stores, which pscalasm reads back with loadASTFromJSONExact() into the node
+ * writeAst would write again. dumpASTJSON() is for reading: it leaves out
+ * is_virtual, i_val on all but numbers and enum values, and by_ref outside
+ * parameter lists, and a Pascal interface type that lost those failed after a
+ * round trip with "Unable to initialise interface table". var_type_id is
+ * there because FLOAT and DOUBLE share the name REAL. */
+static void printAstJsonExact(FILE *out, const AST *node) {
+    if (!node) {
+        fputs("null", out);
+        return;
+    }
+    fputs("{\"node_type\":", out);
+    printJsonString(out, astTypeToString(node->type));
+    if (node->token) {
+        fputs(",\"token\":{\"type\":", out);
+        printJsonString(out, tokenTypeToString(node->token->type));
+        fputs(",\"value\":", out);
+        printJsonString(out, node->token->value);
+        fputc('}', out);
+    }
+    fputs(",\"var_type_annotated\":", out);
+    printJsonString(out, varTypeToString(node->var_type));
+    fprintf(out, ",\"var_type_id\":%d", (int)node->var_type);
+    if (node->by_ref) {
+        fputs(",\"by_ref\":true", out);
+    }
+    if (node->is_inline) {
+        fputs(",\"is_inline\":true", out);
+    }
+    if (node->is_virtual) {
+        fputs(",\"is_virtual\":true", out);
+    }
+    if (node->is_global_scope) {
+        fputs(",\"is_global_scope\":true", out);
+    }
+    if (node->i_val) {
+        fprintf(out, ",\"i_val\":%d", (int)node->i_val);
+    }
+    if (node->left) {
+        fputs(",\"left\":", out);
+        printAstJsonExact(out, node->left);
+    }
+    if (node->right) {
+        fputs(",\"right\":", out);
+        printAstJsonExact(out, node->right);
+    }
+    if (node->extra) {
+        fputs(",\"extra\":", out);
+        printAstJsonExact(out, node->extra);
+    }
+    if (node->child_count > 0) {
+        fputs(",\"children\":[", out);
+        for (int i = 0; i < node->child_count; ++i) {
+            if (i > 0) {
+                fputc(',', out);
+            }
+            printAstJsonExact(out, node->children ? node->children[i] : NULL);
+        }
+        fputc(']', out);
+    }
+    fputc('}', out);
+}
+
 static int astToJsonString(const AST *node, char **json_out) {
     if (!node || !json_out) {
         return 0;
@@ -176,7 +261,7 @@ static int astToJsonString(const AST *node, char **json_out) {
         return 0;
     }
 
-    dumpASTJSON((AST *)node, tmp);
+    printAstJsonExact(tmp, node);
     if (fflush(tmp) != 0 || fseek(tmp, 0, SEEK_END) != 0) {
         fclose(tmp);
         return 0;
@@ -263,6 +348,48 @@ static int bytecodeChunkToAsmStringIsolated(const BytecodeChunk *chunk, char **a
     return 1;
 }
 
+static int emitAsmV2ValuePayload(FILE *out, const Value *value);
+
+/* Whether an array element can go in the untyped `values` list, which pscalasm
+ * reads back as the array's element type. That list covers scalar and string
+ * element types only. Anything else, or an element whose own type is not the
+ * array's (the cache stores a type tag per element, so one can differ), goes
+ * in `typed_values`, where each element carries its type. */
+static bool asmArrayElementFitsUntypedList(VarType elem_type, const Value *elem) {
+    if (elem->type != elem_type) {
+        return false;
+    }
+    switch (elem_type) {
+        case TYPE_INT32:
+        case TYPE_WORD:
+        case TYPE_BYTE:
+        case TYPE_BOOLEAN:
+        case TYPE_INT8:
+        case TYPE_INT16:
+        case TYPE_INT64:
+        case TYPE_UINT8:
+        case TYPE_UINT16:
+        case TYPE_UINT32:
+        case TYPE_UINT64:
+        case TYPE_FLOAT:
+        case TYPE_DOUBLE:
+        case TYPE_LONG_DOUBLE:
+        case TYPE_CHAR:
+        case TYPE_NIL:
+            return true;
+        case TYPE_STRING: {
+            // The untyped list has no spelling for a NULL string.
+            StringObj *str_obj = PSCAL_VALUE_PTR(*elem, StringObj);
+            return str_obj && str_obj->buffer;
+        }
+        default:
+            return false;
+    }
+}
+
+/* One case per type core/cache.c's writeValue() serializes, since that codec
+ * decides which constants a real chunk can hold, and pscalasm writes whatever
+ * it rebuilds back out through it. */
 static int emitAsmV2ValuePayload(FILE *out, const Value *value) {
     if (!out || !value) {
         return 0;
@@ -275,6 +402,7 @@ static int emitAsmV2ValuePayload(FILE *out, const Value *value) {
         case TYPE_INT8:
         case TYPE_INT16:
         case TYPE_INT64:
+        case TYPE_THREAD:
             fprintf(out, " %lld", VAL_INT(*value));
             break;
         case TYPE_UINT8:
@@ -289,14 +417,49 @@ static int emitAsmV2ValuePayload(FILE *out, const Value *value) {
             fprintf(out, " %.21Lg", AS_REAL(*value));
             break;
         case TYPE_STRING:
+        case TYPE_UNICODE_STRING: {
+            // The cache keeps a NULL string apart from "", so this does too.
+            StringObj *str_obj = PSCAL_VALUE_PTR(*value, StringObj);
+            if (!str_obj || !str_obj->buffer) {
+                fprintf(out, " null");
+                break;
+            }
             fputc(' ', out);
-            printEscapedQuoted(out, AS_STRING(*value));
+            printEscapedQuoted(out, str_obj->buffer);
             break;
+        }
         case TYPE_CHAR:
+        case TYPE_WIDECHAR:
             fprintf(out, " %d", AS_CHAR(*value));
             break;
         case TYPE_NIL:
+        case TYPE_VOID:
             break;
+        case TYPE_TASK:
+        case TYPE_CHANNEL:
+            // Only the unset handle a declaration pools, as in the cache: a
+            // live task or channel means nothing outside its process.
+            if (PSCAL_VALUE_PTR(*value, void)) {
+                fprintf(stderr, "pscald: live %s constant cannot be emitted in --emit-asm.\n",
+                        varTypeToString(value->type));
+                return 0;
+            }
+            break;
+        case TYPE_MEMORYSTREAM: {
+            // The pooled default of an mstream variable. Its bytes are
+            // decimals, like a packed array's, because a stream may hold NULs.
+            const MStream *ms = PSCAL_VALUE_PTR(*value, MStream);
+            if (!ms) {
+                fprintf(out, " null");
+                break;
+            }
+            int size = (ms->buffer && ms->size > 0) ? ms->size : 0;
+            fprintf(out, " bytes %d", size);
+            for (int i = 0; i < size; ++i) {
+                fprintf(out, " %u", (unsigned)ms->buffer[i]);
+            }
+            break;
+        }
         case TYPE_ENUM: {
             EnumObj *enum_obj = PSCAL_VALUE_PTR(*value, EnumObj);
             const char *name = enum_obj ? enum_obj->enum_name : NULL;
@@ -343,16 +506,44 @@ static int emitAsmV2ValuePayload(FILE *out, const Value *value) {
                 free(nested_asm);
                 break;
             }
+            /* A nil pointer that keeps its base type, e.g. each element of an
+             * Aether array-of-records literal before its object is stored.
+             * Field access hydrates records from that type, which is why the
+             * cache stores it (writePointerValue kind 4) rather than folding
+             * the pointer into an opaque address. Same test as the cache's. */
+            if (!address && base != OPAQUE_POINTER_SENTINEL &&
+                base != STRING_LENGTH_SENTINEL && base != BYTE_ARRAY_PTR_SENTINEL) {
+                if (!base) {
+                    fprintf(out, " typed_nil none");
+                    break;
+                }
+                char *json = NULL;
+                if (!astToJsonString(base, &json)) {
+                    fprintf(stderr, "pscald: failed to emit a nil pointer's base type in --emit-asm.\n");
+                    return 0;
+                }
+                fprintf(out, " typed_nil ");
+                printEscapedQuoted(out, json);
+                free(json);
+                break;
+            }
             fprintf(out, " opaque_addr %llu",
                     (unsigned long long)(uintptr_t)address);
             break;
         }
         case TYPE_ARRAY: {
-            int dims = ARRAY_DIMENSIONS(*value);
-            int *lower_bounds = ARRAY_LOWER_BOUNDS(*value);
-            int *upper_bounds = ARRAY_UPPER_BOUNDS(*value);
-            VarType elem_type = ARRAY_ELEMENT_TYPE(*value);
-            if (dims <= 0 || !lower_bounds || !upper_bounds) {
+            ArrayObj *array_obj = PSCAL_VALUE_PTR(*value, ArrayObj);
+            int dims = array_obj ? ARRAY_DIMENSIONS(*value) : 0;
+            int *lower_bounds = array_obj ? ARRAY_LOWER_BOUNDS(*value) : NULL;
+            int *upper_bounds = array_obj ? ARRAY_UPPER_BOUNDS(*value) : NULL;
+            VarType elem_type = array_obj ? ARRAY_ELEMENT_TYPE(*value) : TYPE_VOID;
+            // No dimensions is an empty dynamic array, e.g. Aether's `[]`: no
+            // bounds and no elements, which is all the cache stores for it.
+            if (dims == 0) {
+                fprintf(out, " dims 0 elem %d bounds values 0", (int)elem_type);
+                break;
+            }
+            if (dims < 0 || !lower_bounds || !upper_bounds) {
                 fprintf(stderr, "pscald: invalid array constant shape in --emit-asm.\n");
                 return 0;
             }
@@ -366,64 +557,44 @@ static int emitAsmV2ValuePayload(FILE *out, const Value *value) {
             for (int i = 0; i < dims; ++i) {
                 fprintf(out, " %d %d", lower_bounds[i], upper_bounds[i]);
             }
-            fprintf(out, " values %d", total);
 
-            if (total > 0) {
-                if (arrayUsesPackedBytes(value)) {
-                    uint8_t *raw = AS_ARRAY_RAW(*value);
-                    if (!raw) {
-                        fprintf(stderr, "pscald: packed array constant missing raw bytes.\n");
-                        return 0;
-                    }
-                    for (int i = 0; i < total; ++i) {
-                        fprintf(out, " %u", (unsigned)raw[i]);
+            if (total > 0 && arrayUsesPackedBytes(value)) {
+                uint8_t *raw = AS_ARRAY_RAW(*value);
+                if (!raw) {
+                    fprintf(stderr, "pscald: packed array constant missing raw bytes.\n");
+                    return 0;
+                }
+                fprintf(out, " values %d", total);
+                for (int i = 0; i < total; ++i) {
+                    fprintf(out, " %u", (unsigned)raw[i]);
+                }
+                break;
+            }
+
+            Value *elements = total > 0 ? AS_ARRAY(*value) : NULL;
+            if (total > 0 && !elements) {
+                fprintf(stderr, "pscald: array constant missing elements.\n");
+                return 0;
+            }
+            bool untyped = true;
+            for (int i = 0; i < total && untyped; ++i) {
+                untyped = asmArrayElementFitsUntypedList(elem_type, &elements[i]);
+            }
+            fprintf(out, untyped ? " values %d" : " typed_values %d", total);
+            for (int i = 0; i < total; ++i) {
+                const Value *elem = &elements[i];
+                if (untyped) {
+                    // Each untyped spelling is the element's own payload,
+                    // except nil, which needs a word to take up its place.
+                    if (elem_type == TYPE_NIL) {
+                        fprintf(out, " nil");
+                        continue;
                     }
                 } else {
-                    Value *elements = AS_ARRAY(*value);
-                    if (!elements) {
-                        fprintf(stderr, "pscald: array constant missing elements.\n");
-                        return 0;
-                    }
-                    for (int i = 0; i < total; ++i) {
-                        const Value *elem = &elements[i];
-                        switch (elem_type) {
-                            case TYPE_INT32:
-                            case TYPE_WORD:
-                            case TYPE_BYTE:
-                            case TYPE_BOOLEAN:
-                            case TYPE_INT8:
-                            case TYPE_INT16:
-                            case TYPE_INT64:
-                                fprintf(out, " %lld", VAL_INT(*elem));
-                                break;
-                            case TYPE_UINT8:
-                            case TYPE_UINT16:
-                            case TYPE_UINT32:
-                            case TYPE_UINT64:
-                                fprintf(out, " %llu", VAL_UINT(*elem));
-                                break;
-                            case TYPE_FLOAT:
-                            case TYPE_DOUBLE:
-                            case TYPE_LONG_DOUBLE:
-                                fprintf(out, " %.21Lg", AS_REAL(*elem));
-                                break;
-                            case TYPE_STRING:
-                                fputc(' ', out);
-                                printEscapedQuoted(out, AS_STRING(*elem));
-                                break;
-                            case TYPE_CHAR:
-                                fprintf(out, " %d", AS_CHAR(*elem));
-                                break;
-                            case TYPE_NIL:
-                                fprintf(out, " nil");
-                                break;
-                            default:
-                                fprintf(stderr,
-                                        "pscald: unsupported array element type %s in --emit-asm.\n",
-                                        varTypeToString(elem_type));
-                                return 0;
-                        }
-                    }
+                    fprintf(out, " %d", (int)elem->type);
+                }
+                if (!emitAsmV2ValuePayload(out, elem)) {
+                    return 0;
                 }
             }
             break;
@@ -572,13 +743,15 @@ static int emitAsmV2(FILE *out, const BytecodeChunk *chunk, HashTable *procedure
         }
         fprintf(out, "proc %zu ", i);
         printEscapedQuoted(out, sym->name ? sym->name : "");
-        fprintf(out, " %d %u %u %d %u %d\n",
+        fprintf(out, " %d %u %u %d %u %d%s%s\n",
                 sym->bytecode_address,
                 (unsigned)sym->locals_count,
                 (unsigned)sym->upvalue_count,
                 (int)sym->type,
                 (unsigned)sym->arity,
-                enclosing_idx);
+                enclosing_idx,
+                sym->closure_captures ? " captures" : "",
+                sym->closure_escapes ? " escapes" : "");
         for (int uv = 0; uv < sym->upvalue_count; ++uv) {
             fprintf(out, "upvalue %zu %d %u %u %u\n",
                     i,
