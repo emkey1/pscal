@@ -47,6 +47,12 @@
 #include "tools/ast_json_loader.h"
 #include "vm/string_sentinels.h"
 
+/* The highest VarType a .asm may name. var_type.h keeps TYPE_CHANNEL last
+ * (its note there says why); move this with it when a type is appended. The
+ * bound used to be TYPE_THREAD, which rejected every type after it, so an
+ * Aether function returning Text failed as "proc values out of range". */
+#define ASM_LAST_VAR_TYPE TYPE_CHANNEL
+
 static const char *PSCALASM_USAGE =
     "Usage: pscalasm <assembly.txt|-> <output.pbc>\n"
     "       pscald --emit-asm <input.pbc> > dump.asm\n"
@@ -76,6 +82,8 @@ typedef struct {
     VarType type;
     uint8_t arity;
     int enclosing_index;
+    bool closure_captures;
+    bool closure_escapes;
     bool is_set;
     ParsedUpvalue upvalues[256];
 } ParsedProcedure;
@@ -259,6 +267,35 @@ static int parseLongLongToken(const char **cursor, long long *value_out) {
     }
     *cursor = end;
     *value_out = value;
+    return 1;
+}
+
+/* For the unsigned types, whose values above LLONG_MAX strtoll cannot read. */
+static int parseUnsignedLongLongToken(const char **cursor, unsigned long long *value_out) {
+    skipSpaces(cursor);
+    if (**cursor == '\0' || **cursor == '-') {
+        return 0;
+    }
+    char *end = NULL;
+    errno = 0;
+    unsigned long long value = strtoull(*cursor, &end, 0);
+    if (errno != 0 || end == *cursor) {
+        return 0;
+    }
+    *cursor = end;
+    *value_out = value;
+    return 1;
+}
+
+/* Consumes the next token only if it is exactly `word`. */
+static int consumeWordIf(const char **cursor, const char *word) {
+    skipSpaces(cursor);
+    size_t len = strlen(word);
+    if (strncmp(*cursor, word, len) != 0 ||
+        ((*cursor)[len] != '\0' && !isspace((unsigned char)(*cursor)[len]))) {
+        return 0;
+    }
+    *cursor += len;
     return 1;
 }
 
@@ -926,178 +963,216 @@ static int parseShellFunctionPointerPayload(const char *asm_text, Value *value_o
     return 1;
 }
 
-static int parseAsmConstantValue(VarType type, const char **cursor, Value *value_out) {
+/* A string constant's payload: a quoted string, or the word null for a string
+ * with no buffer at all, which the cache keeps apart from "". */
+static int parseAsmStringPayload(VarType type, const char **cursor, Value *value_out) {
+    char *text = NULL;
+    if (!consumeWordIf(cursor, "null") && !parseQuotedStringToken(cursor, &text)) {
+        return 0;
+    }
+    StringObj *str_obj = pscalStringObjCreate(-1, type);
+    if (!str_obj) {
+        free(text);
+        return 0;
+    }
     Value v = {0};
     v.type = type;
+    pscalValueSetHeapPtrBits(&v, str_obj);
+    str_obj->buffer = text;
+    *value_out = v;
+    return 1;
+}
 
-    if (type == TYPE_ARRAY) {
-        char keyword[32];
-        long long dims_ll = 0;
-        long long elem_type_ll = 0;
-        long long declared_total_ll = 0;
+static int parseAsmConstantValue(VarType type, const char **cursor, Value *value_out);
 
-        if (!parseWordToken(cursor, keyword, sizeof(keyword)) || strcmp(keyword, "dims") != 0 ||
-            !parseLongLongToken(cursor, &dims_ll) || dims_ll <= 0 || dims_ll > 32 ||
-            !parseWordToken(cursor, keyword, sizeof(keyword)) || strcmp(keyword, "elem") != 0 ||
-            !parseLongLongToken(cursor, &elem_type_ll) ||
-            elem_type_ll < TYPE_UNKNOWN || elem_type_ll > TYPE_THREAD ||
-            !parseWordToken(cursor, keyword, sizeof(keyword)) || strcmp(keyword, "bounds") != 0) {
+/* `dims D elem T bounds <lb ub>... values N <element>...`. The elements are
+ * untyped and read as T, or, after `typed_values N` instead, each is spelled
+ * `<type> <payload>` (pscald writes that form for any element the untyped list
+ * cannot carry). D is 0, with no bounds and no values, for an empty dynamic
+ * array such as Aether's `[]`. */
+static int parseAsmArrayValue(const char **cursor, Value *value_out) {
+    char keyword[32];
+    long long dims_ll = 0;
+    long long elem_type_ll = 0;
+    long long declared_total_ll = 0;
+
+    if (!parseWordToken(cursor, keyword, sizeof(keyword)) || strcmp(keyword, "dims") != 0 ||
+        !parseLongLongToken(cursor, &dims_ll) || dims_ll < 0 || dims_ll > 32 ||
+        !parseWordToken(cursor, keyword, sizeof(keyword)) || strcmp(keyword, "elem") != 0 ||
+        !parseLongLongToken(cursor, &elem_type_ll) ||
+        elem_type_ll < TYPE_UNKNOWN || elem_type_ll > ASM_LAST_VAR_TYPE ||
+        !parseWordToken(cursor, keyword, sizeof(keyword)) || strcmp(keyword, "bounds") != 0) {
+        return 0;
+    }
+
+    int dims = (int)dims_ll;
+    VarType elem_type = (VarType)elem_type_ll;
+    if (dims == 0) {
+        // makeEmptyArray builds just what the cache reads back for one.
+        if (!consumeWordIf(cursor, "values") ||
+            !parseLongLongToken(cursor, &declared_total_ll) || declared_total_ll != 0) {
             return 0;
         }
+        *value_out = makeEmptyArray(elem_type, NULL);
+        return 1;
+    }
 
-        int dims = (int)dims_ll;
-        VarType elem_type = (VarType)elem_type_ll;
-        int *lower_bounds = (int *)calloc((size_t)dims, sizeof(int));
-        int *upper_bounds = (int *)calloc((size_t)dims, sizeof(int));
-        if (!lower_bounds || !upper_bounds) {
+    int *lower_bounds = (int *)calloc((size_t)dims, sizeof(int));
+    int *upper_bounds = (int *)calloc((size_t)dims, sizeof(int));
+    if (!lower_bounds || !upper_bounds) {
+        free(lower_bounds);
+        free(upper_bounds);
+        return 0;
+    }
+    for (int i = 0; i < dims; ++i) {
+        long long lb = 0;
+        long long ub = 0;
+        if (!parseLongLongToken(cursor, &lb) || !parseLongLongToken(cursor, &ub) ||
+            lb < INT32_MIN || lb > INT32_MAX || ub < INT32_MIN || ub > INT32_MAX ||
+            ub < lb) {
             free(lower_bounds);
             free(upper_bounds);
             return 0;
         }
-        for (int i = 0; i < dims; ++i) {
-            long long lb = 0;
-            long long ub = 0;
-            if (!parseLongLongToken(cursor, &lb) || !parseLongLongToken(cursor, &ub) ||
-                lb < INT32_MIN || lb > INT32_MAX || ub < INT32_MIN || ub > INT32_MAX ||
-                ub < lb) {
-                free(lower_bounds);
-                free(upper_bounds);
-                return 0;
-            }
-            lower_bounds[i] = (int)lb;
-            upper_bounds[i] = (int)ub;
-        }
+        lower_bounds[i] = (int)lb;
+        upper_bounds[i] = (int)ub;
+    }
 
-        if (!parseWordToken(cursor, keyword, sizeof(keyword)) || strcmp(keyword, "values") != 0 ||
-            !parseLongLongToken(cursor, &declared_total_ll) ||
-            declared_total_ll < 0 || declared_total_ll > INT32_MAX) {
-            free(lower_bounds);
-            free(upper_bounds);
-            return 0;
-        }
+    bool typed = false;
+    if (!parseWordToken(cursor, keyword, sizeof(keyword))) {
+        free(lower_bounds);
+        free(upper_bounds);
+        return 0;
+    }
+    if (strcmp(keyword, "typed_values") == 0) {
+        typed = true;
+    } else if (strcmp(keyword, "values") != 0) {
+        free(lower_bounds);
+        free(upper_bounds);
+        return 0;
+    }
+    if (!parseLongLongToken(cursor, &declared_total_ll) ||
+        declared_total_ll < 0 || declared_total_ll > INT32_MAX) {
+        free(lower_bounds);
+        free(upper_bounds);
+        return 0;
+    }
 
-        Value arr = makeEmptyArray(elem_type, NULL);
-        ARRAY_DIMENSIONS(arr) = dims;
-        ARRAY_LOWER_BOUNDS(arr) = lower_bounds;
-        ARRAY_UPPER_BOUNDS(arr) = upper_bounds;
-        ARRAY_LOWER_BOUND(arr) = lower_bounds[0];
-        ARRAY_UPPER_BOUND(arr) = upper_bounds[0];
-        ARRAY_IS_PACKED(arr) = isPackedByteElementType(elem_type);
+    Value arr = makeEmptyArray(elem_type, NULL);
+    ARRAY_DIMENSIONS(arr) = dims;
+    ARRAY_LOWER_BOUNDS(arr) = lower_bounds;
+    ARRAY_UPPER_BOUNDS(arr) = upper_bounds;
+    ARRAY_LOWER_BOUND(arr) = lower_bounds[0];
+    ARRAY_UPPER_BOUND(arr) = upper_bounds[0];
+    ARRAY_IS_PACKED(arr) = isPackedByteElementType(elem_type);
 
-        int total = calculateArrayTotalSize(&arr);
-        if (total < 0 || declared_total_ll != total) {
-            freeValue(&arr);
-            return 0;
-        }
-
-        if (total > 0) {
-            if (ARRAY_IS_PACKED(arr)) {
-                AS_ARRAY_RAW(arr) = (uint8_t *)calloc((size_t)total, sizeof(uint8_t));
-                if (!AS_ARRAY_RAW(arr)) {
-                    freeValue(&arr);
-                    return 0;
-                }
-                for (int i = 0; i < total; ++i) {
-                    long long n = 0;
-                    if (!parseLongLongToken(cursor, &n) || n < 0 || n > 255) {
-                        freeValue(&arr);
-                        return 0;
-                    }
-                    AS_ARRAY_RAW(arr)[i] = (uint8_t)n;
-                }
-            } else {
-                AS_ARRAY(arr) = (Value *)calloc((size_t)total, sizeof(Value));
-                if (!AS_ARRAY(arr)) {
-                    freeValue(&arr);
-                    return 0;
-                }
-                for (int i = 0; i < total; ++i) {
-                    Value elem = {0};
-                    elem.type = elem_type;
-                    switch (elem_type) {
-                        case TYPE_INT32:
-                        case TYPE_WORD:
-                        case TYPE_BYTE:
-                        case TYPE_BOOLEAN:
-                        case TYPE_INT8:
-                        case TYPE_INT16:
-                        case TYPE_INT64: {
-                            long long n = 0;
-                            if (!parseLongLongToken(cursor, &n)) {
-                                freeValue(&arr);
-                                return 0;
-                            }
-                            SET_INT_VALUE(&elem, n);
-                            break;
-                        }
-                        case TYPE_UINT8:
-                        case TYPE_UINT16:
-                        case TYPE_UINT32:
-                        case TYPE_UINT64: {
-                            long long n = 0;
-                            if (!parseLongLongToken(cursor, &n) || n < 0) {
-                                freeValue(&arr);
-                                return 0;
-                            }
-                            // SET_INT_VALUE stores the exact 64-bit pattern
-                            // (VAL_UINT reinterprets it), same as cache.c's
-                            // readValue for the same type family.
-                            SET_INT_VALUE(&elem, n);
-                            break;
-                        }
-                        case TYPE_FLOAT:
-                        case TYPE_DOUBLE:
-                        case TYPE_LONG_DOUBLE: {
-                            long double n = 0.0;
-                            if (!parseLongDoubleToken(cursor, &n)) {
-                                freeValue(&arr);
-                                return 0;
-                            }
-                            SET_REAL_VALUE(&elem, n);
-                            break;
-                        }
-                        case TYPE_STRING: {
-                            char *text = NULL;
-                            if (!parseQuotedStringToken(cursor, &text)) {
-                                freeValue(&arr);
-                                return 0;
-                            }
-                            StringObj *elem_str_obj = pscalStringObjCreate(-1, TYPE_STRING);
-                            pscalValueSetHeapPtrBits(&elem, elem_str_obj);
-                            elem_str_obj->buffer = text;
-                            break;
-                        }
-                        case TYPE_CHAR: {
-                            long long n = 0;
-                            if (!parseLongLongToken(cursor, &n) || n < 0 || n > 255) {
-                                freeValue(&arr);
-                                return 0;
-                            }
-                            SET_INT_VALUE(&elem, n);
-                            break;
-                        }
-                        case TYPE_NIL: {
-                            char nil_word[16];
-                            if (!parseWordToken(cursor, nil_word, sizeof(nil_word)) ||
-                                strcmp(nil_word, "nil") != 0) {
-                                freeValue(&arr);
-                                return 0;
-                            }
-                            elem = makeNil();
-                            break;
-                        }
-                        default:
-                            freeValue(&arr);
-                            return 0;
-                    }
-                    AS_ARRAY(arr)[i] = elem;
-                }
-            }
-        }
-
+    int total = calculateArrayTotalSize(&arr);
+    if (total < 0 || declared_total_ll != total) {
+        freeValue(&arr);
+        return 0;
+    }
+    if (total == 0) {
         *value_out = arr;
         return 1;
     }
+
+    if (ARRAY_IS_PACKED(arr)) {
+        AS_ARRAY_RAW(arr) = (uint8_t *)calloc((size_t)total, sizeof(uint8_t));
+        if (!AS_ARRAY_RAW(arr)) {
+            freeValue(&arr);
+            return 0;
+        }
+    } else {
+        AS_ARRAY(arr) = (Value *)calloc((size_t)total, sizeof(Value));
+        if (!AS_ARRAY(arr)) {
+            freeValue(&arr);
+            return 0;
+        }
+    }
+
+    for (int i = 0; i < total; ++i) {
+        if (typed) {
+            long long tag = -1;
+            Value elem = {0};
+            if (!parseLongLongToken(cursor, &tag) ||
+                tag < TYPE_UNKNOWN || tag > ASM_LAST_VAR_TYPE ||
+                !parseAsmConstantValue((VarType)tag, cursor, &elem)) {
+                freeValue(&arr);
+                return 0;
+            }
+            if (ARRAY_IS_PACKED(arr)) {
+                // As the cache's readValue does: a packed array keeps each
+                // element's low byte.
+                AS_ARRAY_RAW(arr)[i] = (uint8_t)AS_INTEGER(elem);
+                freeValue(&elem);
+            } else {
+                AS_ARRAY(arr)[i] = elem;
+            }
+            continue;
+        }
+
+        if (ARRAY_IS_PACKED(arr)) {
+            long long n = 0;
+            if (!parseLongLongToken(cursor, &n) || n < 0 || n > 255) {
+                freeValue(&arr);
+                return 0;
+            }
+            AS_ARRAY_RAW(arr)[i] = (uint8_t)n;
+            continue;
+        }
+
+        Value elem = {0};
+        elem.type = elem_type;
+        switch (elem_type) {
+            case TYPE_INT32:
+            case TYPE_WORD:
+            case TYPE_BYTE:
+            case TYPE_BOOLEAN:
+            case TYPE_INT8:
+            case TYPE_INT16:
+            case TYPE_INT64:
+            case TYPE_UINT8:
+            case TYPE_UINT16:
+            case TYPE_UINT32:
+            case TYPE_UINT64:
+            case TYPE_FLOAT:
+            case TYPE_DOUBLE:
+            case TYPE_LONG_DOUBLE:
+            case TYPE_STRING:
+            case TYPE_CHAR:
+                // Each of these is spelled exactly like the scalar constant.
+                if (!parseAsmConstantValue(elem_type, cursor, &elem)) {
+                    freeValue(&arr);
+                    return 0;
+                }
+                break;
+            case TYPE_NIL:
+                if (!consumeWordIf(cursor, "nil")) {
+                    freeValue(&arr);
+                    return 0;
+                }
+                elem = makeNil();
+                break;
+            default:
+                freeValue(&arr);
+                return 0;
+        }
+        AS_ARRAY(arr)[i] = elem;
+    }
+
+    *value_out = arr;
+    return 1;
+}
+
+/* One case per type core/cache.c's writeValue() serializes: the payloads
+ * pscald's emitAsmV2ValuePayload() writes for each. */
+static int parseAsmConstantValue(VarType type, const char **cursor, Value *value_out) {
+    if (type == TYPE_ARRAY) {
+        return parseAsmArrayValue(cursor, value_out);
+    }
+
+    Value v = {0};
+    v.type = type;
 
     switch (type) {
         case TYPE_INT32:
@@ -1106,7 +1181,8 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
         case TYPE_BOOLEAN:
         case TYPE_INT8:
         case TYPE_INT16:
-        case TYPE_INT64: {
+        case TYPE_INT64:
+        case TYPE_THREAD: {
             long long n = 0;
             if (!parseLongLongToken(cursor, &n)) {
                 return 0;
@@ -1118,11 +1194,13 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
         case TYPE_UINT16:
         case TYPE_UINT32:
         case TYPE_UINT64: {
-            long long n = 0;
-            if (!parseLongLongToken(cursor, &n) || n < 0) {
+            unsigned long long n = 0;
+            if (!parseUnsignedLongLongToken(cursor, &n)) {
                 return 0;
             }
-            SET_INT_VALUE(&v, n);
+            // SET_INT_VALUE stores the exact 64-bit pattern (VAL_UINT
+            // reinterprets it), same as cache.c's readValue for this family.
+            SET_INT_VALUE(&v, (long long)n);
             break;
         }
         case TYPE_FLOAT:
@@ -1135,26 +1213,73 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
             SET_REAL_VALUE(&v, n);
             break;
         }
-        case TYPE_STRING: {
-            char *text = NULL;
-            if (!parseQuotedStringToken(cursor, &text)) {
-                return 0;
-            }
-            StringObj *str_obj = pscalStringObjCreate(-1, TYPE_STRING);
-            pscalValueSetHeapPtrBits(&v, str_obj);
-            str_obj->buffer = text;
-            break;
-        }
+        case TYPE_STRING:
+        case TYPE_UNICODE_STRING:
+            return parseAsmStringPayload(type, cursor, value_out);
         case TYPE_CHAR: {
+            // The cache reads a char back through a plain `char`, which is
+            // signed on macOS, so pscald can print one as -128..-1.
             long long n = 0;
-            if (!parseLongLongToken(cursor, &n) || n < 0 || n > 255) {
+            if (!parseLongLongToken(cursor, &n) || n < -128 || n > 255) {
                 return 0;
             }
             SET_INT_VALUE(&v, n);
             break;
         }
+        case TYPE_WIDECHAR: {
+            long long n = 0;
+            if (!parseLongLongToken(cursor, &n) || n < INT32_MIN || n > INT32_MAX) {
+                return 0;
+            }
+            v = makeWideChar((int)n);
+            break;
+        }
         case TYPE_NIL:
             break;
+        case TYPE_VOID:
+            v = makeVoid();
+            break;
+        case TYPE_TASK:
+        case TYPE_CHANNEL:
+            // Only ever the unset handle; see pscald.
+            pscalValueSetHeapPtrBits(&v, NULL);
+            break;
+        case TYPE_MEMORYSTREAM: {
+            if (consumeWordIf(cursor, "null")) {
+                pscalValueSetHeapPtrBits(&v, NULL);
+                break;
+            }
+            long long size = 0;
+            if (!consumeWordIf(cursor, "bytes") ||
+                !parseLongLongToken(cursor, &size) || size < 0 || size >= INT32_MAX) {
+                return 0;
+            }
+            unsigned char *bytes = NULL;
+            if (size > 0) {
+                // NUL-terminated with capacity size+1, as the cache builds it.
+                bytes = (unsigned char *)malloc((size_t)size + 1u);
+                if (!bytes) {
+                    return 0;
+                }
+                for (long long i = 0; i < size; ++i) {
+                    long long n = 0;
+                    if (!parseLongLongToken(cursor, &n) || n < 0 || n > 255) {
+                        free(bytes);
+                        return 0;
+                    }
+                    bytes[i] = (unsigned char)n;
+                }
+                bytes[size] = '\0';
+            }
+            MStream *ms = createMStream();
+            pscalValueSetHeapPtrBits(&v, ms);
+            if (bytes) {
+                ms->buffer = bytes;
+                ms->size = (int)size;
+                ms->capacity = (int)size + 1;
+            }
+            break;
+        }
         case TYPE_ENUM: {
             char *enum_name = NULL;
             long long ordinal = 0;
@@ -1223,6 +1348,28 @@ static int parseAsmConstantValue(VarType type, const char **cursor, Value *value
                 pscalPointerEnsureObj(&v);
                 AS_POINTER(v) = (Value *)text;
                 PTR_BASE_TYPE_NODE(v) = SERIALIZED_CHAR_PTR_SENTINEL;
+                break;
+            }
+            if (strcmp(keyword, "typed_nil") == 0) {
+                // A nil pointer that keeps its base type (cache pointer kind
+                // 4), given as that type's AST JSON, or `none`.
+                AST *base = NULL;
+                if (!consumeWordIf(cursor, "none")) {
+                    char *json = NULL;
+                    if (!parseQuotedStringToken(cursor, &json)) {
+                        return 0;
+                    }
+                    base = loadASTFromJSONExact(json);
+                    free(json);
+                    if (!base) {
+                        return 0;
+                    }
+                }
+                // Like the cache's copy, it lives for the process: a pointer
+                // borrows its base type and never frees it.
+                pscalPointerEnsureObj(&v);
+                AS_POINTER(v) = NULL;
+                PTR_BASE_TYPE_NODE(v) = base;
                 break;
             }
             if (strcmp(keyword, "opaque_addr") == 0) {
@@ -1384,7 +1531,7 @@ static int parsePscalasm2(const char *input_text, ParsedAsmProgram *program) {
             if (!parseLongLongToken(&cursor, &idx_ll) ||
                 !parseLongLongToken(&cursor, &type_ll) ||
                 idx_ll < 0 || idx_ll >= program->constants_count ||
-                type_ll < TYPE_UNKNOWN || type_ll > TYPE_THREAD) {
+                type_ll < TYPE_UNKNOWN || type_ll > ASM_LAST_VAR_TYPE) {
                 fprintf(stderr, "pscalasm:%d: invalid const directive header.\n", line_number);
                 free(copy);
                 return -1;
@@ -1488,7 +1635,7 @@ static int parsePscalasm2(const char *input_text, ParsedAsmProgram *program) {
             }
             if (!parseQuotedStringToken(&cursor, &name) ||
                 !parseLongLongToken(&cursor, &type_ll) ||
-                type_ll < TYPE_UNKNOWN || type_ll > TYPE_THREAD) {
+                type_ll < TYPE_UNKNOWN || type_ll > ASM_LAST_VAR_TYPE) {
                 free(name);
                 fprintf(stderr, "pscalasm:%d: invalid const_symbol header.\n", line_number);
                 free(copy);
@@ -1639,13 +1786,32 @@ static int parsePscalasm2(const char *input_text, ParsedAsmProgram *program) {
 
             if (locals < 0 || locals > UINT16_MAX ||
                 upvalues < 0 || upvalues > 255 ||
-                type_ll < TYPE_UNKNOWN || type_ll > TYPE_THREAD ||
+                type_ll < TYPE_UNKNOWN || type_ll > ASM_LAST_VAR_TYPE ||
                 arity < 0 || arity > 255 ||
                 enclosing < -1 || enclosing >= program->procedures_count) {
                 free(name);
                 fprintf(stderr, "pscalasm:%d: proc values out of range.\n", line_number);
                 free(copy);
                 return -1;
+            }
+
+            /* Optional trailing words, one per closure flag the PROC section
+             * stores, as pscald writes them. Without them an escaping
+             * closure's routine came back as one that does not escape. */
+            bool captures = false;
+            bool escapes = false;
+            char flag[32];
+            while (parseWordToken(&cursor, flag, sizeof(flag))) {
+                if (strcmp(flag, "captures") == 0) {
+                    captures = true;
+                } else if (strcmp(flag, "escapes") == 0) {
+                    escapes = true;
+                } else {
+                    free(name);
+                    fprintf(stderr, "pscalasm:%d: unknown proc flag '%s'.\n", line_number, flag);
+                    free(copy);
+                    return -1;
+                }
             }
 
             ParsedProcedure *proc = &program->procedures[idx];
@@ -1656,6 +1822,8 @@ static int parsePscalasm2(const char *input_text, ParsedAsmProgram *program) {
             proc->type = (VarType)type_ll;
             proc->arity = (uint8_t)arity;
             proc->enclosing_index = (int)enclosing;
+            proc->closure_captures = captures;
+            proc->closure_escapes = escapes;
             proc->is_set = true;
             program->procedure_set[idx] = 1;
             continue;
@@ -1984,6 +2152,8 @@ static Symbol *makeProcedureSymbol(const ParsedProcedure *parsed) {
     sym->locals_count = parsed->locals_count;
     sym->upvalue_count = parsed->upvalue_count;
     sym->arity = parsed->arity;
+    sym->closure_captures = parsed->closure_captures;
+    sym->closure_escapes = parsed->closure_escapes;
     for (int i = 0; i < parsed->upvalue_count; ++i) {
         sym->upvalues[i].index = parsed->upvalues[i].index;
         sym->upvalues[i].isLocal = parsed->upvalues[i].is_local;
@@ -2121,7 +2291,7 @@ static int assembleAndWritePscalasm2(const ParsedAsmProgram *program,
 
     for (int i = 0; i < program->type_count; ++i) {
         const ParsedTypeEntry *te = &program->types[i];
-        AST *type_ast = loadASTFromJSON(te->json);
+        AST *type_ast = loadASTFromJSONExact(te->json);
         if (!type_ast) {
             fprintf(stderr, "pscalasm: failed to parse type JSON for '%s'.\n", te->name);
             goto cleanup;
