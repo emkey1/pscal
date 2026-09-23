@@ -17,8 +17,14 @@
 #include "common/frontend_kind.h"
 
 static const char* USAGE =
-    "Usage: pscaljson2bc [--dump-bytecode | --dump-bytecode-only] [-o <out.bc>] [<ast.json>]\n"
+    "Usage: pscaljson2bc [--dump-bytecode | --dump-bytecode-only] [--frontend <kind>]\n"
+    "                    [-o <out.bc>] [<ast.json>]\n"
     "  If no input file is provided or '-' is used, reads from stdin.\n"
+    "  --frontend <kind>          Compile under a frontend's conventions and record\n"
+    "                             it in the output: pascal (default), rea, aether,\n"
+    "                             clike or shell. AST JSON does not carry which\n"
+    "                             frontend produced it, and the choice is not\n"
+    "                             cosmetic -- aether and shell index strings from 0.\n"
     "  -h, --help                 Show this help and exit.\n";
 
 static char* slurp(FILE* f) {
@@ -97,7 +103,19 @@ static void predeclare_procedures(AST* node) {
 }
 
 int pscaljson2bc_main(int argc, char** argv) {
-    FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_PASCAL);
+    /* Parsed out of argv before the push below, because the kind has to be in
+     * effect for the compile itself, not just stamped on the result: the
+     * compiler branches on it (compiler.c), and initBytecodeChunk() reads it. */
+    FrontendKind requestedKind = FRONTEND_KIND_PASCAL;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--frontend") != 0) continue;
+        if (i + 1 >= argc || !frontendKindFromName(argv[i + 1], &requestedKind)) {
+            fprintf(stderr, "%s", USAGE);
+            return EXIT_FAILURE;
+        }
+        i++;
+    }
+    FrontendKind previousKind = frontendPushKind(requestedKind);
 #define JSON2BC_RETURN(value)           \
     do {                                \
         int __json2bc_rc = (value);     \
@@ -114,6 +132,7 @@ int pscaljson2bc_main(int argc, char** argv) {
             JSON2BC_RETURN(EXIT_SUCCESS);
         } else if (strcmp(argv[i], "--dump-bytecode") == 0) { dump_bc = 1; }
         else if (strcmp(argv[i], "--dump-bytecode-only") == 0) { dump_bc = 1; dump_only = 1; }
+        else if (strcmp(argv[i], "--frontend") == 0 && i+1 < argc) { i++; /* handled above */ }
         else if ((strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) && i+1 < argc) { out_path = argv[++i]; }
         else if (argv[i][0] == '-') { fprintf(stderr, "%s", USAGE); JSON2BC_RETURN(EXIT_FAILURE); }
         else { in_path = argv[i]; }

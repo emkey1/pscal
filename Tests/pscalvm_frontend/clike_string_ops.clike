@@ -1,0 +1,11 @@
+/* The other direction: clike keeps Pascal's 1-based strings, so recording the
+ * frontend must not move it to 0. This fixture fails if the PSB3 frontend
+ * field ever starts meaning "not Pascal, therefore 0-based". */
+int main(void) {
+    str s = "abcdef";
+    printf("first=%s last=%s\n", copy(s, 1, 1), copy(s, 6, 1));
+    printf("length=%d\n", length(s));
+    printf("copy=%s\n", copy(s, 1, 3));
+    printf("pos_hit=%d pos_miss=%d\n", pos("c", s), pos("z", s));
+    return 0;
+}

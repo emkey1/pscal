@@ -664,7 +664,12 @@ def write_bytecode(builder: BytecodeBuilder, path: Path, vm_version: int, format
     header.extend(struct.pack("<I", PSB3_MAGIC))
     header.extend(struct.pack("<H", format_version))
     header.extend(struct.pack("<H", vm_version))
-    header.extend(struct.pack("<I", 0))            # flags: reserved
+    # flags bits 0..7 are the FrontendKind the chunk expects (cache.c's
+    # PSB3_FLAG_FRONTEND_MASK); bits 8..31 are reserved. 0 is
+    # FRONTEND_KIND_UNKNOWN -- tiny indexes strings from 1 like Pascal, so
+    # the Pascal-compatible defaults an unrecorded frontend gets are what it
+    # wants. A 0-based frontend targeting the VM would have to set this.
+    header.extend(struct.pack("<I", 0))
     header.extend(struct.pack("<I", len(sections)))  # section_count
 
     dir_entry_size = 12  # id:u32 + offset:u32 + length:u32

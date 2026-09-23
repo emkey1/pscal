@@ -1,0 +1,11 @@
+// Array-bounds diagnostics are frontend-specific too: Aether gets the coded
+// ARR-003 message with its hint and guide pointer, every other frontend gets
+// the terse "Index N out of bounds". Under pscalvm this chunk used to print
+// the terse Pascal wording, so the same program said different things
+// depending on which binary ran it. Exits nonzero on purpose.
+fn main() -> Void {
+    let xs: Int[] = [1, 2, 3];
+    let i: Int = 7;
+    fx { println("unreachable=", xs[i]); }
+    ret;
+}

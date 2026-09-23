@@ -457,6 +457,10 @@ def main():
     # --- Bad jump target: patch a JUMP/JUMP_IF_FALSE displacement to point
     # far past the end of the code section. ---
     pf = psb3.read_psb3(os.path.join(args.out, "golden_hello.bc"))
+    # Fail loudly here rather than generating a corpus of files the real
+    # reader rejects on format grounds -- every "expected rejection" case
+    # would then pass for the wrong reason.
+    psb3.check_format_version(os.path.join(args.out, "golden_hello.bc"))
     code_bytes, code_cache_count = code_section_payload(pf.section(psb3.SEC_CODE))
     code = bytearray(code_bytes)
     jmp_pc = find_first_opcode(bytes(code), {OP_JUMP_IF_FALSE, OP_JUMP})
@@ -552,15 +556,40 @@ def main():
     # rejected at verify time, identically to plain stack_underflow.bc. ---
     trusted_skip_mutated = tpf.with_section(psb3.SEC_CODE, rebuild_code_section(new_code))
     trusted_skip_mutated = trusted_skip_mutated.with_section(psb3.SEC_LINE, new_lines)
-    trusted_skip_mutated = psb3.Psb3File(trusted_skip_mutated.format_version,
-                                          trusted_skip_mutated.vm_version,
-                                          0x1,  # old PSB3_FLAG_TRUSTED_SKIP_VERIFY bit
-                                          trusted_skip_mutated.sections)
+    # Bit 0 was PSB3_FLAG_TRUSTED_SKIP_VERIFY. It has since been reassigned as
+    # the low bit of the header's frontend field, so setting it alone now just
+    # spells FRONTEND_KIND_PASCAL. Set a still-reserved bit as well, so the
+    # case keeps asserting what it was written to assert -- that no header flag
+    # a file sets about itself buys it out of verification -- rather than
+    # quietly degrading into "a chunk that says it is Pascal".
+    trusted_skip_mutated = trusted_skip_mutated.with_flags(0x101)
     manifest.append(write_corpus(args.out, "trusted_skip_flag_bypass.bc", trusted_skip_mutated.to_bytes(), False,
                                   "same corruption as stack_underflow.bc, but with the file's own "
                                   "header flags bit 0 set (the removed self-attested "
                                   "PSB3_FLAG_TRUSTED_SKIP_VERIFY) -- must still be rejected, proving "
                                   "the bit is no longer honored"))
+
+    # --- The header's frontend field (flags bits 0..7, cache.c's
+    # PSB3_FLAG_FRONTEND_MASK). It decides how the chunk *executes* -- most
+    # visibly whether strings index from 0 -- so a value this build has no
+    # FrontendKind for cannot be quietly rounded down to Pascal and run;
+    # that would be exactly the silent-miscompile the field exists to stop.
+    # psb3ParseHeader() rejects it before a single section body is parsed. ---
+    for label, code in [("out_of_range", psb3.FRONTEND_LAST + 1), ("max_byte", 0xFF)]:
+        bogus = pf.with_frontend(code)
+        manifest.append(write_corpus(args.out, f"bad_frontend_kind_{label}.bc", bogus.to_bytes(), False,
+                                      f"header frontend field {code}, which no FrontendKind claims -- "
+                                      "must be rejected at load, not run under Pascal's conventions",
+                                      expect_stderr="unknown frontend kind"))
+
+    # The control for those two: the same golden chunk relabelled as a
+    # frontend that does exist still loads and runs. Without it, a reader that
+    # rejected every nonzero frontend code would pass the pair above.
+    manifest.append(write_corpus(args.out, "golden_hello_frontend_clike.bc",
+                                  pf.with_frontend(psb3.FRONTEND_CLIKE).to_bytes(), True,
+                                  "golden_hello relabelled FRONTEND_KIND_CLIKE -- a recognised "
+                                  "frontend code must load and run like any other",
+                                  expect_stdout="square("))
 
     # --- Finding 3 regression: an embedded shell-closure's nested chunk must
     # be verified too, not just the top-level chunk. Compiles a tiny exsh

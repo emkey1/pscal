@@ -101,6 +101,9 @@ typedef struct {
     bool has_cache_count;
     int cache_count;
 
+    bool has_frontend;
+    FrontendKind frontend_kind;
+
     bool has_constants;
     int constants_count;
     Value *constants;
@@ -1312,6 +1315,26 @@ static int parsePscalasm2(const char *input_text, ParsedAsmProgram *program) {
         // operand is a raw byte pair the .asm author supplies directly, like
         // any other operand). Defaults to 0 (no cache sites) when omitted --
         // fine for programs that don't touch those opcodes.
+        /* Which frontend's conventions the assembled chunk runs under (the
+         * PSB3 header's frontend field; see common/frontend_kind.h). Optional,
+         * and omitted means FRONTEND_KIND_UNKNOWN -- what a hand-written .asm
+         * implies and what every .asm meant before this directive existed, so
+         * leaving it out keeps the Pascal-compatible defaults. pscald emits it
+         * only for a chunk that does name a frontend, which is what makes
+         * `pscald --emit-asm | pscalasm` round-trip an Aether or shell chunk
+         * without quietly turning it into a Pascal one. */
+        if (strcmp(directive, "frontend") == 0) {
+            char name[32];
+            if (!parseWordToken(&cursor, name, sizeof(name)) ||
+                !frontendKindFromName(name, &program->frontend_kind)) {
+                fprintf(stderr, "pscalasm:%d: invalid frontend directive.\n", line_number);
+                free(copy);
+                return -1;
+            }
+            program->has_frontend = true;
+            continue;
+        }
+
         if (strcmp(directive, "cache_count") == 0) {
             long long v = 0;
             if (!parseLongLongToken(&cursor, &v) || v < 0 || v > 0xFFFF) {
@@ -2047,6 +2070,11 @@ static int assembleAndWritePscalasm2(const ParsedAsmProgram *program,
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
     chunk.version = program->has_version ? program->version : pscal_vm_version();
+    /* Not initBytecodeChunk()'s frontendGetKind(): pscalasm pushes Pascal for
+     * its own compile-time helpers, but the chunk it assembles belongs to
+     * whatever the source says -- and to no frontend at all when it says
+     * nothing. */
+    chunk.frontend_kind = program->has_frontend ? program->frontend_kind : FRONTEND_KIND_UNKNOWN;
     chunk.cache_count = program->has_cache_count ? program->cache_count : 0;
 
     if (program->constants_count > 0) {

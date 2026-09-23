@@ -9,6 +9,26 @@ import struct
 MAGIC = 0x50534233  # 'PSB3'
 SECTION_ALIGN = 8
 
+# The container-format epoch cache.c's PSB3_FORMAT_VERSION must agree with.
+# read_psb3() carries whatever a real file says, so this is only needed when
+# synthesising a header from nothing; it is asserted against a real file by
+# check_format_version() so a bump on the C side can't go unnoticed here.
+FORMAT_VERSION = 5
+
+# Header `flags` bits 0..7 carry the FrontendKind the chunk was compiled
+# under (cache.c's PSB3_FLAG_FRONTEND_MASK, common/frontend_kind.h). This is
+# what lets `pscalvm prog.bc` apply the right string-index base and
+# diagnostics instead of assuming Pascal. Bits 8..31 are reserved and 0.
+FLAG_FRONTEND_MASK = 0x000000FF
+
+FRONTEND_UNKNOWN = 0
+FRONTEND_PASCAL = 1
+FRONTEND_REA = 2
+FRONTEND_AETHER = 3
+FRONTEND_CLIKE = 4
+FRONTEND_SHELL = 5
+FRONTEND_LAST = FRONTEND_SHELL
+
 SEC_CODE = struct.unpack("<I", b"CODE")[0]
 SEC_LINE = struct.unpack("<I", b"LINE")[0]
 SEC_CONS = struct.unpack("<I", b"CONS")[0]
@@ -64,6 +84,18 @@ class Psb3File:
                 return data
         raise KeyError(sec_id)
 
+    @property
+    def frontend(self):
+        """The FrontendKind code in the header's flags word."""
+        return self.flags & FLAG_FRONTEND_MASK
+
+    def with_flags(self, new_flags):
+        return Psb3File(self.format_version, self.vm_version, new_flags, self.sections)
+
+    def with_frontend(self, kind):
+        """A copy whose header names `kind`, leaving the reserved bits alone."""
+        return self.with_flags((self.flags & ~FLAG_FRONTEND_MASK) | (kind & FLAG_FRONTEND_MASK))
+
     def with_section(self, sec_id, new_data):
         new_sections = [
             (sid, new_data if sid == sec_id else data) for sid, data in self.sections
@@ -109,3 +141,19 @@ def read_psb3(path):
         entries.append((sid, off, length))
     sections = [(sid, data[off:off + length]) for sid, off, length in entries]
     return Psb3File(format_ver, vm_ver, flags, sections)
+
+
+def check_format_version(path):
+    """Raise if `path`'s container epoch is not the one this module mirrors.
+
+    This module reimplements cache.c's container byte for byte, so a
+    PSB3_FORMAT_VERSION bump on the C side that isn't reflected here would
+    silently start producing files the real reader rejects -- and the corpus
+    would read that as "the verifier caught it", passing for the wrong reason.
+    """
+    actual = read_psb3(path).format_version
+    if actual != FORMAT_VERSION:
+        raise ValueError(
+            f"{path} is container format {actual}, but psb3.py mirrors format "
+            f"{FORMAT_VERSION}; update this module to match cache.c"
+        )

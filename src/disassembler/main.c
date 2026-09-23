@@ -455,6 +455,19 @@ static int emitAsmV2(FILE *out, const BytecodeChunk *chunk, HashTable *procedure
 
     fprintf(out, "PSCALASM2\n");
     fprintf(out, "version %u\n", (unsigned)chunk->version);
+    /* Only when the chunk names one. A chunk with FRONTEND_KIND_UNKNOWN --
+     * every hand-written .asm, every tools/tiny output -- emits nothing, so
+     * the .asm text for those is byte-identical to what this printed before
+     * the frontend field existed. */
+    if (chunk->frontend_kind != FRONTEND_KIND_UNKNOWN) {
+        const char *frontend_name = frontendKindName(chunk->frontend_kind);
+        if (!frontend_name) {
+            fprintf(stderr, "pscald: unknown frontend kind %d in --emit-asm.\n",
+                    (int)chunk->frontend_kind);
+            return 0;
+        }
+        fprintf(out, "frontend %s\n", frontend_name);
+    }
     fprintf(out, "constants %d\n", chunk->constants_count);
     for (int i = 0; i < chunk->constants_count; ++i) {
         if (!emitAsmV2Constant(out, i, &chunk->constants[i])) {
