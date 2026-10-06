@@ -21,7 +21,7 @@
 set -uo pipefail
 
 CFG=Tests/aether_doc_bench/destinations.local_tiers_20260811.json
-OUTDIR=Tests/aether_doc_bench/results/local_tiers_20260811
+OUTDIR=${OUTDIR:-Tests/aether_doc_bench/results/local_tiers_20260811}
 AETHER_BIN=${AETHER_BIN:-/usr/local/bin/aether}
 # The harness runs each case from a temp cwd, so a relative --aether-bin
 # resolves to nothing and every compile fails with ENOENT. Make it absolute
@@ -32,22 +32,25 @@ REPAIR=2
 
 mkdir -p "$OUTDIR/logs"
 
-# Gate on the compiler the board is PINNED to, not on the live VERSION file.
-# components/aether moves while a board runs (a separate session landed compiler
-# fixes and a VERSION bump mid-run on 2026-08-11), and a board must hold its
-# toolchain still or its rows stop being comparable with each other.
-PIN_FILE=Tests/aether_doc_bench/toolchain/PINNED_VERSION
-if [ -f "$PIN_FILE" ]; then
-    WANT_VERSION=$(cat "$PIN_FILE"); PIN_SRC="pin"
-else
-    WANT_VERSION=$(cat components/aether/VERSION); PIN_SRC="components/aether/VERSION"
-fi
-GOT_VERSION=$("$AETHER_BIN" --version 2>&1 | sed -n 's/.*Version: \([0-9-]*\).*/\1/p')
-if [ "$WANT_VERSION" != "$GOT_VERSION" ]; then
-    echo "FATAL: $AETHER_BIN is $GOT_VERSION but $PIN_SRC says $WANT_VERSION"
+# A board must hold its toolchain still or its rows stop being comparable with
+# each other (components/aether moved mid-run on 2026-08-11). The harness now
+# does that itself: it runs every case on a hashed private copy of the binary
+# and its skew guard refuses a binary it cannot tie to the guides' checkout.
+# That replaced the pinned-version date gate this driver used to carry. Pass
+# guide overrides and harness flags through DOC / BENCH_ARGS, as for
+# bench_one_destination.sh.
+DOC_ARGS=()
+for spec in ${DOC:-}; do DOC_ARGS+=(--doc "$spec"); done
+read -r -a EXTRA_ARGS <<< "${BENCH_ARGS:-}"
+HARNESS_ARGS=(--docs "${DOCS:-medium}" ${DOC_ARGS[@]+"${DOC_ARGS[@]}"} --aether-bin "$AETHER_BIN" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"})
+if ! python3 tools/aether_doc_bench.py --destinations-config "$CFG" --destination high-ds4 \
+        --tasks "Tests/aether_doc_bench/${SUITES%% *}.json" "${HARNESS_ARGS[@]}" \
+        --preflight-only >"$OUTDIR/logs/preflight.log" 2>&1; then
+    echo "FATAL: harness preflight refused the toolchain -- see $OUTDIR/logs/preflight.log"
+    sed 's/^/    /' "$OUTDIR/logs/preflight.log"
     exit 1
 fi
-echo "[preflight] aether $GOT_VERSION at $AETHER_BIN"
+echo "[preflight] aether at $AETHER_BIN accepted by the harness skew guard"
 echo "[preflight] outdir $OUTDIR"
 
 run_one() {
@@ -67,9 +70,8 @@ run_one() {
         --destinations-config "$CFG" \
         --destination "$dest" \
         --tasks "Tests/aether_doc_bench/$suite.json" \
-        --docs medium \
+        "${HARNESS_ARGS[@]}" \
         --repair-attempts "$REPAIR" \
-        --aether-bin "$AETHER_BIN" \
         --output-json "$out.tmp" \
         --text-summary --progress \
         "$@" >"$log" 2>&1

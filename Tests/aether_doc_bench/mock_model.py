@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
-"""Deterministic fake model for testing the doc benchmark harness."""
+"""Deterministic fake model for testing the doc benchmark harness.
+
+Environment knobs, all optional:
+  MOCK_SEED_LOG=FILE        append {"task_ids": [...], "seed": "<AETHER_BENCH_SEED>"} per call,
+                            so a test can see the seed the harness sent for each repeat
+  MOCK_MODEL_FAKE_PROGRAMS=1  answer with Tests/aether_doc_bench/fake_aether.py directive
+                            programs (for runs on the fake compiler) instead of real Aether
+"""
 
 from __future__ import annotations
 
-import pathlib
 import json
+import os
+import pathlib
 import re
 import sys
 
@@ -89,22 +97,37 @@ fn main() -> Void {
 }
 
 
+# The same answers as directive programs for fake_aether.py: each prints the
+# task's expected stdout, so a smoke run on the fake compiler scores exact.
+FAKE_PROGRAMS = {
+    "hello_fx": "//! print hello from benchmark\n",
+    "classify_scores": "//! print 95 => ready\n//! print 72 => review\n//! print 10 => blocked\n",
+    "type_and_method": "//! print 1\n//! print 2\n",
+    "toon_inline_extract": "//! print Aether 42\n",
+}
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         raise SystemExit("usage: mock_model.py PROMPT_FILE")
     prompt_path = pathlib.Path(sys.argv[1])
     prompt = prompt_path.read_text(encoding="utf-8")
     task_ids = extract_task_ids(prompt)
+    seed_log = os.environ.get("MOCK_SEED_LOG")
+    if seed_log:
+        with open(seed_log, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"task_ids": task_ids, "seed": os.environ.get("AETHER_BENCH_SEED", "")}) + "\n")
+    programs = FAKE_PROGRAMS if os.environ.get("MOCK_MODEL_FAKE_PROGRAMS") else PROGRAMS
     if "\"results\"" in prompt or "Return exactly one JSON object" in prompt:
         payload = {
             "results": [
-                {"task_id": task_id, "source_code": PROGRAMS[task_id]}
+                {"task_id": task_id, "source_code": programs[task_id]}
                 for task_id in task_ids
             ]
         }
         sys.stdout.write(json.dumps(payload))
         return 0
-    sys.stdout.write(PROGRAMS[task_ids[0]])
+    sys.stdout.write(programs[task_ids[0]])
     return 0
 
 

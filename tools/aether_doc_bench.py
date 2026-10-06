@@ -31,10 +31,12 @@ import os
 import pathlib
 import queue as queue_module
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import email.utils
 import hashlib
@@ -48,12 +50,36 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_TASKS = REPO_ROOT / "Tests" / "aether_doc_bench" / "tasks.json"
 DEFAULT_AETHER_BIN = REPO_ROOT / "build" / "bin" / "aether"
 DEFAULT_DESTINATIONS_CONFIG = REPO_ROOT / "Tests" / "aether_doc_bench" / "destinations.template.json"
-DOC_VARIANTS: dict[str, pathlib.Path | None] = {
-    "full": REPO_ROOT / "components" / "aether" / "docs" / "aether_for_llms_and_others.md",
-    "medium": REPO_ROOT / "components" / "aether" / "docs" / "aether_for_llms_medium_contexts.md",
-    "small": REPO_ROOT / "components" / "aether" / "docs" / "aether_for_llms_with_small_contexts.md",
-    "none": None,
+# The aether checkout the guides (and, for the skew guard, the binary's +sha) come
+# from. --aether-root points it elsewhere, e.g. at the versioned ~/aether-<sha>
+# checkout a board's binary was built from, so binary and guide share one sha.
+DEFAULT_AETHER_ROOT = REPO_ROOT / "components" / "aether"
+DOC_FILENAMES: dict[str, str] = {
+    "full": "aether_for_llms_and_others.md",
+    "medium": "aether_for_llms_medium_contexts.md",
+    "small": "aether_for_llms_with_small_contexts.md",
 }
+
+
+def doc_variant_paths(
+    aether_root: pathlib.Path | None = None,
+    overrides: dict[str, pathlib.Path] | None = None,
+) -> dict[str, pathlib.Path | None]:
+    """The guide variants: the three tiers under <aether_root>/docs, `none`, and
+    every --doc NAME=PATH override (which may add new names or replace a tier)."""
+    root = aether_root if aether_root is not None else DEFAULT_AETHER_ROOT
+    variants: dict[str, pathlib.Path | None] = {
+        name: root / "docs" / filename for name, filename in DOC_FILENAMES.items()
+    }
+    variants["none"] = None
+    if overrides:
+        variants.update(overrides)
+    return variants
+
+
+# Kept for callers that read the default map (older tools); new code goes through
+# doc_variant_paths() so --aether-root and --doc are honoured.
+DOC_VARIANTS: dict[str, pathlib.Path | None] = doc_variant_paths()
 _DESTINATION_CONTEXT_CACHE: dict[tuple[str, str, str], int | None] = {}
 OUTPUT_END_MARKER = "__AETHER_BENCH_END__"
 
@@ -71,6 +97,7 @@ class Task:
     timeout_seconds: int = 20
     cwd: str | None = None
     files: dict[str, str] | None = None
+    reference_solution: str | None = None
 
 
 @dataclass
@@ -95,6 +122,64 @@ class Destination:
     extra_headers: dict | None = None
     preferred_targets: list[str] | None = None
     priority: int = 5
+    # Base sampling seed. Repeat r of a case is requested with seed + r, so
+    # --repeats N draws N distinct, reproducible samples (D37b: seed 42+r).
+    seed: int | None = None
+
+
+@dataclass
+class RequestOptions:
+    """Per-request settings the case loop decides (not the destination config):
+    the seed for this repeat and, once the context guard has run, the clamped
+    output budget. None means "use the destination's own value / send nothing"."""
+
+    seed: int | None = None
+    max_tokens: int | None = None
+
+
+# Destination kinds whose request builders forward a seed. The OpenAI Responses
+# API takes no seed, so a seed configured there would be silently dropped --
+# exactly the bug this field exists to end -- and is rejected at load instead.
+SEEDABLE_KINDS = frozenset(
+    {"openai_chat_completions", "openai_completions", "tra_queue", "tra_scheduler", "command"}
+)
+
+
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def sha256_text(text: str) -> str:
+    return sha256_bytes(text.encode("utf-8"))
+
+
+def sha256_file(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def display_path(path: Any) -> str | None:
+    """A path as it may be written into a report that can end up in this public
+    repo: repo-relative when inside it, `~/...` under the home directory, else
+    absolute. Never the account name."""
+    if path is None:
+        return None
+    candidate = pathlib.Path(path)
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        resolved = candidate
+    try:
+        return str(resolved.relative_to(REPO_ROOT))
+    except ValueError:
+        pass
+    try:
+        return "~/" + str(resolved.relative_to(pathlib.Path.home()))
+    except ValueError:
+        return str(resolved)
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -409,6 +494,7 @@ def load_tasks(path: pathlib.Path) -> list[Task]:
                 timeout_seconds=int(item.get("timeout_seconds", 20)),
                 cwd=item.get("cwd"),
                 files=item.get("files"),
+                reference_solution=item.get("reference_solution"),
             )
         )
     return tasks
@@ -427,8 +513,67 @@ def _expand_fleet_refs(value: Any) -> Any:
     return value
 
 
+# Every key load_destinations reads. Anything else is a typo or a field this
+# harness does not implement, and used to be dropped without a word: a top-level
+# "seed": 42 on the cs-aug18 destinations never reached a request, and the same
+# shape of bug had already hit chat_template_kwargs (acf5cee6). Keys starting
+# with "_" are annotations (_note, _tier, ...) and are allowed anywhere.
+DESTINATION_KEYS = frozenset({
+    "id", "type", "model", "base_url", "api_key", "api_key_env", "temperature",
+    "max_output_tokens", "command_template", "after_each_command",
+    "after_each_timeout_seconds", "cooldown_seconds", "prompt_context_limit",
+    "request_timeout_seconds", "request_max_retries", "retry_backoff_seconds",
+    "extra_body", "extra_headers", "preferred_targets", "priority", "seed",
+})
+# Read from the raw config by tools/aether_idea_miner.py, not by this harness.
+MINER_DESTINATION_KEYS = frozenset({"guide", "system"})
+DESTINATION_FILE_KEYS = frozenset({"destinations"})
+
+
+def validate_destination_config(raw: Any, path: pathlib.Path) -> None:
+    """Fail loudly on a destination key nothing reads (see DESTINATION_KEYS)."""
+    if not isinstance(raw, dict):
+        raise SystemExit(f"{path}: a destinations file must be a JSON object")
+    unknown_top = sorted(k for k in raw if k not in DESTINATION_FILE_KEYS and not str(k).startswith("_"))
+    if unknown_top:
+        raise SystemExit(
+            f"{path}: unknown top-level key(s) {', '.join(unknown_top)}; "
+            "per-destination settings belong inside each destinations[] entry"
+        )
+    allowed = DESTINATION_KEYS | MINER_DESTINATION_KEYS
+    for index, item in enumerate(raw.get("destinations", [])):
+        if not isinstance(item, dict):
+            raise SystemExit(f"{path}: destinations[{index}] is not an object")
+        label = item.get("id", f"destinations[{index}]")
+        unknown = sorted(k for k in item if k not in allowed and not str(k).startswith("_"))
+        if unknown:
+            raise SystemExit(
+                f"{path}: destination {label!r} has unknown key(s) {', '.join(unknown)} "
+                f"(known: {', '.join(sorted(allowed))}; prefix a key with '_' for a note)"
+            )
+        for required in ("id", "type"):
+            if required not in item:
+                raise SystemExit(f"{path}: destination {label!r} is missing {required!r}")
+        seed = item.get("seed")
+        if seed is not None:
+            if isinstance(seed, bool) or not isinstance(seed, int):
+                raise SystemExit(f"{path}: destination {label!r}: seed must be an integer, got {seed!r}")
+            if item["type"] not in SEEDABLE_KINDS:
+                raise SystemExit(
+                    f"{path}: destination {label!r}: type {item['type']!r} cannot be seeded "
+                    "(its API takes no seed); remove the seed key"
+                )
+            extra_body = item.get("extra_body") or {}
+            if isinstance(extra_body, dict) and "seed" in extra_body:
+                raise SystemExit(
+                    f"{path}: destination {label!r} sets both seed and extra_body.seed; keep the "
+                    "top-level seed (the harness sends seed + repeat_index)"
+                )
+
+
 def load_destinations(path: pathlib.Path) -> list[Destination]:
     raw = json.loads(read_text(path))
+    validate_destination_config(raw, path)
     items = raw.get("destinations", [])
     destinations: list[Destination] = []
     for item in items:
@@ -456,9 +601,38 @@ def load_destinations(path: pathlib.Path) -> list[Destination]:
                 extra_headers=item.get("extra_headers"),
                 preferred_targets=item.get("preferred_targets"),
                 priority=int(item.get("priority", 5)),
+                seed=item.get("seed"),
             )
         )
     return destinations
+
+
+def is_self_hosted(destination: Destination) -> bool:
+    """A destination served on the fleet rather than by a cloud vendor: a local
+    command, the T'Ra queue, or a plain-http endpoint. Cloud APIs are https."""
+    if destination.kind in ("command", "tra_queue", "tra_scheduler"):
+        return True
+    return bool(destination.base_url) and str(destination.base_url).startswith("http://")
+
+
+def request_seed(destination: Destination, repeat_index: int, seed_base: int | None = None) -> int | None:
+    """The seed for repeat `repeat_index` (D37b: seed 42 + r).
+
+    A destination's own `seed` is its base. Otherwise the run-wide --seed-base
+    applies to self-hosted destinations only: cloud vendors either ignore a seed
+    or reject the field, so a cloud destination must opt in explicitly. None when
+    no base applies or the destination kind cannot carry a seed."""
+    if destination.kind not in SEEDABLE_KINDS:
+        return None
+    if destination.seed is not None:
+        base: int | None = destination.seed
+    elif seed_base is not None and is_self_hosted(destination):
+        base = seed_base
+    else:
+        base = None
+    if base is None:
+        return None
+    return int(base) + int(repeat_index)
 
 
 def load_report_json(path: pathlib.Path) -> dict[str, Any]:
@@ -549,12 +723,48 @@ def classify_task_bucket(
     return "stable"
 
 
-def resolve_docs(names: list[str]) -> list[tuple[str, pathlib.Path | None]]:
+def parse_doc_overrides(items: list[str]) -> dict[str, pathlib.Path]:
+    """Parse repeatable --doc NAME=PATH. NAME may be a tier (full/medium/small) to
+    replace its default path, or a new name for an A/B variant."""
+    overrides: dict[str, pathlib.Path] = {}
+    for item in items or []:
+        name, sep, raw_path = str(item).partition("=")
+        name, raw_path = name.strip(), raw_path.strip()
+        if not sep or not name or not raw_path:
+            raise SystemExit(f"--doc expects NAME=PATH, got {item!r}")
+        if not re.fullmatch(r"[A-Za-z0-9_.+-]+", name):
+            raise SystemExit(f"--doc {name!r}: a variant name may use letters, digits and _.+- only")
+        if name == "none":
+            raise SystemExit("--doc none=PATH is not allowed: 'none' is the no-guide variant")
+        path = pathlib.Path(raw_path).expanduser()
+        if not path.is_file():
+            raise SystemExit(f"--doc {name}: guide file not found: {raw_path}")
+        if name in overrides:
+            raise SystemExit(f"--doc {name} given twice")
+        overrides[name] = path.resolve()
+    return overrides
+
+
+def resolve_docs(
+    names: list[str],
+    variants: dict[str, pathlib.Path | None] | None = None,
+) -> list[tuple[str, pathlib.Path | None]]:
+    variants = DOC_VARIANTS if variants is None else variants
     resolved: list[tuple[str, pathlib.Path | None]] = []
+    seen: set[str] = set()
     for name in names:
-        if name not in DOC_VARIANTS:
-            raise SystemExit(f"unknown doc variant '{name}', expected one of: {', '.join(DOC_VARIANTS)}")
-        resolved.append((name, DOC_VARIANTS[name]))
+        if name not in variants:
+            raise SystemExit(f"unknown doc variant '{name}', expected one of: {', '.join(variants)}")
+        if name in seen:
+            raise SystemExit(f"doc variant '{name}' selected twice")
+        seen.add(name)
+        path = variants[name]
+        if path is not None and not pathlib.Path(path).is_file():
+            raise SystemExit(
+                f"doc variant '{name}': guide file not found: {path} "
+                "(pass --aether-root DIR or --doc NAME=PATH)"
+            )
+        resolved.append((name, path))
     return resolved
 
 
@@ -1207,7 +1417,23 @@ def get_destination_context_limit(destination: Destination) -> int | None:
     return None
 
 
-def invoke_openai_responses(prompt: str, destination: Destination) -> dict[str, Any]:
+def _max_tokens_for(destination: Destination, options: RequestOptions | None) -> int:
+    if options is not None and options.max_tokens is not None:
+        return int(options.max_tokens)
+    return int(destination.max_output_tokens)
+
+
+def _apply_output_clamp(body: dict[str, Any], options: RequestOptions | None) -> None:
+    """Hold an explicit extra_body max_completion_tokens to the clamped budget too."""
+    if options is None or options.max_tokens is None:
+        return
+    if "max_completion_tokens" in body and isinstance(body["max_completion_tokens"], int):
+        body["max_completion_tokens"] = min(body["max_completion_tokens"], int(options.max_tokens))
+
+
+def invoke_openai_responses(
+    prompt: str, destination: Destination, options: RequestOptions | None = None
+) -> dict[str, Any]:
     if not destination.model:
         raise RuntimeError("destination model is required for openai_responses")
     base_url = (destination.base_url or "https://api.openai.com/v1").rstrip("/")
@@ -1220,12 +1446,14 @@ def invoke_openai_responses(prompt: str, destination: Destination) -> dict[str, 
         "input": prompt,
         "reasoning": {"effort": "medium"},
         "text": {"verbosity": "low"},
-        "max_output_tokens": destination.max_output_tokens,
+        "max_output_tokens": _max_tokens_for(destination, options),
     }
     if destination.temperature >= 0:
         body["temperature"] = destination.temperature
     if destination.extra_body:
         body.update(destination.extra_body)
+    if options is not None and options.max_tokens is not None:
+        body["max_output_tokens"] = min(int(body.get("max_output_tokens") or options.max_tokens), int(options.max_tokens))
 
     payload = http_json_request(
         f"{base_url}/responses",
@@ -1271,7 +1499,9 @@ def flatten_chat_content(content: Any) -> str:
     return ""
 
 
-def invoke_openai_chat_completions(prompt: str, destination: Destination) -> dict[str, Any]:
+def invoke_openai_chat_completions(
+    prompt: str, destination: Destination, options: RequestOptions | None = None
+) -> dict[str, Any]:
     if not destination.model:
         raise RuntimeError("destination model is required for openai_chat_completions")
     base_url = (destination.base_url or "https://api.openai.com/v1").rstrip("/")
@@ -1282,13 +1512,16 @@ def invoke_openai_chat_completions(prompt: str, destination: Destination) -> dic
         "messages": [
             {"role": "user", "content": prompt},
         ],
-        "max_tokens": destination.max_output_tokens,
+        "max_tokens": _max_tokens_for(destination, options),
         "stop": [OUTPUT_END_MARKER],
     }
     if destination.temperature >= 0:
         body["temperature"] = destination.temperature
     if destination.extra_body:
         body.update(destination.extra_body)
+    if options is not None and options.seed is not None:
+        body["seed"] = int(options.seed)
+    _apply_output_clamp(body, options)
     # OpenAI reasoning models (o-series, gpt-5) reject max_tokens; honor
     # max_completion_tokens from extra_body and drop the incompatible field.
     if "max_completion_tokens" in body:
@@ -1347,7 +1580,7 @@ def invoke_openai_chat_completions(prompt: str, destination: Destination) -> dic
 
 
 def invoke_openai_chat_completions_messages(
-    messages: list[dict[str, str]], destination: Destination
+    messages: list[dict[str, str]], destination: Destination, options: RequestOptions | None = None
 ) -> dict[str, Any]:
     """Like invoke_openai_chat_completions but takes a pre-built messages list
     instead of a single flat prompt -- used by aether_doc_bench_session.py's
@@ -1360,13 +1593,16 @@ def invoke_openai_chat_completions_messages(
     body = {
         "model": destination.model,
         "messages": messages,
-        "max_tokens": destination.max_output_tokens,
+        "max_tokens": _max_tokens_for(destination, options),
         "stop": [OUTPUT_END_MARKER],
     }
     if destination.temperature >= 0:
         body["temperature"] = destination.temperature
     if destination.extra_body:
         body.update(destination.extra_body)
+    if options is not None and options.seed is not None:
+        body["seed"] = int(options.seed)
+    _apply_output_clamp(body, options)
     if "max_completion_tokens" in body:
         body.pop("max_tokens", None)
     if body.get("stop") is None:
@@ -1452,7 +1688,9 @@ def invoke_openai_responses_session(
     }
 
 
-def invoke_tra_queue(prompt: str, destination: Destination) -> dict[str, Any]:
+def invoke_tra_queue(
+    prompt: str, destination: Destination, options: RequestOptions | None = None
+) -> dict[str, Any]:
     """Canonical T'Ra AI queue adapter -- shared by the doc-bench AND the idea-miner.
 
     Submit a generation to the queue (e.g. http://m4t:8793), explain-validate, submit
@@ -1473,7 +1711,7 @@ def invoke_tra_queue(prompt: str, destination: Destination) -> dict[str, Any]:
     eb = destination.extra_body or {}
     payload: dict[str, Any] = {
         "prompt": prompt,
-        "max_tokens": destination.max_output_tokens,
+        "max_tokens": _max_tokens_for(destination, options),
         "request_timeout_seconds": destination.request_timeout_seconds,
         # The scheduler kills a job at max_runtime / on idle -- bounds reasoning runaway.
         "max_runtime_seconds": int(eb.get("max_runtime_seconds", destination.request_timeout_seconds)),
@@ -1540,6 +1778,10 @@ def invoke_tra_queue(prompt: str, destination: Destination) -> dict[str, Any]:
     nested = eb.get("extra_body")
     if isinstance(nested, dict):
         backend_extra.update(nested)
+    # The per-repeat seed (destination seed + repeat_index) rides the same nested
+    # extra_body, the only path that reaches the backend.
+    if options is not None and options.seed is not None:
+        backend_extra["seed"] = int(options.seed)
     if backend_extra:
         payload["extra_body"] = backend_extra
 
@@ -1668,7 +1910,9 @@ def invoke_tra_queue(prompt: str, destination: Destination) -> dict[str, Any]:
         raise
 
 
-def invoke_openai_completions(prompt: str, destination: Destination) -> dict[str, Any]:
+def invoke_openai_completions(
+    prompt: str, destination: Destination, options: RequestOptions | None = None
+) -> dict[str, Any]:
     if not destination.model:
         raise RuntimeError("destination model is required for openai_completions")
     base_url = (destination.base_url or "https://api.openai.com/v1").rstrip("/")
@@ -1677,11 +1921,13 @@ def invoke_openai_completions(prompt: str, destination: Destination) -> dict[str
     body = {
         "model": destination.model,
         "prompt": prompt,
-        "max_tokens": destination.max_output_tokens,
+        "max_tokens": _max_tokens_for(destination, options),
         "stop": [OUTPUT_END_MARKER],
     }
     if destination.temperature >= 0:
         body["temperature"] = destination.temperature
+    if options is not None and options.seed is not None:
+        body["seed"] = int(options.seed)
 
     payload = http_json_request(
         f"{base_url}/completions",
@@ -1710,13 +1956,24 @@ def invoke_command(
     command_template: str,
     cwd: pathlib.Path,
     timeout_seconds: int,
+    options: RequestOptions | None = None,
 ) -> dict[str, Any]:
+    """Run a local model command. The per-request seed and output budget reach it
+    as {seed} / {max_tokens} template placeholders and as AETHER_BENCH_SEED /
+    AETHER_BENCH_MAX_TOKENS in its environment (empty when unset)."""
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".prompt", delete=False) as handle:
         handle.write(prompt)
         prompt_file = pathlib.Path(handle.name)
 
+    seed_text = "" if options is None or options.seed is None else str(int(options.seed))
+    max_tokens_text = "" if options is None or options.max_tokens is None else str(int(options.max_tokens))
+    env = dict(os.environ)
+    env["AETHER_BENCH_SEED"] = seed_text
+    env["AETHER_BENCH_MAX_TOKENS"] = max_tokens_text
     try:
-        command = command_template.format(prompt_file=str(prompt_file))
+        command = command_template.format(
+            prompt_file=str(prompt_file), seed=seed_text, max_tokens=max_tokens_text
+        )
         proc = subprocess.run(
             command,
             shell=True,
@@ -1725,6 +1982,7 @@ def invoke_command(
             errors="replace",
             capture_output=True,
             timeout=timeout_seconds,
+            env=env,
         )
     finally:
         prompt_file.unlink(missing_ok=True)
@@ -1827,15 +2085,17 @@ def preflight_destination(destination: Destination) -> tuple[bool, str]:
     return True, text[:40]
 
 
-def run_model(prompt: str, destination: Destination) -> dict[str, Any]:
+def run_model(
+    prompt: str, destination: Destination, options: RequestOptions | None = None
+) -> dict[str, Any]:
     if destination.kind == "openai_responses":
-        return invoke_openai_responses(prompt=prompt, destination=destination)
+        return invoke_openai_responses(prompt=prompt, destination=destination, options=options)
     if destination.kind == "openai_chat_completions":
-        return invoke_openai_chat_completions(prompt=prompt, destination=destination)
+        return invoke_openai_chat_completions(prompt=prompt, destination=destination, options=options)
     if destination.kind in ("tra_queue", "tra_scheduler"):
-        return invoke_tra_queue(prompt=prompt, destination=destination)
+        return invoke_tra_queue(prompt=prompt, destination=destination, options=options)
     if destination.kind == "openai_completions":
-        return invoke_openai_completions(prompt=prompt, destination=destination)
+        return invoke_openai_completions(prompt=prompt, destination=destination, options=options)
     if destination.kind == "command":
         if not destination.command_template:
             raise RuntimeError("command_template is required for command destinations")
@@ -1844,22 +2104,27 @@ def run_model(prompt: str, destination: Destination) -> dict[str, Any]:
             command_template=destination.command_template,
             cwd=REPO_ROOT,
             timeout_seconds=max(30, int(destination.request_timeout_seconds)),
+            options=options,
         )
     raise RuntimeError(f"unsupported destination type {destination.kind}")
 
 
-def _run_model_worker(prompt: str, destination: Destination, queue: Any) -> None:
+def _run_model_worker(
+    prompt: str, destination: Destination, queue: Any, options: RequestOptions | None = None
+) -> None:
     try:
-        queue.put(("ok", run_model(prompt, destination)))
+        queue.put(("ok", run_model(prompt, destination, options)))
     except Exception as exc:
         queue.put(("err", str(exc)))
 
 
-def run_model_with_deadline(prompt: str, destination: Destination) -> dict[str, Any]:
+def run_model_with_deadline(
+    prompt: str, destination: Destination, options: RequestOptions | None = None
+) -> dict[str, Any]:
     deadline = max(1, int(destination.request_timeout_seconds))
     ctx = multiprocessing.get_context("spawn")
     queue: Any = ctx.Queue()
-    proc = ctx.Process(target=_run_model_worker, args=(prompt, destination, queue))
+    proc = ctx.Process(target=_run_model_worker, args=(prompt, destination, queue, options))
     proc.start()
     # queue.get() must happen before proc.join(): a worker payload larger than
     # the OS pipe buffer (~64KB on macOS) blocks in queue.put() until drained,
@@ -1889,6 +2154,13 @@ def materialize_task_files(task: Task, work_dir: pathlib.Path) -> None:
         target.write_text(content, encoding="utf-8")
 
 
+def aether_flags(args: Any) -> list[str]:
+    """Every flag the harness puts in front of the program path on an aether
+    call: the sandbox deny list, then each --aether-arg in order."""
+    sandbox_flags = ["--deny", args.sandbox_deny] if getattr(args, "sandbox_deny", "") else []
+    return [*sandbox_flags, *[str(a) for a in (getattr(args, "aether_args", None) or [])]]
+
+
 def compile_and_run(task: Task, source_code: str, args: argparse.Namespace) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="aether-doc-bench-") as tmp_name:
         tmp_dir = pathlib.Path(tmp_name)
@@ -1898,8 +2170,16 @@ def compile_and_run(task: Task, source_code: str, args: argparse.Namespace) -> d
         materialize_task_files(task, tmp_dir)
         program_path.write_text(source_code, encoding="utf-8")
 
-        sandbox_flags = ["--deny", args.sandbox_deny] if getattr(args, "sandbox_deny", "") else []
-        cmd = [str(args.aether_bin), *sandbox_flags, "--no-cache", str(program_path)]
+        flags = aether_flags(args)
+        cmd = [str(args.aether_bin), *flags, "--no-cache", str(program_path)]
+        # What the report records: the binary the user named (not the per-run
+        # snapshot under a random temp dir) and the program by file name.
+        recorded_cmd = [
+            str(getattr(args, "aether_bin_display", None) or args.aether_bin),
+            *flags,
+            "--no-cache",
+            program_path.name,
+        ]
         started = time.time()
         proc = subprocess.run(
             cmd,
@@ -1917,7 +2197,7 @@ def compile_and_run(task: Task, source_code: str, args: argparse.Namespace) -> d
         diagnostics = None
 
         if proc.returncode != 0:
-            diag_cmd = [str(args.aether_bin), *sandbox_flags, "--diagnostics-json", "--no-cache", str(program_path)]
+            diag_cmd = [str(args.aether_bin), *flags, "--diagnostics-json", "--no-cache", str(program_path)]
             diag_proc = subprocess.run(
                 diag_cmd,
                 cwd=str(work_dir),
@@ -1934,13 +2214,14 @@ def compile_and_run(task: Task, source_code: str, args: argparse.Namespace) -> d
                     diagnostics = None
 
         return {
-            "command": cmd,
+            "command": recorded_cmd,
             "returncode": proc.returncode,
             "stdout": stdout,
             "stderr": stderr,
             "diagnostics": diagnostics,
             "elapsed_seconds": round(elapsed, 3),
             "exact_stdout_match": exact_match,
+            "binary_sha256": getattr(args, "binary_sha256", None),
         }
 
 
@@ -2269,12 +2550,18 @@ def evaluate_attempt(
     task: Task,
     args: argparse.Namespace,
     runner: str = "aether",
+    options: RequestOptions | None = None,
 ) -> dict[str, Any]:
     prompt_tokens = approx_tokens(prompt)
     attempt: dict[str, Any] = {
         "prompt_kind": prompt_kind,
         "prompt_approx_tokens": prompt_tokens,
         "runner": runner,
+        "prompt_sha256": sha256_text(prompt),
+        "request": {
+            "seed": None if options is None else options.seed,
+            "max_tokens": _max_tokens_for(destination, options),
+        },
     }
     context_limit = get_destination_context_limit(destination)
     if context_limit is not None and prompt_tokens >= context_limit:
@@ -2282,7 +2569,7 @@ def evaluate_attempt(
             "prompt_too_large: approx prompt tokens "
             f"{prompt_tokens} exceed loaded context {context_limit} for model {destination.model}"
         )
-    generation = run_model_with_deadline(prompt, destination)
+    generation = run_model_with_deadline(prompt, destination, options)
     source_code = sanitize_code(generation["raw_text"])
     attempt["generation"] = generation
     attempt["usage"] = normalize_usage(generation.get("usage"))
@@ -2525,6 +2812,7 @@ def apply_repairs(
     args: argparse.Namespace,
     runner: str,
     repair_prompt_builder: Any,
+    options: RequestOptions | None = None,
 ) -> list[dict[str, Any]]:
     attempts: list[dict[str, Any]] = [initial_attempt]
     attempt = initial_attempt
@@ -2552,6 +2840,7 @@ def apply_repairs(
                 task=task,
                 args=args,
                 runner=runner,
+                options=options,
             )
             attempts.append(attempt)
             if attempt["run"]["exact_stdout_match"]:
@@ -2568,6 +2857,7 @@ def execute_case(
     args: argparse.Namespace,
     runner: str,
     repair_prompt_builder: Any,
+    options: RequestOptions | None = None,
 ) -> dict[str, Any]:
     attempt = evaluate_attempt(
         prompt=initial_prompt,
@@ -2576,6 +2866,7 @@ def execute_case(
         task=task,
         args=args,
         runner=runner,
+        options=options,
     )
     attempts = apply_repairs(
         initial_attempt=attempt,
@@ -2584,6 +2875,7 @@ def execute_case(
         args=args,
         runner=runner,
         repair_prompt_builder=repair_prompt_builder,
+        options=options,
     )
     return finalize_case_record(attempts)
 
@@ -2592,6 +2884,230 @@ def chunk_list(items: list[Any], size: int) -> list[list[Any]]:
     if size <= 1:
         return [[item] for item in items]
     return [items[idx:idx + size] for idx in range(0, len(items), size)]
+
+
+def run_single_aether_task(
+    *,
+    destination: Destination,
+    doc_name: str,
+    doc_text: str,
+    task: Task,
+    repeat_index: int,
+    args: argparse.Namespace,
+    doc_token_reference: dict[str, Any],
+    options: RequestOptions | None = None,
+) -> dict[str, Any]:
+    """One Aether case: the initial prompt, its repair rounds, and the record."""
+    if args.progress:
+        print_progress_start(destination, doc_name, task, repeat_index)
+    prompt = build_prompt(doc_name=doc_name, doc_text=doc_text, task=task)
+    case_record: dict[str, Any] = {
+        "task_id": task.task_id,
+        "task_title": task.title,
+        "repeat_index": repeat_index,
+        "seed": None if options is None else options.seed,
+        "attempts": [],
+        "doc_token_reference": doc_token_reference,
+    }
+    context_limit = get_destination_context_limit(destination)
+    if context_limit is not None and approx_tokens(prompt) >= context_limit:
+        case_record.update(
+            make_prompt_too_large_record(
+                prompt=prompt,
+                context_limit=context_limit,
+                destination=destination,
+            )
+        )
+        if args.progress:
+            print_progress_done(destination, doc_name, task, repeat_index, case_record)
+        return case_record
+    try:
+        aether_case = execute_case(
+            initial_prompt=prompt,
+            destination=destination,
+            task=task,
+            args=args,
+            runner="aether",
+            repair_prompt_builder=lambda **kwargs: build_repair_prompt(
+                doc_name=doc_name,
+                doc_text=doc_text,
+                **kwargs,
+            ),
+            options=options,
+        )
+        case_record.update(aether_case)
+        case_record["doc_token_reference"] = doc_token_reference
+    except Exception as exc:  # pragma: no cover - surfaced in JSON report
+        case_record["generated_ok"] = False
+        case_record["generation_error"] = str(exc)
+        case_record["run"] = {
+            "returncode": -1,
+            "stdout": "",
+            "stderr": str(exc),
+            "elapsed_seconds": 0.0,
+            "exact_stdout_match": False,
+        }
+        case_record["attempt_count"] = len(case_record["attempts"])
+        case_record["resolved_after_repair"] = False
+        case_record["failure_fingerprint"] = derive_failure_fingerprint(case_record)
+    finally:
+        try:
+            run_destination_cleanup(destination, task, doc_name, repeat_index)
+        except Exception as cleanup_exc:  # pragma: no cover - surfaced in JSON report
+            case_record["cleanup_error"] = str(cleanup_exc)
+    if args.progress:
+        print_progress_done(destination, doc_name, task, repeat_index, case_record)
+    return case_record
+
+
+def run_aether_task_group(
+    *,
+    destination: Destination,
+    doc_name: str,
+    doc_text: str,
+    task_group: list[Task],
+    repeat_index: int,
+    args: argparse.Namespace,
+    doc_token_reference: dict[str, Any],
+    options: RequestOptions | None = None,
+    on_case_complete: Any | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """Run one unit of work under one guide variant: a single task, or one
+    shared-guide batch of tasks. Returns (case records, batch metadata or None)."""
+    results: list[dict[str, Any]] = []
+
+    def emit(case_record: dict[str, Any]) -> None:
+        results.append(case_record)
+        if on_case_complete:
+            on_case_complete(case_record)
+
+    def single(task: Task) -> dict[str, Any]:
+        return run_single_aether_task(
+            destination=destination,
+            doc_name=doc_name,
+            doc_text=doc_text,
+            task=task,
+            repeat_index=repeat_index,
+            args=args,
+            doc_token_reference=doc_token_reference,
+            options=options,
+        )
+
+    if len(task_group) <= 1 or effective_shared_guide_batch_size(args, destination) <= 1:
+        for task in task_group:
+            emit(single(task))
+        return results, None
+
+    for task in task_group:
+        if args.progress:
+            print_progress_start(destination, doc_name, task, repeat_index)
+
+    batch_prompt = build_batch_prompt(doc_name=doc_name, doc_text=doc_text, tasks=task_group)
+    context_limit = get_destination_context_limit(destination)
+    if context_limit is not None and approx_tokens(batch_prompt) >= context_limit:
+        for task in task_group:
+            emit(single(task))
+        return results, None
+
+    batch_prompt_tokens = approx_tokens(batch_prompt)
+    batch_id = f"{doc_name}-r{repeat_index}-{'-'.join(task.task_id for task in task_group)}"
+    batch_meta: dict[str, Any] = {
+        "batch_id": batch_id,
+        "repeat_index": repeat_index,
+        "task_ids": [task.task_id for task in task_group],
+        "prompt_approx_tokens": batch_prompt_tokens,
+        "doc_name": doc_name,
+    }
+
+    try:
+        shared_generation = run_model_with_deadline(batch_prompt, destination, options)
+        shared_usage = normalize_usage(shared_generation.get("usage"))
+        split_usage = split_usage_across_tasks(shared_usage, len(task_group))
+        split_prompt_tokens = split_int_total(batch_prompt_tokens, len(task_group))
+        sources = parse_batch_sources(
+            shared_generation.get("raw_text", ""),
+            [task.task_id for task in task_group],
+        )
+        batch_meta["usage"] = shared_usage
+        batch_meta["parsed_task_count"] = len(sources)
+    except Exception as exc:  # pragma: no cover - surfaced in JSON report
+        batch_meta["error"] = str(exc)
+        for task in task_group:
+            case_record = single(task)
+            case_record["batch_fallback_reason"] = str(exc)
+            emit(case_record)
+        return results, batch_meta
+
+    for idx, task in enumerate(task_group):
+        case_record: dict[str, Any] = {
+            "task_id": task.task_id,
+            "task_title": task.title,
+            "repeat_index": repeat_index,
+            "seed": None if options is None else options.seed,
+            "doc_token_reference": doc_token_reference,
+        }
+        try:
+            source_code = sources.get(task.task_id, "")
+            generation_error = None
+            if not source_code.strip():
+                generation_error = (
+                    f"shared batch did not return source_code for task '{task.task_id}'"
+                )
+            initial_attempt = build_attempt_from_source(
+                task=task,
+                args=args,
+                runner="aether",
+                source_code=source_code,
+                prompt_kind="initial_batch",
+                prompt_approx_tokens=split_prompt_tokens[idx],
+                usage=split_usage[idx],
+                generation_meta={
+                    "response_id": shared_generation.get("response_id"),
+                    "shared_batch": True,
+                    "task_ids": [item.task_id for item in task_group],
+                },
+                generation_error=generation_error,
+                shared_prompt_approx_tokens=batch_prompt_tokens,
+                batch_id=batch_id,
+            )
+            attempts = apply_repairs(
+                initial_attempt=initial_attempt,
+                destination=destination,
+                task=task,
+                args=args,
+                runner="aether",
+                repair_prompt_builder=lambda **kwargs: build_repair_prompt(
+                    doc_name=doc_name,
+                    doc_text=doc_text,
+                    **kwargs,
+                ),
+                options=options,
+            )
+            case_record.update(finalize_case_record(attempts))
+            case_record["doc_token_reference"] = doc_token_reference
+        except Exception as exc:  # pragma: no cover - surfaced in JSON report
+            case_record["generated_ok"] = False
+            case_record["generation_error"] = str(exc)
+            case_record["run"] = {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": str(exc),
+                "elapsed_seconds": 0.0,
+                "exact_stdout_match": False,
+            }
+            case_record["attempt_count"] = 0
+            case_record["resolved_after_repair"] = False
+            case_record["failure_fingerprint"] = derive_failure_fingerprint(case_record)
+        finally:
+            try:
+                run_destination_cleanup(destination, task, doc_name, repeat_index)
+            except Exception as cleanup_exc:  # pragma: no cover - surfaced in JSON report
+                case_record["cleanup_error"] = str(cleanup_exc)
+        if args.progress:
+            print_progress_done(destination, doc_name, task, repeat_index, case_record)
+        emit(case_record)
+
+    return results, batch_meta
 
 
 def run_aether_cases_for_repeat(
@@ -2604,224 +3120,89 @@ def run_aether_cases_for_repeat(
     args: argparse.Namespace,
     doc_token_reference: dict[str, Any],
     on_case_complete: Any | None = None,
+    options: RequestOptions | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Every task of one repeat under ONE variant (variant-major). main() no longer
+    uses this -- it interleaves variants per task -- but it is kept for callers."""
     results: list[dict[str, Any]] = []
     batch_runs: list[dict[str, Any]] = []
-    batch_size = effective_shared_guide_batch_size(args, destination)
+    for task_group in chunk_list(tasks, effective_shared_guide_batch_size(args, destination)):
+        group_results, batch_meta = run_aether_task_group(
+            destination=destination,
+            doc_name=doc_name,
+            doc_text=doc_text,
+            task_group=task_group,
+            repeat_index=repeat_index,
+            args=args,
+            doc_token_reference=doc_token_reference,
+            options=options,
+            on_case_complete=on_case_complete,
+        )
+        results.extend(group_results)
+        if batch_meta is not None:
+            batch_runs.append(batch_meta)
+    return results, batch_runs
 
-    def run_single_task(task: Task) -> dict[str, Any]:
-        if args.progress:
-            print_progress_start(destination, doc_name, task, repeat_index)
-        prompt = build_prompt(doc_name=doc_name, doc_text=doc_text, task=task)
-        case_record: dict[str, Any] = {
-            "task_id": task.task_id,
-            "task_title": task.title,
-            "repeat_index": repeat_index,
+
+def interleaved_variant_order(variant_count: int, unit_index: int) -> list[int]:
+    """The variant order for one task (or batch) unit: a rotation that shifts by
+    one each unit, so over a suite every variant runs first equally often.
+
+    Running variants back to back per task, rather than variant-major, keeps a
+    slow drift in the serving stack (load, thermal state, a mid-run restart) from
+    landing on one variant; rotating the order keeps "always runs second" from
+    becoming a variable of its own."""
+    if variant_count <= 0:
+        return []
+    start = unit_index % variant_count
+    return [(start + offset) % variant_count for offset in range(variant_count)]
+
+
+def run_baseline_case(
+    *,
+    runner: str,
+    destination: Destination,
+    task: Task,
+    repeat_index: int,
+    args: argparse.Namespace,
+    doc_token_reference: dict[str, Any],
+    options: RequestOptions | None = None,
+) -> dict[str, Any]:
+    """One Python or Rust comparison case (no guide in the prompt)."""
+    prompt_builder = build_python_prompt if runner == "python" else build_rust_prompt
+    repair_builder = build_python_repair_prompt if runner == "python" else build_rust_repair_prompt
+    try:
+        case = execute_case(
+            initial_prompt=prompt_builder(task),
+            destination=destination,
+            task=task,
+            args=args,
+            runner=runner,
+            repair_prompt_builder=lambda **kwargs: repair_builder(**kwargs),
+            options=options,
+        )
+    except Exception as exc:  # pragma: no cover - surfaced in JSON report
+        case = {
             "attempts": [],
-            "doc_token_reference": doc_token_reference,
-        }
-        context_limit = get_destination_context_limit(destination)
-        if context_limit is not None and approx_tokens(prompt) >= context_limit:
-            case_record.update(
-                make_prompt_too_large_record(
-                    prompt=prompt,
-                    context_limit=context_limit,
-                    destination=destination,
-                )
-            )
-            if args.progress:
-                print_progress_done(destination, doc_name, task, repeat_index, case_record)
-            return case_record
-        try:
-            aether_case = execute_case(
-                initial_prompt=prompt,
-                destination=destination,
-                task=task,
-                args=args,
-                runner="aether",
-                repair_prompt_builder=lambda **kwargs: build_repair_prompt(
-                    doc_name=doc_name,
-                    doc_text=doc_text,
-                    **kwargs,
-                ),
-            )
-            case_record.update(aether_case)
-            case_record["doc_token_reference"] = doc_token_reference
-        except Exception as exc:  # pragma: no cover - surfaced in JSON report
-            case_record["generated_ok"] = False
-            case_record["generation_error"] = str(exc)
-            case_record["run"] = {
+            "generated_ok": False,
+            "generation_error": str(exc),
+            "run": {
                 "returncode": -1,
                 "stdout": "",
                 "stderr": str(exc),
                 "elapsed_seconds": 0.0,
                 "exact_stdout_match": False,
-            }
-            case_record["attempt_count"] = len(case_record["attempts"])
-            case_record["resolved_after_repair"] = False
-            case_record["failure_fingerprint"] = derive_failure_fingerprint(case_record)
-        finally:
-            try:
-                run_destination_cleanup(destination, task, doc_name, repeat_index)
-            except Exception as cleanup_exc:  # pragma: no cover - surfaced in JSON report
-                case_record["cleanup_error"] = str(cleanup_exc)
-        if args.progress:
-            print_progress_done(destination, doc_name, task, repeat_index, case_record)
-        return case_record
-
-    if batch_size <= 1:
-        workers = max(1, int(os.environ.get("AETHER_BENCH_WORKERS", "1") or "1"))
-        if workers <= 1 or len(tasks) <= 1:
-            for task in tasks:
-                case_record = run_single_task(task)
-                results.append(case_record)
-                if on_case_complete:
-                    on_case_complete(case_record)
-            return results, batch_runs
-        # Concurrent fan-out: the loaded model serves several requests at once
-        # (LM Studio PARALLEL); keep original task order and serialize the
-        # checkpoint callback so the incremental JSON stays consistent.
-        import concurrent.futures as _cf
-        import threading as _th
-        _cb_lock = _th.Lock()
-        _by_idx: dict[int, dict[str, Any]] = {}
-        with _cf.ThreadPoolExecutor(max_workers=workers) as _ex:
-            _fut = {_ex.submit(run_single_task, t): i for i, t in enumerate(tasks)}
-            for _f in _cf.as_completed(_fut):
-                _i = _fut[_f]
-                _rec = _f.result()
-                _by_idx[_i] = _rec
-                if on_case_complete:
-                    with _cb_lock:
-                        on_case_complete(_rec)
-        results = [_by_idx[i] for i in range(len(tasks))]
-        return results, batch_runs
-
-    for task_group in chunk_list(tasks, batch_size):
-        for task in task_group:
-            if args.progress:
-                print_progress_start(destination, doc_name, task, repeat_index)
-
-        batch_prompt = build_batch_prompt(doc_name=doc_name, doc_text=doc_text, tasks=task_group)
-        context_limit = get_destination_context_limit(destination)
-        if context_limit is not None and approx_tokens(batch_prompt) >= context_limit:
-            if len(task_group) > 1:
-                for task in task_group:
-                    case_record = run_single_task(task)
-                    results.append(case_record)
-                    if on_case_complete:
-                        on_case_complete(case_record)
-                continue
-            case_record = run_single_task(task_group[0])
-            results.append(case_record)
-            if on_case_complete:
-                on_case_complete(case_record)
-            continue
-
-        batch_prompt_tokens = approx_tokens(batch_prompt)
-        batch_id = f"{doc_name}-r{repeat_index}-{'-'.join(task.task_id for task in task_group)}"
-        batch_meta: dict[str, Any] = {
-            "batch_id": batch_id,
-            "repeat_index": repeat_index,
-            "task_ids": [task.task_id for task in task_group],
-            "prompt_approx_tokens": batch_prompt_tokens,
-            "doc_name": doc_name,
+            },
+            "attempt_count": 0,
+            "resolved_after_repair": False,
         }
-
-        shared_generation: dict[str, Any] | None = None
-        try:
-            shared_generation = run_model_with_deadline(batch_prompt, destination)
-            shared_usage = normalize_usage(shared_generation.get("usage"))
-            split_usage = split_usage_across_tasks(shared_usage, len(task_group))
-            split_prompt_tokens = split_int_total(batch_prompt_tokens, len(task_group))
-            sources = parse_batch_sources(
-                shared_generation.get("raw_text", ""),
-                [task.task_id for task in task_group],
-            )
-            batch_meta["usage"] = shared_usage
-            batch_meta["parsed_task_count"] = len(sources)
-
-            for idx, task in enumerate(task_group):
-                case_record: dict[str, Any] = {
-                    "task_id": task.task_id,
-                    "task_title": task.title,
-                    "repeat_index": repeat_index,
-                    "doc_token_reference": doc_token_reference,
-                }
-                try:
-                    source_code = sources.get(task.task_id, "")
-                    generation_error = None
-                    if not source_code.strip():
-                        generation_error = (
-                            f"shared batch did not return source_code for task '{task.task_id}'"
-                        )
-                    initial_attempt = build_attempt_from_source(
-                        task=task,
-                        args=args,
-                        runner="aether",
-                        source_code=source_code,
-                        prompt_kind="initial_batch",
-                        prompt_approx_tokens=split_prompt_tokens[idx],
-                        usage=split_usage[idx],
-                        generation_meta={
-                            "response_id": shared_generation.get("response_id"),
-                            "shared_batch": True,
-                            "task_ids": [item.task_id for item in task_group],
-                        },
-                        generation_error=generation_error,
-                        shared_prompt_approx_tokens=batch_prompt_tokens,
-                        batch_id=batch_id,
-                    )
-                    attempts = apply_repairs(
-                        initial_attempt=initial_attempt,
-                        destination=destination,
-                        task=task,
-                        args=args,
-                        runner="aether",
-                        repair_prompt_builder=lambda **kwargs: build_repair_prompt(
-                            doc_name=doc_name,
-                            doc_text=doc_text,
-                            **kwargs,
-                        ),
-                    )
-                    case_record.update(finalize_case_record(attempts))
-                    case_record["doc_token_reference"] = doc_token_reference
-                except Exception as exc:  # pragma: no cover - surfaced in JSON report
-                    case_record["generated_ok"] = False
-                    case_record["generation_error"] = str(exc)
-                    case_record["run"] = {
-                        "returncode": -1,
-                        "stdout": "",
-                        "stderr": str(exc),
-                        "elapsed_seconds": 0.0,
-                        "exact_stdout_match": False,
-                    }
-                    case_record["attempt_count"] = 0
-                    case_record["resolved_after_repair"] = False
-                    case_record["failure_fingerprint"] = derive_failure_fingerprint(case_record)
-                finally:
-                    try:
-                        run_destination_cleanup(destination, task, doc_name, repeat_index)
-                    except Exception as cleanup_exc:  # pragma: no cover - surfaced in JSON report
-                        case_record["cleanup_error"] = str(cleanup_exc)
-                if args.progress:
-                    print_progress_done(destination, doc_name, task, repeat_index, case_record)
-                results.append(case_record)
-                if on_case_complete:
-                    on_case_complete(case_record)
-        except Exception as exc:  # pragma: no cover - surfaced in JSON report
-            batch_meta["error"] = str(exc)
-            for task in task_group:
-                case_record = run_single_task(task)
-                case_record["batch_fallback_reason"] = str(exc)
-                results.append(case_record)
-                if on_case_complete:
-                    on_case_complete(case_record)
-
-        batch_runs.append(batch_meta)
-
-    return results, batch_runs
-
+        case["failure_fingerprint"] = derive_failure_fingerprint(case)
+    case["task_id"] = task.task_id
+    case["task_title"] = task.title
+    case["repeat_index"] = repeat_index
+    case["seed"] = None if options is None else options.seed
+    case["doc_token_reference"] = doc_token_reference
+    return case
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -2829,8 +3210,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tasks", type=pathlib.Path, default=DEFAULT_TASKS, help="task manifest JSON")
     parser.add_argument(
         "--docs",
-        default="full,small",
-        help="comma-separated doc variants to benchmark (default: full,small; also supports medium, none)",
+        default=None,
+        help="comma-separated doc variants to benchmark: full, medium, small, none, or any --doc NAME "
+        "(default: the --doc names when any are given, else full,small)",
+    )
+    parser.add_argument(
+        "--doc",
+        action="append",
+        default=[],
+        metavar="NAME=PATH",
+        help="define or replace guide variant NAME with the file at PATH; repeatable. For a board, "
+        "point it at the docs/ of the same checkout that built --aether-bin",
+    )
+    parser.add_argument(
+        "--aether-root",
+        type=pathlib.Path,
+        default=DEFAULT_AETHER_ROOT,
+        help="aether checkout the default guides come from and the binary's +sha is checked "
+        "against (default: components/aether)",
     )
     parser.add_argument("--task", action="append", default=[], help="restrict to one or more task ids")
     parser.add_argument("--list-tasks", action="store_true", help="list manifest task ids and exit")
@@ -2916,6 +3313,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--repeats", type=int, default=1, help="repeat each task N times per doc variant")
     parser.add_argument(
+        "--start-repeat",
+        type=int,
+        default=0,
+        help="index of the first repeat (default 0); repeat r is requested with seed base + r, so "
+        "--start-repeat 2 --repeats 1 re-runs exactly repeat 2",
+    )
+    parser.add_argument(
+        "--seed-base",
+        type=int,
+        default=None,
+        help="base seed for self-hosted destinations without their own `seed` (D37b uses 42); "
+        "repeat r sends seed base + r",
+    )
+    parser.add_argument(
         "--repair-attempts",
         type=int,
         default=0,
@@ -2928,6 +3339,39 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="max characters of stdout/stderr/source included in a repair prompt section",
     )
     parser.add_argument("--aether-bin", type=pathlib.Path, default=DEFAULT_AETHER_BIN, help="path to local aether binary")
+    parser.add_argument(
+        "--aether-bin-sha256",
+        default="",
+        metavar="HEX",
+        help="expected sha256 of --aether-bin; a mismatch always aborts. Required, with --allow-skew, "
+        "for a standalone build, whose version carries no +sha",
+    )
+    parser.add_argument(
+        "--allow-skew",
+        action="store_true",
+        help="run although the binary cannot be tied to --aether-root's HEAD (dirty build, '+' "
+        "gitlink, +sha mismatch, standalone build); the reasons are recorded in the report",
+    )
+    parser.add_argument(
+        "--aether-arg",
+        action="append",
+        default=[],
+        dest="aether_args",
+        metavar="ARG",
+        help="extra aether flag placed before the program path on every aether call; repeatable and "
+        "recorded. Write flag values with '=': --aether-arg=--strict",
+    )
+    parser.add_argument(
+        "--build-type",
+        default=None,
+        help="build type to record for the binary (default: read CMAKE_BUILD_TYPE from a "
+        "CMakeCache.txt beside it, else unknown)",
+    )
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="run the start-up checks (docs, binary snapshot and hash, skew guard) and exit",
+    )
     parser.add_argument(
         "--sandbox-deny",
         default="net,proc",
@@ -2989,23 +3433,326 @@ def capture_aether_version(aether_bin: pathlib.Path) -> tuple[str, str]:
     return (match.group(1) if match else (raw or "unknown")), raw
 
 
-def main() -> int:
+def parse_aether_version(token: str) -> dict[str, Any]:
+    """Split a version token into its parts.
+
+    Umbrella builds append the component's short commit, with -dirty for a tree
+    with uncommitted changes to tracked files (cmake/PscalBuildCommit.cmake):
+    `2026-09-22-1+da6028e`, `2026-09-22-1+da6028e-dirty`. A standalone aether
+    build reports the VERSION alone (`2026-10-06-1`), so nothing ties it to a
+    source commit."""
+    token = (token or "").strip()
+    version, commit, dirty = token, None, False
+    if "+" in token:
+        version, _, rest = token.partition("+")
+        if rest.endswith("-dirty"):
+            dirty, rest = True, rest[: -len("-dirty")]
+        commit = rest or None
+    elif token.endswith("-dirty"):
+        version, dirty = token[: -len("-dirty")], True
+    return {"token": token, "version": version, "commit": commit, "dirty": dirty}
+
+
+def version_tuple(version: str | None) -> tuple[int, ...] | None:
+    """`2026-07-26-1` (any +sha suffix ignored) -> (2026, 7, 26, 1), else None."""
+    if not version:
+        return None
+    match = re.match(r"^\s*(\d{4})-(\d{2})-(\d{2})-(\d+)", str(version))
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
+def _git(cwd: Any, *argv: str, timeout: int = 20) -> str | None:
+    """A read-only git query. GIT_OPTIONAL_LOCKS=0 keeps status/describe from
+    refreshing (and so writing) the index of a checkout we only inspect."""
+    env = dict(os.environ)
+    env["GIT_OPTIONAL_LOCKS"] = "0"
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(cwd), *argv],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=timeout,
+            env=env,
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip()
+
+
+def git_checkout_info(path: Any, require_toplevel: bool = False) -> dict[str, Any] | None:
+    """HEAD, describe and dirty flag of the git checkout holding `path`, or None.
+
+    With require_toplevel, `path` must itself be the checkout's top: an
+    uninitialised submodule directory sits inside the umbrella's work tree and
+    would otherwise report the umbrella's HEAD as its own."""
+    target = pathlib.Path(path)
+    directory = target if target.is_dir() else target.parent
+    if not directory.exists():
+        return None
+    top = _git(directory, "rev-parse", "--show-toplevel")
+    if not top:
+        return None
+    if require_toplevel:
+        try:
+            if pathlib.Path(top).resolve() != directory.resolve():
+                return None
+        except OSError:
+            return None
+    status = _git(top, "status", "--porcelain", "--untracked-files=no")
+    return {
+        "toplevel": display_path(top),
+        "head": _git(top, "rev-parse", "HEAD"),
+        "describe": _git(top, "describe", "--always", "--dirty"),
+        "dirty": bool(status),
+    }
+
+
+def umbrella_submodule_state(name: str = "components/aether") -> dict[str, Any]:
+    """`git submodule status` and the recorded gitlink for one umbrella submodule.
+    state: ' ' in sync, '+' checkout differs from the gitlink, '-' not
+    initialised, 'U' merge conflict."""
+    line = _git(REPO_ROOT, "submodule", "status", "--", name) or ""
+    tree = _git(REPO_ROOT, "ls-tree", "HEAD", "--", name) or ""
+    gitlink = None
+    parts = tree.split()
+    if len(parts) >= 3 and parts[1] == "commit":
+        gitlink = parts[2]
+    return {
+        "status_line": line or None,
+        "state": (line[:1] if line else None),
+        "gitlink": gitlink,
+    }
+
+
+def detect_build_type(aether_bin: pathlib.Path) -> tuple[str | None, str | None]:
+    """CMAKE_BUILD_TYPE from a CMakeCache.txt beside the binary or one level up."""
+    try:
+        resolved = aether_bin.resolve()
+    except OSError:
+        return None, None
+    for directory in (resolved.parent, resolved.parent.parent):
+        cache = directory / "CMakeCache.txt"
+        if not cache.is_file():
+            continue
+        try:
+            for line in cache.read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.startswith("CMAKE_BUILD_TYPE:"):
+                    value = line.split("=", 1)[1].strip() if "=" in line else ""
+                    return (value or "(none)"), display_path(cache)
+        except OSError:
+            return None, None
+        return "(none)", display_path(cache)
+    return None, None
+
+
+def snapshot_aether_binary(aether_bin: pathlib.Path, run_dir: pathlib.Path) -> dict[str, Any]:
+    """Copy the binary into this run's private temp dir and hash the copy.
+
+    Every compile_and_run then executes the copy, so a rebuild of the original
+    mid-run (which used to mix two compilers into one report) cannot reach it."""
+    source = aether_bin.resolve()
+    snapshot = run_dir / source.name
+    shutil.copy2(source, snapshot)
+    snapshot.chmod(snapshot.stat().st_mode | 0o111)
+    digest = sha256_file(snapshot)
+    if sha256_file(source) != digest:
+        raise SystemExit(f"{aether_bin} changed while it was being copied; re-run when the build is done")
+    token, raw = capture_aether_version(snapshot)
+    parsed = parse_aether_version(token)
+    return {
+        "path": snapshot,
+        "aether_bin": display_path(aether_bin),
+        "aether_bin_resolved": display_path(source),
+        "binary_sha256": digest,
+        "aether_version": token,
+        "aether_version_raw": raw,
+        "language_version": parsed["version"],
+        "binary_commit": parsed["commit"],
+        "binary_dirty": parsed["dirty"],
+        "standalone_build": parsed["commit"] is None,
+    }
+
+
+def assess_skew(
+    toolchain: dict[str, Any],
+    aether_root: pathlib.Path,
+    allow_skew: bool,
+    expected_sha256: str = "",
+) -> dict[str, Any]:
+    """The skew guard. Refuses (SystemExit) a binary that cannot be tied to the
+    aether checkout the run takes its guides from, unless --allow-skew.
+
+    Refused without --allow-skew:
+      * a -dirty binary (built from uncommitted source);
+      * a '+' in `git submodule status components/aether` (the checkout is not
+        the commit the umbrella records), when --aether-root is that submodule;
+      * a +sha that differs from --aether-root's HEAD (or from the recorded
+        gitlink, when the submodule is not checked out);
+      * a +sha that cannot be checked because --aether-root is not a checkout;
+      * a standalone build, which carries no +sha at all. It also needs
+        --aether-bin-sha256, so the acceptance names exactly one binary.
+    A --aether-bin-sha256 that does not match the binary always aborts."""
+    reasons: list[str] = []
+    expected = (expected_sha256 or "").strip().lower()
+    if expected and expected != toolchain["binary_sha256"]:
+        raise SystemExit(
+            f"--aether-bin-sha256 {expected} does not match {toolchain['aether_bin']} "
+            f"(sha256 {toolchain['binary_sha256']})"
+        )
+
+    try:
+        is_default_root = aether_root.resolve() == DEFAULT_AETHER_ROOT.resolve()
+    except OSError:
+        is_default_root = False
+    submodule = umbrella_submodule_state() if is_default_root else None
+    root_info = git_checkout_info(aether_root, require_toplevel=True)
+    commit = toolchain.get("binary_commit")
+
+    if toolchain.get("binary_dirty"):
+        reasons.append("the binary was built from a dirty tree (its version carries -dirty)")
+    if submodule and submodule.get("state") == "+":
+        reasons.append(
+            "components/aether is checked out at a commit other than the umbrella's recorded "
+            "gitlink ('+' in git submodule status)"
+        )
+    if submodule and submodule.get("state") == "U":
+        reasons.append("components/aether has a merge conflict ('U' in git submodule status)")
+    if commit:
+        target = root_info.get("head") if root_info else None
+        target_label = f"{display_path(aether_root)} HEAD"
+        if target is None and submodule and submodule.get("gitlink"):
+            target, target_label = submodule["gitlink"], "the umbrella's components/aether gitlink"
+        if target is None:
+            reasons.append(
+                f"cannot check the binary's +{commit}: {display_path(aether_root)} is not a git checkout"
+            )
+        elif not target.startswith(commit):
+            reasons.append(f"the binary is +{commit} but {target_label} is {target[:12]}")
+    else:
+        reasons.append(
+            "standalone build: the binary's version carries no +sha, so nothing ties it to a "
+            "source commit"
+        )
+
+    if reasons and not allow_skew:
+        raise SystemExit(
+            "skew guard: refusing to run on this binary:\n  - "
+            + "\n  - ".join(reasons)
+            + "\nBuild from a clean checkout of the guides' commit, or pass --allow-skew"
+            + (" and --aether-bin-sha256 <sha256>" if not commit else "")
+            + " (recorded in the report)."
+        )
+    if reasons and not commit and not expected:
+        raise SystemExit(
+            "skew guard: a standalone binary needs --allow-skew AND --aether-bin-sha256 "
+            f"{toolchain['binary_sha256']} so the run names exactly the binary it accepted"
+        )
+    return {
+        "ok": not reasons,
+        "allowed_by_flag": bool(reasons) and allow_skew,
+        "reasons": reasons,
+        "expected_binary_sha256": expected or None,
+        "aether_root": display_path(aether_root),
+        "aether_root_checkout": root_info,
+        "umbrella_submodule": submodule,
+    }
+
+
+def prompt_template_fingerprint() -> dict[str, Any]:
+    """sha256 of every prompt template, rendered with placeholder inputs.
+
+    The guide, task and repair inputs each have their own hash; this names the
+    fixed wording around them. D41: it (with the harness sha) replaces the
+    harness-only guide-stamp bumps, so any wording change shows up here."""
+    task = Task(
+        task_id="{TASK_ID}",
+        title="{TASK_TITLE}",
+        prompt="{TASK_PROMPT}",
+        expected_stdout="{EXPECTED_STDOUT}",
+    )
+    repair_inputs = dict(
+        previous_source="{PREVIOUS_SOURCE}",
+        attempt_number=1,
+        failure_summary="{FAILURE_SUMMARY}",
+        observed_stdout="{OBSERVED_STDOUT}",
+        observed_stderr="{OBSERVED_STDERR}",
+    )
+    rendered = {
+        "initial": build_prompt("{DOC_NAME}", "{DOC_TEXT}", task),
+        "initial_none": build_prompt("none", "", task),
+        "batch": build_batch_prompt("{DOC_NAME}", "{DOC_TEXT}", [task]),
+        "repair": build_repair_prompt(doc_name="{DOC_NAME}", doc_text="{DOC_TEXT}", task=task, **repair_inputs),
+        "python": build_python_prompt(task),
+        "python_repair": build_python_repair_prompt(task=task, **repair_inputs),
+        "rust": build_rust_prompt(task),
+        "rust_repair": build_rust_repair_prompt(task=task, **repair_inputs),
+    }
+    per_template = {name: sha256_text(text) for name, text in sorted(rendered.items())}
+    return {
+        "sha256": sha256_text(json.dumps(per_template, sort_keys=True)),
+        "templates": per_template,
+    }
+
+
+HARNESS_SOURCE_FILES = ("tools/aether_doc_bench.py", "tools/fleet_env.py")
+
+
+def harness_fingerprint() -> dict[str, Any]:
+    """Identity of the harness code: the umbrella commit, whether the harness
+    sources differ from it, and a content hash of those sources (which holds even
+    outside git)."""
+    files: dict[str, str] = {}
+    for rel in HARNESS_SOURCE_FILES:
+        path = REPO_ROOT / rel
+        if path.is_file():
+            files[rel] = sha256_file(path)
+    dirty_files = _git(REPO_ROOT, "status", "--porcelain", "--untracked-files=no", "--", *HARNESS_SOURCE_FILES)
+    return {
+        "sha256": sha256_text(json.dumps(files, sort_keys=True)),
+        "files": files,
+        "umbrella_head": _git(REPO_ROOT, "rev-parse", "HEAD"),
+        "harness_dirty": bool(dirty_files),
+    }
+
+
+def guide_record(name: str, path: pathlib.Path | None, text: str) -> dict[str, Any]:
+    """What a report says about one guide variant: path, stamp, size and hash,
+    plus the git state of the checkout the file lives in."""
+    if path is None:
+        return {
+            "path": None,
+            "version": None,
+            "sha256": None,
+            "bytes": 0,
+            "approx_tokens": 0,
+            "checkout": None,
+        }
+    return {
+        "path": display_path(path),
+        "version": guide_version(text),
+        "sha256": sha256_text(text),
+        "bytes": len(text.encode("utf-8")),
+        "approx_tokens": approx_tokens(text),
+        "checkout": git_checkout_info(path),
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = build_arg_parser()
-    args = parser.parse_args()
-
-    if not args.aether_bin.exists():
-        raise SystemExit(f"missing aether binary: {args.aether_bin}")
-
-    # Capture the Aether language version once, so every result is traceable to
-    # the language build it ran against (components/aether/VERSION + CHANGELOG.md).
-    aether_version, aether_version_raw = capture_aether_version(args.aether_bin)
+    args = parser.parse_args(argv)
 
     tasks = load_tasks(args.tasks)
+    tasks_bytes = args.tasks.read_bytes()
 
     # Record the dataset's own version stamp (YYYY-MM-DD-N), parallel to the
     # language version, so a score ties to the exact dataset revision too.
     try:
-        _traw = json.loads(read_text(args.tasks))
+        _traw = json.loads(tasks_bytes.decode("utf-8"))
         tasks_version = _traw.get("version") if isinstance(_traw, dict) else None
     except Exception:
         tasks_version = None
@@ -3073,7 +3820,9 @@ def main() -> int:
     if not tasks:
         raise SystemExit("no tasks selected")
 
+    destinations_sha256 = None
     if args.destinations_config.exists():
+        destinations_sha256 = sha256_file(args.destinations_config)
         destinations = load_destinations(args.destinations_config)
     else:
         destinations = []
@@ -3103,32 +3852,155 @@ def main() -> int:
 
     if not destinations:
         raise SystemExit("no destinations selected")
+    if args.repeats < 1:
+        raise SystemExit("--repeats must be at least 1")
+    if args.start_repeat < 0:
+        raise SystemExit("--start-repeat must be >= 0")
 
-    doc_variants = resolve_docs([part.strip() for part in args.docs.split(",") if part.strip()])
+    doc_overrides = parse_doc_overrides(args.doc)
+    variants = doc_variant_paths(args.aether_root, doc_overrides)
+    if args.docs is not None:
+        doc_names = [part.strip() for part in args.docs.split(",") if part.strip()]
+    elif doc_overrides:
+        doc_names = list(doc_overrides)
+    else:
+        doc_names = ["full", "small"]
+    doc_variants = resolve_docs(doc_names, variants)
+    doc_texts = {name: (read_text(path) if path else "") for name, path in doc_variants}
+
+    if not args.aether_bin.exists():
+        raise SystemExit(f"missing aether binary: {args.aether_bin}")
+
+    run_dir = pathlib.Path(tempfile.mkdtemp(prefix="aether-bench-run-"))
+    try:
+        return _run_benchmark(
+            args=args,
+            run_dir=run_dir,
+            tasks=tasks,
+            tasks_bytes=tasks_bytes,
+            tasks_version=tasks_version,
+            destinations=destinations,
+            destinations_sha256=destinations_sha256,
+            doc_variants=doc_variants,
+            doc_texts=doc_texts,
+            variants=variants,
+        )
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
+
+
+def _run_benchmark(
+    *,
+    args: argparse.Namespace,
+    run_dir: pathlib.Path,
+    tasks: list[Task],
+    tasks_bytes: bytes,
+    tasks_version: Any,
+    destinations: list[Destination],
+    destinations_sha256: str | None,
+    doc_variants: list[tuple[str, pathlib.Path | None]],
+    doc_texts: dict[str, str],
+    variants: dict[str, pathlib.Path | None],
+) -> int:
+    # Snapshot and hash the binary once, check it against the guides' checkout,
+    # then point every aether call at the snapshot.
+    original_bin = args.aether_bin
+    toolchain = snapshot_aether_binary(original_bin, run_dir)
+    skew = assess_skew(toolchain, args.aether_root, args.allow_skew, args.aether_bin_sha256)
+    if args.build_type:
+        build_type, build_type_source = args.build_type, "--build-type"
+    else:
+        build_type, build_type_source = detect_build_type(original_bin)
+    toolchain.update({
+        "build_type": build_type or "unknown",
+        "build_type_source": build_type_source,
+        "aether_args": list(args.aether_args or []),
+        "sandbox_deny": args.sandbox_deny,
+        "snapshot": True,
+    })
+    snapshot_path = toolchain.pop("path")
+    args.aether_bin = snapshot_path
+    args.aether_bin_display = toolchain["aether_bin"]
+    args.binary_sha256 = toolchain["binary_sha256"]
+
+    harness = harness_fingerprint()
+    harness["prompt_template"] = prompt_template_fingerprint()
+    umbrella_status = _git(REPO_ROOT, "status", "--porcelain", "--untracked-files=no")
+    provenance = {
+        "umbrella_head": harness["umbrella_head"],
+        "umbrella_dirty": bool(umbrella_status),
+        "aether_root": display_path(args.aether_root),
+        "aether_root_checkout": skew["aether_root_checkout"],
+        "components_aether_submodule": skew["umbrella_submodule"] or umbrella_submodule_state(),
+    }
+
+    guides: dict[str, dict[str, Any]] = {}
+    for name, path in variants.items():
+        if path is not None and not pathlib.Path(path).is_file():
+            continue
+        text = doc_texts.get(name)
+        if text is None:
+            text = read_text(path) if path else ""
+        guides[name] = guide_record(name, path, text)
+    # Each case carries this slim copy (the full record, with each guide's
+    # checkout, is the report-level "guides" block).
+    doc_token_reference: dict[str, dict[str, Any]] = {
+        name: {key: record[key] for key in ("path", "version", "sha256", "bytes", "approx_tokens")}
+        for name, record in guides.items()
+    }
 
     report: dict[str, Any] = {
-        "tasks_file": str(args.tasks),
+        "tasks_file": display_path(args.tasks),
         "tasks_version": tasks_version,
-        "destinations_config": str(args.destinations_config),
+        "tasks_sha256": sha256_bytes(tasks_bytes),
+        "destinations_config": display_path(args.destinations_config),
+        "destinations_sha256": destinations_sha256,
         "created_at_unix": int(time.time()),
-        "aether_version": aether_version,
-        "aether_version_raw": aether_version_raw,
-        "aether_bin": str(args.aether_bin),
+        "aether_version": toolchain["aether_version"],
+        "aether_version_raw": toolchain["aether_version_raw"],
+        "aether_bin": toolchain["aether_bin"],
+        "binary_sha256": toolchain["binary_sha256"],
+        "toolchain": toolchain,
+        "skew_guard": {key: skew[key] for key in ("ok", "allowed_by_flag", "reasons", "expected_binary_sha256")},
+        "provenance": provenance,
+        "harness": harness,
+        "run_config": {
+            "docs": [name for name, _ in doc_variants],
+            "repeats": args.repeats,
+            "start_repeat": args.start_repeat,
+            "seed_base": args.seed_base,
+            "repair_attempts": args.repair_attempts,
+            "repair_feedback_limit": args.repair_feedback_limit,
+            "shared_guide_batch_size": args.shared_guide_batch_size,
+            "python_baseline": bool(args.python_baseline),
+            "rust_baseline": bool(args.rust_baseline),
+            "skip_aether": bool(args.skip_aether),
+            "variant_order": "interleaved per task, rotated",
+            "task_ids": [task.task_id for task in tasks],
+        },
         "summary": {
             "total_cases_per_destination": len(tasks) * args.repeats,
             "doc_variants": len(doc_variants),
             "destination_count": len(destinations),
         },
-        "doc_token_reference": {
-            name: {
-                "path": str(path) if path else None,
-                "approx_tokens": approx_tokens(read_text(path)) if path else 0,
-                "bytes": len(read_text(path).encode("utf-8")) if path else 0,
-            }
-            for name, path in DOC_VARIANTS.items()
-        },
+        "guides": guides,
+        "doc_token_reference": doc_token_reference,
         "destinations": [],
     }
+
+    if args.preflight_only:
+        print(json.dumps({
+            "preflight": "ok",
+            "aether_version": toolchain["aether_version"],
+            "binary_sha256": toolchain["binary_sha256"],
+            "skew_guard": report["skew_guard"],
+            "docs": {name: guides.get(name, {}).get("sha256") for name, _ in doc_variants},
+            "tasks": len(tasks),
+            "tasks_sha256": report["tasks_sha256"],
+        }, indent=2))
+        return 0
+
+    report_lock = threading.Lock()
 
     def persist_report_checkpoint() -> None:
         if not args.output_json:
@@ -3175,11 +4047,6 @@ def main() -> int:
             variant_report["rust_baseline_exact_final_source_token_summary"] = summarize_final_source_tokens(rust_results, "exact")
             variant_report["rust_failure_patterns"] = summarize_failure_patterns(rust_results)
 
-    def append_case_and_checkpoint(variant_report: dict[str, Any], case_record: dict[str, Any]) -> None:
-        variant_report["results"].append(case_record)
-        refresh_variant_report(variant_report)
-        persist_report_checkpoint()
-
     for destination in destinations:
         ok, detail = preflight_destination(destination)
         if not ok:
@@ -3199,128 +4066,119 @@ def main() -> int:
             "type": destination.kind,
             "model": destination.model,
             "base_url": destination.base_url,
+            # The seed repeat 0 is requested with; repeat r adds r.
+            "seed_base": request_seed(destination, 0, args.seed_base),
             "variants": [],
         }
         report["destinations"].append(destination_report)
+
+        variant_reports: list[dict[str, Any]] = []
         for doc_name, doc_path in doc_variants:
-            doc_text = read_text(doc_path) if doc_path else ""
+            doc_text = doc_texts[doc_name]
+            record = guides.get(doc_name) or guide_record(doc_name, doc_path, doc_text)
+            batch_size = effective_shared_guide_batch_size(args, destination)
             variant_report = {
                 "doc_name": doc_name,
-                "doc_path": str(doc_path) if doc_path else None,
+                "doc_path": record["path"],
                 "doc_version": guide_version(doc_text),
+                "doc_sha256": record["sha256"],
                 "doc_bytes": len(doc_text.encode("utf-8")),
                 "doc_approx_tokens": approx_tokens(doc_text) if doc_text else 0,
                 "shared_guide_batch_size_requested": max(1, int(args.shared_guide_batch_size)),
-                "shared_guide_batch_size": effective_shared_guide_batch_size(args, destination),
-                "batch_mode_enabled": bool(effective_shared_guide_batch_size(args, destination) > 1),
+                "shared_guide_batch_size": batch_size,
+                "batch_mode_enabled": bool(batch_size > 1),
                 "batch_runs": [],
                 "results": [],
-                "summary": summarize([]),
-                "usage_summary": summarize_usage([]),
-                "source_token_summary": summarize_source_tokens([]),
-                "final_usage_summary": summarize_final_usage([], "all"),
-                "run_ok_final_usage_summary": summarize_final_usage([], "run_ok"),
-                "exact_final_usage_summary": summarize_final_usage([], "exact"),
-                "final_source_token_summary": summarize_final_source_tokens([], "all"),
-                "run_ok_final_source_token_summary": summarize_final_source_tokens([], "run_ok"),
-                "exact_final_source_token_summary": summarize_final_source_tokens([], "exact"),
-                "failure_patterns": summarize_failure_patterns([]),
             }
             if args.python_baseline:
                 variant_report["python_baseline_results"] = []
             if args.rust_baseline:
                 variant_report["rust_baseline_results"] = []
+            refresh_variant_report(variant_report)
             destination_report["variants"].append(variant_report)
-            persist_report_checkpoint()
+            variant_reports.append(variant_report)
+        persist_report_checkpoint()
 
-            for repeat_index in range(args.repeats):
-                if not args.skip_aether:
-                    repeat_results, repeat_batch_runs = run_aether_cases_for_repeat(
-                        destination=destination,
-                        doc_name=doc_name,
-                        doc_text=doc_text,
-                        tasks=tasks,
-                        repeat_index=repeat_index,
-                        args=args,
-                        doc_token_reference=report["doc_token_reference"],
-                        on_case_complete=lambda case_record, variant_report=variant_report: append_case_and_checkpoint(
-                            variant_report,
-                            case_record,
-                        ),
-                    )
-                    variant_report["batch_runs"].extend(repeat_batch_runs)
+        sequence = {"next": 0}
+
+        def append_case(variant_report: dict[str, Any], key: str, case_record: dict[str, Any]) -> None:
+            with report_lock:
+                case_record["case_sequence"] = sequence["next"]
+                sequence["next"] += 1
+                variant_report[key].append(case_record)
                 refresh_variant_report(variant_report)
                 persist_report_checkpoint()
 
-                if args.python_baseline:
-                    for task in tasks:
-                        try:
-                            python_case = execute_case(
-                                initial_prompt=build_python_prompt(task),
-                                destination=destination,
-                                task=task,
-                                args=args,
-                                runner="python",
-                                repair_prompt_builder=lambda **kwargs: build_python_repair_prompt(**kwargs),
-                            )
-                        except Exception as exc:  # pragma: no cover - surfaced in JSON report
-                            python_case = {
-                                "attempts": [],
-                                "generated_ok": False,
-                                "generation_error": str(exc),
-                                "run": {
-                                    "returncode": -1,
-                                    "stdout": "",
-                                    "stderr": str(exc),
-                                    "elapsed_seconds": 0.0,
-                                    "exact_stdout_match": False,
-                                },
-                                "attempt_count": 0,
-                                "resolved_after_repair": False,
-                            }
-                            python_case["failure_fingerprint"] = derive_failure_fingerprint(python_case)
-                        python_case["task_id"] = task.task_id
-                        python_case["task_title"] = task.title
-                        python_case["repeat_index"] = repeat_index
-                        python_case["doc_token_reference"] = report["doc_token_reference"]
-                        variant_report["python_baseline_results"].append(python_case)
-                        refresh_variant_report(variant_report)
-                        persist_report_checkpoint()
+        groups = chunk_list(tasks, effective_shared_guide_batch_size(args, destination))
+        workers = max(1, int(os.environ.get("AETHER_BENCH_WORKERS", "1") or "1"))
+        for repeat_index in range(args.start_repeat, args.start_repeat + args.repeats):
+            options = RequestOptions(seed=request_seed(destination, repeat_index, args.seed_base))
+            units: list[tuple[int, int]] = []
+            for group_index, _group in enumerate(groups):
+                for variant_index in interleaved_variant_order(len(variant_reports), group_index + repeat_index):
+                    units.append((group_index, variant_index))
 
-                if args.rust_baseline:
-                    for task in tasks:
-                        try:
-                            rust_case = execute_case(
-                                initial_prompt=build_rust_prompt(task),
-                                destination=destination,
-                                task=task,
-                                args=args,
-                                runner="rust",
-                                repair_prompt_builder=lambda **kwargs: build_rust_repair_prompt(**kwargs),
-                            )
-                        except Exception as exc:  # pragma: no cover - surfaced in JSON report
-                            rust_case = {
-                                "attempts": [],
-                                "generated_ok": False,
-                                "generation_error": str(exc),
-                                "run": {
-                                    "returncode": -1,
-                                    "stdout": "",
-                                    "stderr": str(exc),
-                                    "elapsed_seconds": 0.0,
-                                    "exact_stdout_match": False,
-                                },
-                                "attempt_count": 0,
-                                "resolved_after_repair": False,
-                            }
-                            rust_case["failure_fingerprint"] = derive_failure_fingerprint(rust_case)
-                        rust_case["task_id"] = task.task_id
-                        rust_case["task_title"] = task.title
-                        rust_case["repeat_index"] = repeat_index
-                        rust_case["doc_token_reference"] = report["doc_token_reference"]
-                        variant_report["rust_baseline_results"].append(rust_case)
-                        refresh_variant_report(variant_report)
-                        persist_report_checkpoint()
+            def run_unit(unit: tuple[int, int]) -> None:
+                group_index, variant_index = unit
+                group = groups[group_index]
+                variant_report = variant_reports[variant_index]
+                doc_name, _doc_path = doc_variants[variant_index]
+                if not args.skip_aether:
+                    _results, batch_meta = run_aether_task_group(
+                        destination=destination,
+                        doc_name=doc_name,
+                        doc_text=doc_texts[doc_name],
+                        task_group=group,
+                        repeat_index=repeat_index,
+                        args=args,
+                        doc_token_reference=doc_token_reference,
+                        options=options,
+                        on_case_complete=lambda case_record, vr=variant_report: append_case(vr, "results", case_record),
+                    )
+                    if batch_meta is not None:
+                        with report_lock:
+                            variant_report["batch_runs"].append(batch_meta)
+                for runner, key, enabled in (
+                    ("python", "python_baseline_results", args.python_baseline),
+                    ("rust", "rust_baseline_results", args.rust_baseline),
+                ):
+                    if not enabled:
+                        continue
+                    for task in group:
+                        case = run_baseline_case(
+                            runner=runner,
+                            destination=destination,
+                            task=task,
+                            repeat_index=repeat_index,
+                            args=args,
+                            doc_token_reference=doc_token_reference,
+                            options=options,
+                        )
+                        append_case(variant_report, key, case)
+
+            if workers > 1 and len(units) > 1:
+                # Concurrent fan-out (LM Studio PARALLEL and the like). Units are
+                # submitted in the interleaved order; results land as they finish
+                # and carry case_sequence, so the order stays reconstructible.
+                import concurrent.futures as _cf
+
+                with _cf.ThreadPoolExecutor(max_workers=workers) as executor:
+                    for future in [executor.submit(run_unit, unit) for unit in units]:
+                        future.result()
+            else:
+                for unit in units:
+                    run_unit(unit)
+            with report_lock:
+                for variant_report in variant_reports:
+                    refresh_variant_report(variant_report)
+                persist_report_checkpoint()
+
+    # The snapshot must still be the binary every case was scored with.
+    final_sha = sha256_file(snapshot_path)
+    report["toolchain"]["binary_sha256_at_end"] = final_sha
+    if final_sha != toolchain["binary_sha256"]:
+        report["toolchain"]["snapshot_modified"] = True
+        print("[toolchain] WARNING: the binary snapshot changed during the run", file=sys.stderr)
 
     if args.output_json:
         persist_report_checkpoint()

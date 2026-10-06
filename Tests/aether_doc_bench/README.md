@@ -90,6 +90,47 @@ List configured destinations:
 python3 tools/aether_doc_bench.py --list-destinations
 ```
 
+## Reproducibility: binary, guides, seeds
+
+Every report names exactly what produced it, and the harness refuses to start
+when it cannot:
+
+- **Binary.** At start-up the harness copies `--aether-bin` into a private
+  temp dir, hashes it, and runs every case on that copy, so a rebuild mid-run
+  cannot mix compilers. Each run records `binary_sha256`.
+- **Skew guard.** The run stops if the binary was built from a dirty tree
+  (`-dirty`), if `components/aether` is not at the umbrella's gitlink (`+` in
+  `git submodule status`), or if the binary's `+sha` is not `--aether-root`'s
+  HEAD. A standalone build (no `+sha`) always needs `--allow-skew` together with
+  `--aether-bin-sha256 <its sha256>`. `--allow-skew` is recorded with its
+  reasons under `skew_guard`.
+- **Guides.** `--doc NAME=PATH` (repeatable) defines or replaces a variant;
+  `--aether-root DIR` moves the default `docs/`. Each variant records its path,
+  stamp and sha256 (`guides`, `doc_sha256`). For a board, point `--doc` (or
+  `--aether-root`) at the `docs/` of the same `~/aether-<sha>` checkout that
+  built the binary.
+- **Tasks and destinations.** `tasks_sha256`, `tasks_version` and
+  `destinations_sha256`; the umbrella HEAD and dirty flag; and the harness's
+  own sha plus a sha256 of every prompt template (`harness.prompt_template`),
+  which is what identifies a harness change now that harness-only guide-stamp
+  bumps are retired.
+- **Seeds.** A destination's top-level `seed` is its base; `--seed-base N`
+  sets one for every self-hosted destination without its own. Repeat `r` sends
+  `seed = base + r` (the protocol is T=0.2, seed 42+r, 3 repeats locally; cloud
+  x1). `--start-repeat R --repeats 1` re-runs exactly repeat R. A destination
+  key the harness does not read is now an error, not silently ignored.
+- **Variant order.** Variants run back to back per task, in an order that
+  rotates by one each task, instead of variant-major; `case_sequence` records
+  the order cases actually ran in.
+- **Extra compiler flags.** `--aether-arg=FLAG` (repeatable) goes in front of
+  the program on every aether call and is recorded, for language A/Bs.
+
+`--preflight-only` runs these checks and prints what it found. The drivers
+(`bench_one_destination.sh`, `bench_one_destination_cfg.sh`,
+`run_cloud_spectrum.sh`) call it once before their suite loop, take guide
+overrides from `DOC="NAME=PATH ..."` and pass `BENCH_ARGS` through to the
+harness.
+
 ## Providers
 
 The harness now prefers named destination profiles from:

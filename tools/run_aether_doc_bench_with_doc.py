@@ -1,38 +1,39 @@
 #!/usr/bin/env python3
-"""Run aether_doc_bench.py with an overridden guide path."""
+"""Run aether_doc_bench.py with an overridden guide path.
+
+Kept for old command lines. It is now a thin wrapper over the harness's own
+repeatable --doc NAME=PATH, which records the guide's path, stamp and sha256 in
+the report like any other variant:
+
+  run_aether_doc_bench_with_doc.py medium /path/to/guide.md [bench args...]
+
+is exactly
+
+  aether_doc_bench.py --doc medium=/path/to/guide.md [bench args...]
+
+When the bench args carry no --docs, the run selects the overridden variant
+alone (the harness default when --doc is given).
+"""
 
 from __future__ import annotations
 
-import importlib.util
 import pathlib
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import aether_doc_bench  # noqa: E402
 
-def main() -> int:
-    if len(sys.argv) < 3:
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if len(argv) < 2:
         raise SystemExit(
-            "usage: run_aether_doc_bench_with_doc.py <variant: full|small|none> /path/to/guide.md [bench args...]"
+            "usage: run_aether_doc_bench_with_doc.py <variant> /path/to/guide.md [bench args...]"
         )
-
-    variant = sys.argv[1]
-    override_path = pathlib.Path(sys.argv[2]).resolve()
-    bench_args = sys.argv[3:]
-
-    bench_path = pathlib.Path(__file__).with_name("aether_doc_bench.py")
-    spec = importlib.util.spec_from_file_location("aether_doc_bench", bench_path)
-    if spec is None or spec.loader is None:
-        raise SystemExit(f"unable to load benchmark module from {bench_path}")
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    if variant not in module.DOC_VARIANTS:
-        raise SystemExit(f"unknown variant '{variant}', expected one of: {', '.join(sorted(module.DOC_VARIANTS))}")
-
-    module.DOC_VARIANTS[variant] = override_path
-
-    sys.argv = ["aether_doc_bench.py", *bench_args]
-    return module.main()
+    variant, override_path, bench_args = argv[0], argv[1], argv[2:]
+    if variant == "none":
+        raise SystemExit("variant 'none' has no guide to override")
+    return aether_doc_bench.main(["--doc", f"{variant}={override_path}", *bench_args])
 
 
 if __name__ == "__main__":

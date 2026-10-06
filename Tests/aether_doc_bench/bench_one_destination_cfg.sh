@@ -15,7 +15,7 @@ set -uo pipefail
 
 DEST=${1:?usage: bench_one_destination.sh <destination-id>}
 CFG=${CFG:-Tests/aether_doc_bench/destinations.local_tiers_20260811.json}
-OUTDIR=Tests/aether_doc_bench/results/local_tiers_20260811
+OUTDIR=${OUTDIR:-Tests/aether_doc_bench/results/local_tiers_20260811}
 AETHER_BIN=${AETHER_BIN:-/usr/local/bin/aether}
 # The harness runs each case from a temp cwd, so a relative --aether-bin
 # resolves to nothing and every compile fails with ENOENT. Make it absolute
@@ -26,11 +26,36 @@ REPAIR=${REPAIR:-2}
 
 mkdir -p "$OUTDIR/logs"
 
-PIN_FILE=Tests/aether_doc_bench/toolchain/PINNED_VERSION
-if [ -f "$PIN_FILE" ]; then WANT=$(cat "$PIN_FILE"); PIN_SRC="pin"; else WANT=$(cat components/aether/VERSION); PIN_SRC="VERSION"; fi
-GOT=$("$AETHER_BIN" --version 2>&1 | sed -n 's/.*Version: \([0-9-]*\).*/\1/p')
-[ "$WANT" != "$GOT" ] && { echo "FATAL: $AETHER_BIN is $GOT, $PIN_SRC says $WANT"; exit 1; }
-echo "[preflight] aether $GOT | destination $DEST"
+# Guides. DOCS selects the variants (default medium). DOC overrides their files,
+# space-separated NAME=PATH, and for a board points at the docs/ of the checkout
+# that built AETHER_BIN, so binary and guide share one sha:
+#   DOC="medium=$HOME/aether-<sha>/docs/aether_for_llms_medium_contexts.md"
+DOCS=${DOCS:-medium}
+DOC_ARGS=()
+for spec in ${DOC:-}; do DOC_ARGS+=(--doc "$spec"); done
+# Anything else for the harness, word-split: --allow-skew, --aether-bin-sha256 HEX,
+# --aether-root DIR, --seed-base 42, --repeats 3, --aether-arg=FLAG, ...
+read -r -a EXTRA_ARGS <<< "${BENCH_ARGS:-}"
+# bash 3.2 (macOS) treats "${arr[@]}" of an empty array as unbound under set -u.
+HARNESS_ARGS=(--docs "$DOCS" ${DOC_ARGS[@]+"${DOC_ARGS[@]}"} --aether-bin "$AETHER_BIN" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"})
+
+# Preflight. The harness copies the binary, hashes it, and refuses one it cannot
+# tie to the guides' checkout (the skew guard: a -dirty build, a '+' gitlink, a
+# +sha other than the checkout's HEAD, or a standalone build without
+# --allow-skew and its sha). This replaces the old pinned-version date gate,
+# which compared only the date and could not see any of those.
+PREFLIGHT_LOG="$OUTDIR/logs/${DEST}__preflight.log"
+if ! python3 tools/aether_doc_bench.py \
+        --destinations-config "$CFG" \
+        --destination "$DEST" \
+        --tasks "Tests/aether_doc_bench/${SUITES%% *}.json" \
+        "${HARNESS_ARGS[@]}" \
+        --preflight-only >"$PREFLIGHT_LOG" 2>&1; then
+    echo "FATAL: harness preflight refused the toolchain -- see $PREFLIGHT_LOG"
+    sed 's/^/    /' "$PREFLIGHT_LOG"
+    exit 1
+fi
+echo "[preflight] $(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("aether", d["aether_version"], "sha256", d["binary_sha256"][:16])' "$PREFLIGHT_LOG") | destination $DEST"
 
 for suite in $SUITES; do
     name="${DEST}__${suite}"
@@ -45,9 +70,8 @@ for suite in $SUITES; do
         --destinations-config "$CFG" \
         --destination "$DEST" \
         --tasks "Tests/aether_doc_bench/$suite.json" \
-        --docs medium \
+        "${HARNESS_ARGS[@]}" \
         --repair-attempts "$REPAIR" \
-        --aether-bin "$AETHER_BIN" \
         --output-json "$out.tmp" \
         --text-summary --progress >"$log" 2>&1
     rc=$?

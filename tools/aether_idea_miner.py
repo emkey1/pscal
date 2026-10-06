@@ -51,7 +51,9 @@ import hashlib
 import json
 import pathlib
 import re
+import shutil
 import sys
+import tempfile
 import textwrap
 import threading
 import time
@@ -133,8 +135,14 @@ def choose_guide_name(
     return "full"
 
 
-def guide_path_for(name: str) -> pathlib.Path:
-    return FULL_GUIDE if name == "full" else CONCISE_GUIDE
+def guide_path_for(name: str, variants: dict[str, pathlib.Path | None] | None = None) -> pathlib.Path:
+    """The guide file for a tier name. `variants` is the run's resolved map
+    (--aether-root plus every --doc override); without it, the default checkout."""
+    variants = variants if variants is not None else adb.DOC_VARIANTS
+    path = variants.get(name)
+    if path is None:
+        raise SystemExit(f"no guide file for variant {name!r}")
+    return pathlib.Path(path)
 
 
 # --------------------------------------------------------------------------- #
@@ -366,7 +374,7 @@ def generate(prompt: str, destination: adb.Destination) -> dict[str, Any]:
 # Compile + run (reuse adb.compile_and_run via a synthetic, oracle-free Task)
 # --------------------------------------------------------------------------- #
 def compile_program(source_code: str, aether_bin: pathlib.Path, timeout_seconds: int,
-                     sandbox_deny: str = "net,proc") -> dict[str, Any]:
+                     sandbox_deny: str = "net,proc", toolchain: dict[str, Any] | None = None) -> dict[str, Any]:
     task = adb.Task(
         task_id="idea",
         title="generative",
@@ -376,7 +384,13 @@ def compile_program(source_code: str, aether_bin: pathlib.Path, timeout_seconds:
         cwd=None,
         files=None,
     )
-    ns = argparse.Namespace(aether_bin=aether_bin, sandbox_deny=sandbox_deny)
+    toolchain = toolchain or {}
+    ns = argparse.Namespace(
+        aether_bin=aether_bin,
+        sandbox_deny=sandbox_deny,
+        aether_bin_display=toolchain.get("aether_bin"),
+        binary_sha256=toolchain.get("binary_sha256"),
+    )
     return adb.compile_and_run(task, source_code, ns)
 
 
@@ -549,7 +563,8 @@ def process_program(
         "attempts": [],
     }
 
-    run = compile_program(source, args.aether_bin, args.timeout_seconds, args.sandbox_deny)
+    run = compile_program(source, args.aether_bin, args.timeout_seconds, args.sandbox_deny,
+                          getattr(args, "toolchain", None))
     initial_failure = analyze_failure(source, run)
     record["attempts"].append({
         "kind": "initial",
@@ -603,7 +618,8 @@ def process_program(
                 record["attempts"].append(attempt)
                 break
 
-            new_run = compile_program(new_source, args.aether_bin, args.timeout_seconds, args.sandbox_deny)
+            new_run = compile_program(new_source, args.aether_bin, args.timeout_seconds, args.sandbox_deny,
+                                      getattr(args, "toolchain", None))
             attempt["source_code"] = new_source
             attempt["run"] = run_brief(new_run)
             attempt["failure"] = analyze_failure(new_source, new_run)
@@ -978,7 +994,12 @@ def run_miner(args: argparse.Namespace) -> dict[str, Any]:
 
     guide_hints = load_destination_guide_hints(args.destinations_config)
     system_overrides = load_destination_system_overrides(args.destinations_config)
-    aether_version, aether_version_raw = adb.capture_aether_version(args.aether_bin)
+    variants = getattr(args, "doc_variants", None) or adb.DOC_VARIANTS
+    toolchain = getattr(args, "toolchain", None) or {}
+    aether_version = toolchain.get("aether_version")
+    aether_version_raw = toolchain.get("aether_version_raw")
+    if aether_version is None:
+        aether_version, aether_version_raw = adb.capture_aether_version(args.aether_bin)
 
     # Resume support: carry over only *completed* destinations from an existing
     # report. A model gets its "stats" field set when its loop finishes (even on
@@ -997,7 +1018,14 @@ def run_miner(args: argparse.Namespace) -> dict[str, Any]:
 
     report: dict[str, Any] = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "aether_bin": str(args.aether_bin),
+        "aether_bin": toolchain.get("aether_bin") or adb.display_path(args.aether_bin),
+        "binary_sha256": toolchain.get("binary_sha256"),
+        "toolchain": toolchain or None,
+        "guides": {
+            name: adb.guide_record(name, path, adb.read_text(path))
+            for name, path in variants.items()
+            if path is not None and pathlib.Path(path).is_file()
+        },
         "aether_version": aether_version,
         "aether_version_raw": aether_version_raw,
         "destinations_config": str(args.destinations_config),
@@ -1044,13 +1072,17 @@ def run_miner(args: argparse.Namespace) -> dict[str, Any]:
             destination.temperature = args.temperature
 
         guide_name = choose_guide_name(destination, args.guide, guide_hints.get(did))
-        guide_text = adb.read_text(guide_path_for(guide_name))
+        guide_path = guide_path_for(guide_name, variants)
+        guide_text = adb.read_text(guide_path)
 
         mr: dict[str, Any] = {
             "destination_id": did,
             "model": destination.model,
             "type": destination.kind,
             "guide": guide_name,
+            "guide_path": adb.display_path(guide_path),
+            "guide_sha256": adb.sha256_text(guide_text),
+            "guide_version": adb.guide_version(guide_text),
             "system": system_key(destination, system_overrides),
             "programs": [],
         }
@@ -1160,6 +1192,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--list-destinations", action="store_true", help="list configured destinations and exit")
     p.add_argument("--aether-bin", type=pathlib.Path, default=DEFAULT_AETHER_BIN,
                    help="path to the gating aether binary (resolved to absolute)")
+    p.add_argument("--doc", action="append", default=[], metavar="NAME=PATH",
+                   help="use the guide file at PATH for tier NAME (full/medium/small); repeatable")
+    p.add_argument("--aether-root", type=pathlib.Path, default=adb.DEFAULT_AETHER_ROOT,
+                   help="aether checkout the default guides come from (default: components/aether)")
     p.add_argument("--guide", choices=("auto", "full", "small"), default="auto",
                    help="which guide to inject (default: auto by context/model size)")
     p.add_argument("--programs-per-model", type=int, default=5,
@@ -1216,10 +1252,25 @@ def main() -> int:
     if not args.aether_bin.exists():
         raise SystemExit(f"missing aether binary: {args.aether_bin}")
 
+    args.doc_variants = adb.doc_variant_paths(args.aether_root, adb.parse_doc_overrides(args.doc))
+    # Same discipline as the bench: every program runs on a hashed private copy
+    # of the binary, so a rebuild mid-run cannot mix compilers into one report.
+    run_dir = pathlib.Path(tempfile.mkdtemp(prefix="aether-miner-run-"))
+    try:
+        toolchain = adb.snapshot_aether_binary(args.aether_bin, run_dir)
+        args.aether_bin = toolchain.pop("path")
+        args.toolchain = toolchain
+        return _main_with_snapshot(args)
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
+
+
+def _main_with_snapshot(args: argparse.Namespace) -> int:
     report = run_miner(args)
 
     # Glossary from the full guide (superset of codes) for code -> rule mapping.
-    glossary = load_code_glossary(FULL_GUIDE)
+    full_guide = args.doc_variants.get("full")
+    glossary = load_code_glossary(pathlib.Path(full_guide) if full_guide else None)
 
     md = render_markdown(report, glossary)
     if args.output_md:
