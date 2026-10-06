@@ -285,7 +285,7 @@
       "id": "repair_invented_text_builtins",
       "diagnostic": "[SCOPE-001] identifier 'text_len' not in scope.",
       "broken_source": "fn main() -> Void {\n    let word: Text = \"aether\";\n    fx {\n        println(text_len(word));\n        println(substring(word, 1, 3));\n        println(string_at(word, 1));\n    }\n    ret;\n}\n",
-      "fixed_source": "fn main() -> Void {\n    let word: Text = \"aether\";\n    fx {\n        println(length(word));\n        println(copy(word, 1, 3));\n        println(word[1]);\n    }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let word: Text = \"aether\";\n    fx {\n        println(length(word));\n        println(copy(word, 0, 3));\n        println(word[0]);\n    }\n    ret;\n}\n",
       "expected_stdout": "6\naet\na\n"
     }
   ]

@@ -7,7 +7,13 @@ import argparse
 import json
 import pathlib
 import re
+import sys
 from collections import Counter
+
+_SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+import aether_specialization_corpus_policy as policy  # noqa: E402
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -117,6 +123,26 @@ def main() -> int:
         if path.name not in manifest_name_set and classify_name(path.name) == "other"
     )
 
+    # Every item declares where its golden's truth comes from, and an item
+    # without an oracle is never canonical (policy.oracle_problem).
+    oracle_errors = []
+    # The repo is public: no golden may carry host data, whether or not the
+    # item trains (the golden backstop's host-data half).
+    host_data_goldens = []
+    for item in manifest_items:
+        name = pathlib.Path(str(item.get("repo_path", "?"))).name
+        problem = policy.oracle_problem(policy.item_metadata(item))
+        if problem:
+            oracle_errors.append(f"{name}: {problem}")
+        hits = policy.backstop_hits(item.get("stdout"), policy.HOST_DATA_PATTERNS)
+        if hits:
+            host_data_goldens.append(f"{name}: {'/'.join(hits)}")
+
+    # A retired item stays retired: its id may not come back in the manifest
+    # or on disk.
+    retired_ids = {str(entry.get("id")) for entry in manifest.get("retired", []) if isinstance(entry, dict)}
+    retired_but_present = sorted(retired_ids & (manifest_name_set | disk_names))
+
     report = {
         "summary": {
             "disk_files": len(disk_files),
@@ -128,6 +154,9 @@ def main() -> int:
             "extensionful_sources": len(extensionful_sources),
             "scratch_like_on_disk": len(scratch_like_on_disk),
             "scratch_like_in_manifest": len(scratch_like_in_manifest),
+            "oracle_errors": len(oracle_errors),
+            "host_data_goldens": len(host_data_goldens),
+            "retired_items": len(retired_ids),
         },
         "errors": {
             "missing_manifest_files": missing_manifest_files,
@@ -136,6 +165,9 @@ def main() -> int:
             "manifest_not_disk": manifest_not_disk,
             "duplicate_repo_paths": duplicate_repo_paths,
             "fixture_files_in_corpus_dir": fixture_files_in_corpus,
+            "oracle_errors": oracle_errors,
+            "host_data_goldens": host_data_goldens,
+            "retired_but_present": retired_but_present,
         },
         "warnings": {
             "extensionful_sources": extensionful_sources,
@@ -161,6 +193,9 @@ def main() -> int:
                 manifest_not_disk,
                 duplicate_repo_paths,
                 fixture_files_in_corpus,
+                oracle_errors,
+                host_data_goldens,
+                retired_but_present,
             ]
         )
         if hard_fail:

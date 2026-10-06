@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Prepare compiler-verified Aether specialization assets in one step."""
+"""Prepare compiler-verified Aether specialization assets in one step.
+
+Order: strict corpus-layout validation, the recapture_expected.py --check
+pre-flight (every golden in the manifest against the current binary), the raw
+and reference exports, then the gated dataset build. Any failing step stops
+the run before a dataset is written.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +14,7 @@ import datetime
 import json
 import pathlib
 import subprocess
-
+import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_AETHER_BIN = REPO_ROOT / "build" / "bin" / "aether"
@@ -16,6 +22,7 @@ DEFAULT_INSTRUCTION_MANIFEST = REPO_ROOT / "Tests" / "aether_specialization" / "
 DEFAULT_REPAIR_MANIFEST = REPO_ROOT / "Tests" / "aether_specialization" / "seed_repair_pairs.json"
 DEFAULT_BENCHMARK_TASKS = REPO_ROOT / "Tests" / "aether_doc_bench" / "tasks.json"
 DEFAULT_CORPUS_MANIFEST = REPO_ROOT / "Tests" / "aether_specialization" / "corpus_candidates_manifest.json"
+TOOLS_DIR = REPO_ROOT / "tools"
 
 
 def run(argv: list[str]) -> None:
@@ -23,7 +30,7 @@ def run(argv: list[str]) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--output-dir", type=pathlib.Path, required=True)
     parser.add_argument("--aether-bin", type=pathlib.Path, default=DEFAULT_AETHER_BIN)
     parser.add_argument("--instruction-manifest", type=pathlib.Path, default=DEFAULT_INSTRUCTION_MANIFEST)
@@ -38,12 +45,18 @@ def main() -> int:
     parser.add_argument("--validate-manifest", type=pathlib.Path, default=None,
                         help="manifest used for the strict corpus-layout validation step "
                         "(default: the --corpus-manifest value).")
+    parser.add_argument("--skip-recapture-check", action="store_true",
+                        help="skip the recapture_expected.py --check pre-flight (iteration only; "
+                        "aether_training_mix.json records that it was skipped)")
     parser.add_argument("--version", default=None,
                         help="dataset version stamp (YYYY-MM-DD-N); default: today-1. "
                         "Recorded in aether_training_mix.json alongside the aether "
                         "language version for traceability.")
     args = parser.parse_args()
     validate_manifest = args.validate_manifest if args.validate_manifest is not None else args.corpus_manifest
+
+    if not args.aether_bin.exists():
+        raise SystemExit(f"missing aether binary: {args.aether_bin}")
 
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -52,28 +65,50 @@ def main() -> int:
     reference_json = output_dir / "aether_reference_corpus.json"
     instruction_jsonl = output_dir / "aether_instruction_sft.jsonl"
     repair_jsonl = output_dir / "aether_repair_sft.jsonl"
+    build_report_json = output_dir / "aether_build_report.json"
+    recapture_report_json = output_dir / "aether_recapture_report.json"
 
     run(
         [
-            "python3",
-            str(REPO_ROOT / "tools" / "aether_specialization_validate_corpus.py"),
+            sys.executable,
+            str(TOOLS_DIR / "aether_specialization_validate_corpus.py"),
             "--strict",
             "--manifest",
             str(validate_manifest),
         ]
     )
+    # Pre-flight: every golden in the manifest, trained or not, against the
+    # binary that is about to build the dataset. Drift here is a compiler
+    # behaviour change; it stops the run until a person has read the diff
+    # (tools/recapture_expected.py --update) and accepted it (--accept).
+    preflight = "skipped"
+    if not args.skip_recapture_check:
+        run(
+            [
+                sys.executable,
+                str(TOOLS_DIR / "recapture_expected.py"),
+                "--check",
+                "--aether-bin",
+                str(args.aether_bin),
+                "--manifest",
+                str(args.corpus_manifest),
+                "--report-json",
+                str(recapture_report_json),
+            ]
+        )
+        preflight = "recapture_expected.py --check passed"
     run(
         [
-            "python3",
-            str(REPO_ROOT / "tools" / "aether_specialization_export_corpus.py"),
+            sys.executable,
+            str(TOOLS_DIR / "aether_specialization_export_corpus.py"),
             "--output-json",
             str(corpus_json),
         ]
     )
     run(
         [
-            "python3",
-            str(REPO_ROOT / "tools" / "aether_specialization_export_reference_corpus.py"),
+            sys.executable,
+            str(TOOLS_DIR / "aether_specialization_export_reference_corpus.py"),
             "--output-json",
             str(reference_json),
         ]
@@ -84,8 +119,8 @@ def main() -> int:
     # (v6 wrote empty JSONL here, so the model trained on bare corpus completions with
     # no instruction signal and its no-guide accuracy collapsed to 0/25.)
     build_dataset_cmd = [
-        "python3",
-        str(REPO_ROOT / "Tools" / "aether_specialization_build_dataset.py"),
+        sys.executable,
+        str(TOOLS_DIR / "aether_specialization_build_dataset.py"),
         "--instruction-manifest",
         str(args.instruction_manifest),
         "--repair-manifest",
@@ -98,6 +133,8 @@ def main() -> int:
         str(args.aether_bin),
         "--corpus-manifest",
         str(args.corpus_manifest),
+        "--report-json",
+        str(build_report_json),
     ]
     if not args.include_benchmark_overlap:
         build_dataset_cmd += ["--exclude-benchmark-tasks", str(args.benchmark_tasks)]
@@ -116,31 +153,51 @@ def main() -> int:
             "no-supervision asset set (this was the v6 failure mode)."
         )
 
-    version_file = REPO_ROOT / "components" / "aether" / "VERSION"
-    aether_version = version_file.read_text(encoding="utf-8").strip() if version_file.exists() else "unknown"
+    build_report = json.loads(build_report_json.read_text(encoding="utf-8"))
     dataset_version = args.version or f"{datetime.date.today().isoformat()}-1"
 
     summary_path = output_dir / "aether_training_mix.json"
+    # Paths are recorded relative to this file, so the summary never carries
+    # the building host's directory layout.
     summary_path.write_text(
         json.dumps(
             {
                 "version": dataset_version,
-                "aether_version": aether_version,
-                "raw_corpus": str(corpus_json),
-                "reference_corpus": str(reference_json),
-                "instruction_jsonl": str(instruction_jsonl),
-                "repair_jsonl": str(repair_jsonl),
+                "aether_version": build_report["aether_version"],
+                "aether_sha256": build_report["aether_sha256"],
+                "raw_corpus": corpus_json.name,
+                "reference_corpus": reference_json.name,
+                "instruction_jsonl": instruction_jsonl.name,
+                "repair_jsonl": repair_jsonl.name,
+                "build_report": build_report_json.name,
                 "instruction_records": instruction_records,
                 "repair_records": repair_records,
+                "corpus_selection": build_report["corpus_selection"],
+                "benchmark_overlap": build_report["benchmark_overlap"],
+                "preflight": preflight,
+                "gates": {
+                    "exact_stdout_mismatches": sum(
+                        len(v) for v in build_report["gates"]["exact_stdout_mismatches"].values()
+                    ),
+                    "returncode_failures": sum(
+                        len(v) for v in build_report["gates"]["returncode_failures"].values()
+                    ),
+                    "golden_backstop_hits": len(build_report["gates"]["golden_backstop"]["records"])
+                    + len(build_report["gates"]["golden_backstop"]["manifest_host_data"]),
+                    "oracle_errors": len(build_report["gates"]["oracle_errors"]),
+                },
                 "policy": (
-                    "instruction-only SFT: corpus cases promoted to verified instruction "
-                    "pairs + seed instruction/repair pairs. Raw corpus and small guide are "
-                    "still exported for provenance but are NOT language-modeled as bare "
-                    "completions (trainer --include-raw-corpus / --include-reference default off)."
+                    "instruction-only SFT: canonical corpus cases with an oracle are promoted to "
+                    "verified instruction pairs + seed instruction/repair pairs; every record "
+                    "reproduces its expected stdout exactly. Environment-dependent and harvested "
+                    "(no-oracle) items never train. Raw corpus and reference guide are still "
+                    "exported for provenance but are NOT language-modeled as bare completions "
+                    "(trainer --include-raw-corpus / --include-reference default off)."
                 ),
             },
             indent=2,
-        ),
+        )
+        + "\n",
         encoding="utf-8",
     )
 

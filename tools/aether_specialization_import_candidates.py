@@ -9,7 +9,13 @@ import json
 import pathlib
 import re
 import subprocess
+import sys
 from typing import Any
+
+_SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+import aether_specialization_corpus_policy as policy  # noqa: E402
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -71,6 +77,14 @@ def main() -> int:
         action="store_true",
         help="promote imported candidates directly into the raw training corpus",
     )
+    parser.add_argument(
+        "--oracle",
+        choices=policy.ORACLE_VALUES,
+        default="none",
+        help="where the recorded stdout's truth comes from: python (an independent Python "
+        "reference computed it), reviewed (a person checked it) or none (it is only what the "
+        "program printed; the default). An item with oracle none is imported canonical: false.",
+    )
     args = parser.parse_args()
 
     if not args.aether_bin.exists():
@@ -109,21 +123,25 @@ def main() -> int:
         target = unique_target_path(args.dest_dir, path.name, sha256)
         target.write_text(source, encoding="utf-8")
 
+        metadata: dict[str, Any] = {}
+        if args.oracle == "none":
+            metadata["canonical"] = False
+        metadata["oracle"] = args.oracle
+        metadata["include_in_training"] = args.include_in_training
+        metadata["lifecycle"] = "imported_candidate" if args.include_in_training else "quarantine"
         record = {
-            "source_path": str(path),
+            # Repo-relative, or just the file name: the manifest is public.
+            "source_path": policy.display_path(path),
             "repo_path": str(target.relative_to(REPO_ROOT)),
             "sha256": sha256,
             "stdout": stdout,
-            "metadata": {
-                "include_in_training": args.include_in_training,
-                "lifecycle": "imported_candidate" if args.include_in_training else "quarantine",
-            },
+            "metadata": metadata,
         }
         manifest.setdefault("items", []).append(record)
         known_hashes.add(sha256)
         imported.append(record)
 
-    args.manifest.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    args.manifest.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"imported": imported, "rejected": rejected}, indent=2))
     return 0
 

@@ -9,7 +9,6 @@ fn worker(out: Tally, n: Int) -> Void {
         sum = sum + i;
     }
     out.total = sum;
-    fx { println("Worker ", out.label, " finished sum: ", sum); }
     ret;
 }
 
@@ -28,7 +27,11 @@ fn main() -> Void {
         worker(task_c, 300);
     }
 
+    // Branches run in no fixed order, so report only after the par block joins.
     fx {
+        println("Worker ", task_a.label, " finished sum: ", task_a.total);
+        println("Worker ", task_b.label, " finished sum: ", task_b.total);
+        println("Worker ", task_c.label, " finished sum: ", task_c.total);
         println("All tasks complete.");
         println("Alpha total: ", task_a.total);
         println("Beta total: ", task_b.total);

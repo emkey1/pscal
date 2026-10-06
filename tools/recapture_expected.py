@@ -5,23 +5,32 @@ specialization corpus after compiler behavior changes.
 Runs every manifest candidate against the current aether binary and compares
 actual stdout to the manifest's stored ``stdout``.
 
-  --check   (default) report drift, exit 1 if any found — CI/pre-flight mode
-  --update  rewrite drifted ``stdout`` fields in place, with provenance in
-            ``metadata.recaptured`` (aether version + date)
+  --check            (default) report drift, exit 1 if any found — the
+                     pre-flight mode tools/aether_specialization_prepare_assets.py
+                     runs before every dataset build
+  --update           print a unified diff of every drifted golden and exit 1
+                     without writing anything
+  --update --accept  rewrite the drifted ``stdout`` fields in place, with
+                     provenance in ``metadata.recaptured`` (aether version + date)
+
+A drifted golden is a compiler behavior change until a person says otherwise:
+re-capturing from the current binary would bless a regression as the new
+truth, so nothing is written without reading the diff and passing --accept.
 
 Environment-dependent candidates (``metadata.environment_dependent``) are
 compared but reported separately and never fail --check on their own.
 Candidates whose source no longer matches the manifest sha256 are flagged as
 ``source_drift`` (the program itself changed; fix that first). Pass
-``--accept-source-drift`` with ``--update`` to deliberately re-baseline those
-entries too (refreshes sha256 AND stdout — changes corpus provenance, so only
-do this when the source edits were intentional).
+``--accept-source-drift`` with ``--update --accept`` to deliberately
+re-baseline those entries too (refreshes sha256 AND stdout — changes corpus
+provenance, so only do this when the source edits were intentional).
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime
+import difflib
 import hashlib
 import json
 import pathlib
@@ -36,7 +45,9 @@ DEFAULT_MANIFEST = (
     REPO_ROOT / "Tests" / "aether_specialization" / "corpus_candidates_manifest.json"
 )
 DEFAULT_FIXTURES_DIR = REPO_ROOT / "Tests" / "aether_specialization" / "fixtures"
-RUN_TIMEOUT_SECONDS = 20
+# Three corpus programs take 24-32 s on a loaded rig; 20 s made them read as
+# run failures.
+RUN_TIMEOUT_SECONDS = 60
 
 
 def aether_version(aether_bin: pathlib.Path) -> str:
@@ -68,34 +79,57 @@ def run_candidate(
                 timeout=RUN_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired:
-            return None, "", "timeout"
+            return None, "", f"timeout after {RUN_TIMEOUT_SECONDS} s"
         return proc.returncode, proc.stdout, proc.stderr
 
 
+def golden_diff(repo_path: str, expected: str | None, actual: str) -> str:
+    return "".join(
+        difflib.unified_diff(
+            (expected or "").splitlines(keepends=True),
+            actual.splitlines(keepends=True),
+            fromfile=f"{repo_path} (manifest)",
+            tofile=f"{repo_path} (current binary)",
+        )
+    )
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--aether-bin", type=pathlib.Path, default=DEFAULT_AETHER_BIN)
     parser.add_argument("--manifest", type=pathlib.Path, default=DEFAULT_MANIFEST)
     parser.add_argument("--fixtures-dir", type=pathlib.Path, default=DEFAULT_FIXTURES_DIR)
-    parser.add_argument("--update", action="store_true", help="re-capture drifted stdout")
+    parser.add_argument("--update", action="store_true",
+                        help="show the diff of every drifted golden; writes only with --accept")
+    parser.add_argument("--accept", action="store_true",
+                        help="with --update: write the re-captured goldens after you have read the diff")
     parser.add_argument("--check", action="store_true", help="report only (default)")
     parser.add_argument(
         "--accept-source-drift",
         action="store_true",
-        help="with --update: re-baseline sha256+stdout for source-drift entries",
+        help="with --update --accept: re-baseline sha256+stdout for source-drift entries",
     )
     parser.add_argument("--only", metavar="SUBSTR", help="limit to repo_paths containing SUBSTR")
     parser.add_argument("--report-json", type=pathlib.Path, help="write full report here")
     args = parser.parse_args()
 
+    if args.accept and not args.update:
+        parser.error("--accept only makes sense with --update")
+    if args.accept_source_drift and not args.update:
+        parser.error("--accept-source-drift only makes sense with --update")
     if not args.aether_bin.exists():
         raise SystemExit(f"missing aether binary: {args.aether_bin}")
 
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     items = manifest.get("items", [])
     version = aether_version(args.aether_bin)
+    today = datetime.date.today().isoformat()
 
     ok, drifted, env_dep_drifted, source_drift, run_failed, missing = [], [], [], [], [], []
+    # (item, new fields) applied only on --update --accept
+    pending: list[tuple[dict, dict]] = []
 
     for item in items:
         repo_path = item.get("repo_path", "")
@@ -126,16 +160,12 @@ def main() -> int:
         expected = item.get("stdout")
         if sha_mismatch:
             # --update --accept-source-drift: deliberate re-baseline
-            item["sha256"] = sha
-            item["stdout"] = stdout
-            item.setdefault("metadata", {})["recaptured"] = {
-                "aether_version": version,
-                "date": datetime.date.today().isoformat(),
-                "source_rebaselined": True,
-            }
-            drifted.append(
-                {"repo_path": repo_path, "expected": expected, "actual": stdout}
-            )
+            drifted.append({"repo_path": repo_path, "expected": expected, "actual": stdout})
+            pending.append((item, {
+                "sha256": sha,
+                "stdout": stdout,
+                "recaptured": {"aether_version": version, "date": today, "source_rebaselined": True},
+            }))
             continue
 
         if expected is None or stdout == expected:
@@ -147,17 +177,18 @@ def main() -> int:
             env_dep_drifted.append(record)
         else:
             drifted.append(record)
-            if args.update:
-                item["stdout"] = stdout
-                item.setdefault("metadata", {})["recaptured"] = {
-                    "aether_version": version,
-                    "date": datetime.date.today().isoformat(),
-                }
+            pending.append((item, {
+                "stdout": stdout,
+                "recaptured": {"aether_version": version, "date": today},
+            }))
 
-    if args.update and drifted:
-        args.manifest.write_text(
-            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
-        )
+    write = bool(args.update and args.accept and pending)
+    if write:
+        for item, fields in pending:
+            recaptured = fields.pop("recaptured")
+            item.update(fields)
+            item.setdefault("metadata", {})["recaptured"] = recaptured
+        args.manifest.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
     report = {
         "aether_version": version,
@@ -168,7 +199,7 @@ def main() -> int:
         "source_drift": source_drift,
         "run_failed": run_failed,
         "missing": missing,
-        "updated": bool(args.update and drifted),
+        "updated": write,
     }
     if args.report_json:
         args.report_json.write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -183,17 +214,26 @@ def main() -> int:
             print(f"  REBASELINED {rec['repo_path']} (stdout unchanged, sha refreshed)")
             continue
         print(f"  DRIFT {rec['repo_path']}")
-        print(f"    expected: {rec['expected']!r}")
-        print(f"    actual:   {rec['actual']!r}")
+        if args.update:
+            print(golden_diff(rec["repo_path"], rec["expected"], rec["actual"]), end="")
+        else:
+            print(f"    expected: {rec['expected']!r}")
+            print(f"    actual:   {rec['actual']!r}")
     for rec in run_failed:
         print(f"  FAIL  {rec['repo_path']} rc={rec['returncode']} {rec['stderr'][:120]!r}")
     for path in source_drift:
         print(f"  SRC-DRIFT {path} (sha256 mismatch — program changed, not output)")
-    if args.update and drifted:
-        print(f"re-captured {len(drifted)} entries into {args.manifest}")
+    if write:
+        print(f"re-captured {len(pending)} entries into {args.manifest}")
+    elif args.update and pending:
+        print(
+            f"not written: {len(pending)} golden(s) would change. Read the diff above; "
+            "if the new output is correct, re-run with --update --accept."
+        )
+        return 1
 
     if drifted or run_failed or source_drift or missing:
-        return 0 if args.update and not (run_failed or source_drift or missing) else 1
+        return 0 if write and not (run_failed or source_drift or missing) else 1
     return 0
 
 

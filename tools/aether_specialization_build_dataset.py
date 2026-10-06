@@ -1,10 +1,31 @@
 #!/usr/bin/env python3
-"""Build compiler-verified Aether specialization datasets."""
+"""Build compiler-verified Aether specialization datasets.
+
+Every record is gated, and the build fails (writing nothing) when any gate
+trips:
+
+- exact stdout: a record that carries an expected stdout must reproduce it
+  byte for byte (instruction, corpus and repair records alike); a record
+  without one must at least exit 0;
+- environment-dependent corpus items never become records, because their
+  golden cannot be reproduced;
+- the golden backstop: no record may carry a heap pointer, a raw array dump,
+  a host path or an environment dump, and no golden anywhere in the corpus
+  manifest may carry host data;
+- oracle: a corpus item only trains when its golden has an oracle
+  (metadata.oracle python|reviewed); harvested goldens (oracle none) never do.
+
+Each record is stamped with the aether VERSION and binary sha256 it was
+verified against. `--report-json` writes the selection counts, the overlap
+drops and every gate failure, whether or not the build passes.
+"""
 
 from __future__ import annotations
 
 import argparse
+import collections
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -18,6 +39,7 @@ _SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 from aether_collapse_oneliners import collapse_text  # noqa: E402
+import aether_specialization_corpus_policy as policy  # noqa: E402
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -31,6 +53,10 @@ EXAMPLE_DIRS = [
     REPO_ROOT / "Examples" / "aether" / "base",
     REPO_ROOT / "Examples" / "aether" / "showcase",
 ]
+# Some corpus programs take 24-32 s on a loaded rig; nothing legitimate is
+# near a minute.
+RUN_TIMEOUT_SECONDS = 60
+SAMPLE_NAME = "sample.aether"
 
 
 def read_json(path: pathlib.Path) -> dict[str, Any]:
@@ -76,6 +102,8 @@ def build_corpus_prompt(
     files: dict[str, str],
     expected_stdout: str,
 ) -> str:
+    # Only `notes` (behaviour the program demonstrates) reaches the prompt.
+    # Curation history lives in metadata.audit_notes and never does.
     parts = [
         "Write canonical Aether source only.",
         f"Program id: {corpus_id}.",
@@ -119,6 +147,55 @@ def materialize_files(files: dict[str, str] | None, root: pathlib.Path) -> None:
         target.write_text(content, encoding="utf-8")
 
 
+def normalize_sandbox_paths(text: str, sandbox: pathlib.Path) -> str:
+    """Strip the per-run temp directory, so diagnostics read `sample.aether:N:`."""
+    if not text:
+        return text
+    for prefix in {str(sandbox), os.path.realpath(sandbox)}:
+        text = text.replace(prefix + os.sep, "").replace(prefix, ".")
+    return text
+
+
+def run_aether(
+    *,
+    aether_bin: pathlib.Path,
+    source: str,
+    files: dict[str, str] | None,
+    extra_args: tuple[str, ...] = (),
+    timeout: int = RUN_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Compile and run `source` as sample.aether in a fresh sandbox directory.
+
+    The program is passed by its relative name from inside the sandbox, so
+    diagnostics name `sample.aether:N:` rather than a host temp path.
+    """
+    with tempfile.TemporaryDirectory(prefix="aether-specialize-") as tmp_name:
+        tmp_dir = pathlib.Path(tmp_name)
+        materialize_files(files, tmp_dir)
+        (tmp_dir / SAMPLE_NAME).write_text(source, encoding="utf-8")
+        argv = [str(aether_bin), "--no-cache", *extra_args, SAMPLE_NAME]
+        try:
+            proc = subprocess.run(
+                argv,
+                cwd=str(tmp_dir),
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+            )
+            returncode, stdout, stderr = proc.returncode, proc.stdout, proc.stderr
+        except subprocess.TimeoutExpired as exc:
+            partial = exc.stdout or ""
+            if isinstance(partial, bytes):
+                partial = partial.decode("utf-8", errors="replace")
+            returncode, stdout = 124, partial
+            stderr = f"timeout: no exit within {timeout} s\n"
+        return {
+            "returncode": returncode,
+            "stdout": stdout,
+            "stderr": normalize_sandbox_paths(stderr, tmp_dir),
+        }
+
+
 def verify_program(
     *,
     aether_bin: pathlib.Path,
@@ -126,30 +203,23 @@ def verify_program(
     expected_stdout: str | None,
     files: dict[str, str] | None,
 ) -> dict[str, Any]:
-    with tempfile.TemporaryDirectory(prefix="aether-specialize-") as tmp_name:
-        tmp_dir = pathlib.Path(tmp_name)
-        program_path = tmp_dir / "sample.aether"
-        materialize_files(files, tmp_dir)
-        program_path.write_text(source, encoding="utf-8")
-
-        proc = subprocess.run(
-            [str(aether_bin), "--no-cache", str(program_path)],
-            cwd=str(tmp_dir),
-            text=True,
-            capture_output=True,
-            timeout=60,
-        )
-
-        exact = expected_stdout is not None and proc.returncode == 0 and proc.stdout == expected_stdout
-        return {
-            "returncode": proc.returncode,
-            "stdout": proc.stdout,
-            "stderr": proc.stderr,
-            "exact_stdout_match": exact,
-        }
+    run = run_aether(aether_bin=aether_bin, source=source, files=files)
+    exact = (
+        expected_stdout is not None
+        and run["returncode"] == 0
+        and run["stdout"] == expected_stdout
+    )
+    return {
+        "returncode": run["returncode"],
+        "stdout": run["stdout"],
+        "stderr": run["stderr"],
+        "exact_stdout_match": exact,
+    }
 
 
-def build_instruction_records(payload: dict[str, Any], aether_bin: pathlib.Path) -> list[dict[str, Any]]:
+def build_instruction_records(
+    payload: dict[str, Any], aether_bin: pathlib.Path, stamp: dict[str, str]
+) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for item in payload.get("pairs", []):
         verification = verify_program(
@@ -178,12 +248,15 @@ def build_instruction_records(payload: dict[str, Any], aether_bin: pathlib.Path)
             "expected_stdout": item.get("expected_stdout"),
             "files": item.get("files", {}),
             "verification": verification,
+            "aether": stamp,
         }
         records.append(record)
     return records
 
 
-def build_repair_records(payload: dict[str, Any], aether_bin: pathlib.Path) -> list[dict[str, Any]]:
+def build_repair_records(
+    payload: dict[str, Any], aether_bin: pathlib.Path, stamp: dict[str, str]
+) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for item in payload.get("pairs", []):
         verification = verify_program(
@@ -217,9 +290,47 @@ def build_repair_records(payload: dict[str, Any], aether_bin: pathlib.Path) -> l
             "expected_stdout": item.get("expected_stdout"),
             "files": item.get("files", {}),
             "verification": verification,
+            "aether": stamp,
         }
         records.append(record)
     return records
+
+
+def corpus_selection_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    """Which manifest items train, and why each of the others does not."""
+    items = [item for item in payload.get("items", []) if isinstance(item, dict)]
+    excluded: collections.Counter[str] = collections.Counter()
+    flagged: collections.Counter[str] = collections.Counter()
+    selected = 0
+    for item in items:
+        metadata = policy.item_metadata(item)
+        reason = policy.sft_exclusion(item)
+        if reason is None:
+            selected += 1
+        else:
+            excluded[reason] += 1
+        if metadata.get("environment_dependent"):
+            flagged["environment_dependent"] += 1
+        if policy.is_harvested(metadata):
+            flagged["harvested"] += 1
+        if metadata.get("oracle") == "none":
+            flagged["oracle_none"] += 1
+        if metadata.get("canonical") is False:
+            flagged["canonical_false"] += 1
+        if metadata.get("include_in_training") is False:
+            flagged["include_in_training_false"] += 1
+    retired = [
+        {key: entry.get(key) for key in ("id", "retired", "reason")}
+        for entry in payload.get("retired", [])
+        if isinstance(entry, dict)
+    ]
+    return {
+        "manifest_items": len(items),
+        "selected": selected,
+        "excluded": dict(sorted(excluded.items())),
+        "flagged": dict(sorted(flagged.items())),
+        "deleted": retired,
+    }
 
 
 def build_corpus_instruction_records(
@@ -227,6 +338,7 @@ def build_corpus_instruction_records(
     *,
     aether_bin: pathlib.Path,
     fixtures_dir: pathlib.Path,
+    stamp: dict[str, str],
     compact: bool = False,
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
@@ -235,14 +347,10 @@ def build_corpus_instruction_records(
         repo_path = item.get("repo_path")
         if not isinstance(repo_path, str) or not repo_path:
             continue
-        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
-        if metadata.get("include_in_supervised") is False:
+        if policy.sft_exclusion(item) is not None:
             continue
-        if metadata.get("canonical") is False:
-            continue
-        expected_stdout = item.get("stdout")
-        if not isinstance(expected_stdout, str) or not expected_stdout:
-            continue
+        metadata = policy.item_metadata(item)
+        expected_stdout = item["stdout"]
 
         # Resolve the module source from --corpus-dir (by basename) so an
         # alternate corpus form (e.g. corpus_candidates_oneliner) can be trained
@@ -259,8 +367,7 @@ def build_corpus_instruction_records(
         if compact:
             # Teach the compact one-liner form. Collapse, then verify the
             # collapsed source reproduces the expected stdout; if it doesn't
-            # (an unsupported shape), keep the multi-line original. With the
-            # hardened compiler this fallback should never fire.
+            # (an unsupported shape), keep the multi-line original.
             collapsed, n_collapsed = collapse_text(source)
             if n_collapsed > 0:
                 v = verify_program(
@@ -310,6 +417,7 @@ def build_corpus_instruction_records(
             "source_repo_path": repo_path,
             "metadata": metadata,
             "verification": verification,
+            "aether": stamp,
         }
         records.append(record)
     if compact:
@@ -323,10 +431,9 @@ def build_corpus_instruction_records(
 def load_benchmark_stdout(paths: list[pathlib.Path]) -> set[str]:
     """Collect expected_stdout from benchmark task manifests to de-contaminate training.
 
-    The doc-bench tasks (Tests/aether_doc_bench/tasks.json) overlap heavily with the
-    corpus and seed pairs. Training on records that reproduce a benchmark's exact output
-    turns the benchmark into a memorization check, so we drop them by default and keep
-    tasks.json as an honest held-out no-guide test.
+    Training on records that reproduce a benchmark's exact output turns the
+    benchmark into a memorization check, so prepare_assets drops them by
+    default and keeps the board manifests an honest held-out test.
     """
     outputs: set[str] = set()
     for path in paths:
@@ -357,6 +464,58 @@ def drop_benchmark_overlap(
     return kept, dropped
 
 
+def verification_failures(records: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+    """(exit-code failures, exact-stdout mismatches) among built records."""
+    rc_failures: list[str] = []
+    mismatches: list[str] = []
+    for record in records:
+        verification = record["verification"]
+        if verification["returncode"] != 0:
+            rc_failures.append(record["id"])
+        elif isinstance(record.get("expected_stdout"), str) and not verification["exact_stdout_match"]:
+            mismatches.append(record["id"])
+    return rc_failures, mismatches
+
+
+def record_backstop_hits(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Golden-backstop hits in built records: the golden, the live stdout,
+    and (as a last net) anything else the serialized record carries."""
+    hits: list[dict[str, Any]] = []
+    for record in records:
+        for field, text in (
+            ("expected_stdout", record.get("expected_stdout")),
+            ("verification.stdout", record["verification"].get("stdout")),
+            ("record", json.dumps(record, ensure_ascii=True)),
+        ):
+            names = policy.backstop_hits(text)
+            if names:
+                hits.append({"id": record["id"], "field": field, "patterns": names})
+                break
+    return hits
+
+
+def manifest_host_data_hits(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Host data in any manifest golden, trained or not (the repo is public)."""
+    hits: list[dict[str, Any]] = []
+    for item in payload.get("items", []):
+        names = policy.backstop_hits(item.get("stdout"), policy.HOST_DATA_PATTERNS)
+        if names:
+            hits.append({"id": pathlib.Path(str(item.get("repo_path", "?"))).name, "patterns": names})
+    return hits
+
+
+def corpus_oracle_errors(payload: dict[str, Any]) -> list[str]:
+    """Selected corpus items whose oracle metadata is missing or inconsistent."""
+    errors: list[str] = []
+    for item in payload.get("items", []):
+        if policy.sft_exclusion(item) is not None:
+            continue
+        problem = policy.oracle_problem(policy.item_metadata(item))
+        if problem:
+            errors.append(f"{pathlib.Path(str(item.get('repo_path', '?'))).name}: {problem}")
+    return errors
+
+
 def write_jsonl(path: pathlib.Path, records: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
@@ -366,7 +525,7 @@ def write_jsonl(path: pathlib.Path, records: list[dict[str, Any]]) -> None:
 
 def main() -> int:
     global CORPUS_DIR
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--instruction-manifest", type=pathlib.Path, required=True)
     parser.add_argument("--repair-manifest", type=pathlib.Path, required=True)
     parser.add_argument("--instruction-jsonl", type=pathlib.Path, required=True)
@@ -393,22 +552,29 @@ def main() -> int:
         help="benchmark task JSON whose expected_stdout values are dropped from training "
         "(keeps the benchmark an honest held-out test). Repeatable.",
     )
+    parser.add_argument("--report-json", type=pathlib.Path, default=None,
+                        help="write selection counts, overlap drops and gate failures here")
     args = parser.parse_args()
 
     CORPUS_DIR = args.corpus_dir
 
     if not args.aether_bin.exists():
         raise SystemExit(f"missing aether binary: {args.aether_bin}")
+    stamp = policy.aether_identity(args.aether_bin)
 
-    instruction_records = build_instruction_records(read_json(args.instruction_manifest), args.aether_bin)
+    corpus_payload = read_json(args.corpus_manifest)
+    instruction_records = build_instruction_records(
+        read_json(args.instruction_manifest), args.aether_bin, stamp
+    )
     corpus_instruction_records = build_corpus_instruction_records(
-        read_json(args.corpus_manifest),
+        corpus_payload,
         aether_bin=args.aether_bin,
         fixtures_dir=args.fixtures_dir,
+        stamp=stamp,
         compact=args.compact_oneliners,
     )
     instruction_records.extend(corpus_instruction_records)
-    repair_records = build_repair_records(read_json(args.repair_manifest), args.aether_bin)
+    repair_records = build_repair_records(read_json(args.repair_manifest), args.aether_bin, stamp)
 
     exclude_stdout = load_benchmark_stdout(args.exclude_benchmark_tasks)
     instruction_records, dropped_instruction = drop_benchmark_overlap(instruction_records, exclude_stdout)
@@ -419,14 +585,66 @@ def main() -> int:
             f"repair={len(dropped_repair)} ids={sorted(dropped_instruction + dropped_repair)}"
         )
 
-    bad_instruction = [r["id"] for r in instruction_records if r["verification"]["returncode"] != 0]
-    bad_repair = [r["id"] for r in repair_records if r["verification"]["returncode"] != 0]
-    if bad_instruction or bad_repair:
+    selection = corpus_selection_summary(corpus_payload)
+    rc_instruction, mismatch_instruction = verification_failures(instruction_records)
+    rc_repair, mismatch_repair = verification_failures(repair_records)
+    backstop = record_backstop_hits(instruction_records + repair_records)
+    manifest_hits = manifest_host_data_hits(corpus_payload)
+    oracle_errors = corpus_oracle_errors(corpus_payload)
+
+    gates = {
+        "returncode_failures": {"instruction": rc_instruction, "repair": rc_repair},
+        "exact_stdout_mismatches": {"instruction": mismatch_instruction, "repair": mismatch_repair},
+        "golden_backstop": {"records": backstop, "manifest_host_data": manifest_hits},
+        "oracle_errors": oracle_errors,
+    }
+    failed = any([rc_instruction, rc_repair, mismatch_instruction, mismatch_repair,
+                  backstop, manifest_hits, oracle_errors])
+
+    report = {
+        **stamp,
+        "status": "failed" if failed else "ok",
+        "corpus_selection": selection,
+        "benchmark_overlap": {
+            "manifests": [policy.display_path(path) for path in args.exclude_benchmark_tasks],
+            "dropped": sorted(dropped_instruction + dropped_repair),
+        },
+        "records": {
+            "instruction": len(instruction_records),
+            "corpus_instruction": sum(1 for r in instruction_records if r["kind"] == "corpus_instruction_sft"),
+            "repair": len(repair_records),
+        },
+        "gates": gates,
+    }
+    if args.report_json:
+        args.report_json.parent.mkdir(parents=True, exist_ok=True)
+        args.report_json.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
+    print(
+        f"corpus_selection selected={selection['selected']} "
+        + " ".join(f"excluded_{reason}={count}" for reason, count in selection["excluded"].items())
+    )
+    print(
+        "gates "
+        f"returncode_failures={len(rc_instruction) + len(rc_repair)} "
+        f"exact_stdout_mismatches={len(mismatch_instruction) + len(mismatch_repair)} "
+        f"backstop_hits={len(backstop) + len(manifest_hits)} "
+        f"oracle_errors={len(oracle_errors)}"
+    )
+    if failed:
         details = []
-        if bad_instruction:
-            details.append("instruction failures: " + ", ".join(bad_instruction))
-        if bad_repair:
-            details.append("repair failures: " + ", ".join(bad_repair))
+        if rc_instruction or rc_repair:
+            details.append("nonzero exit: " + ", ".join(rc_instruction + rc_repair))
+        if mismatch_instruction or mismatch_repair:
+            details.append("exact-stdout mismatch: " + ", ".join(mismatch_instruction + mismatch_repair))
+        if backstop:
+            details.append("golden backstop: " + ", ".join(
+                f"{hit['id']} ({hit['field']}: {'/'.join(hit['patterns'])})" for hit in backstop))
+        if manifest_hits:
+            details.append("host data in manifest golden: " + ", ".join(
+                f"{hit['id']} ({'/'.join(hit['patterns'])})" for hit in manifest_hits))
+        if oracle_errors:
+            details.append("oracle: " + "; ".join(oracle_errors))
         raise SystemExit("verification failed: " + "; ".join(details))
 
     write_jsonl(args.instruction_jsonl, instruction_records)
