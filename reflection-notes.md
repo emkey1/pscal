@@ -29,7 +29,7 @@ memory recall when it fails:
 - Host identity re-taught repeatedly: 78ab3d17 "Lets start using the tailscale
   DNS for nodes. Please save the following..."; 3b2c0831 "Dude, you need to keep
   better track of this stuff. We've used that label MANY times.
-  macbook-pro-2.tailfe3968.ts.net is the DNS name."; "No, this is not mint...
+  macbook-pro-2 is the DNS name."; "No, this is not mint...
   This laptop is macbook-pro-2"; "Err, m4t is actually a 64GB m4 Mac Mini."
 - Deploy topology re-explained in 2383fc7d ("The claws are also supposed to
   pull the latest changes"), 78ab3d17, a8b9dbc3.
@@ -245,10 +245,10 @@ Tokens are hand-fed in chat repeatedly (LM Studio per-host tokens ×3 hosts,
 HF token "Don't forget we have a hugging face token" ×3 verbatim in 78ab3d17,
 z.ai key location, GLM proxy JWT refresh, claw3 sudo password), and the
 corruption hot-button: ab32b92a "if I had a dollar for every time I've heard
-something similar to '/storage/hf/token on claw2 is corrupted...', I'd have a
+something similar to 'the HF token on claw2 is corrupted...', I'd have a
 lot of dollars." **Proposal:** a CLAUDE.md "Credentials" table of *locations
-only* (never values): openclaw.json for GLM/LM Studio, ~/zap on claw1,
-/storage/hf/token (read-only, never write), so no session ever asks or
+only* (never values), now kept in the untracked CLAUDE.local.md rather than
+the public CLAUDE.md, so no session ever asks or
 guesses. The never-write rule rides along from memory into CLAUDE.md.
 
 ## 13. Multi-model relay / external-review shuttling — already self-solved

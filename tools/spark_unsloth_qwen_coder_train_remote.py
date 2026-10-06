@@ -12,7 +12,10 @@ import subprocess
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 LOCAL_TRAIN_SCRIPT = REPO_ROOT / "tools" / "unsloth_qwen_coder_30b_sft.py"
 LOCAL_SYNC_SCRIPT = REPO_ROOT / "tools" / "aether_specialization_sync_to_spark.py"
-DEFAULT_HOST = "claw@100.124.15.16"
+import fleet_env  # noqa: E402  (tools/ is on sys.path when run as a script)
+
+# Private: $PSCAL_SPARK_HOST or ~/.config/pscal/fleet.env; --host otherwise.
+DEFAULT_HOST = fleet_env.get("PSCAL_SPARK_HOST")
 DEFAULT_WORKSPACE = "$HOME/training/aether-qwen-coder-30b-unsloth"
 DEFAULT_NOTEBOOKS_REPO = "https://github.com/unslothai/notebooks.git"
 DEFAULT_NOTEBOOKS_COMMIT = "568a161218dae1c30b6e13285192dc268850dc8b"
@@ -249,7 +252,7 @@ fi
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default=DEFAULT_HOST)
+    parser.add_argument("--host", default=DEFAULT_HOST, required=DEFAULT_HOST is None)
     parser.add_argument("--workspace", default=DEFAULT_WORKSPACE)
     parser.add_argument("--repo-url", default=DEFAULT_NOTEBOOKS_REPO)
     parser.add_argument("--repo-commit", default=DEFAULT_NOTEBOOKS_COMMIT)

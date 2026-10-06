@@ -10,7 +10,10 @@ import subprocess
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
-DEFAULT_HOST = "claw@100.124.15.16"
+import fleet_env  # noqa: E402  (tools/ is on sys.path when run as a script)
+
+# Private: $PSCAL_SPARK_HOST or ~/.config/pscal/fleet.env; --host otherwise.
+DEFAULT_HOST = fleet_env.get("PSCAL_SPARK_HOST")
 DEFAULT_REMOTE_WORKSPACE = "$HOME/training/aether-qwen3-base"
 
 
@@ -44,7 +47,7 @@ def expand_remote_workspace(host: str, workspace: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default=DEFAULT_HOST)
+    parser.add_argument("--host", default=DEFAULT_HOST, required=DEFAULT_HOST is None)
     parser.add_argument("--remote-workspace", default=DEFAULT_REMOTE_WORKSPACE)
     parser.add_argument(
         "--local-output-dir",

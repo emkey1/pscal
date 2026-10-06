@@ -3,7 +3,7 @@
     {
       "id": "spark-qwen-coder-30b-v2-vllm",
       "type": "openai_chat_completions",
-      "base_url": "http://100.124.15.16:8015/v1",
+      "base_url": "http://${PSCAL_SPARK_IP}:8015/v1",
       "api_key": "",
       "model": "aether-qwen-coder-30b-v2",
       "temperature": 0.2,

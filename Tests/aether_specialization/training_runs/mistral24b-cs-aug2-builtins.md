@@ -5,7 +5,7 @@ trained on the `out_cs_aug2_builtins` corpus. Captured at launch from `docker in
 of the live container so it can never be lost to container pruning.
 
 - **Launched:** 2026-06-28
-- **Rig:** claw2 GB10 (`claw2.tailfe3968.ts.net`, user `claw`)
+- **Rig:** claw2 GB10 (`claw2`, user `claw`)
 - **Run name / tag:** `mistral24b-cs-aug2-builtins`
 - **Container name:** `aether-train-mistral24b-cs-aug2-builtins`
 - **Base model:** `mistralai/Mistral-Small-24B-Instruct-2501`
@@ -99,7 +99,7 @@ Use an ABSOLUTE remote path — `rsync host:relpath` mangles the target.
 
 ```bash
 SRC=/Users/mke/PBuild/Tests/aether_specialization/out_cs_aug2_builtins/
-HOST=claw@claw2.tailfe3968.ts.net
+HOST=claw@claw2
 RHOME=$(ssh "$HOST" 'printf %s "$HOME"')
 rsync -av "$SRC" "${HOST}:${RHOME}/training/aether-qwen-coder-30b-unsloth/data_cs_aug2_builtins/"
 ```
@@ -107,7 +107,7 @@ rsync -av "$SRC" "${HOST}:${RHOME}/training/aether-qwen-coder-30b-unsloth/data_c
 ## Check status
 
 ```bash
-ssh claw@claw2.tailfe3968.ts.net \
+ssh claw@claw2 \
   "docker ps -a --filter name=aether-train-mistral24b-cs-aug2-builtins --format '{{.Status}}'; \
    docker logs --tail 40 aether-train-mistral24b-cs-aug2-builtins 2>&1 | tail; \
    ls -la /storage/mistral24b-cs-aug2-builtins/merged_16bit/ 2>/dev/null"

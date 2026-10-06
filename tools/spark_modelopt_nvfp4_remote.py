@@ -11,7 +11,10 @@ import subprocess
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 LOCAL_EXPORT_SCRIPT = REPO_ROOT / "tools" / "modelopt_nvfp4_export.py"
-DEFAULT_HOST = "claw@100.124.15.16"
+import fleet_env  # noqa: E402  (tools/ is on sys.path when run as a script)
+
+# Private: $PSCAL_SPARK_HOST or ~/.config/pscal/fleet.env; --host otherwise.
+DEFAULT_HOST = fleet_env.get("PSCAL_SPARK_HOST")
 DEFAULT_IMAGE = "aether-unsloth-qwen3-coder-30b:568a161"
 DEFAULT_WORKSPACE = "/storage/aether-qwen-coder-30b-unsloth-nvfp4"
 DEFAULT_SOURCE_MODEL = (
@@ -185,7 +188,7 @@ df -h /
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default=DEFAULT_HOST)
+    parser.add_argument("--host", default=DEFAULT_HOST, required=DEFAULT_HOST is None)
     parser.add_argument("--workspace", default=DEFAULT_WORKSPACE)
     parser.add_argument("--image", default=DEFAULT_IMAGE)
     parser.add_argument("--source-model", default=DEFAULT_SOURCE_MODEL)

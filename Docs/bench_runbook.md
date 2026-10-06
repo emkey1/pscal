@@ -13,7 +13,7 @@ Companion policies live in CLAUDE.md (budgets, triage, long runs, T'Ra).
    `refresh_aether.sh` / the autodeploy hook. Verify `aether --version`
    matches `components/aether/VERSION` on every node involved. Results are
    stamped with `aether_version`; a mismatch invalidates the run.
-2. **Route through T'Ra** (http://100.121.116.25:8793). `GET /api/targets`
+2. **Route through T'Ra** (address in `CLAUDE.local.md`, `$TRA_QUEUE_URL`). `GET /api/targets`
    first — never guess target names. One job per endpoint at a time; parallel
    across endpoints is good. Direct hits on Ollama/LM Studio during shared use
    cause silent contention (models spill to CPU, "slow model" mysteries).
@@ -28,7 +28,7 @@ Companion policies live in CLAUDE.md (budgets, triage, long runs, T'Ra).
    (`__AETHER_BENCH_END__`) can fire inside the thinking phase → empty
    content → bogus 0s. Use `extra_body stop:null` for reasoning models.
 5. **Tokens/auth.** Locations in CLAUDE.md (read-only, never write). GLM
-   proxy JWT expires — on 401, re-copy from openclaw.json. A dummy/expired
+   proxy JWT expires — on 401, re-copy it from the credential file named in `CLAUDE.local.md`. A dummy/expired
    LM Studio key 401s silently and produces 0-case runs.
 6. **Endpoints warm.** Ollama keep-alive should be 1h (default 5 min causes
    cold-load timeouts). Check nothing stale is squatting on GPU RAM

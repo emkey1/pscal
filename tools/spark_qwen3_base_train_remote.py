@@ -11,7 +11,10 @@ import subprocess
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 LOCAL_TRAIN_SCRIPT = REPO_ROOT / "tools" / "qwen3_base_lora_sft.py"
-DEFAULT_HOST = "claw@100.124.15.16"
+import fleet_env  # noqa: E402  (tools/ is on sys.path when run as a script)
+
+# Private: $PSCAL_SPARK_HOST or ~/.config/pscal/fleet.env; --host otherwise.
+DEFAULT_HOST = fleet_env.get("PSCAL_SPARK_HOST")
 DEFAULT_WORKSPACE = "$HOME/training/aether-qwen3-base"
 
 
@@ -33,7 +36,7 @@ def sync_train_script(host: str, workspace: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default=DEFAULT_HOST)
+    parser.add_argument("--host", default=DEFAULT_HOST, required=DEFAULT_HOST is None)
     parser.add_argument("--workspace", default=DEFAULT_WORKSPACE)
     parser.add_argument("--run-name", default="sft-seed-v1")
     parser.add_argument("--model-id", default="Qwen/Qwen3-4B-Base")

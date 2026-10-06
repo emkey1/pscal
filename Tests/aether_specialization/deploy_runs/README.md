@@ -29,7 +29,7 @@ For a merged 16-bit checkpoint at `/storage/<tag>/merged_16bit`:
    ```
 4. **Serve check** via the OpenAI endpoint:
    ```bash
-   curl -s http://claw2.tailfe3968.ts.net:11435/v1/chat/completions \
+   curl -s http://claw2:11435/v1/chat/completions \
      -H 'Authorization: Bearer ollama' \
      -d '{"model":"<model-name>","messages":[{"role":"user","content":"hi"}]}'
    ```

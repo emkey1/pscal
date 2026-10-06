@@ -3,7 +3,7 @@
     {
       "id": "claw2-qwen3-8b-nothink-4bit-cs-aug18",
       "type": "openai_chat_completions",
-      "base_url": "http://claw2.tailfe3968.ts.net:8019/v1",
+      "base_url": "http://claw2:8019/v1",
       "api_key": "",
       "model": "qwen3-8b-nothink-4bit-cs-aug18",
       "temperature": 0.2,
@@ -17,7 +17,7 @@
     {
       "id": "claw2-qwen3-8b-nothink-8bit-cs-aug18",
       "type": "openai_chat_completions",
-      "base_url": "http://claw2.tailfe3968.ts.net:8019/v1",
+      "base_url": "http://claw2:8019/v1",
       "api_key": "",
       "model": "qwen3-8b-nothink-8bit-cs-aug18",
       "temperature": 0.2,
@@ -31,7 +31,7 @@
     {
       "id": "claw2-qwen3-8b-nothink-16bit-cs-aug18",
       "type": "openai_chat_completions",
-      "base_url": "http://claw2.tailfe3968.ts.net:8019/v1",
+      "base_url": "http://claw2:8019/v1",
       "api_key": "",
       "model": "qwen3-8b-nothink-16bit-cs-aug18",
       "temperature": 0.2,
@@ -45,7 +45,7 @@
     {
       "id": "claw2-qwen35-9b-4bit-cs-aug18",
       "type": "openai_chat_completions",
-      "base_url": "http://claw2.tailfe3968.ts.net:8019/v1",
+      "base_url": "http://claw2:8019/v1",
       "api_key": "",
       "model": "qwen35-9b-4bit-cs-aug18",
       "temperature": 0.2,
@@ -60,7 +60,7 @@
     {
       "id": "claw2-qwen35-9b-8bit-cs-aug18",
       "type": "openai_chat_completions",
-      "base_url": "http://claw2.tailfe3968.ts.net:8019/v1",
+      "base_url": "http://claw2:8019/v1",
       "api_key": "",
       "model": "qwen35-9b-8bit-cs-aug18",
       "temperature": 0.2,
@@ -75,7 +75,7 @@
     {
       "id": "claw2-qwen35-9b-16bit-cs-aug18",
       "type": "openai_chat_completions",
-      "base_url": "http://claw2.tailfe3968.ts.net:8019/v1",
+      "base_url": "http://claw2:8019/v1",
       "api_key": "",
       "model": "qwen35-9b-16bit-cs-aug18",
       "temperature": 0.2,

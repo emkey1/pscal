@@ -77,7 +77,7 @@ If the hook is missing (it was on 2026-09-22) or the commit skipped hooks, run
 in. It reads `components/aether/VERSION`, so that submodule must be initialized,
 and it can outlast a foreground Bash call, so run it in the background.
 Confirm the final `=== done: N/3 hosts current` line.
-Spot-check: `ssh claw@claw1.tailfe3968.ts.net '~/aether-current/build/aether --version'`
+Spot-check: `ssh claw@claw1 '~/aether-current/build/aether --version'`
 and compare to `components/aether/VERSION`.
 
 ## 5. Report

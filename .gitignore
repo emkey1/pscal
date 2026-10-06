@@ -101,3 +101,8 @@ Tests/aether_doc_bench/results/history/ornith/*.partial_hang_backup
 Tests/aether_doc_bench/results/history/ornith/ornith_cs_final*.json
 Tests/aether_doc_bench/results/history/ornith/ornith_cs_rerun.json
 Tests/aether_doc_bench/results/history/ornith/ornith_large_full_rerun.json
+
+# Private: fleet hosts, endpoints and credential locations (see CLAUDE.md "Fleet")
+CLAUDE.local.md
+# A stray build tree that was tracked by mistake (its configure log held a PATH)
+build.del/

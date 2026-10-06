@@ -26,16 +26,20 @@ AETHER_DIR="$ROOT/components/aether"
 REFRESH_SRC="$ROOT/tools/refresh_aether.sh"
 DEPLOY_TIMEOUT="${AETHER_DEPLOY_TIMEOUT:-1800}"
 
-# name|primary|fallback  (fallback optional; claw3 keeps its LAN address as a backup
-# because MagicDNS occasionally lags). Override wholesale via $AETHER_CLAWS.
+# name|primary|fallback  (fallback optional). Override wholesale via $AETHER_CLAWS,
+# normally set in the private fleet overlay (~/.config/pscal/fleet.env), which
+# carries the FQDNs and claw3's LAN fallback (MagicDNS occasionally lags). The
+# in-repo default is short MagicDNS names: this repo is public.
+FLEET_ENV="${PSCAL_FLEET_ENV:-$HOME/.config/pscal/fleet.env}"
+if [ -z "${AETHER_CLAWS:-}" ] && [ -r "$FLEET_ENV" ]; then . "$FLEET_ENV"; fi
 if [ -n "${AETHER_CLAWS:-}" ]; then
   # shellcheck disable=SC2206
   HOSTS=( $AETHER_CLAWS )
 else
   HOSTS=(
-    "claw1|claw@claw1.tailfe3968.ts.net|"
-    "claw2|claw@claw2.tailfe3968.ts.net|"
-    "claw3|claw@claw3.tailfe3968.ts.net|claw@192.168.110.27"
+    "claw1|claw@claw1|"
+    "claw2|claw@claw2|"
+    "claw3|claw@claw3|"
   )
 fi
 

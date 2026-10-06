@@ -414,6 +414,19 @@ def load_tasks(path: pathlib.Path) -> list[Task]:
     return tasks
 
 
+def _expand_fleet_refs(value: Any) -> Any:
+    """A destination may name a private host as ${VAR}; resolve it from the environment
+    or the untracked fleet overlay (tools/fleet_env.py). This repo is public."""
+    if isinstance(value, str) and "${" in value:
+        tools_dir = str(pathlib.Path(__file__).resolve().parent)
+        if tools_dir not in sys.path:
+            sys.path.insert(0, tools_dir)
+        import fleet_env
+
+        return fleet_env.expand(value)
+    return value
+
+
 def load_destinations(path: pathlib.Path) -> list[Destination]:
     raw = json.loads(read_text(path))
     items = raw.get("destinations", [])
@@ -424,13 +437,13 @@ def load_destinations(path: pathlib.Path) -> list[Destination]:
                 destination_id=item["id"],
                 kind=item["type"],
                 model=item.get("model"),
-                base_url=item.get("base_url"),
+                base_url=_expand_fleet_refs(item.get("base_url")),
                 api_key=item.get("api_key"),
                 api_key_env=item.get("api_key_env"),
                 temperature=float(item.get("temperature", 0.2)),
                 max_output_tokens=int(item.get("max_output_tokens", 3000)),
-                command_template=item.get("command_template"),
-                after_each_command=item.get("after_each_command"),
+                command_template=_expand_fleet_refs(item.get("command_template")),
+                after_each_command=_expand_fleet_refs(item.get("after_each_command")),
                 after_each_timeout_seconds=int(item.get("after_each_timeout_seconds", 60)),
                 cooldown_seconds=float(item.get("cooldown_seconds", 0.0)),
                 prompt_context_limit=(

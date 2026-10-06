@@ -50,7 +50,7 @@ ssh claw@claw2 "cd ~/training/aether-qwen-coder-30b-unsloth && ./serve_any.sh $T
 echo "=== waiting for vLLM readiness ==="
 ready=0
 for i in $(seq 1 60); do
-  if curl -sf "http://claw2.tailfe3968.ts.net:8019/v1/models" >/dev/null 2>&1; then
+  if curl -sf "http://claw2:8019/v1/models" >/dev/null 2>&1; then
     echo "ready after ${i}0s"
     ready=1
     break

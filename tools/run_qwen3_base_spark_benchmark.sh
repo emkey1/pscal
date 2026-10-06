@@ -7,9 +7,14 @@ adapter_path="${2:-}"
 
 mkdir -p "$(dirname "$output_json")"
 
-start_args=(python3 "$repo_root/tools/spark_qwen3_base_remote.py" --host "claw@100.124.15.16" start-server --wait-seconds 1800)
+# The Spark host is private: $PSCAL_SPARK_HOST, or the fleet overlay.
+FLEET_ENV="${PSCAL_FLEET_ENV:-$HOME/.config/pscal/fleet.env}"
+if [ -z "${PSCAL_SPARK_HOST:-}" ] && [ -r "$FLEET_ENV" ]; then . "$FLEET_ENV"; fi
+spark_host="${PSCAL_SPARK_HOST:?set PSCAL_SPARK_HOST (or add it to ~/.config/pscal/fleet.env)}"
+
+start_args=(python3 "$repo_root/tools/spark_qwen3_base_remote.py" --host "$spark_host" start-server --wait-seconds 1800)
 if [ -n "$adapter_path" ]; then
-  start_args=(python3 "$repo_root/tools/spark_qwen3_base_remote.py" --host "claw@100.124.15.16" --adapter-path "$adapter_path" start-server --wait-seconds 1800)
+  start_args=(python3 "$repo_root/tools/spark_qwen3_base_remote.py" --host "$spark_host" --adapter-path "$adapter_path" start-server --wait-seconds 1800)
 fi
 "${start_args[@]}"
 

@@ -42,7 +42,7 @@ Equivalent wrapper: `./train_any.sh qwen3-8b-nothink-cs-aug2-builtins /storage/h
 
 ## Check status
 ```bash
-ssh claw@claw2.tailfe3968.ts.net \
+ssh claw@claw2 \
   "docker ps -a --filter name=aether-train-qwen3-8b-nothink-cs-aug2-builtins --format '{{.Status}}'; \
    tail -30 /storage/aether_retrain_queue/qwen3-8b-nothink-cs-aug2-builtins.log 2>/dev/null; \
    ls /storage/qwen3-8b-nothink-cs-aug2-builtins/merged_16bit/ 2>/dev/null"

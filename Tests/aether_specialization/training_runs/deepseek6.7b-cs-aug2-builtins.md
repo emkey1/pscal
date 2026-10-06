@@ -47,7 +47,7 @@ Equivalent wrapper: `INSTR_PART="### Instruction:" RESP_PART="### Response:" ./t
 
 ## Check status
 ```bash
-ssh claw@claw2.tailfe3968.ts.net \
+ssh claw@claw2 \
   "docker ps -a --filter name=aether-train-deepseek6.7b-cs-aug2-builtins --format '{{.Status}}'; \
    tail -30 /storage/aether_retrain_queue/deepseek6.7b-cs-aug2-builtins.log 2>/dev/null; \
    ls /storage/deepseek6.7b-cs-aug2-builtins/merged_16bit/ 2>/dev/null"

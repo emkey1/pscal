@@ -50,25 +50,26 @@ lives in the auto-memory files (this file wins if they disagree).
 - Aether parse errors come from the AST parser (`ast_parser.c`), the default
   frontend since 2026-06-27. Grep the error string there first.
 
-## Fleet (always tailscale FQDNs, never raw IPs — they rotate)
+## Fleet
 
-| Host | FQDN | Hardware | Role |
-|------|------|----------|------|
-| claw1 | claw1.tailfe3968.ts.net | GB10 Spark, 128GB | rich Ollama bench host (:11434), /storage NFS server (7.3T), ds4 |
-| claw2 | claw2.tailfe3968.ts.net | GB10 Spark, 128GB | training rig; docker Ollama on **:11435** (snap owns :11434) |
-| claw3 | claw3.tailfe3968.ts.net | GB10 Spark, 128GB | image/video gen (ComfyUI :8188); keep clean |
-| m4t | m4mini.tailfe3968.ts.net | M4 mini, 64GB | T'Ra scheduler :8793, YouTube transcription :8792 |
-| m2t | (LM Studio :1215) | M2 Mac, 32GB | small LM Studio node |
-| m5t / this laptop | macbook-pro-2.tailfe3968.ts.net | M4 MBP, 128GB | primary workstation, LM Studio :1215 |
-| pscal build box | 169.254.143.229 port 1022 | Devuan 6, very slow | link-local; run long ops detached |
+Host names, endpoints, ports, the ssh user and credential locations are private.
+They live in two untracked files, never in this public repo:
 
-- ssh user on the claws is `claw`, passwordless + passwordless sudo.
-- **All shared-GPU LLM jobs go through the T'Ra scheduler at
-  http://100.121.116.25:8793 (m4t)** — never hit Ollama/LM Studio directly for
-  batch work (direct hits caused the qwen3.6 contention mystery). Workflow:
-  `GET /api/targets` (never guess names) → `/jobs/explain` → `POST /jobs` →
-  poll `/jobs/{id}?wait=`. Max one job per endpoint; different endpoints in
-  parallel is encouraged.
+- **`CLAUDE.local.md`**, beside this file. Claude Code loads it automatically;
+  it holds the fleet table, the T'Ra scheduler address and the credential table.
+- **`~/.config/pscal/fleet.env`** (or `$PSCAL_FLEET_ENV`), `export NAME=value`
+  lines that the tools read (`tools/fleet_env.py`; shell drivers `source` it).
+
+Copy both to every machine that runs sessions or tools. Never put a hostname,
+tailnet address or credential location back into a tracked file. Short MagicDNS
+names (`claw1`, `claw2`, `claw3`) are fine in tracked commands.
+
+- **All shared-GPU LLM jobs go through the T'Ra scheduler** (address in
+  `CLAUDE.local.md`, `$TRA_QUEUE_URL` for the tools) — never hit Ollama/LM
+  Studio directly for batch work (direct hits caused the qwen3.6 contention
+  mystery). Workflow: `GET /api/targets` (never guess names) → `/jobs/explain`
+  → `POST /jobs` → poll `/jobs/{id}?wait=`. Max one job per endpoint; different
+  endpoints in parallel is encouraged.
 
 ## Ship flow — do this after every verified fix, without being asked
 
@@ -117,18 +118,11 @@ wraps steps 1–4.
 - Prefer parallel advancement across the fleet (via T'Ra) over serial
   measurement; idle claws are wasted money.
 
-## Credentials — locations only, and a hard rule
+## Credentials — a hard rule
 
 **NEVER write, append, or heredoc into a token/credential file. Read-only.**
-(This is how tokens get corrupted and how leaks happen.)
-
-| What | Where |
-|------|-------|
-| GLM/z.ai proxy JWT (expires; refresh on 401) | `~/.openclaw-autoclaw/openclaw.json` → models.providers.zai X-Authorization |
-| LM Studio API keys (per host) | `~/.openclaw-autoclaw/openclaw.json` (localhost:1215 provider apiKey); note m5t token contains a `:` |
-| z.ai API key | `claw@claw1:~/zap` |
-| Hugging Face token | `/storage/hf/token` on the claws (currently read-only scope) |
-| Gemini/Google token | openclaw.json |
+(This is how tokens get corrupted and how leaks happen.) Where each credential
+lives is in `CLAUDE.local.md`.
 
 Never do unauthenticated HF downloads; we have a token — use it.
 

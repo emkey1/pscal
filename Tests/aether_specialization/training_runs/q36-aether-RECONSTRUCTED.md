@@ -9,7 +9,7 @@
 > metadata and are reconstructed from project memory — **verify before relying on them
 > for the deferred retrain.** Status: **DEFERRED** (do not launch yet, per owner).
 
-- **Rig:** claw2 GB10 (`claw2.tailfe3968.ts.net`, user `claw`) — Blackwell sm_121
+- **Rig:** claw2 GB10 (`claw2`, user `claw`) — Blackwell sm_121
 - **Run name / tag:** `q36-sdpa` (deployed as `q36-aether:latest`)
 - **Base model:** `/storage/models/Qwen3.6-35B-A3B-Instruct` (arch `qwen3_5_moe`,
   hybrid linear-attention + MoE)

@@ -15,7 +15,10 @@ import urllib.request
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 LOCAL_SERVER_SCRIPT = REPO_ROOT / "tools" / "qwen3_base_server.py"
-DEFAULT_HOST = "claw@100.124.15.16"
+import fleet_env  # noqa: E402  (tools/ is on sys.path when run as a script)
+
+# Private: $PSCAL_SPARK_HOST or ~/.config/pscal/fleet.env; --host otherwise.
+DEFAULT_HOST = fleet_env.get("PSCAL_SPARK_HOST")
 DEFAULT_WORKSPACE = "$HOME/training/aether-qwen3-base"
 DEFAULT_PORT = 18081
 DEFAULT_MODEL_ID = "Qwen/Qwen3-4B-Base"
@@ -172,7 +175,7 @@ def health_matches_requested(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default=DEFAULT_HOST)
+    parser.add_argument("--host", default=DEFAULT_HOST, required=DEFAULT_HOST is None)
     parser.add_argument("--workspace", default=DEFAULT_WORKSPACE)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--model-id", default=DEFAULT_MODEL_ID)

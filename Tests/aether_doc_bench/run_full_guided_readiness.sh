@@ -7,7 +7,10 @@ set -u
 cd /Users/mke/PBuild || exit 1
 BIN=/Users/mke/PBuild/components/aether/build/aether
 DEST_CONFIG="${1:-Tests/aether_doc_bench/destinations.tra.json}"
-SCHED="${TRA_QUEUE_URL:-http://100.121.116.25:8793}"
+# The scheduler address is private: $TRA_QUEUE_URL, or the fleet overlay.
+FLEET_ENV="${PSCAL_FLEET_ENV:-$HOME/.config/pscal/fleet.env}"
+[ -z "${TRA_QUEUE_URL:-}" ] && [ -r "$FLEET_ENV" ] && . "$FLEET_ENV"
+SCHED="${TRA_QUEUE_URL:?set TRA_QUEUE_URL (or add it to ~/.config/pscal/fleet.env)}"
 
 echo "=== binary ==="
 if [ -x "$BIN" ]; then echo "OK  $BIN -> $($BIN --version 2>&1 | head -1)"; else echo "MISSING $BIN (rebuild post-fixes)"; fi

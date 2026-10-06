@@ -5,7 +5,7 @@ Qwen3-Coder-30B-A3B (MoE, `Qwen3MoeForCausalLM`, 128 experts) Aether fine-tune o
 (`runs/sft-a3b-ml1xL/run_metadata.json`), data dir swapped to `data_cs_aug2_builtins`.
 
 - **Launched:** 2026-06-28 (via `retrain_queue.sh`, queue position 1)
-- **Rig:** claw2 GB10 (`claw2.tailfe3968.ts.net`, user `claw`)
+- **Rig:** claw2 GB10 (`claw2`, user `claw`)
 - **Run name / tag:** `a3b-coder30b-cs-aug2-builtins` · container `aether-train-a3b-coder30b-cs-aug2-builtins`
 - **Base:** `/storage/archive/qwen3-coder-30b-a3b-model-mirror` (arch `Qwen3MoeForCausalLM`, present, 16 shards)
 - **Markers:** ChatML — trainer defaults `<|im_start|>user\n` / `<|im_start|>assistant\n`
@@ -39,7 +39,7 @@ Equivalent wrapper: `./train_any.sh a3b-coder30b-cs-aug2-builtins /storage/archi
 
 ## Check status
 ```bash
-ssh claw@claw2.tailfe3968.ts.net \
+ssh claw@claw2 \
   "docker ps -a --filter name=aether-train-a3b-coder30b-cs-aug2-builtins --format '{{.Status}}'; \
    tail -30 /storage/aether_retrain_queue/a3b-coder30b-cs-aug2-builtins.log 2>/dev/null; \
    ls /storage/a3b-coder30b-cs-aug2-builtins/merged_16bit/ 2>/dev/null"
