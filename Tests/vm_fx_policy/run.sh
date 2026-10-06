@@ -41,6 +41,52 @@ else
     harness_report PASS "vm_fx_deny_net" "--deny net rejects a network builtin"
 fi
 
+# --- Case 1b: --deny net rejects a raw socket builtin -----------------
+# The socket* builtins had no effect classification, so they ran as pure.
+cat > "$WORK_DIR/sock_test.pas" <<'EOF'
+program SockTest;
+var s: integer;
+begin
+  s := SocketCreate(0);
+  writeln('socket: ', s >= 0);
+end.
+EOF
+"$PASCAL_BIN" --deny net --no-cache "$WORK_DIR/sock_test.pas" > "$deny_out" 2>&1
+deny_status=$?
+if [ "$deny_status" -eq 0 ]; then
+    harness_report FAIL "vm_fx_deny_net_socket" "--deny net rejects a socket builtin" \
+        "expected nonzero exit, got 0:\n$(cat "$deny_out")"
+elif ! grep -q "builtin 'socketcreate' denied by --deny/PSCAL_VM_DENY policy" "$deny_out"; then
+    harness_report FAIL "vm_fx_deny_net_socket" "--deny net rejects a socket builtin" \
+        "wrong diagnostic:\n$(cat "$deny_out")"
+else
+    harness_report PASS "vm_fx_deny_net_socket" "--deny net rejects a socket builtin"
+fi
+
+# --- Case 1c: --deny net reaches a builtin handed to the thread pool --
+# A pooled/spawned builtin runs its handler on the worker, past the
+# dispatch-time gate, so this used to print the lookup under --deny net.
+cat > "$WORK_DIR/pool_test.pas" <<'EOF'
+program PoolTest;
+var t: integer;
+begin
+  t := ThreadPoolSubmit('dnslookup', 'localhost');
+  WaitForThread(t);
+  writeln('pool: ', ThreadGetResult(t, true));
+end.
+EOF
+"$PASCAL_BIN" --deny net --no-cache "$WORK_DIR/pool_test.pas" > "$deny_out" 2>&1
+deny_status=$?
+if [ "$deny_status" -eq 0 ]; then
+    harness_report FAIL "vm_fx_deny_net_thread_pool" "--deny net reaches a builtin queued on the thread pool" \
+        "expected nonzero exit, got 0:\n$(cat "$deny_out")"
+elif ! grep -q "builtin 'dnslookup' denied by --deny/PSCAL_VM_DENY policy" "$deny_out"; then
+    harness_report FAIL "vm_fx_deny_net_thread_pool" "--deny net reaches a builtin queued on the thread pool" \
+        "wrong diagnostic:\n$(cat "$deny_out")"
+else
+    harness_report PASS "vm_fx_deny_net_thread_pool" "--deny net reaches a builtin queued on the thread pool"
+fi
+
 # --- Case 2: record -> mutate live state -> replay must match record ------
 export VM_FX_TEST_TMP="$WORK_DIR"
 export VM_FX_HTTP_TARGET="$WORK_DIR/http_target.txt"

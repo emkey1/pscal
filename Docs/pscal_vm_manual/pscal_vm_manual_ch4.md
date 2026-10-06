@@ -87,14 +87,15 @@ effect_mask` — a bitmask over `FX_PURE | FX_IO | FX_NET | FX_PROC | FX_CLOCK
 | FX_RANDOM` (`core/effect_mask.h`). Every call site across `ext_builtins/*`
 passes one explicitly; the ~500-entry core dispatch table (§4.0's static
 `vmBuiltinDispatchTable[]`) is classified by name instead, against the same
-130-name table `pscalBuiltinNameIsEffectful()` already used for the Aether
+name table (`kEffectClassifiedNames`, 157 names as of 2026-10-06) that
+`pscalBuiltinNameIsEffectful()` already used for the Aether
 FX-001 gate — so that predicate's behavior didn't change, only its backing
 data type (bool → mask).
 
 **`pscalBuiltinNameIsEffectful()`/`pscalBuiltinNameEffectMask()` are
 static-table-only — use `pscalBuiltinNameEffectMaskLive()` for a name-based
 check that must be correct for *every* registered builtin.** The static
-~130-name table can't know about a builtin an `ext_builtins` category, or —
+name table can't know about a builtin an `ext_builtins` category, or —
 since VM 2.0 Phase 7 — a `dlopen` plugin registers at runtime with its own
 explicit mask. Aether's FX-001/ANN-001 gate (`aetherIsEffectfulBuiltin`,
 `semantic.c`) and the `--dump-ext-builtins`/`builtins_json` introspection
@@ -134,9 +135,15 @@ that makes it safe to run untrusted or model-generated PSCAL programs
 unattended at fleet scale (the aether_doc_bench / idea-miner harnesses'
 motivating use case): `--deny net,proc` denies network egress and
 process/thread spawning while leaving ordinary compute and stdout intact.
+A builtin handed to a thread (`ThreadSpawnBuiltin` / `ThreadPoolSubmit`, and
+the `thread_spawn_named` / `thread_pool_submit` wrappers behind Aether's
+`task_*`) is checked against the deny mask when the job is queued, because
+the worker runs its handler directly rather than through the dispatch-time
+gate; without that check a `dnslookup` on the pool ran under `--deny net`.
 
-**Record/replay.** `--fx-record <path>` journals every *effectful*
-builtin call's return value and VAR-parameter writebacks, in call order;
+**Record/replay.** `--fx-record <path>` journals the return value and
+VAR-parameter writebacks of every *effectful* builtin call except the
+journal-exempt raw sockets (below), in call order;
 `--fx-replay <path>` substitutes the journal for execution on a later run,
 so a flaky or hard-to-reproduce program (an HTTP-dependent eval, say) can be
 replayed byte-identically without touching the network again. A
@@ -157,6 +164,14 @@ faithfully captured.
   live on replay too (`PSCAL_FX_REPLAY_RUN_LIVE`) — after first verifying
   the journal's name/arg-count still match, so a genuine desync is still
   caught.
+- **Raw sockets are not journaled at all.** The 13 `socket*` builtins are
+  `FX_NET`, so `--deny net` stops them, but `pscalFxBuiltinIsJournalExempt()`
+  (`vm/vm_fx_policy.c`) keeps them out of the journal: they run live on both
+  record and replay, and a replayed socket program talks to the network
+  again. A socket handle is a live descriptor, so a replayed `socketcreate`
+  would hand back one that was never opened; `socketreceive` returns an
+  `MStream` result, which is never substitutable; and the journal's single
+  call order cannot follow `par` branches racing on accept/connect.
 - **`MStream` out-params are substitutable.** `HttpRequest`'s `Contents`
   argument (and similar) arrives as a bare `TYPE_MEMORYSTREAM`, not a
   pointer — `MStream` is already reference-counted shared state, so passing
