@@ -35,7 +35,7 @@ Original first-pass report follows (its failure lists are now historical).
 - **Binary:** `/Users/mke/PBuild/build/bin/aether` (20260701.1525_DEV, language 2026-07-01-7)
 - **Date:** 2026-07-01, local compile+run only (`--no-cache`, cwd seeded with `fixtures/` + module files, 20s timeout per unit)
 - **Scope:** union of all four candidate manifests (main + 1x/2x/3x; 3x extras resolved from `corpus_candidates_archive_old/`), `seed_instruction_pairs.json`, and all three `seed_repair_pairs.*.json` overlays (broken AND fixed halves)
-- **Machine-readable results:** scratchpad `corpus_reverify_2026-07-01.json` + per-unit `results/*.json` (session scratchpad `/private/tmp/claude-501/-Users-mke-PBuild/ab32b92a-0ee3-4ec1-b3b3-eb60c822147d/scratchpad/`)
+- **Machine-readable results:** scratchpad `corpus_reverify_2026-07-01.json` + per-unit `results/*.json` (session scratchpad `<session scratchpad>/`)
 - **Nothing was modified or committed.** Verification only.
 
 ## Headline counts

@@ -9935,20 +9935,6 @@
       }
     },
     {
-      "source_path": "/tmp/aether_harvest/07-01b_sched_m5_qwen3_coder_04_A_file_analysis_tool_that_read.aether",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_m5_qwen3_coder_04_A_file_analysis_tool_that_read.aether",
-      "sha256": "666d7af2df053b269dac7fd069c6dbe164440a6e502f7988844f3699af065519",
-      "stdout": "System Configuration Check\n===========================\n\nHome directory: /Users/mke\n\n[FOUND]  /etc/hosts\n[MISSING] /tmp/test_config.txt\n[MISSING] nonexistent_file.txt\n\nEnvironment variables:\n  PATH = <redacted>\n  HOME = /Users/mke\n  USER = mke\n  SHELL = /bin/zsh\n\nCLI arguments (0):\n",
-      "metadata": {
-        "canonical": true,
-        "fixture_required": false,
-        "assumption_bearing": false,
-        "tags": [
-          "harvested_idea_miner_2026-07-19"
-        ]
-      }
-    },
-    {
       "source_path": "/tmp/aether_harvest/07-01b_sched_ornith_00_unspecified.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_ornith_00_unspecified.aether",
       "sha256": "59c676e0a5413547f89f47bcd197204c94198294cb271a9d24dcb78c17daa272",
