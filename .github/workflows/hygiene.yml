@@ -1,0 +1,21 @@
+name: Public hygiene
+
+# This repo is public: no host names, tailnet addresses, credential locations,
+# sudo notes, PATH dumps or session paths in tracked files. The checker lives in
+# the aether repo (pinned here as components/aether); accepted hits are in
+# tools/public_hygiene_allowlist.txt.
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+
+jobs:
+  public-hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch the pinned aether checker
+        run: git submodule update --init --depth 1 components/aether
+      - name: No host, fleet, credential or session data in tracked files
+        run: python3 components/aether/tools/check_public_hygiene.py --root . --allowlist tools/public_hygiene_allowlist.txt
