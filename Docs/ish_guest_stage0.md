@@ -43,7 +43,7 @@ like. `smallclue` is statically linked (its own build system's default).
 |---|---|
 | Host | macOS 26.5.2, Apple M5, 10 cores |
 | iSH-AOK | worktree HEAD `f6fe2d30`, `ish` CLI rebuilt from that commit |
-| PSCAL | `548d98ce`, all 12 submodules clean |
+| PSCAL | `d171c274`, all 12 submodules clean |
 | Guest | Devuan 6 "excalibur" aarch64, glibc 2.41, gcc 14.2, Python 3.13.5 |
 | Emulation | iSH-AOK 5.20.66, **4 emulated CPUs**, arm64 gadget JIT |
 

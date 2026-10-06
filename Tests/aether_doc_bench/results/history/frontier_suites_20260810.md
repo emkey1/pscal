@@ -118,7 +118,7 @@ failure. The low-tier runs used 16000.
 
 **`--repeats` only works on direct destinations.** Through T'Ra the idempotency
 key returns one cached job N times instead of N samples. Fixed harness-side in
-pscal `b80a7d6b9`, but T'Ra's payload cannot yet exploit it.
+pscal `ef0d18369`, but T'Ra's payload cannot yet exploit it.
 
 **Check the model still exists.** `gemini-2.0-flash-lite` 404s; a dead model
 produces a clean-looking 0/12.

@@ -53,7 +53,7 @@ only single-model full-vs-small datapoint from that guide generation.
 ### 2026-07-05 — Ornith-1.0-35B, second run · `ornith_20260705/`
 
 Same model and destination as June 30, five days and one aether/guide bump later.
-Landed by `10f899c67`; see that directory's own `README.md` for authoritative
+Landed by `c3ac60990`; see that directory's own `README.md` for authoritative
 numbers, the two harness failures, and why cs is stored as two repeats.
 
 | suite | full | small |

@@ -92,7 +92,7 @@ overflow, evictions), task #29 stop-token empties, q36 empty content
   are real. Do not write a finding on a one-task move.
 - **`--repeats` only works on direct destinations.** Through T'Ra the
   idempotency key returns one cached job N times instead of N samples. Fixed
-  harness-side in pscal `b80a7d6b9`, but T'Ra's payload cannot yet exploit it.
+  harness-side in pscal `ef0d18369`, but T'Ra's payload cannot yet exploit it.
 - **A saturating suite is still worth running.** The surface suite sits at
   14–15/15 everywhere because the guide is in the prompt, so it tests recall,
   not capability. Its value is catching compiler regressions, which it has
