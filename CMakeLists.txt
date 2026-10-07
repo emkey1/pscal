@@ -2612,14 +2612,14 @@ if(NOT AETHER_LANG_VERSION)
 endif()
 message(STATUS "Aether language version: ${AETHER_LANG_VERSION}")
 set(AETHER_SRC components/aether/src/aether)
+# Every front-end source in the pinned aether, not a list kept by hand: aether
+# 6659679 split ast_parser.c into four files and a hand list broke the link.
+file(GLOB AETHER_FRONTEND_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/${AETHER_SRC}/*.c")
+list(SORT AETHER_FRONTEND_SOURCES)
 set(AETHER_SOURCES
     ${REA_SOURCES}
-    ${AETHER_SRC}/diagnostics.c
-    ${AETHER_SRC}/parser.c
-    ${AETHER_SRC}/ast_prepasses.c
-    ${AETHER_SRC}/ast_parser.c
-    ${AETHER_SRC}/semantic.c
-    ${AETHER_SRC}/state.c
+    ${AETHER_FRONTEND_SOURCES}
 )
 
 if(NOT PSCAL_PLATFORM_IOS)
