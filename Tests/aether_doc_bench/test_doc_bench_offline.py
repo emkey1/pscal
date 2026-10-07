@@ -1450,6 +1450,73 @@ def test_replay_task_keeps_sandbox_allow_and_generated_files():
 
 
 # --------------------------------------------------------------------------- #
+# W1-20: first-attempt failure histogram
+# --------------------------------------------------------------------------- #
+
+HISTOGRAM = REPO_ROOT / "tools" / "aether_failure_histogram.py"
+
+
+def _hist_case(task_id: str, rc: int, stdout: str, stderr: str = "", diagnostics=None, timed_out=False,
+               exact=False, expected_rc=0, source="fn main() -> Void { ret; }\n") -> dict:
+    run = {"returncode": rc, "stdout": stdout, "stderr": stderr, "diagnostics": diagnostics,
+           "exact_stdout_match": exact, "timed_out": timed_out, "expected_returncode": expected_rc}
+    first = {"generated_ok": True, "source_code": source, "run": run}
+    return {"task_id": task_id, "repeat_index": 0, "generated_ok": True, "source_code": source,
+            "run": run, "attempts": [first]}
+
+
+def test_failure_histogram_buckets_first_attempts():
+    with workdir() as tmp:
+        tasks = write_json(tmp / "tasks_h.json", {"version": "h-1", "tasks": [
+            simple_task("num", expected="avg = 3\n"), simple_task("miss", expected="a\nb\nc\n"),
+            simple_task("code", expected="x\n"), simple_task("unc", expected="x\n"),
+            simple_task("slow", expected="x\n"), simple_task("ok", expected="x\n"),
+            simple_task("status", expected="bye\n", expected_returncode=2)]})
+        scope = [{"severity": "warning", "code": "PREC-001", "message": "warning: precedence"},
+                 {"severity": "error", "code": "SCOPE-001", "message": "identifier 'sum' not in scope", "line": 1}]
+        cases = [
+            _hist_case("num", 0, "avg = 3.500000\n"), _hist_case("miss", 0, "a\nc\n"),
+            _hist_case("code", 1, "", "/tmp/aether-doc-bench-x/code.aether:1: [SCOPE-001] boom", scope),
+            _hist_case("unc", 1, "", "/tmp/aether-doc-bench-y/unc.aether:7: Runtime Error: index 12 out of range"),
+            _hist_case("slow", 124, "", timed_out=True), _hist_case("ok", 0, "x\n", exact=True),
+            _hist_case("status", 0, "bye\n", expected_rc=2),
+        ]
+        report = {"tasks_file": str(tasks), "aether_version": "2026-10-07-1",
+                  "guides": {"medium": {"version": "2026-09-05-1"}},
+                  "destinations": [{"destination_id": "d1", "variants": [
+                      {"doc_name": "medium", "results": cases}, {"doc_name": "none", "results": cases[:3]}]}]}
+        write_json(tmp / "report.json", report)
+        out_md, out_json = tmp / "h.md", tmp / "h.json"
+        proc = run_harness([str(tmp), "--out-md", str(out_md), "--out-json", str(out_json)], script=HISTOGRAM)
+        assert proc.returncode == 0, proc.stderr
+        result = json.loads(out_json.read_text())
+        medium = next(g for g in result["groups"] if g["variant"] == "medium")
+        assert (medium["guide_stamp"], medium["aether_version"], medium["attempts"]) == ("2026-09-05-1", "2026-10-07-1", 7)
+        buckets = {(b["class"], b["bucket"]): b["tasks"] for b in medium["buckets"]}
+        assert buckets[("silent_wrong", "stdout:numeric_format")] == ["num"], buckets
+        assert buckets[("silent_wrong", "stdout:missing_line")] == ["miss"]
+        assert buckets[("silent_wrong", "stdout:exit_status")] == ["status"]
+        assert buckets[("coded_error", "SCOPE-001")] == ["code"], "the error, not the warning before it"
+        assert buckets[("uncoded_error", "uncoded: <path>:N: Runtime Error: index N out of range")] == ["unc"], buckets
+        assert buckets[("crash_hang", "timeout")] == ["slow"]
+        text = out_md.read_text()
+        assert "## medium @ 2026-09-05-1 on aether 2026-10-07-1" in text and "/tmp/" not in text
+        proc = run_harness([str(tmp / "report.json"), "--doc", "none", "--by-construct", "--out-json", str(out_json)],
+                           script=HISTOGRAM)
+        assert proc.returncode == 0, proc.stderr
+        none = json.loads(out_json.read_text())["groups"]
+        assert [g["variant"] for g in none] == ["none"]
+        tags = {b["bucket"] for b in none[0]["buckets"]}
+        assert "missing: sum" in tags, tags
+
+
+def test_no_doc_names_the_missing_triage_tool():
+    for path in [REPO_ROOT / "Tests" / "aether_specialization" / "README_corpus_structure.md",
+                 BENCH_DIR / "README.md"]:
+        assert "none_fail_detail" not in path.read_text(), path
+
+
+# --------------------------------------------------------------------------- #
 # W1-16: paired replay with declared-break waivers
 # --------------------------------------------------------------------------- #
 

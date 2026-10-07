@@ -63,8 +63,9 @@ excluded — they target reverts this family doesn't make).
 
 ## Adding a new family
 1. Train on core (+ closest overlay or none), serve, eval `none`.
-2. `python3 tools/none_fail_detail.py <eval>.json none` to read its failing
-   generations and identify its specific wrong priors.
+2. `python3 tools/aether_failure_histogram.py <eval>.json --doc none --by-construct --examples 3`
+   to read its failing generations, bucketed by the construct each one
+   reached for, and identify its specific wrong priors.
 3. Author `broken -> fixed` pairs with a `kind` (verify each fixed source
    prints its expected stdout and each broken source still fails the way the
    drill says) -> `seed_repair_pairs.<family>.json`.

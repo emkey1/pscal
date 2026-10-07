@@ -474,6 +474,23 @@ non-inferiority test (`--margin`, default 3 points).
 
 ## Interpreting repeated failures
 
+The failure patterns above describe each case's FINAL state. For the first
+attempt -- what the guide alone produced -- run the histogram over the board's
+reports:
+
+```bash
+python3 tools/aether_failure_histogram.py results/<board>/ --out-md results/<board>/failure_histogram.md
+python3 tools/aether_failure_histogram.py <reports> --doc none --by-construct --examples 3
+```
+
+It groups by (variant, guide stamp, aether VERSION), buckets coded and
+uncoded errors by their first code or normalised first stderr line, and
+splits wrong stdout into numeric_format / numeric_value / whitespace / case /
+order / missing_line / extra_line / no_output / exit_status / value. The
+`--by-construct` form keys `none` failures by the construct the model reached
+for, with the failing generations inline: the triage entry point for a new
+model family.
+
 If one task fails far more often than the others:
 
 - it may indicate a documentation gap for that language surface
