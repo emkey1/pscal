@@ -1234,8 +1234,9 @@ def test_oracle_check_passes_on_the_real_binary_quickly():
                            script=REPO_ROOT / "tools" / "aether_oracle_check.py")
         assert proc.returncode == 0, proc.stdout + proc.stderr
         report = json.loads(out.read_text())
-        assert report["references_passed"] == report["references_total"] == 164
-        assert report["python_references_passed"] == report["python_references_total"] == 24
+        assert report["references_passed"] == report["references_total"] == 192
+        assert report["python_references_passed"] == report["python_references_total"] == PY_CHECKED
+        assert report["board_agreement"]["agreeing"] == report["board_agreement"]["tasks"] == 114
         assert sum(n["ok"] for n in report["negatives"]) == len(report["negatives"]) == 4
         assert report["sandbox_probe"]["ok"] is True
         # The target is under 10 s on an idle Release build. A loaded machine or an
@@ -1258,6 +1259,42 @@ def test_harness_preflight_aborts_on_a_broken_reference():
         assert report["oracle"]["broken"] == ["broken"] and report["oracle"]["sandbox_probe"]["ok"] is True
         oracle = {c["task_id"]: c["oracle_ok"] for _, _, c in all_cases(report)}
         assert oracle == {"good": True, "broken": False}
+
+
+# --------------------------------------------------------------------------- #
+# W1-11: an independent oracle for every board task
+# --------------------------------------------------------------------------- #
+
+# Python references run once per manifest that carries the task id: the 114
+# board tasks, the traps, and the ids tasks.json / tasks_v2*.json / tasks_hard /
+# smoke share (identical tasks) -- the default lap skips the scale suite.
+PY_CHECKED = 210
+
+
+def test_every_board_task_has_both_references():
+    import aether_oracle_check as oracle_check
+
+    count = 0
+    for name in oracle_check.BOARD_MANIFESTS:
+        for task in adb.load_tasks(BENCH_DIR / name):
+            count += 1
+            assert task.reference_solution, (name, task.task_id)
+            assert (BENCH_DIR / "py_refs" / f"{task.task_id}.py").is_file(), (name, task.task_id)
+    assert count == 114, count
+    assert sum(1 for t in adb.load_tasks(BENCH_DIR / "tasks_cs.json") if t.reference_solution) == 19
+
+
+def test_board_python_references_agree_without_a_compiler():
+    import aether_oracle_check as oracle_check
+
+    bad = {}
+    for name in oracle_check.BOARD_MANIFESTS:
+        for task_id, result in oracle_check.check_python_references(adb.load_tasks(BENCH_DIR / name)).items():
+            if not result["ok"]:
+                bad[f"{name}:{task_id}"] = result["detail"]
+    assert not bad, bad
+    ambiguities = json.loads((BENCH_DIR / "py_refs" / "ambiguities.json").read_text())["tasks"]
+    assert {a["id"] for a in ambiguities if a["disagreed"]} == {"eligibility_bool_logic", "spec_tokenizer_positions"}
 
 
 # --------------------------------------------------------------------------- #

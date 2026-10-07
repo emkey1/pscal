@@ -10,6 +10,7 @@
    ],
    "prompt": "Write the smallest valid Aether program that prints exactly `hello from benchmark` followed by a newline.",
    "expected_stdout": "hello from benchmark\n",
+   "reference_solution": "fn main() -> Void {\n    fx {\n        println(\"hello from benchmark\");\n    }\n    ret;\n}\n",
    "achievability": "model-verified"
   },
   {
@@ -21,6 +22,7 @@
    ],
    "prompt": "Write an Aether program that defines `Greeting` as `hello` and `Target` as `Aether`, then prints exactly `hello, Aether` followed by a newline.",
    "expected_stdout": "hello, Aether\n",
+   "reference_solution": "const Greeting: Text = \"hello\";\nconst Target: Text = \"Aether\";\n\nfn main() -> Void {\n    fx {\n        println(Greeting, \", \", Target);\n    }\n    ret;\n}\n",
    "achievability": "model-verified"
   },
   {
@@ -32,6 +34,7 @@
    ],
    "prompt": "Write an Aether program with a pure helper `classify(score: Int) -> Text` that returns `ready` for scores >= 90, `review` for scores >= 70, and `blocked` otherwise. In `main`, print three lines for scores 95, 72, and 10 in the format `95 => ready`.",
    "expected_stdout": "95 => ready\n72 => review\n10 => blocked\n",
+   "reference_solution": "@pure\nfn classify(score: Int) -> Text {\n    if score >= 90 {\n        ret \"ready\";\n    }\n    if score >= 70 {\n        ret \"review\";\n    }\n    ret \"blocked\";\n}\n\nfn main() -> Void {\n    let scores: Int[] = [95, 72, 10];\n    fx {\n        loop i in 0..length(scores) {\n            println(scores[i], \" => \", classify(scores[i]));\n        }\n    }\n    ret;\n}\n",
    "achievability": "model-verified"
   },
   {
@@ -42,6 +45,7 @@
    ],
    "prompt": "Write an Aether program that uses a `loop i in 0..5` style range loop and prints one line per iteration in the form `0 => 0`, `1 => 1`, ..., `4 => 16`.",
    "expected_stdout": "0 => 0\n1 => 1\n2 => 4\n3 => 9\n4 => 16\n",
+   "reference_solution": "fn main() -> Void {\n    fx {\n        loop i in 0..5 {\n            let sq: Int = i * i;\n            println(i, \" => \", sq);\n        }\n    }\n    ret;\n}\n",
    "achievability": "model-verified"
   },
   {
@@ -75,6 +79,7 @@
    ],
    "prompt": "Write an Aether program that computes `avg0` from `total0 = 9` and `count0 = 0`, and `avg2` from `total2 = 9` and `count2 = 2`, using inline `if ... else ...` expressions on the right-hand side. Print `avg0=0` and `avg2=4` on separate lines.",
    "expected_stdout": "avg0=0\navg2=4\n",
+   "reference_solution": "fn main() -> Void {\n    let total0: Int = 9;\n    let count0: Int = 0;\n    let total2: Int = 9;\n    let count2: Int = 2;\n    let avg0: Int = if count0 == 0 { 0 } else { total0 div count0 };\n    let avg2: Int = if count2 == 0 { 0 } else { total2 div count2 };\n    fx {\n        println(\"avg0=\", avg0);\n        println(\"avg2=\", avg2);\n    }\n    ret;\n}\n",
    "achievability": "model-verified"
   },
   {
@@ -130,6 +135,7 @@
    ],
    "prompt": "Write an Aether program that defines a `Point` type with `x` and `y` integer fields and a `sum() -> Int` method. Initialize a point with values 3 and 4 using current Aether type-initialization syntax, and print exactly `sum=7` followed by a newline.",
    "expected_stdout": "sum=7\n",
+   "reference_solution": "type Point {\n    x: Int = 0;\n    y: Int = 0;\n\n    fn sum() -> Int {\n        ret self.x + self.y;\n    }\n}\n\nfn main() -> Void {\n    let p: Point = new Point { x: 3, y: 4 };\n    let total: Int = p.sum();\n    fx {\n        println(\"sum=\", total);\n    }\n    ret;\n}\n",
    "achievability": "model-verified"
   },
   {
@@ -142,6 +148,7 @@
    ],
    "prompt": "Write an Aether program that defines an `Inventory` type with `currentStock` and `maxCapacity` fields, an `addItem(amount: Int) -> Int` method that updates the stock without exceeding capacity, and a `getStatus() -> Text` method that returns `FULL`, `IN_STOCK`, or `EMPTY`. Initialize the inventory to 10 of 50, add 25, and print `Final Stock: 35` and `Current Status: IN_STOCK` on separate lines.",
    "expected_stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n",
+   "reference_solution": "type Inventory {\n    currentStock: Int = 0;\n    maxCapacity: Int = 0;\n\n    fn addItem(amount: Int) -> Int {\n        self.currentStock = min(self.currentStock + amount, self.maxCapacity);\n        ret self.currentStock;\n    }\n\n    fn getStatus() -> Text {\n        if self.currentStock >= self.maxCapacity {\n            ret \"FULL\";\n        }\n        if self.currentStock <= 0 {\n            ret \"EMPTY\";\n        }\n        ret \"IN_STOCK\";\n    }\n}\n\nfn main() -> Void {\n    let inv: Inventory = new Inventory { currentStock: 10, maxCapacity: 50 };\n    let stock: Int = inv.addItem(25);\n    let status: Text = inv.getStatus();\n    fx {\n        println(\"Final Stock: \", stock);\n        println(\"Current Status: \", status);\n    }\n    ret;\n}\n",
    "achievability": "model-verified"
   },
   {
@@ -164,6 +171,7 @@
    ],
    "prompt": "Write an Aether program with a helper `pair() -> (Text, Int)` that returns `(\"answer\", 42)`. Destructure the direct call with `let (label, value) = pair();` and print `answer 42` followed by a newline.",
    "expected_stdout": "answer 42\n",
+   "reference_solution": "fn pair() -> (Text, Int) {\n    ret (\"answer\", 42);\n}\n\nfn main() -> Void {\n    let (label, value) = pair();\n    fx {\n        println(label, \" \", value);\n    }\n    ret;\n}\n",
    "achievability": "model-verified"
   },
   {
@@ -185,6 +193,7 @@
    ],
    "prompt": "Write an Aether program that creates an `Int[]` dynamic array containing the values 3, 1, 4, 1, and 5 using supported array syntax. Iterate over it with `length(...)` and indexing, compute the sum and maximum value, and print `sum=14`, `max=5`, and `count=5` on separate lines.",
    "expected_stdout": "sum=14\nmax=5\ncount=5\n",
+   "reference_solution": "fn main() -> Void {\n    let values: Int[] = [3, 1, 4, 1, 5];\n    let n: Int = length(values);\n    let total: Int = 0;\n    let best: Int = values[0];\n    loop i in 0..n {\n        total = total + values[i];\n        best = max(best, values[i]);\n    }\n    fx {\n        println(\"sum=\", total);\n        println(\"max=\", best);\n        println(\"count=\", n);\n    }\n    ret;\n}\n",
    "achievability": "model-verified"
   },
   {

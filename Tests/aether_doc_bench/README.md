@@ -402,7 +402,12 @@ that must print the same expected stdout (and exit status) through the
 harness's python lane. `tools/aether_oracle_check.py` runs every one of them
 next to the Aether references (`--no-python` skips the lap); a reference whose
 only check is the Aether compiler can bake a compiler bug into the oracle, as
-algo_sliding_window_max once did.
+algo_sliding_window_max once did. Every one of the 114 board tasks has both
+references and the check prints `board: 114/114 tasks with agreeing Aether and
+Python references`. `py_refs/ambiguities.json` lists the tasks whose prompts
+allow a second reading (unstated 0- vs 1-based numbering, an unnamed token
+kind): the reference follows expected_stdout, and the prompt fix waits for the
+suite's next version, not the running baseline.
 
 ### The silent-wrong trap suite (`tasks_traps.json`, board B1)
 

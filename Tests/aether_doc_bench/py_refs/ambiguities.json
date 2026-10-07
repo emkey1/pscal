@@ -1,0 +1,25 @@
+{
+  "_note": "W1-11 triage. Each Python reference was written from its task's prompt alone and then compared with expected_stdout. Where the prompt allows more than one reading, the reference follows the reading expected_stdout encodes and the task is listed here. 'disagreed' means the prompt-only reference first chose the other reading. The fix is a prompt clarification in the suite's next version bump -- not during the B0 baseline, which runs on these exact prompts.",
+  "tasks": [
+    {"manifest": "tasks_v2_pos.json", "id": "eligibility_bool_logic", "disagreed": true,
+     "issue": "`guest N` never says whether N is 0- or 1-based; expected is 0-based",
+     "fix": "add 'where N is the zero-based index (guest 0, ...)'"},
+    {"manifest": "tasks_frontier_spec.json", "id": "spec_tokenizer_positions", "disagreed": true,
+     "issue": "the string token's <kind> is never named; expected prints `str`",
+     "fix": "say 'a string token of kind `str`'"},
+    {"manifest": "tasks_v2_pos.json", "id": "toon_type_probe", "disagreed": false,
+     "issue": "`item N` numbering base unstated (expected 0-based)", "fix": "say zero-based"},
+    {"manifest": "tasks_v2_pos.json", "id": "toon_deep_nested", "disagreed": false,
+     "issue": "`team N` numbering base unstated (expected 0-based)", "fix": "say zero-based"},
+    {"manifest": "tasks_hard_nontoon.json", "id": "hard2_rle_roundtrip", "disagreed": false,
+     "issue": "`case <i>` numbering base unstated (expected 0-based)", "fix": "say zero-based"},
+    {"manifest": "tasks_frontier.json", "id": "text_slice_tokenize", "disagreed": false,
+     "issue": "`<i>` numbering base unstated (expected 0-based)", "fix": "say zero-based"},
+    {"manifest": "tasks_frontier_algo.json", "id": "algo_bracket_validate", "disagreed": false,
+     "issue": "position base unstated (expected 0-based)", "fix": "say zero-based"},
+    {"manifest": "tasks_frontier_algo.json", "id": "algo_record_pipeline", "disagreed": false,
+     "issue": "`<i>` numbering base unstated (expected 0-based)", "fix": "say zero-based"},
+    {"manifest": "tasks_frontier.json", "id": "money_cents_report", "disagreed": false,
+     "issue": "`avg` unit (dollars vs cents) unstated; expected is dollars to 3 decimals", "fix": "name the unit"}
+  ]
+}

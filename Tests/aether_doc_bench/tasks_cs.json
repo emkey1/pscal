@@ -10,7 +10,8 @@
         "arithmetic"
       ],
       "prompt": "Write an Aether program that computes 10! (ten factorial) and prints it on one line in exactly the form `10! = N`, where N is the computed value, followed by a newline. Do not hard-code the result; compute it.",
-      "expected_stdout": "10! = 3628800\n"
+      "expected_stdout": "10! = 3628800\n",
+      "reference_solution": "fn factorial_of(n: Int) -> Int {\n    let acc: Int = 1;\n    loop i in 2..n + 1 {\n        acc = acc * i;\n    }\n    ret acc;\n}\n\nfn main() -> Void {\n    let n: Int = 10;\n    let result: Int = factorial_of(n);\n    fx {\n        println(n, \"! = \", result);\n    }\n    ret;\n}\n"
     },
     {
       "id": "cs_gcd",
@@ -20,7 +21,8 @@
         "modulo"
       ],
       "prompt": "Write an Aether program that computes the greatest common divisor of 48 and 36 using the Euclidean algorithm, and prints it on one line in exactly the form `gcd(48, 36) = N`, followed by a newline.",
-      "expected_stdout": "gcd(48, 36) = 12\n"
+      "expected_stdout": "gcd(48, 36) = 12\n",
+      "reference_solution": "fn gcd(a: Int, b: Int) -> Int {\n    let x: Int = a;\n    let y: Int = b;\n    loop y != 0 {\n        let r: Int = x % y;\n        x = y;\n        y = r;\n    }\n    ret x;\n}\n\nfn main() -> Void {\n    let a: Int = 48;\n    let b: Int = 36;\n    let g: Int = gcd(a, b);\n    fx {\n        println(\"gcd(\", a, \", \", b, \") = \", g);\n    }\n    ret;\n}\n"
     },
     {
       "id": "cs_fizzbuzz",
@@ -31,7 +33,8 @@
         "modulo"
       ],
       "prompt": "Write an Aether program that prints FizzBuzz for the integers 1 through 15 inclusive, one value per line. For each integer: print `Fizz` if it is divisible by 3, `Buzz` if divisible by 5, `FizzBuzz` if divisible by both 3 and 5, otherwise print the integer itself. End each line with a newline.",
-      "expected_stdout": "1\n2\nFizz\n4\nBuzz\nFizz\n7\n8\nFizz\nBuzz\n11\nFizz\n13\n14\nFizzBuzz\n"
+      "expected_stdout": "1\n2\nFizz\n4\nBuzz\nFizz\n7\n8\nFizz\nBuzz\n11\nFizz\n13\n14\nFizzBuzz\n",
+      "reference_solution": "fn main() -> Void {\n    fx {\n        loop i in 1..16 {\n            if i % 15 == 0 {\n                println(\"FizzBuzz\");\n            } else if i % 3 == 0 {\n                println(\"Fizz\");\n            } else if i % 5 == 0 {\n                println(\"Buzz\");\n            } else {\n                println(i);\n            }\n        }\n    }\n    ret;\n}\n"
     },
     {
       "id": "cs_fibonacci",
@@ -41,7 +44,8 @@
         "sequence"
       ],
       "prompt": "Write an Aether program that prints the first 10 Fibonacci numbers, starting with 0 and 1, on a single line. Separate consecutive numbers with `, ` (a comma followed by a space). Do not print a trailing separator. End the line with a newline.",
-      "expected_stdout": "0, 1, 1, 2, 3, 5, 8, 13, 21, 34\n"
+      "expected_stdout": "0, 1, 1, 2, 3, 5, 8, 13, 21, 34\n",
+      "reference_solution": "fn main() -> Void {\n    let count: Int = 10;\n    let a: Int = 0;\n    let b: Int = 1;\n    let line: Text = \"\";\n    loop i in 0..count {\n        if i > 0 {\n            line = line + \", \";\n        }\n        line = line + int_to_text(a);\n        let next: Int = a + b;\n        a = b;\n        b = next;\n    }\n    fx {\n        println(line);\n    }\n    ret;\n}\n"
     },
     {
       "id": "cs_sieve_primes",
@@ -51,7 +55,8 @@
         "sieve"
       ],
       "prompt": "Write an Aether program that uses the Sieve of Eratosthenes to find all prime numbers strictly less than 30, and prints them in ascending order on a single line, separated by `, ` (comma and space), with no trailing separator, followed by a newline.",
-      "expected_stdout": "2, 3, 5, 7, 11, 13, 17, 19, 23, 29\n"
+      "expected_stdout": "2, 3, 5, 7, 11, 13, 17, 19, 23, 29\n",
+      "reference_solution": "fn main() -> Void {\n    let limit: Int = 30;\n    let composite: Bool[] = [];\n    loop i in 0..limit {\n        composite = composite + [false];\n    }\n    loop p in 2..limit {\n        if !composite[p] {\n            let m: Int = p * p;\n            loop m < limit {\n                composite[m] = true;\n                m = m + p;\n            }\n        }\n    }\n    let line: Text = \"\";\n    let first: Bool = true;\n    loop i in 2..limit {\n        if !composite[i] {\n            if !first {\n                line = line + \", \";\n            }\n            line = line + int_to_text(i);\n            first = false;\n        }\n    }\n    fx {\n        println(line);\n    }\n    ret;\n}\n"
     },
     {
       "id": "cs_collatz",
@@ -61,7 +66,8 @@
         "int_recursion"
       ],
       "prompt": "Write an Aether program that counts how many steps it takes for the Collatz sequence starting at 27 to reach 1. Each step replaces n with n/2 if n is even, or 3*n+1 if n is odd. Print the count on one line in exactly the form `steps = N`, followed by a newline.",
-      "expected_stdout": "steps = 111\n"
+      "expected_stdout": "steps = 111\n",
+      "reference_solution": "fn main() -> Void {\n    let n: Int = 27;\n    let steps: Int = 0;\n    loop n != 1 {\n        if n % 2 == 0 {\n            n = n div 2;\n        } else {\n            n = 3 * n + 1;\n        }\n        steps = steps + 1;\n    }\n    fx {\n        println(\"steps = \", steps);\n    }\n    ret;\n}\n"
     },
     {
       "id": "cs_hanoi",
@@ -70,7 +76,8 @@
         "recursion"
       ],
       "prompt": "Write an Aether program that solves the Towers of Hanoi puzzle for 3 disks. Disks are numbered 1 (smallest) to 3 (largest). Move all disks from peg A to peg C, using peg B as the auxiliary peg, following the standard recursive solution. Print each move on its own line in exactly the form `move disk N from X to Y` (for example `move disk 1 from A to C`). End each line with a newline.",
-      "expected_stdout": "move disk 1 from A to C\nmove disk 2 from A to B\nmove disk 1 from C to B\nmove disk 3 from A to C\nmove disk 1 from B to A\nmove disk 2 from B to C\nmove disk 1 from A to C\n"
+      "expected_stdout": "move disk 1 from A to C\nmove disk 2 from A to B\nmove disk 1 from C to B\nmove disk 3 from A to C\nmove disk 1 from B to A\nmove disk 2 from B to C\nmove disk 1 from A to C\n",
+      "reference_solution": "fn hanoi(n: Int, src: Text, dst: Text, aux: Text) -> Void {\n    if n == 0 {\n        ret;\n    }\n    hanoi(n - 1, src, aux, dst);\n    fx {\n        println(\"move disk \", n, \" from \", src, \" to \", dst);\n    }\n    hanoi(n - 1, aux, dst, src);\n    ret;\n}\n\nfn main() -> Void {\n    hanoi(3, \"A\", \"C\", \"B\");\n    ret;\n}\n"
     },
     {
       "id": "cs_bubble_sort",
@@ -81,7 +88,8 @@
         "nested_loop"
       ],
       "prompt": "Write an Aether program that sorts the list of integers [5, 2, 8, 1, 9, 3] into ascending order using bubble sort, then prints the sorted list on a single line separated by `, ` (comma and space), with no trailing separator, followed by a newline.",
-      "expected_stdout": "1, 2, 3, 5, 8, 9\n"
+      "expected_stdout": "1, 2, 3, 5, 8, 9\n",
+      "reference_solution": "fn bubbleSort(xs: Int[]) -> Int[] {\n    let out: Int[] = xs;\n    let n: Int = length(out);\n    loop i in 0..n {\n        let last: Int = n - 1 - i;\n        loop j in 0..last {\n            if out[j] > out[j + 1] {\n                let tmp: Int = out[j];\n                out[j] = out[j + 1];\n                out[j + 1] = tmp;\n            }\n        }\n    }\n    ret out;\n}\n\nfn joinInts(xs: Int[]) -> Text {\n    let out: Text = \"\";\n    loop i in 0..length(xs) {\n        if i > 0 {\n            out = out + \", \";\n        }\n        out = out + int_to_text(xs[i]);\n    }\n    ret out;\n}\n\nfn main() -> Void {\n    let data: Int[] = [5, 2, 8, 1, 9, 3];\n    let sorted: Int[] = bubbleSort(data);\n    fx {\n        println(joinInts(sorted));\n    }\n    ret;\n}\n"
     },
     {
       "id": "cs_binary_search",
@@ -91,7 +99,8 @@
         "search"
       ],
       "prompt": "Write an Aether program that performs a binary search for the value 7 in the sorted list [1, 3, 5, 7, 9, 11], and prints the 0-based index where it is found on one line in exactly the form `index = N`, followed by a newline.",
-      "expected_stdout": "index = 3\n"
+      "expected_stdout": "index = 3\n",
+      "reference_solution": "fn binarySearch(xs: Int[], target: Int) -> Int {\n    let lo: Int = 0;\n    let hi: Int = length(xs) - 1;\n    loop lo <= hi {\n        let mid: Int = (lo + hi) div 2;\n        if xs[mid] == target {\n            ret mid;\n        }\n        if xs[mid] < target {\n            lo = mid + 1;\n        } else {\n            hi = mid - 1;\n        }\n    }\n    ret -1;\n}\n\nfn main() -> Void {\n    let data: Int[] = [1, 3, 5, 7, 9, 11];\n    let idx: Int = binarySearch(data, 7);\n    fx {\n        println(\"index = \", idx);\n    }\n    ret;\n}\n"
     },
     {
       "id": "cs_nqueens",
@@ -101,7 +110,8 @@
         "backtracking"
       ],
       "prompt": "Write an Aether program that counts the number of distinct solutions to the N-Queens problem for a 6x6 board (6 queens, none attacking another), using backtracking. Print the count on one line in exactly the form `solutions = N`, followed by a newline.",
-      "expected_stdout": "solutions = 4\n"
+      "expected_stdout": "solutions = 4\n",
+      "reference_solution": "type Board {\n    cols: Int[] = [];\n    count: Int = 0;\n}\n\nfn safe(b: Board, row: Int, col: Int) -> Bool {\n    loop r in 0..row {\n        let c: Int = b.cols[r];\n        if c == col {\n            ret false;\n        }\n        if abs(c - col) == row - r {\n            ret false;\n        }\n    }\n    ret true;\n}\n\nfn place(b: Board, row: Int, n: Int) -> Void {\n    if row == n {\n        b.count = b.count + 1;\n        ret;\n    }\n    loop col in 0..n {\n        if safe(b, row, col) {\n            b.cols[row] = col;\n            place(b, row + 1, n);\n        }\n    }\n    ret;\n}\n\nfn main() -> Void {\n    let n: Int = 6;\n    let b: Board = new Board();\n    loop i in 0..n {\n        b.cols = b.cols + [0];\n    }\n    place(b, 0, n);\n    fx {\n        println(\"solutions = \", b.count);\n    }\n    ret;\n}\n"
     },
     {
       "id": "cs_coin_change",
@@ -111,7 +121,8 @@
         "array"
       ],
       "prompt": "Write an Aether program that computes the minimum number of coins needed to make the amount 11 using coin denominations 1, 2, and 5 (each denomination usable any number of times), via dynamic programming. Print the result on one line in exactly the form `coins = N`, followed by a newline.",
-      "expected_stdout": "coins = 3\n"
+      "expected_stdout": "coins = 3\n",
+      "reference_solution": "fn minCoins(coins: Int[], amount: Int) -> Int {\n    let inf: Int = amount + 1;\n    let dp: Int[] = [0];\n    loop a in 1..amount + 1 {\n        let best: Int = inf;\n        loop k in 0..length(coins) {\n            let c: Int = coins[k];\n            if c <= a {\n                best = min(best, dp[a - c] + 1);\n            }\n        }\n        dp = dp + [best];\n    }\n    if dp[amount] >= inf {\n        ret -1;\n    }\n    ret dp[amount];\n}\n\nfn main() -> Void {\n    let coins: Int[] = [1, 2, 5];\n    let result: Int = minCoins(coins, 11);\n    fx {\n        println(\"coins = \", result);\n    }\n    ret;\n}\n"
     },
     {
       "id": "cs_lis",
@@ -121,7 +132,8 @@
         "array"
       ],
       "prompt": "Write an Aether program that computes the length of the longest strictly increasing subsequence of the list [10, 9, 2, 5, 3, 7, 101, 18], via dynamic programming. Print it on one line in exactly the form `lis = N`, followed by a newline.",
-      "expected_stdout": "lis = 4\n"
+      "expected_stdout": "lis = 4\n",
+      "reference_solution": "fn lisLength(xs: Int[]) -> Int {\n    let n: Int = length(xs);\n    let dp: Int[] = [];\n    let best: Int = 0;\n    loop i in 0..n {\n        let cur: Int = 1;\n        loop j in 0..i {\n            if xs[j] < xs[i] {\n                cur = max(cur, dp[j] + 1);\n            }\n        }\n        dp = dp + [cur];\n        best = max(best, cur);\n    }\n    ret best;\n}\n\nfn main() -> Void {\n    let data: Int[] = [10, 9, 2, 5, 3, 7, 101, 18];\n    let result: Int = lisLength(data);\n    fx {\n        println(\"lis = \", result);\n    }\n    ret;\n}\n"
     },
     {
       "id": "cs_lcs",
@@ -131,7 +143,8 @@
         "strings"
       ],
       "prompt": "Write an Aether program that computes the length of the longest common subsequence of the two strings `ABCBDAB` and `BDCAB` using dynamic programming, and prints it on one line in exactly the form `lcs = N`, followed by a newline.",
-      "expected_stdout": "lcs = 4\n"
+      "expected_stdout": "lcs = 4\n",
+      "reference_solution": "fn lcsLength(a: Text, b: Text) -> Int {\n    let n: Int = string_len(a);\n    let m: Int = string_len(b);\n    let table: Int[][] = [];\n    let zeroRow: Int[] = [];\n    loop j in 0..m + 1 {\n        zeroRow = zeroRow + [0];\n    }\n    table = table + [zeroRow];\n    loop i in 1..n + 1 {\n        let row: Int[] = [0];\n        loop j in 1..m + 1 {\n            let v: Int = 0;\n            if a[i - 1] == b[j - 1] {\n                v = table[i - 1][j - 1] + 1;\n            } else {\n                v = max(table[i - 1][j], row[j - 1]);\n            }\n            row = row + [v];\n        }\n        table = table + [row];\n    }\n    ret table[n][m];\n}\n\nfn main() -> Void {\n    let result: Int = lcsLength(\"ABCBDAB\", \"BDCAB\");\n    fx {\n        println(\"lcs = \", result);\n    }\n    ret;\n}\n"
     },
     {
       "id": "cs_edit_distance",
@@ -141,7 +154,8 @@
         "strings"
       ],
       "prompt": "Write an Aether program that computes the Levenshtein edit distance between the strings `kitten` and `sitting` (insertions, deletions, substitutions each cost 1) using dynamic programming, and prints it on one line in exactly the form `distance = N`, followed by a newline.",
-      "expected_stdout": "distance = 3\n"
+      "expected_stdout": "distance = 3\n",
+      "reference_solution": "fn editDistance(a: Text, b: Text) -> Int {\n    let n: Int = string_len(a);\n    let m: Int = string_len(b);\n    let table: Int[][] = [];\n    let firstRow: Int[] = [];\n    loop j in 0..m + 1 {\n        firstRow = firstRow + [j];\n    }\n    table = table + [firstRow];\n    loop i in 1..n + 1 {\n        let row: Int[] = [i];\n        loop j in 1..m + 1 {\n            let cost: Int = 1;\n            if a[i - 1] == b[j - 1] {\n                cost = 0;\n            }\n            let del: Int = table[i - 1][j] + 1;\n            let ins: Int = row[j - 1] + 1;\n            let sub: Int = table[i - 1][j - 1] + cost;\n            row = row + [min(min(del, ins), sub)];\n        }\n        table = table + [row];\n    }\n    ret table[n][m];\n}\n\nfn main() -> Void {\n    let result: Int = editDistance(\"kitten\", \"sitting\");\n    fx {\n        println(\"distance = \", result);\n    }\n    ret;\n}\n"
     },
     {
       "id": "cs_merge_sort",
@@ -153,7 +167,8 @@
         "divide_and_conquer"
       ],
       "prompt": "Write an Aether program that sorts the list of integers [38, 27, 43, 3, 9, 82, 10] into ascending order using merge sort (recursively split the list, then merge the sorted halves), then prints the sorted list on a single line separated by `, ` (comma and space), with no trailing separator, followed by a newline.",
-      "expected_stdout": "3, 9, 10, 27, 38, 43, 82\n"
+      "expected_stdout": "3, 9, 10, 27, 38, 43, 82\n",
+      "reference_solution": "fn merge(left: Int[], right: Int[]) -> Int[] {\n    let out: Int[] = [];\n    let i: Int = 0;\n    let j: Int = 0;\n    let nl: Int = length(left);\n    let nr: Int = length(right);\n    loop i < nl && j < nr {\n        if left[i] <= right[j] {\n            out = out + [left[i]];\n            i = i + 1;\n        } else {\n            out = out + [right[j]];\n            j = j + 1;\n        }\n    }\n    loop i < nl {\n        out = out + [left[i]];\n        i = i + 1;\n    }\n    loop j < nr {\n        out = out + [right[j]];\n        j = j + 1;\n    }\n    ret out;\n}\n\nfn mergeSort(xs: Int[]) -> Int[] {\n    let n: Int = length(xs);\n    if n <= 1 {\n        ret xs;\n    }\n    let mid: Int = n div 2;\n    let left: Int[] = mergeSort(xs[0..mid]);\n    let right: Int[] = mergeSort(xs[mid..n]);\n    ret merge(left, right);\n}\n\nfn joinInts(xs: Int[]) -> Text {\n    let out: Text = \"\";\n    loop i in 0..length(xs) {\n        if i > 0 {\n            out = out + \", \";\n        }\n        out = out + int_to_text(xs[i]);\n    }\n    ret out;\n}\n\nfn main() -> Void {\n    let data: Int[] = [38, 27, 43, 3, 9, 82, 10];\n    let sorted: Int[] = mergeSort(data);\n    fx {\n        println(joinInts(sorted));\n    }\n    ret;\n}\n"
     },
     {
       "id": "cs_quick_sort",
@@ -165,7 +180,8 @@
         "partition"
       ],
       "prompt": "Write an Aether program that sorts the list of integers [6, 3, 9, 1, 7, 4, 8, 2, 5] into ascending order using quicksort (choose a pivot, partition, then recurse on the partitions), then prints the sorted list on a single line separated by `, ` (comma and space), with no trailing separator, followed by a newline.",
-      "expected_stdout": "1, 2, 3, 4, 5, 6, 7, 8, 9\n"
+      "expected_stdout": "1, 2, 3, 4, 5, 6, 7, 8, 9\n",
+      "reference_solution": "fn quickSort(xs: Int[]) -> Int[] {\n    let n: Int = length(xs);\n    if n <= 1 {\n        ret xs;\n    }\n    let pivot: Int = xs[n - 1];\n    let less: Int[] = [];\n    let equal: Int[] = [];\n    let greater: Int[] = [];\n    loop i in 0..n {\n        let v: Int = xs[i];\n        if v < pivot {\n            less = less + [v];\n        } else if v > pivot {\n            greater = greater + [v];\n        } else {\n            equal = equal + [v];\n        }\n    }\n    let sortedLess: Int[] = quickSort(less);\n    let sortedGreater: Int[] = quickSort(greater);\n    ret sortedLess + equal + sortedGreater;\n}\n\nfn joinInts(xs: Int[]) -> Text {\n    let out: Text = \"\";\n    loop i in 0..length(xs) {\n        if i > 0 {\n            out = out + \", \";\n        }\n        out = out + int_to_text(xs[i]);\n    }\n    ret out;\n}\n\nfn main() -> Void {\n    let data: Int[] = [6, 3, 9, 1, 7, 4, 8, 2, 5];\n    let sorted: Int[] = quickSort(data);\n    fx {\n        println(joinInts(sorted));\n    }\n    ret;\n}\n"
     },
     {
       "id": "cs_bfs",
@@ -176,7 +192,8 @@
         "queue"
       ],
       "prompt": "Write an Aether program that performs a breadth-first search (BFS) starting from node 0 on the undirected graph with adjacency lists 0:[1,4], 1:[0,2,5], 2:[1,3], 3:[2,6], 4:[0,5], 5:[1,4,6], 6:[3,5]. When visiting a node, consider its neighbors in ascending order. Print the order in which nodes are first visited on a single line, separated by single spaces, followed by a newline.",
-      "expected_stdout": "0 1 4 2 5 3 6\n"
+      "expected_stdout": "0 1 4 2 5 3 6\n",
+      "reference_solution": "fn main() -> Void {\n    let adj: Int[][] = [[1, 4], [0, 2, 5], [1, 3], [2, 6], [0, 5], [1, 4, 6], [3, 5]];\n    let n: Int = length(adj);\n    let visited: Bool[] = [];\n    loop i in 0..n {\n        visited = visited + [false];\n    }\n    let queue: Int[] = [0];\n    visited[0] = true;\n    let head: Int = 0;\n    let line: Text = \"\";\n    loop head < length(queue) {\n        let u: Int = queue[head];\n        head = head + 1;\n        if string_len(line) > 0 {\n            line = line + \" \";\n        }\n        line = line + int_to_text(u);\n        let nbrs: Int[] = adj[u];\n        loop k in 0..length(nbrs) {\n            let v: Int = nbrs[k];\n            if !visited[v] {\n                visited[v] = true;\n                queue = queue + [v];\n            }\n        }\n    }\n    fx {\n        println(line);\n    }\n    ret;\n}\n"
     },
     {
       "id": "cs_dijkstra",
@@ -187,7 +204,8 @@
         "shortest_path"
       ],
       "prompt": "Write an Aether program that computes the shortest path distance from node 0 to node 4 in the undirected weighted graph whose edges (given as u, v, weight) are (0,1,4), (0,2,1), (1,2,2), (1,3,1), (2,3,5), (3,4,3), using Dijkstra's algorithm. Print the result on one line in exactly the form `distance = N`, followed by a newline.",
-      "expected_stdout": "distance = 7\n"
+      "expected_stdout": "distance = 7\n",
+      "reference_solution": "fn main() -> Void {\n    let n: Int = 5;\n    let eu: Int[] = [0, 0, 1, 1, 2, 3];\n    let ev: Int[] = [1, 2, 2, 3, 3, 4];\n    let ew: Int[] = [4, 1, 2, 1, 5, 3];\n    let inf: Int = 1000000;\n    let dist: Int[] = [];\n    let done: Bool[] = [];\n    loop i in 0..n {\n        dist = dist + [inf];\n        done = done + [false];\n    }\n    dist[0] = 0;\n    loop round in 0..n {\n        let u: Int = -1;\n        loop i in 0..n {\n            if !done[i] && dist[i] < inf {\n                if u < 0 || dist[i] < dist[u] {\n                    u = i;\n                }\n            }\n        }\n        if u < 0 {\n            break;\n        }\n        done[u] = true;\n        loop e in 0..length(eu) {\n            let other: Int = -1;\n            if eu[e] == u {\n                other = ev[e];\n            } else if ev[e] == u {\n                other = eu[e];\n            }\n            if other >= 0 {\n                let cand: Int = dist[u] + ew[e];\n                if cand < dist[other] {\n                    dist[other] = cand;\n                }\n            }\n        }\n    }\n    fx {\n        println(\"distance = \", dist[4]);\n    }\n    ret;\n}\n"
     },
     {
       "id": "cs_substring",
@@ -198,7 +216,8 @@
         "pattern_matching"
       ],
       "prompt": "Write an Aether program that finds the 0-based index of the first occurrence of the pattern `sip` within the text `mississippi` using a naive character-by-character substring search. Print the result on one line in exactly the form `index = N`, followed by a newline.",
-      "expected_stdout": "index = 6\n"
+      "expected_stdout": "index = 6\n",
+      "reference_solution": "fn naiveFind(text: Text, pattern: Text) -> Int {\n    let n: Int = string_len(text);\n    let m: Int = string_len(pattern);\n    let last: Int = n - m + 1;\n    loop i in 0..last {\n        let matched: Bool = true;\n        let j: Int = 0;\n        loop j < m && matched {\n            if text[i + j] != pattern[j] {\n                matched = false;\n            }\n            j = j + 1;\n        }\n        if matched {\n            ret i;\n        }\n    }\n    ret -1;\n}\n\nfn main() -> Void {\n    let idx: Int = naiveFind(\"mississippi\", \"sip\");\n    fx {\n        println(\"index = \", idx);\n    }\n    ret;\n}\n"
     }
   ]
 }

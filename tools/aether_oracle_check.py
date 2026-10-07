@@ -70,6 +70,30 @@ SANDBOX_PROBE = """fn main() -> Void {
 """
 
 
+# The scored boards (the decontamination list minus tasks.json, which is off
+# the boards): W1-11 wants every one of their tasks covered by an Aether AND a
+# Python reference that agree.
+BOARD_MANIFESTS = ("tasks_v2_pos.json", "tasks_hard_v2.json", "tasks_hard_nontoon.json", "tasks_cs.json",
+                   "tasks_frontier.json", "tasks_frontier_algo.json", "tasks_frontier_spec.json")
+
+
+def board_agreement(report: dict[str, Any]) -> dict[str, Any] | None:
+    """Board tasks whose Aether and Python references both pass, or None when
+    the run did not check every board manifest."""
+    refs, py = report.get("references") or {}, report.get("python_references") or {}
+    if not all(name in refs and name in py for name in BOARD_MANIFESTS):
+        return None
+    total, agree, missing = 0, 0, []
+    for name in BOARD_MANIFESTS:
+        for task_id, result in refs[name].items():
+            total += 1
+            if result.get("ok") and (py[name].get(task_id) or {}).get("ok"):
+                agree += 1
+            else:
+                missing.append(f"{name}:{task_id}")
+    return {"tasks": total, "agreeing": agree, "not_agreeing": missing}
+
+
 # Suites whose references take minutes (the scale tier's 5 MB TOON rollup is
 # quadratic today): linted always, run only when named with --tasks or with
 # --include-slow, so the default lap stays a pre-commit-sized check.
@@ -320,6 +344,12 @@ def main(argv: list[str] | None = None) -> int:
                         elif not args.quiet:
                             print(f"[PASS] python reference {manifest.name}:{task_id}")
                 report["python_references_passed"], report["python_references_total"] = py_ok, py_total
+                board = board_agreement(report)
+                if board is not None:
+                    report["board_agreement"] = board
+                    print(f"board: {board['agreeing']}/{board['tasks']} tasks with agreeing Aether and "
+                          f"Python references" + (f" (not: {', '.join(board['not_agreeing'][:8])})"
+                                                  if board["not_agreeing"] else ""))
             sandbox = check_sandbox(args)
             report["sandbox_probe"] = sandbox
             if not sandbox["ok"]:
