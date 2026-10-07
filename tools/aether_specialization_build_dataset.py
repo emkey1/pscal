@@ -13,7 +13,13 @@ trips:
   a host path or an environment dump, and no golden anywhere in the corpus
   manifest may carry host data;
 - oracle: a corpus item only trains when its golden has an oracle
-  (metadata.oracle python|reviewed); harvested goldens (oracle none) never do.
+  (metadata.oracle python|reviewed); harvested goldens (oracle none) never do;
+- drill polarity: every repair drill's broken_source is run. A `kind: repair`
+  drill must still be rejected, and its first emitted code must equal the
+  code its stored diagnostic cites ("drill obsolete" / "code drift X->Y"
+  otherwise); a `kind: behavioral` drill must run and print something other
+  than its expected stdout. The prompt carries the live stderr (normalised to
+  `sample.aether:N:`); the stored diagnostic is kept for review diffs.
 
 Each record is stamped with the aether VERSION and binary sha256 it was
 verified against. `--report-json` writes the selection counts, the overlap
@@ -254,6 +260,113 @@ def build_instruction_records(
     return records
 
 
+# A repair drill's broken_source must still be rejected, with the code the
+# drill teaches; a behavioral drill's broken_source must run and print the
+# wrong thing. Every language change that legalizes a construct can invert a
+# drill, so this is checked on every build rather than trusted.
+DRILL_KINDS = ("repair", "behavioral")
+_CODE_RE = re.compile(r"\[([A-Z][A-Z0-9]*-\d+)\]")
+_STORED_CODE_RE = re.compile(r"^\s*(?:warning:\s*)?\[([A-Z][A-Z0-9]*-\d+)\]")
+_LOCATION_RE = re.compile(r"^[^\s:]+:\d+:\s*")
+
+
+def stored_drill_code(diagnostic: str) -> str | None:
+    """The code a drill's stored diagnostic cites (None for uncoded text)."""
+    match = _STORED_CODE_RE.match(diagnostic or "")
+    return match.group(1) if match else None
+
+
+def first_diagnostic_line(stderr: str) -> str:
+    """The first diagnostic line, without `sample.aether:N: ` or `warning: `."""
+    for line in (stderr or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        line = _LOCATION_RE.sub("", line, count=1)
+        if line.startswith("warning: "):
+            line = line[len("warning: "):]
+        return line
+    return ""
+
+
+def parse_diagnostics_json(stderr: str) -> list[dict[str, Any]] | None:
+    """The entries of a --diagnostics-json array on stderr, or None."""
+    text = (stderr or "").strip()
+    candidates = [text]
+    lines = text.splitlines()
+    starts = [i for i, line in enumerate(lines) if line.strip().startswith("[")]
+    ends = [i for i, line in enumerate(lines) if line.strip().endswith("]")]
+    if starts and ends and ends[-1] >= starts[0]:
+        candidates.append("\n".join(lines[starts[0]:ends[-1] + 1]))
+    for candidate in candidates:
+        try:
+            entries = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(entries, list):
+            return [entry for entry in entries if isinstance(entry, dict)]
+    return None
+
+
+def probe_broken_source(aether_bin: pathlib.Path, item: dict[str, Any]) -> dict[str, Any]:
+    """Run a drill's broken_source: its live stderr and the first code it emits.
+
+    A rejected program is run again with --diagnostics-json for the code of
+    its first error; a program that runs (behavioral drills) can only emit
+    warnings, which --diagnostics-json suppresses, so their code is read from
+    the plain stderr.
+    """
+    plain = run_aether(aether_bin=aether_bin, source=item["broken_source"], files=item.get("files"))
+    first_code: str | None = None
+    if plain["returncode"] != 0:
+        coded = run_aether(
+            aether_bin=aether_bin,
+            source=item["broken_source"],
+            files=item.get("files"),
+            extra_args=("--diagnostics-json",),
+        )
+        entries = parse_diagnostics_json(coded["stderr"])
+        if entries:
+            errors = [entry for entry in entries if entry.get("severity") == "error"] or entries
+            first_code = errors[0].get("code") or None
+        else:
+            match = _CODE_RE.search(first_diagnostic_line(plain["stderr"]))
+            first_code = match.group(1) if match else None
+    else:
+        match = _CODE_RE.search(plain["stderr"])
+        first_code = match.group(1) if match else None
+    return {
+        "returncode": plain["returncode"],
+        "stdout": plain["stdout"],
+        "stderr": plain["stderr"],
+        "first_code": first_code,
+        "first_line": first_diagnostic_line(plain["stderr"]),
+    }
+
+
+def drill_problems(item: dict[str, Any], broken: dict[str, Any]) -> list[str]:
+    """Polarity and code problems of one drill against the live compiler."""
+    kind = item.get("kind")
+    if kind not in DRILL_KINDS:
+        return [f"invalid kind {kind!r} (expected one of {', '.join(DRILL_KINDS)})"]
+    stored = stored_drill_code(item.get("diagnostic", ""))
+    live = broken["first_code"]
+    expected = item.get("expected_stdout")
+    reproduces = isinstance(expected, str) and broken["stdout"] == expected
+    if kind == "repair":
+        if broken["returncode"] == 0:
+            detail = "and prints the expected stdout" if reproduces else "with exit code 0"
+            return [f"drill obsolete: broken_source now compiles and runs {detail}"]
+    else:
+        if broken["returncode"] != 0:
+            return [f"behavioral drill no longer runs: broken_source exits {broken['returncode']}"]
+        if reproduces:
+            return ["drill obsolete: broken_source now prints the expected stdout"]
+    if live != stored:
+        return [f"code drift {stored or 'none'}\u2192{live or 'none'}"]
+    return []
+
+
 def build_repair_records(
     payload: dict[str, Any], aether_bin: pathlib.Path, stamp: dict[str, str]
 ) -> list[dict[str, Any]]:
@@ -265,9 +378,16 @@ def build_repair_records(
             expected_stdout=item.get("expected_stdout"),
             files=item.get("files"),
         )
+        broken = probe_broken_source(aether_bin, item)
+        # The prompt carries what the compiler prints today. The stored text
+        # is kept for review diffs; it reaches the prompt only for a
+        # behavioral drill the compiler says nothing about.
+        live_diagnostic = broken["stderr"].strip()
+        prompt_diagnostic = live_diagnostic or item["diagnostic"]
         record = {
             "kind": "repair_sft",
             "id": item["id"],
+            "drill_kind": item.get("kind"),
             "messages": [
                 {
                     "role": "system",
@@ -277,7 +397,7 @@ def build_repair_records(
                     "role": "user",
                     "content": (
                         "Fix this Aether program.\n\n"
-                        f"Compiler diagnostic:\n{item['diagnostic']}\n\n"
+                        f"Compiler diagnostic:\n{prompt_diagnostic}\n\n"
                         f"Broken source:\n{item['broken_source']}"
                     ),
                 },
@@ -286,10 +406,20 @@ def build_repair_records(
                     "content": item["fixed_source"],
                 },
             ],
-            "diagnostic": item["diagnostic"],
+            "diagnostic": prompt_diagnostic,
+            "stored_diagnostic": item["diagnostic"],
             "expected_stdout": item.get("expected_stdout"),
             "files": item.get("files", {}),
             "verification": verification,
+            "broken_verification": {
+                "returncode": broken["returncode"],
+                "stdout": broken["stdout"],
+                "stderr": broken["stderr"],
+                "first_code": broken["first_code"],
+            },
+            "drill_problems": drill_problems(item, broken),
+            "diagnostic_text_drift": bool(broken["first_line"])
+            and broken["first_line"] != item["diagnostic"].strip(),
             "aether": stamp,
         }
         records.append(record)
@@ -588,18 +718,32 @@ def main() -> int:
     selection = corpus_selection_summary(corpus_payload)
     rc_instruction, mismatch_instruction = verification_failures(instruction_records)
     rc_repair, mismatch_repair = verification_failures(repair_records)
+    drill_failures = {r["id"]: r["drill_problems"] for r in repair_records if r["drill_problems"]}
+    text_drift = sorted(r["id"] for r in repair_records if r["diagnostic_text_drift"])
     backstop = record_backstop_hits(instruction_records + repair_records)
     manifest_hits = manifest_host_data_hits(corpus_payload)
     oracle_errors = corpus_oracle_errors(corpus_payload)
 
+    failed_runs = {
+        r["id"]: {"returncode": r["verification"]["returncode"],
+                  "stderr_tail": r["verification"]["stderr"][-400:]}
+        for r in instruction_records + repair_records
+        if r["id"] in set(rc_instruction + rc_repair)
+    }
     gates = {
         "returncode_failures": {"instruction": rc_instruction, "repair": rc_repair},
+        "returncode_details": failed_runs,
         "exact_stdout_mismatches": {"instruction": mismatch_instruction, "repair": mismatch_repair},
         "golden_backstop": {"records": backstop, "manifest_host_data": manifest_hits},
         "oracle_errors": oracle_errors,
+        "drill_polarity": drill_failures,
+        # advisory: the stored text differs from what the compiler prints now
+        # (the prompt already uses the live text; refresh_drills.py --write
+        # re-pins the stored copy)
+        "drill_text_drift": text_drift,
     }
     failed = any([rc_instruction, rc_repair, mismatch_instruction, mismatch_repair,
-                  backstop, manifest_hits, oracle_errors])
+                  backstop, manifest_hits, oracle_errors, drill_failures])
 
     report = {
         **stamp,
@@ -629,7 +773,9 @@ def main() -> int:
         f"returncode_failures={len(rc_instruction) + len(rc_repair)} "
         f"exact_stdout_mismatches={len(mismatch_instruction) + len(mismatch_repair)} "
         f"backstop_hits={len(backstop) + len(manifest_hits)} "
-        f"oracle_errors={len(oracle_errors)}"
+        f"oracle_errors={len(oracle_errors)} "
+        f"drill_polarity_failures={len(drill_failures)} "
+        f"drill_text_drift={len(text_drift)}"
     )
     if failed:
         details = []
@@ -645,6 +791,9 @@ def main() -> int:
                 f"{hit['id']} ({'/'.join(hit['patterns'])})" for hit in manifest_hits))
         if oracle_errors:
             details.append("oracle: " + "; ".join(oracle_errors))
+        if drill_failures:
+            details.append("repair drills: " + "; ".join(
+                f"{drill}: {', '.join(problems)}" for drill, problems in sorted(drill_failures.items())))
         raise SystemExit("verification failed: " + "; ".join(details))
 
     write_jsonl(args.instruction_jsonl, instruction_records)

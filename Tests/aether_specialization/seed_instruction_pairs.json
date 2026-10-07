@@ -125,6 +125,24 @@
         "bench_support": "mod BenchSupport {\n    export const DefaultScore: Int = 50;\n\n    @pure\n    export fn classifySupport(score: Int) -> Text {\n        if score >= 90 {\n            ret \"ready\";\n        }\n        if score >= 70 {\n            ret \"review\";\n        }\n        ret \"blocked\";\n    }\n\n    @pure\n    export fn clampSupport(score: Int) -> Int {\n        if score > 100 {\n            ret 100;\n        }\n        if score < 0 {\n            ret 0;\n        }\n        ret score;\n    }\n}\n",
         "support_jobs.json": "{\"jobs\":[{\"name\":\"Alpha\",\"score\":95},{\"name\":\"Beta\"},{\"name\":\"Gamma\",\"score\":12}]}\n"
       }
+    },
+    {
+      "id": "else_if_expression_chain",
+      "prompt": "Write an Aether program with a pure helper `sizeLabel(n: Int) -> Text` that uses one chained if-expression (`if ... else if ... else ...` in value position) to return `small` for n < 10, `medium` for n < 100 and `large` otherwise. Print the labels for 7, 42 and 512, one per line.",
+      "solution": "@pure\nfn sizeLabel(n: Int) -> Text {\n    let label: Text = if n < 10 { \"small\" } else if n < 100 { \"medium\" } else { \"large\" };\n    ret label;\n}\n\nfn main() -> Void {\n    fx {\n        println(sizeLabel(7));\n        println(sizeLabel(42));\n        println(sizeLabel(512));\n    }\n    ret;\n}\n",
+      "expected_stdout": "small\nmedium\nlarge\n"
+    },
+    {
+      "id": "array_concat_plus",
+      "prompt": "Write an Aether program that joins the arrays `[3, 1]` and `[4, 1, 5]` into one `Int[]` with `+`, then prints the combined length followed by each element on its own line.",
+      "solution": "fn main() -> Void {\n    let head: Int[] = [3, 1];\n    let tail: Int[] = [4, 1, 5];\n    let all: Int[] = head + tail;\n    fx {\n        println(length(all));\n        loop i in 0..length(all) {\n            println(all[i]);\n        }\n    }\n    ret;\n}\n",
+      "expected_stdout": "5\n3\n1\n4\n1\n5\n"
+    },
+    {
+      "id": "tuple_recursion",
+      "prompt": "Write an Aether program with a recursive pure function `split(n: Int) -> (Int, Int)` that returns `(0, 0)` when n <= 0 and otherwise destructures `split(n - 1)` into `(lo, hi)` and returns `(lo + 1, hi + 2)`. Print the two values of `split(3)` on one line, separated by a space.",
+      "solution": "@pure\nfn split(n: Int) -> (Int, Int) {\n    if n <= 0 {\n        ret (0, 0);\n    }\n    let (lo, hi) = split(n - 1);\n    ret (lo + 1, hi + 2);\n}\n\nfn main() -> Void {\n    let (a, b) = split(3);\n    fx { println(a, \" \", b); }\n    ret;\n}\n",
+      "expected_stdout": "3 6\n"
     }
   ]
 }
