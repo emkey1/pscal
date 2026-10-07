@@ -1,0 +1,546 @@
+{
+  "version": "2026-10-07-1",
+  "hide_expected_stdout": true,
+  "_note": "Silent-wrong trap suite (W1-22): each task's natural Aether program compiles and prints the wrong answer on some binary. expected_stdout is the task-specified answer, produced by py_refs/<id>.py; reference_solution is the safe form. trap.natural_program is the plausible program the trap catches and trap.observed its class on each binary when the suite was written. Never merge into another suite; report it separately (board B1).",
+  "tasks": [
+    {
+      "id": "trap_div_middle_mark",
+      "title": "Mark the middle element (index n/2)",
+      "mechanisms": [
+        "trap",
+        "int_div",
+        "div_compare"
+      ],
+      "prompt": "Write an Aether program that holds the integers 4, 8, 15, 16, 23, 42, 7 in an array, in that order. Its middle element is the one at index `n / 2`, where `n` is the number of elements and the division is integer division (rounding down). Print all the elements on one line, separated by single spaces, with the middle element wrapped in square brackets and every other element printed bare. Then print a second line `middle index = <i>`, where `<i>` is that index. Print nothing else; both lines end with a newline.",
+      "expected_stdout": "4 8 15 [16] 23 42 7\nmiddle index = 3\n",
+      "reference_solution": "fn main() -> Void {\n    let xs: Int[] = [4, 8, 15, 16, 23, 42, 7];\n    let n: Int = length(xs);\n    let mid: Int = n div 2;\n    let line: Text = \"\";\n    loop i in 0..n {\n        if i > 0 {\n            line = line + \" \";\n        }\n        if i == mid {\n            line = line + \"[\" + int_to_text(xs[i]) + \"]\";\n        } else {\n            line = line + int_to_text(xs[i]);\n        }\n    }\n    fx {\n        println(line);\n        println(\"middle index = \", mid);\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "Int `/` is Real unless sunk into a typed Int target: `i == n / 2` is never true for odd n, and `n / 2` prints as 3.500000",
+        "review": "C3 / T1-adjacent (CHANGELOG 2026-07-15-2 sink coercion)",
+        "fix": "W-language `/` decision (D4)",
+        "natural_program": "fn main() -> Void {\n    let xs: Int[] = [4, 8, 15, 16, 23, 42, 7];\n    fx {\n        loop i in 0..length(xs) {\n            if i > 0 {\n                print(\" \");\n            }\n            if i == length(xs) / 2 {\n                print(\"[\", xs[i], \"]\");\n            } else {\n                print(xs[i]);\n            }\n        }\n        println(\"\");\n        println(\"middle index = \", length(xs) / 2);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    },
+    {
+      "id": "trap_div_round_down",
+      "title": "Round prices down to a multiple of 5",
+      "mechanisms": [
+        "trap",
+        "int_div",
+        "div_mul"
+      ],
+      "prompt": "Write an Aether program for the prices 23, 40, 7, 99, 51 (Int, in that order). Round each price down to the nearest multiple of 5 using integer arithmetic: integer-divide by 5, then multiply by 5. For each price print a line `<price> -> <rounded>`. Then print `total rounded = <sum of the rounded prices>`. Print nothing else.",
+      "expected_stdout": "23 -> 20\n40 -> 40\n7 -> 5\n99 -> 95\n51 -> 50\ntotal rounded = 210\n",
+      "reference_solution": "fn main() -> Void {\n    let prices: Int[] = [23, 40, 7, 99, 51];\n    let total: Int = 0;\n    fx {\n        loop p in prices {\n            let rounded: Int = (p div 5) * 5;\n            total = total + rounded;\n            println(p, \" -> \", rounded);\n        }\n        println(\"total rounded = \", total);\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "Int `/` is Real before the sink: `p / 5 * 5` is p again, even stored into an Int",
+        "review": "C3",
+        "fix": "W-language `/` decision (D4)",
+        "natural_program": "fn roundDown(p: Int) -> Int {\n    let r: Int = p / 5 * 5;\n    ret r;\n}\n\nfn main() -> Void {\n    let prices: Int[] = [23, 40, 7, 99, 51];\n    let total: Int = 0;\n    fx {\n        loop i in 0..length(prices) {\n            let r: Int = roundDown(prices[i]);\n            total = total + r;\n            println(prices[i], \" -> \", r);\n        }\n        println(\"total rounded = \", total);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    },
+    {
+      "id": "trap_range_half",
+      "title": "Sum the two halves of a list (bound n/2)",
+      "mechanisms": [
+        "trap",
+        "int_div",
+        "range_bound"
+      ],
+      "prompt": "Write an Aether program for the list 3, 9, 2, 7, 5, 8, 1 (Int, in that order). Let `n` be its length and `h = n / 2` with integer division (rounding down). The first half is the first `h` elements; the second half is the remaining `n - h` elements. Print `first half = <sum of the first half>` and then `second half = <sum of the second half>`, each on its own line. Print nothing else.",
+      "expected_stdout": "first half = 14\nsecond half = 21\n",
+      "reference_solution": "fn main() -> Void {\n    let xs: Int[] = [3, 9, 2, 7, 5, 8, 1];\n    let n: Int = length(xs);\n    let h: Int = n div 2;\n    let first: Int = 0;\n    let second: Int = 0;\n    loop i in 0..n {\n        if i < h {\n            first = first + xs[i];\n        } else {\n            second = second + xs[i];\n        }\n    }\n    fx {\n        println(\"first half = \", first);\n        println(\"second half = \", second);\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "Int `/` is Real in a range bound: `0..n / 2` runs to 3.5, one iteration too many for odd n",
+        "review": "A-probe-full-B-6 / C3",
+        "fix": "W-language `/` decision (D4)",
+        "natural_program": "fn main() -> Void {\n    let xs: Int[] = [3, 9, 2, 7, 5, 8, 1];\n    let first: Int = 0;\n    let second: Int = 0;\n    loop i in 0..length(xs) / 2 {\n        first = first + xs[i];\n    }\n    loop i in length(xs) / 2..length(xs) {\n        second = second + xs[i];\n    }\n    fx {\n        println(\"first half = \", first);\n        println(\"second half = \", second);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    },
+    {
+      "id": "trap_div_print_duration",
+      "title": "Split durations into hours, minutes and seconds",
+      "mechanisms": [
+        "trap",
+        "int_div",
+        "div_print"
+      ],
+      "prompt": "Write an Aether program for the durations 3725, 59 and 86399 seconds (Int, in that order). For each duration `s` print `<s>s = <h>h <m>m <sec>s`, where `h` is the number of whole hours (`s / 3600`, integer division), `m` the whole minutes left over (`(s % 3600) / 60`, integer division) and `sec` the remaining seconds (`s % 60`). Then print `total = <h>h <m>m <sec>s` for the sum of the three durations, split the same way. Print nothing else.",
+      "expected_stdout": "3725s = 1h 2m 5s\n59s = 0h 0m 59s\n86399s = 23h 59m 59s\ntotal = 25h 3m 3s\n",
+      "reference_solution": "fn describe(s: Int) -> Text {\n    let h: Int = s div 3600;\n    let m: Int = (s % 3600) div 60;\n    let sec: Int = s % 60;\n    ret int_to_text(h) + \"h \" + int_to_text(m) + \"m \" + int_to_text(sec) + \"s\";\n}\n\nfn main() -> Void {\n    let durations: Int[] = [3725, 59, 86399];\n    let total: Int = 0;\n    fx {\n        loop s in durations {\n            total = total + s;\n            println(s, \"s = \", describe(s));\n        }\n        println(\"total = \", describe(total));\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "Int `/` is Real when printed directly: `println(s / 3600, \"h \")` prints 1.034722h, exit 0",
+        "review": "C3 (every `/` in the 195 tasks lands in a sink)",
+        "fix": "W-language `/` decision (D4)",
+        "natural_program": "fn main() -> Void {\n    let durations: Int[] = [3725, 59, 86399];\n    let total: Int = 0;\n    fx {\n        loop i in 0..length(durations) {\n            let s: Int = durations[i];\n            total = total + s;\n            println(s, \"s = \", s / 3600, \"h \", (s % 3600) / 60, \"m \", s % 60, \"s\");\n        }\n        println(\"total = \", total / 3600, \"h \", (total % 3600) / 60, \"m \", total % 60, \"s\");\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    },
+    {
+      "id": "trap_digit_places",
+      "title": "Place-value digits and digit sum",
+      "mechanisms": [
+        "trap",
+        "int_div",
+        "div_mod"
+      ],
+      "prompt": "Write an Aether program for the numbers 4729, 305 and 81 (Int, in that order). For each number `n` print one line `<n>: thousands=<a> hundreds=<b> tens=<c> ones=<d> sum=<s>`, where `<a>`, `<b>`, `<c>`, `<d>` are the decimal digits of `n` in those places (0 when `n` has no such digit; e.g. tens is `(n / 10) % 10` with integer division) and `<s>` is the sum of those four digits. Print nothing else.",
+      "expected_stdout": "4729: thousands=4 hundreds=7 tens=2 ones=9 sum=22\n305: thousands=0 hundreds=3 tens=0 ones=5 sum=8\n81: thousands=0 hundreds=0 tens=8 ones=1 sum=9\n",
+      "reference_solution": "@pure\nfn digitAt(n: Int, place: Int) -> Int {\n    let q: Int = n div place;\n    ret q % 10;\n}\n\nfn main() -> Void {\n    let nums: Int[] = [4729, 305, 81];\n    fx {\n        loop n in nums {\n            let a: Int = digitAt(n, 1000);\n            let b: Int = digitAt(n, 100);\n            let c: Int = digitAt(n, 10);\n            let d: Int = digitAt(n, 1);\n            let s: Int = a + b + c + d;\n            println(n, \": thousands=\", a, \" hundreds=\", b, \" tens=\", c, \" ones=\", d, \" sum=\", s);\n        }\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "Int `/` is Real, so `(n / 10) % 10` hands `%` a Real: an uncoded runtime error (rc 1) -- the loud member of the `/` family",
+        "review": "C3",
+        "fix": "W-language `/` decision (D4)",
+        "natural_program": "fn main() -> Void {\n    let nums: Int[] = [4729, 305, 81];\n    fx {\n        loop i in 0..length(nums) {\n            let n: Int = nums[i];\n            let a: Int = (n / 1000) % 10;\n            let b: Int = (n / 100) % 10;\n            let c: Int = (n / 10) % 10;\n            let d: Int = n % 10;\n            println(n, \": thousands=\", a, \" hundreds=\", b, \" tens=\", c, \" ones=\", d, \" sum=\", a + b + c + d);\n        }\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "uncoded_error",
+          "2026-10-07-1": "uncoded_error"
+        }
+      }
+    },
+    {
+      "id": "trap_base_convert",
+      "title": "Convert integers to base 2, 8 and 16",
+      "mechanisms": [
+        "trap",
+        "int_div",
+        "inferred_let"
+      ],
+      "prompt": "Write an Aether program with a function `toBase(n: Int, base: Int) -> Text` that returns the digits of a non-negative `n` in `base` (2 to 16), most significant digit first, using the digits `0`-`9` then uppercase `A`-`F`; zero is `0`. Repeatedly divide by `base` with integer division: the remainder (`n - quotient * base`) is the next digit, and the quotient becomes the new `n`, until it reaches 0. For each `n` in 10, 255, 1000 (in that order) and each base in 2, 8, 16 (in that order) print `<n> in base <base> = <digits>`. Print nothing else.",
+      "expected_stdout": "10 in base 2 = 1010\n10 in base 8 = 12\n10 in base 16 = A\n255 in base 2 = 11111111\n255 in base 8 = 377\n255 in base 16 = FF\n1000 in base 2 = 1111101000\n1000 in base 8 = 1750\n1000 in base 16 = 3E8\n",
+      "reference_solution": "@pure\nfn digitChar(d: Int) -> Text {\n    if d < 10 {\n        ret chr(48 + d);\n    }\n    ret chr(55 + d);\n}\n\n@pure\nfn toBase(n: Int, base: Int) -> Text {\n    if n == 0 {\n        ret \"0\";\n    }\n    let out: Text = \"\";\n    let m: Int = n;\n    loop m > 0 {\n        let d: Int = m % base;\n        out = digitChar(d) + out;\n        m = m div base;\n    }\n    ret out;\n}\n\nfn main() -> Void {\n    let nums: Int[] = [10, 255, 1000];\n    let bases: Int[] = [2, 8, 16];\n    fx {\n        loop n in nums {\n            loop b in bases {\n                println(n, \" in base \", b, \" = \", toBase(n, b));\n            }\n        }\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "an untyped `let q = n / base;` infers Real (T2), so `n - q * base` is 0.0 and every digit is 0; only NARROW-001 warnings",
+        "review": "T2 / C3",
+        "fix": "W4 inference (promote binary-op types) + `/` decision",
+        "natural_program": "fn toBase(n: Int, base: Int) -> Text {\n    let digits: Text = \"0123456789ABCDEF\";\n    if n == 0 {\n        ret \"0\";\n    }\n    let out: Text = \"\";\n    let m: Int = n;\n    loop m > 0 {\n        let q = m / base;\n        let rem: Int = m - q * base;\n        out = digits[rem] + out;\n        m = q;\n    }\n    ret out;\n}\n\nfn main() -> Void {\n    let nums: Int[] = [10, 255, 1000];\n    let bases: Int[] = [2, 8, 16];\n    fx {\n        loop n in nums {\n            loop b in bases {\n                println(n, \" in base \", b, \" = \", toBase(n, b));\n            }\n        }\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    },
+    {
+      "id": "trap_infer_real_product",
+      "title": "Invoice line totals over Real prices",
+      "mechanisms": [
+        "trap",
+        "inference",
+        "real_format",
+        "type_fields"
+      ],
+      "prompt": "Write an Aether program with `type Item { name: Text = \"\"; price: Real = 0.0; qty: Int = 0; }` and the items pen (price 2.5, qty 3), notebook (price 4.25, qty 2) and stapler (price 11.99, qty 1), in that order. For each item compute its line total `price * qty` and print `<name>: <qty> x <price> = <line total>`, with price and line total printed with exactly two decimals. Then print `subtotal = <sum of the line totals>` with two decimals. Print nothing else.",
+      "expected_stdout": "pen: 3 x 2.50 = 7.50\nnotebook: 2 x 4.25 = 8.50\nstapler: 1 x 11.99 = 11.99\nsubtotal = 27.99\n",
+      "reference_solution": "type Item {\n    name: Text = \"\";\n    price: Real = 0.0;\n    qty: Int = 0;\n}\n\nfn main() -> Void {\n    let items: Item[] = [\n        new Item { name: \"pen\", price: 2.5, qty: 3 },\n        new Item { name: \"notebook\", price: 4.25, qty: 2 },\n        new Item { name: \"stapler\", price: 11.99, qty: 1 }\n    ];\n    let subtotal: Real = 0.0;\n    fx {\n        loop it in items {\n            let line: Real = it.price * it.qty;\n            subtotal = subtotal + line;\n            println(it.name, \": \", it.qty, \" x \", formatfloat(it.price, 2), \" = \", formatfloat(line, 2));\n        }\n        println(\"subtotal = \", formatfloat(subtotal, 2));\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "an untyped `let total = it.price * it.qty;` infers Int (T2's Int fallback), truncating 7.50 to 7, with no NARROW-001, exit 0",
+        "review": "T2 (inferLetTypeName fallback, commit 8a6c380)",
+        "fix": "W4 inference: promote binary-op types, NULL fallback (open)",
+        "natural_program": "type Item {\n    name: Text = \"\";\n    price: Real = 0.0;\n    qty: Int = 0;\n}\n\nfn main() -> Void {\n    let items: Item[] = [new Item { name: \"pen\", price: 2.5, qty: 3 }, new Item { name: \"notebook\", price: 4.25, qty: 2 }, new Item { name: \"stapler\", price: 11.99, qty: 1 }];\n    let subtotal: Real = 0.0;\n    fx {\n        loop i in 0..length(items) {\n            let it: Item = items[i];\n            let total = it.price * it.qty;\n            subtotal = subtotal + total;\n            println(it.name, \": \", it.qty, \" x \", it.price:0:2, \" = \", total:0:2);\n        }\n        println(\"subtotal = \", subtotal:0:2);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    },
+    {
+      "id": "trap_factorial_literal",
+      "title": "Recursive factorial of 20",
+      "mechanisms": [
+        "trap",
+        "int64",
+        "recursion"
+      ],
+      "prompt": "Write an Aether program with a recursive function `factorial(n: Int) -> Int` (factorial(0) and factorial(1) are 1). Print `12! = <value>`, `20! = <value>` and `20! / 18! = <value>` (exact integer quotient; 20!/18! is 380) on three lines, computing each with calls `factorial(12)`, `factorial(20)` and `factorial(18)`. Aether's Int is 64-bit, so 20! = 2432902008176640000 fits. Print nothing else.",
+      "expected_stdout": "12! = 479001600\n20! = 2432902008176640000\n20! / 18! = 380\n",
+      "reference_solution": "@pure\nfn factorial(n: Int) -> Int {\n    if n <= 1 {\n        ret 1;\n    }\n    ret n * factorial(n - 1);\n}\n\nfn main() -> Void {\n    // The arguments come from an array rather than bare literals: on\n    // 2026-10-06-1 a literal argument made the whole recursion 32-bit.\n    let ns: Int[] = [12, 20, 18];\n    let twelve: Int = factorial(ns[0]);\n    let twenty: Int = factorial(ns[1]);\n    let eighteen: Int = factorial(ns[2]);\n    let ratio: Int = twenty div eighteen;\n    fx {\n        println(\"12! = \", twelve);\n        println(\"20! = \", twenty);\n        println(\"20! / 18! = \", ratio);\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "INT32 wrap of literal-derived Ints (T1): `n * factorial(n - 1)` started from the literal 20 wraps to -2102132736 with exit 0",
+        "review": "T1 / B-backend-coupling-1",
+        "fix": "W5 Core-0 widen on INT32 overflow (L0, 2026-10-07-1)",
+        "natural_program": "fn factorial(n: Int) -> Int {\n    if n <= 1 {\n        ret 1;\n    }\n    ret n * factorial(n - 1);\n}\n\nfn main() -> Void {\n    fx {\n        println(\"12! = \", factorial(12));\n        println(\"20! = \", factorial(20));\n        let q: Int = factorial(20) / factorial(18);\n        println(\"20! / 18! = \", q);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "pass"
+        }
+      }
+    },
+    {
+      "id": "trap_literal_product",
+      "title": "Large products of literal constants",
+      "mechanisms": [
+        "trap",
+        "int64",
+        "const"
+      ],
+      "prompt": "Write an Aether program that computes, with Int arithmetic on constant operands written in the program (Aether's Int is 64-bit): the area in square metres of a square plot 100000 m on a side (`100000 * 100000`), the number of seconds in a century of 100 years of 365 days (`100 * 365 * 24 * 60 * 60`), and the number of bytes in 5 GiB (`5 * 1024 * 1024 * 1024`). Print `area = <value>`, `century seconds = <value>` and `bytes = <value>` on three lines. Print nothing else.",
+      "expected_stdout": "area = 10000000000\ncentury seconds = 3153600000\nbytes = 5368709120\n",
+      "reference_solution": "fn main() -> Void {\n    let side: Int = 0;\n    side = side + 100000;\n    let area: Int = side * side;\n    let seconds: Int = 0;\n    seconds = seconds + 365;\n    seconds = seconds * 24;\n    seconds = seconds * 60;\n    seconds = seconds * 60;\n    seconds = seconds * 100;\n    let bytes: Int = 0;\n    bytes = bytes + 5;\n    loop i in 0..3 {\n        bytes = bytes * 1024;\n    }\n    fx {\n        println(\"area = \", area);\n        println(\"century seconds = \", seconds);\n        println(\"bytes = \", bytes);\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "INT32 wrap of literal-derived Ints (T1): a product of literals folds at 32 bits and prints a wrapped value with exit 0",
+        "review": "T1 / B-backend-coupling-1",
+        "fix": "W5 Core-0 widen on INT32 overflow (L0, 2026-10-07-1)",
+        "natural_program": "const SIDE: Int = 100000;\nconst SECONDS_PER_CENTURY: Int = 100 * 365 * 24 * 60 * 60;\n\nfn main() -> Void {\n    let area: Int = 100000 * 100000;\n    let bytes: Int = 5 * 1024 * 1024 * 1024;\n    fx {\n        println(\"area = \", area);\n        println(\"century seconds = \", SECONDS_PER_CENTURY);\n        println(\"bytes = \", bytes);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "pass"
+        }
+      }
+    },
+    {
+      "id": "trap_parse_int_big",
+      "title": "Parse large numeric IDs",
+      "mechanisms": [
+        "trap",
+        "int64",
+        "parse"
+      ],
+      "prompt": "Write an Aether program for the numeric ID strings \"42\", \"2147483647\", \"3000000000\" and \"9007199254740993\" (Text, in that order; Aether's Int is 64-bit, so all of them fit). Convert each to an Int and print `<text> -> next <value + 1>`. Then print `sum = <sum of the four values>`. Print nothing else.",
+      "expected_stdout": "42 -> next 43\n2147483647 -> next 2147483648\n3000000000 -> next 3000000001\n9007199254740993 -> next 9007199254740994\nsum = 9007204402224682\n",
+      "reference_solution": "fn main() -> Void {\n    let ids: Text[] = [\"42\", \"2147483647\", \"3000000000\", \"9007199254740993\"];\n    let total: Int = 0;\n    fx {\n        loop t in ids {\n            let n: Int = 0;\n            let code: Int = 0;\n            val(t, n, code);\n            if code != 0 {\n                n = -1;\n            }\n            total = total + n;\n            println(t, \" -> next \", n + 1);\n        }\n        println(\"sum = \", total);\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "`parse_int` wraps past 2^31 (T1 family): \"3000000000\" parses as -1294967296, exit 0",
+        "review": "part2 open silent-wrong list (`parse_int` past 2^31)",
+        "fix": "W5 Int builtins 64-bit (open)",
+        "natural_program": "fn main() -> Void {\n    let ids: Text[] = [\"42\", \"2147483647\", \"3000000000\", \"9007199254740993\"];\n    let total: Int = 0;\n    fx {\n        loop i in 0..length(ids) {\n            let n: Int = parse_int(ids[i]);\n            total = total + n;\n            println(ids[i], \" -> next \", n + 1);\n        }\n        println(\"sum = \", total);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    },
+    {
+      "id": "trap_shift_wide",
+      "title": "Single-bit masks up to bit 40 via a helper",
+      "mechanisms": [
+        "trap",
+        "int64",
+        "bitwise"
+      ],
+      "prompt": "Write an Aether program with a helper `bit(k: Int) -> Int` that returns the Int with only bit k set (2 to the power k; Aether's Int is 64-bit). Print `bit <k> = <bit(k)>` for k = 0, 10, 31, 32, 40 in that order, then `all = <the bitwise OR of those five masks>`. Print nothing else.",
+      "expected_stdout": "bit 0 = 1\nbit 10 = 1024\nbit 31 = 2147483648\nbit 32 = 4294967296\nbit 40 = 1099511627776\nall = 1105954079745\n",
+      "reference_solution": "@pure\nfn bit(k: Int) -> Int {\n    let m: Int = 1;\n    loop i in 0..k {\n        m = m * 2;\n    }\n    ret m;\n}\n\nfn main() -> Void {\n    // Positions come from an array: a shift (or a power) of a literal-derived\n    // Int is 32-bit on the pinned engines.\n    let positions: Int[] = [0, 10, 31, 32, 40];\n    let all: Int = 0;\n    fx {\n        loop k in positions {\n            let m: Int = bit(k);\n            all = all + m;\n            println(\"bit \", k, \" = \", m);\n        }\n        println(\"all = \", all);\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "`<<` on a literal-derived Int works in 32 bits (part2 open list; L0's widening covers arithmetic, not shifts): `bit(32)` and `bit(40)` called with literals return 0, exit 0",
+        "review": "part2 open silent-wrong list (`<<` in 32 bits)",
+        "fix": "W5 64-bit shifts (open)",
+        "natural_program": "fn bit(k: Int) -> Int {\n    ret 1 << k;\n}\n\nfn main() -> Void {\n    let all: Int = bit(0) | bit(10) | bit(31) | bit(32) | bit(40);\n    fx {\n        println(\"bit 0 = \", bit(0));\n        println(\"bit 10 = \", bit(10));\n        println(\"bit 31 = \", bit(31));\n        println(\"bit 32 = \", bit(32));\n        println(\"bit 40 = \", bit(40));\n        println(\"all = \", all);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    },
+    {
+      "id": "trap_life_continue",
+      "title": "One Game of Life step with neighbour counts",
+      "mechanisms": [
+        "trap",
+        "nested_loop",
+        "continue",
+        "grid"
+      ],
+      "prompt": "Write an Aether program that runs one step of Conway's Game of Life on this 6x6 grid (row 0 first; `#` alive, `.` dead), with cells outside the grid counted as dead:\n\n```\n......\n..#...\n...#..\n.###..\n......\n......\n```\n\nFor each cell count its live neighbours among the 8 surrounding cells (the cell itself is not a neighbour). A live cell with 2 or 3 live neighbours stays alive; a dead cell with exactly 3 becomes alive; every other cell is dead in the next generation. First print the neighbour counts of the ORIGINAL grid, one row per line, as the six digits with no separators. Then print the next generation as six lines of `#` and `.`. Finally print `alive = <number of live cells in the next generation>`. Print nothing else.",
+      "expected_stdout": "011100\n011210\n135320\n113220\n123210\n000000\n......\n......\n.#.#..\n..##..\n..#...\n......\nalive = 5\n",
+      "reference_solution": "fn liveNeighbours(grid: Int[][], r: Int, c: Int) -> Int {\n    let rows: Int = length(grid);\n    let count: Int = 0;\n    loop dr in -1..2 {\n        loop dc in -1..2 {\n            let rr: Int = r + dr;\n            let cc: Int = c + dc;\n            let isSelf: Bool = dr == 0 && dc == 0;\n            if !isSelf && rr >= 0 && rr < rows && cc >= 0 && cc < length(grid[rr]) {\n                count = count + grid[rr][cc];\n            }\n        }\n    }\n    ret count;\n}\n\nfn main() -> Void {\n    let rowsText: Text[] = [\"......\", \"..#...\", \"...#..\", \".###..\", \"......\", \"......\"];\n    let grid: Int[][] = [];\n    loop line in rowsText {\n        let row: Int[] = [];\n        loop ch in line {\n            if ch == \"#\" {\n                row = row + [1];\n            } else {\n                row = row + [0];\n            }\n        }\n        grid = grid + [row];\n    }\n    let alive: Int = 0;\n    let counts: Text[] = [];\n    let nextRows: Text[] = [];\n    loop r in 0..length(grid) {\n        let countLine: Text = \"\";\n        let nextLine: Text = \"\";\n        loop c in 0..length(grid[r]) {\n            let n: Int = liveNeighbours(grid, r, c);\n            countLine = countLine + int_to_text(n);\n            let lives: Bool = (grid[r][c] == 1 && (n == 2 || n == 3)) || (grid[r][c] == 0 && n == 3);\n            if lives {\n                nextLine = nextLine + \"#\";\n                alive = alive + 1;\n            } else {\n                nextLine = nextLine + \".\";\n            }\n        }\n        counts = counts + [countLine];\n        nextRows = nextRows + [nextLine];\n    }\n    fx {\n        loop line in counts {\n            println(line);\n        }\n        loop line in nextRows {\n            println(line);\n        }\n        println(\"alive = \", alive);\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "a nested `continue` (skip the centre cell) advanced every enclosing range counter (R1): the 8-neighbour loop counts wrong with exit 0",
+        "review": "R1 / B-runtime-semantics-1",
+        "fix": "W4-01 + rea R-0 (L0, 2026-10-07-1)",
+        "natural_program": "fn countNeighbours(grid: Int[][], r: Int, c: Int) -> Int {\n    let count: Int = 0;\n    loop dr in -1..2 {\n        loop dc in -1..2 {\n            if dr == 0 && dc == 0 {\n                continue;\n            }\n            let rr: Int = r + dr;\n            let cc: Int = c + dc;\n            if rr >= 0 && rr < length(grid) && cc >= 0 && cc < length(grid[0]) {\n                count = count + grid[rr][cc];\n            }\n        }\n    }\n    ret count;\n}\n\nfn main() -> Void {\n    let lines: Text[] = [\"......\", \"..#...\", \"...#..\", \".###..\", \"......\", \"......\"];\n    let grid: Int[][] = [];\n    loop i in 0..length(lines) {\n        let line: Text = lines[i];\n        let row: Int[] = [];\n        loop j in 0..string_len(line) {\n            if line[j] == \"#\" {\n                row = row + [1];\n            } else {\n                row = row + [0];\n            }\n        }\n        grid = grid + [row];\n    }\n    let next: Int[][] = [];\n    let alive: Int = 0;\n    fx {\n        loop r in 0..length(grid) {\n            let row: Int[] = [];\n            loop c in 0..length(grid[r]) {\n                let n: Int = countNeighbours(grid, r, c);\n                print(n);\n                let v: Int = 0;\n                if grid[r][c] == 1 && (n == 2 || n == 3) {\n                    v = 1;\n                }\n                if grid[r][c] == 0 && n == 3 {\n                    v = 1;\n                }\n                alive = alive + v;\n                row = row + [v];\n            }\n            println(\"\");\n            next = next + [row];\n        }\n        loop r in 0..length(next) {\n            loop c in 0..length(next[r]) {\n                if next[r][c] == 1 {\n                    print(\"#\");\n                } else {\n                    print(\".\");\n                }\n            }\n            println(\"\");\n        }\n        println(\"alive = \", alive);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "pass"
+        }
+      }
+    },
+    {
+      "id": "trap_pop_bound",
+      "title": "Pop every element of a stack",
+      "mechanisms": [
+        "trap",
+        "range_bound",
+        "array_slice"
+      ],
+      "prompt": "Write an Aether program that builds a stack as an `Int[]` (top at the end) by pushing 10, 20, 30, 40, 50, 60 in that order and prints `size = <n>`. Then pop exactly as many times as the stack held elements when popping began: each pop removes the top element and prints `pop <value>`. Finally print `left = <number of elements remaining>`. Print nothing else.",
+      "expected_stdout": "size = 6\npop 60\npop 50\npop 40\npop 30\npop 20\npop 10\nleft = 0\n",
+      "reference_solution": "fn main() -> Void {\n    let pushes: Int[] = [10, 20, 30, 40, 50, 60];\n    let stack: Int[] = [];\n    loop v in pushes {\n        stack = stack + [v];\n    }\n    let pops: Int = length(stack);\n    fx {\n        println(\"size = \", pops);\n        let done: Int = 0;\n        loop done < pops {\n            let top: Int = stack[length(stack) - 1];\n            stack = stack[0..length(stack) - 1];\n            println(\"pop \", top);\n            done = done + 1;\n        }\n        println(\"left = \", length(stack));\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "a range loop re-reads its bound every iteration (R2): `loop i in 0..length(stack)` while popping stops halfway, exit 0",
+        "review": "R2 / B-runtime-semantics-2 (the bug that corrupted algo_sliding_window_max)",
+        "fix": "W4 range-bound snapshot (open)",
+        "natural_program": "fn main() -> Void {\n    let stack: Int[] = [];\n    stack = stack + [10];\n    stack = stack + [20];\n    stack = stack + [30];\n    stack = stack + [40];\n    stack = stack + [50];\n    stack = stack + [60];\n    fx {\n        println(\"size = \", length(stack));\n        loop i in 0..length(stack) {\n            let top: Int = stack[length(stack) - 1];\n            stack = stack[0..length(stack) - 1];\n            println(\"pop \", top);\n        }\n        println(\"left = \", length(stack));\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    },
+    {
+      "id": "trap_grid_clone",
+      "title": "Copy a grid and zero the copy's diagonal",
+      "mechanisms": [
+        "trap",
+        "array_value_semantics",
+        "grid"
+      ],
+      "prompt": "Write an Aether program that builds a 4x4 `Int[][]` grid row by row with `grid[r][c] = r * 4 + c + 1`. Make an independent copy of the grid, then set every cell on the main diagonal (`r == c`) of the COPY to 0, leaving the original unchanged. Print `original row <r> sum = <s>` for r = 0..3, then `copy row <r> sum = <s>` for r = 0..3, then `original diagonal = <a b c d>` (the original's four diagonal values separated by single spaces). Print nothing else.",
+      "expected_stdout": "original row 0 sum = 10\noriginal row 1 sum = 26\noriginal row 2 sum = 42\noriginal row 3 sum = 58\ncopy row 0 sum = 9\ncopy row 1 sum = 20\ncopy row 2 sum = 31\ncopy row 3 sum = 42\noriginal diagonal = 1 6 11 16\n",
+      "reference_solution": "fn main() -> Void {\n    let grid: Int[][] = [];\n    loop r in 0..4 {\n        let row: Int[] = [];\n        loop c in 0..4 {\n            row = row + [r * 4 + c + 1];\n        }\n        grid = grid + [row];\n    }\n    // Copy element by element so no row is shared with the original.\n    let copy: Int[][] = [];\n    loop r in 0..length(grid) {\n        let row: Int[] = [];\n        loop c in 0..length(grid[r]) {\n            row = row + [grid[r][c]];\n        }\n        copy = copy + [row];\n    }\n    loop r in 0..length(copy) {\n        copy[r][r] = 0;\n    }\n    fx {\n        loop r in 0..length(grid) {\n            let s: Int = 0;\n            loop c in 0..length(grid[r]) {\n                s = s + grid[r][c];\n            }\n            println(\"original row \", r, \" sum = \", s);\n        }\n        loop r in 0..length(copy) {\n            let s: Int = 0;\n            loop c in 0..length(copy[r]) {\n                s = s + copy[r][c];\n            }\n            println(\"copy row \", r, \" sum = \", s);\n        }\n        let diag: Text = \"\";\n        loop r in 0..length(grid) {\n            if r > 0 {\n                diag = diag + \" \";\n            }\n            diag = diag + int_to_text(grid[r][r]);\n        }\n        println(\"original diagonal = \", diag);\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "2-D array value semantics depend on how rows were built (R3): `let copy: Int[][] = grid;` shares loop-built rows, so zeroing the copy zeroes the original, exit 0",
+        "review": "R3 / B-backend-coupling-3",
+        "fix": "gated BE copy-on-write (W-runtime P2, open)",
+        "natural_program": "fn main() -> Void {\n    let grid: Int[][] = [];\n    loop r in 0..4 {\n        let row: Int[] = [];\n        loop c in 0..4 {\n            row = row + [r * 4 + c + 1];\n        }\n        grid = grid + [row];\n    }\n    let copy: Int[][] = grid;\n    loop i in 0..4 {\n        copy[i][i] = 0;\n    }\n    fx {\n        loop r in 0..4 {\n            let s: Int = 0;\n            loop c in 0..4 {\n                s = s + grid[r][c];\n            }\n            println(\"original row \", r, \" sum = \", s);\n        }\n        loop r in 0..4 {\n            let s: Int = 0;\n            loop c in 0..4 {\n                s = s + copy[r][c];\n            }\n            println(\"copy row \", r, \" sum = \", s);\n        }\n        print(\"original diagonal = \");\n        loop r in 0..4 {\n            if r > 0 {\n                print(\" \");\n            }\n            print(grid[r][r]);\n        }\n        println(\"\");\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    },
+    {
+      "id": "trap_record_eq_bfs",
+      "title": "Shortest path in a maze (BFS with a Point record)",
+      "mechanisms": [
+        "trap",
+        "record_eq",
+        "bfs",
+        "grid"
+      ],
+      "prompt": "Write an Aether program that finds the shortest path length in this 5x5 maze (row 0 first; `.` open, `#` wall), moving one step up, down, left or right between open cells:\n\n```\n..#..\n.##.#\n.....\n#.#.#\n...#.\n```\n\nRepresent positions with `type Point { r: Int = 0; c: Int = 0; }`. Run a breadth-first search from the start (row 0, column 0). For each goal in order -- (2, 4), (4, 0), (4, 4) -- print `steps to (<r>,<c>) = <n>`, where `<n>` is the number of moves on a shortest path, or `-1` if the goal cannot be reached. Print nothing else.",
+      "expected_stdout": "steps to (2,4) = 6\nsteps to (4,0) = 6\nsteps to (4,4) = -1\n",
+      "reference_solution": "type Point {\n    r: Int = 0;\n    c: Int = 0;\n}\n\n@pure\nfn samePoint(a: Point, b: Point) -> Bool {\n    ret a.r == b.r && a.c == b.c;\n}\n\nfn bfs(maze: Text[], goal: Point) -> Int {\n    let rows: Int = length(maze);\n    let cols: Int = string_len(maze[0]);\n    let dist: Int[][] = [];\n    loop r in 0..rows {\n        let row: Int[] = [];\n        loop c in 0..cols {\n            row = row + [-1];\n        }\n        dist = dist + [row];\n    }\n    let dr: Int[] = [-1, 1, 0, 0];\n    let dc: Int[] = [0, 0, -1, 1];\n    let queue: Point[] = [new Point { r: 0, c: 0 }];\n    dist[0][0] = 0;\n    let head: Int = 0;\n    loop head < length(queue) {\n        let cur: Point = queue[head];\n        head = head + 1;\n        if samePoint(cur, goal) {\n            ret dist[cur.r][cur.c];\n        }\n        loop k in 0..4 {\n            let nr: Int = cur.r + dr[k];\n            let nc: Int = cur.c + dc[k];\n            if nr >= 0 && nr < rows && nc >= 0 && nc < cols {\n                let line: Text = maze[nr];\n                if line[nc] == \".\" && dist[nr][nc] == -1 {\n                    dist[nr][nc] = dist[cur.r][cur.c] + 1;\n                    queue = queue + [new Point { r: nr, c: nc }];\n                }\n            }\n        }\n    }\n    ret -1;\n}\n\nfn main() -> Void {\n    let maze: Text[] = [\"..#..\", \".##.#\", \".....\", \"#.#.#\", \"...#.\"];\n    let goals: Point[] = [new Point { r: 2, c: 4 }, new Point { r: 4, c: 0 }, new Point { r: 4, c: 4 }];\n    fx {\n        loop g in goals {\n            println(\"steps to (\", g.r, \",\", g.c, \") = \", bfs(maze, g));\n        }\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "record `==` compares identity (T5): `if cur == goal` on two Points with equal fields is false, so every goal reads unreachable, exit 0",
+        "review": "T5",
+        "fix": "W4 REC-001 for record ==/< (open)",
+        "natural_program": "type Point {\n    r: Int = 0;\n    c: Int = 0;\n}\n\nfn bfs(maze: Text[], start: Point, goal: Point) -> Int {\n    let rows: Int = length(maze);\n    let cols: Int = string_len(maze[0]);\n    let dist: Int[][] = [];\n    loop r in 0..rows {\n        let row: Int[] = [];\n        loop c in 0..cols {\n            row = row + [-1];\n        }\n        dist = dist + [row];\n    }\n    let queue: Point[] = [start];\n    dist[start.r][start.c] = 0;\n    let head: Int = 0;\n    let dr: Int[] = [-1, 1, 0, 0];\n    let dc: Int[] = [0, 0, -1, 1];\n    loop head < length(queue) {\n        let cur: Point = queue[head];\n        head = head + 1;\n        if cur == goal {\n            ret dist[cur.r][cur.c];\n        }\n        loop k in 0..4 {\n            let nr: Int = cur.r + dr[k];\n            let nc: Int = cur.c + dc[k];\n            if nr >= 0 && nr < rows && nc >= 0 && nc < cols {\n                let line: Text = maze[nr];\n                if line[nc] == \".\" && dist[nr][nc] == -1 {\n                    dist[nr][nc] = dist[cur.r][cur.c] + 1;\n                    queue = queue + [new Point { r: nr, c: nc }];\n                }\n            }\n        }\n    }\n    ret -1;\n}\n\nfn main() -> Void {\n    let maze: Text[] = [\"..#..\", \".##.#\", \".....\", \"#.#.#\", \"...#.\"];\n    let start: Point = new Point { r: 0, c: 0 };\n    let goals: Point[] = [new Point { r: 2, c: 4 }, new Point { r: 4, c: 0 }, new Point { r: 4, c: 4 }];\n    fx {\n        loop i in 0..length(goals) {\n            let g: Point = goals[i];\n            println(\"steps to (\", g.r, \",\", g.c, \") = \", bfs(maze, start, g));\n        }\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    },
+    {
+      "id": "trap_const_case_alias",
+      "title": "Greeting with a constant app name",
+      "mechanisms": [
+        "trap",
+        "const",
+        "names"
+      ],
+      "prompt": "Write an Aether program that declares the constant `const Name: Text = \"Aether\";` and a function `greet(name: Text) -> Text` that returns `Hello, <name>! Welcome to <Name>.`, where `<name>` is the argument and `<Name>` is the constant's value. Print `greet(\"Ada\")` and then `greet(\"Linus\")`, one per line. Print nothing else.",
+      "expected_stdout": "Hello, Ada! Welcome to Aether.\nHello, Linus! Welcome to Aether.\n",
+      "reference_solution": "const Name: Text = \"Aether\";\n\nfn appName() -> Text {\n    ret Name;\n}\n\nfn greet(person: Text) -> Text {\n    ret \"Hello, \" + person + \"! Welcome to \" + appName() + \".\";\n}\n\nfn main() -> Void {\n    fx {\n        println(greet(\"Ada\"));\n        println(greet(\"Linus\"));\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "value names ignore case, so parameter `name` shadows `const Name` inside greet: `Welcome to Ada.`, exit 0",
+        "review": "part1: names ignore case (F6, F110); `fn check(limit) { ret LIMIT; }` returns the argument",
+        "fix": "W4 case-folded collision diagnostic (open)",
+        "natural_program": "const Name: Text = \"Aether\";\n\nfn greet(name: Text) -> Text {\n    ret \"Hello, \" + name + \"! Welcome to \" + Name + \".\";\n}\n\nfn main() -> Void {\n    fx {\n        println(greet(\"Ada\"));\n        println(greet(\"Linus\"));\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    },
+    {
+      "id": "trap_tail_if_grade",
+      "title": "Letter grades",
+      "mechanisms": [
+        "trap",
+        "tail_expression",
+        "classify"
+      ],
+      "prompt": "Write an Aether program with a function `grade(score: Int) -> Text` that returns `A` for a score of 90 or more, `B` for 80-89, `C` for 70-79 and `F` below 70. For each score in 95, 83, 71, 40 (in that order) print `<score>: <grade>`. Then print `passing = <number of those scores whose grade is not F>`. Print nothing else.",
+      "expected_stdout": "95: A\n83: B\n71: C\n40: F\npassing = 3\n",
+      "reference_solution": "@pure\nfn grade(score: Int) -> Text {\n    if score >= 90 {\n        ret \"A\";\n    }\n    if score >= 80 {\n        ret \"B\";\n    }\n    if score >= 70 {\n        ret \"C\";\n    }\n    ret \"F\";\n}\n\nfn main() -> Void {\n    let scores: Int[] = [95, 83, 71, 40];\n    let passing: Int = 0;\n    fx {\n        loop s in scores {\n            let g: Text = grade(s);\n            if g != \"F\" {\n                passing = passing + 1;\n            }\n            println(s, \": \", g);\n        }\n        println(\"passing = \", passing);\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "an if/else-if chain used as the function's tail expression (Rust style) is a discarded statement (G1): the function returns nil; printed directly it shows `nil` with exit 0, stored into a typed let it is an uncoded runtime error",
+        "review": "G1 (`grade(...)` with a tail if-chain gives `grade=nil`)",
+        "fix": "W4-03 value-discarded / no-implicit-return error (open; D39)",
+        "natural_program": "fn grade(score: Int) -> Text {\n    if score >= 90 {\n        \"A\"\n    } else if score >= 80 {\n        \"B\"\n    } else if score >= 70 {\n        \"C\"\n    } else {\n        \"F\"\n    }\n}\n\nfn main() -> Void {\n    let scores: Int[] = [95, 83, 71, 40];\n    let passing: Int = 0;\n    fx {\n        loop i in 0..length(scores) {\n            println(scores[i], \": \", grade(scores[i]));\n            if grade(scores[i]) != \"F\" {\n                passing = passing + 1;\n            }\n        }\n        println(\"passing = \", passing);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    },
+    {
+      "id": "trap_tail_expr_clamp",
+      "title": "Clamp percentages with an early return",
+      "mechanisms": [
+        "trap",
+        "tail_expression",
+        "flow"
+      ],
+      "prompt": "Write an Aether program with a function `clampPct(x: Int) -> Int` that returns 0 for a negative `x`, 100 for an `x` above 100, and `x` itself otherwise. For each value in -5, 42, 100, 250 (in that order) print `clampPct(<x>) = <result>`. Then print `unchanged = <number of values whose result equals the value itself>`. Print nothing else.",
+      "expected_stdout": "clampPct(-5) = 0\nclampPct(42) = 42\nclampPct(100) = 100\nclampPct(250) = 100\nunchanged = 2\n",
+      "reference_solution": "@pure\nfn clampPct(x: Int) -> Int {\n    ret clamp(x, 0, 100);\n}\n\nfn main() -> Void {\n    let xs: Int[] = [-5, 42, 100, 250];\n    let unchanged: Int = 0;\n    fx {\n        loop x in xs {\n            let r: Int = clampPct(x);\n            if r == x {\n                unchanged = unchanged + 1;\n            }\n            println(\"clampPct(\", x, \") = \", r);\n        }\n        println(\"unchanged = \", unchanged);\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "a bare tail expression after early `ret`s (`... ret 100; } x }`) passes FLOW-001 and returns nil on the fall-through path (G1 / FLOW-001 gap); printed directly it shows `nil` with exit 0, stored into a typed let it is an uncoded runtime error",
+        "review": "G1; *FLOW-001 misses a missing final ret*",
+        "fix": "W4-03 value-discarded / no-implicit-return error (open; D39)",
+        "natural_program": "fn clampPct(x: Int) -> Int {\n    if x < 0 {\n        ret 0;\n    }\n    if x > 100 {\n        ret 100;\n    }\n    x\n}\n\nfn main() -> Void {\n    let xs: Int[] = [-5, 42, 100, 250];\n    let unchanged: Int = 0;\n    fx {\n        loop i in 0..length(xs) {\n            println(\"clampPct(\", xs[i], \") = \", clampPct(xs[i]));\n            if clampPct(xs[i]) == xs[i] {\n                unchanged = unchanged + 1;\n            }\n        }\n        println(\"unchanged = \", unchanged);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    },
+    {
+      "id": "trap_toplevel_init",
+      "title": "Global lookup table of squares",
+      "mechanisms": [
+        "trap",
+        "entry_point",
+        "globals"
+      ],
+      "prompt": "Write an Aether program that keeps a global lookup table `squares: Int[]` holding `i * i` for i = 0..9, filled in once before any lookup. `main` then prints `squares[3] = <v>`, `squares[9] = <v>` and `table size = <length of the table>`, one per line. Print nothing else.",
+      "expected_stdout": "squares[3] = 9\nsquares[9] = 81\ntable size = 10\n",
+      "reference_solution": "// A non-empty initializer: on the pinned engines an empty global array\n// initializer prints makeValueForType warnings to stderr.\nlet squares: Int[] = [0];\n\nfn fillSquares() -> Void {\n    setlength(squares, 10);\n    loop i in 0..10 {\n        squares[i] = i * i;\n    }\n    ret;\n}\n\nfn main() -> Void {\n    fillSquares();\n    fx {\n        println(\"squares[3] = \", squares[3]);\n        println(\"squares[9] = \", squares[9]);\n        println(\"table size = \", length(squares));\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "a top-level statement other than `let` next to `fn main` (here the loop that fills the table) means main never runs (X3 / entry-point rule): no output, exit 0",
+        "review": "part1 entry-point rule (F71, F85, F91); part2 X3",
+        "fix": "coded ENTRY error (open)",
+        "natural_program": "let squares: Int[] = [];\nloop i in 0..10 {\n    squares = squares + [i * i];\n}\n\nfn main() -> Void {\n    fx {\n        println(\"squares[3] = \", squares[3]);\n        println(\"squares[9] = \", squares[9]);\n        println(\"table size = \", length(squares));\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    },
+    {
+      "id": "trap_toon_absent_count",
+      "title": "Tag counts with an optional tags array",
+      "mechanisms": [
+        "trap",
+        "toon_file",
+        "toon_absent"
+      ],
+      "prompt": "A JSON file named `projects.json` is in the working directory, shaped `{\"projects\": [{\"name\": Text, \"tags\": [Text, ...]}, ...]}`. The `tags` key is optional: a project without it has zero tags. Write an Aether program that parses the file and, for each project in order, prints `<name>: <count> tags` where `<count>` is the number of entries in its `tags` array (0 when `tags` is absent). Then print `total tags = <sum of the counts>` and `untagged = <number of projects whose count is 0>`. Close the document. Print nothing else.",
+      "expected_stdout": "atlas: 3 tags\nborealis: 0 tags\ncirrus: 0 tags\ndelta: 1 tags\nember: 0 tags\ntotal tags = 4\nuntagged = 3\n",
+      "files": {
+        "projects.json": "{\n  \"projects\": [\n    {\n      \"name\": \"atlas\",\n      \"tags\": [\n        \"infra\",\n        \"go\",\n        \"ops\"\n      ]\n    },\n    {\n      \"name\": \"borealis\"\n    },\n    {\n      \"name\": \"cirrus\",\n      \"tags\": []\n    },\n    {\n      \"name\": \"delta\",\n      \"tags\": [\n        \"ml\"\n      ]\n    },\n    {\n      \"name\": \"ember\"\n    }\n  ]\n}\n"
+      },
+      "reference_solution": "fn main() -> Void {\n    let total: Int = 0;\n    let untagged: Int = 0;\n    fx {\n        let doc: ToonDoc = toon_parse_file(\"projects.json\");\n        let root: ToonNode = toon_root(doc);\n        let projects: ToonNode = toon_key(root, \"projects\");\n        let n: Int = toon_len(projects);\n        loop i in 0..n {\n            let p: ToonNode = toon_at(projects, i);\n            let name: Text = toon_get_text_or(p, \"name\", \"?\");\n            let count: Int = 0;\n            if toon_has_key(p, \"tags\") {\n                let tags: ToonNode = toon_key(p, \"tags\");\n                count = toon_len(tags);\n            }\n            if count == 0 {\n                untagged = untagged + 1;\n            }\n            total = total + count;\n            println(name, \": \", count, \" tags\");\n        }\n        println(\"total tags = \", total);\n        println(\"untagged = \", untagged);\n        toon_close(doc);\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "toon_len of an absent toon_key is -1, not the 0 the guides promise (NEST-001), so counts and totals go wrong silently",
+        "review": "part1 F-guide #11 (YyjsonGetLength)",
+        "fix": "W5 runtime: an unused handle's length is 0",
+        "natural_program": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"structured data support unavailable\"); }\n        ret;\n    }\n    let total: Int = 0;\n    let untagged: Int = 0;\n    fx {\n        let doc: ToonDoc = toon_parse_file(\"projects.json\");\n        let root: ToonNode = toon_root(doc);\n        let projects: ToonNode = toon_key(root, \"projects\");\n        loop i in 0..toon_len(projects) {\n            let p: ToonNode = toon_at(projects, i);\n            let name: Text = toon_get_text_or(p, \"name\", \"?\");\n            let tags: ToonNode = toon_key(p, \"tags\");\n            let count: Int = toon_len(tags);\n            if count == 0 {\n                untagged = untagged + 1;\n            }\n            total = total + count;\n            println(name, \": \", count, \" tags\");\n        }\n        println(\"total tags = \", total);\n        println(\"untagged = \", untagged);\n        toon_close(doc);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    },
+    {
+      "id": "trap_upcase_word",
+      "title": "Uppercase every word",
+      "mechanisms": [
+        "trap",
+        "text",
+        "builtin_semantics"
+      ],
+      "prompt": "Write an Aether program for the sentence `the quick brown fox` (lowercase ASCII words separated by single spaces). Print each word converted to uppercase on its own line, in order, and then print the whole sentence converted to uppercase on one more line. Print nothing else.",
+      "expected_stdout": "THE\nQUICK\nBROWN\nFOX\nTHE QUICK BROWN FOX\n",
+      "reference_solution": "@pure\nfn upper(s: Text) -> Text {\n    let out: Text = \"\";\n    loop i in 0..string_len(s) {\n        let c: Int = ord(s[i]);\n        if c >= 97 && c <= 122 {\n            out = out + chr(c - 32);\n        } else {\n            out = out + s[i];\n        }\n    }\n    ret out;\n}\n\nfn main() -> Void {\n    let sentence: Text = \"the quick brown fox\";\n    let words: Text[] = split(sentence, \" \");\n    fx {\n        loop w in words {\n            println(upper(w));\n        }\n        println(upper(sentence));\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "`upcase(word)` is Pascal's one-character UpCase: it returns only the first letter, exit 0",
+        "review": "part2 builtins table (upcase truncates silently)",
+        "fix": "W5 whole-string upper/lower builtins (open)",
+        "natural_program": "fn main() -> Void {\n    let sentence: Text = \"the quick brown fox\";\n    let words: Text[] = split(sentence, \" \");\n    fx {\n        loop i in 0..length(words) {\n            println(upcase(words[i]));\n        }\n        println(upcase(sentence));\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    },
+    {
+      "id": "trap_text_width",
+      "title": "Right-aligned name column",
+      "mechanisms": [
+        "trap",
+        "width_spec",
+        "text_format"
+      ],
+      "prompt": "Write an Aether program for the players \"ada\" (score 91), \"grace\" (score 78) and \"linus\" (score 85), held in arrays. Print one line per player, in that order: the name right-aligned in a field 8 characters wide (padded on the left with spaces), then ` | `, then the score. For example the first line is `     ada | 91`. Print nothing else.",
+      "expected_stdout": "     ada | 91\n   grace | 78\n   linus | 85\n",
+      "reference_solution": "@pure\nfn padLeft(s: Text, width: Int) -> Text {\n    let n: Int = string_len(s);\n    if n >= width {\n        ret s;\n    }\n    ret stringofchar(\" \", width - n) + s;\n}\n\nfn main() -> Void {\n    let names: Text[] = [\"ada\", \"grace\", \"linus\"];\n    let scores: Int[] = [91, 78, 85];\n    fx {\n        loop i in 0..length(names) {\n            println(padLeft(names[i], 8), \" | \", scores[i]);\n        }\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "Pascal width specs on Text (R7): `name:8` on a computed or array-held Text prints `       ?` (a literal prints correctly), exit 0",
+        "review": "R7",
+        "fix": "shared BE FORMAT_VALUE for unicode strings (open)",
+        "natural_program": "fn main() -> Void {\n    let names: Text[] = [\"ada\", \"grace\", \"linus\"];\n    let scores: Int[] = [91, 78, 85];\n    fx {\n        loop i in 0..length(names) {\n            let name: Text = names[i];\n            println(name:8, \" | \", scores[i]);\n        }\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    },
+    {
+      "id": "trap_exit_status",
+      "title": "Validate ports and exit with status 2",
+      "mechanisms": [
+        "trap",
+        "exit_status",
+        "validation"
+      ],
+      "prompt": "Write an Aether program that validates the port values \"8080\", \"443\", \"80x\", \"22\" (Text, in that order) with a helper `parsePort(t: Text) -> Int`. A valid port is a non-empty string of decimal digits. For each value in order: if it is valid print `port <value>`; if it is not, print `error: bad port <text>` and immediately end the whole program with exit status 2, so nothing after it runs and nothing more is printed. (Exiting with a status is `exit(n)` or `halt(n)` inside `fx`.) The program's exit status is graded as well as its output.",
+      "expected_stdout": "port 8080\nport 443\nerror: bad port 80x\n",
+      "expected_returncode": 2,
+      "sandbox_allow": [
+        "proc"
+      ],
+      "reference_solution": "@pure\nfn isAllDigits(s: Text) -> Bool {\n    if string_len(s) == 0 {\n        ret false;\n    }\n    loop i in 0..string_len(s) {\n        let c: Int = ord(s[i]);\n        if c < 48 || c > 57 {\n            ret false;\n        }\n    }\n    ret true;\n}\n\nfn parsePort(t: Text) -> Int {\n    if !isAllDigits(t) {\n        fx {\n            println(\"error: bad port \", t);\n            halt(2);\n        }\n    }\n    ret parse_int(t);\n}\n\nfn main() -> Void {\n    let values: Text[] = [\"8080\", \"443\", \"80x\", \"22\"];\n    loop v in values {\n        let port: Int = parsePort(v);\n        fx { println(\"port \", port); }\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "`exit(n)` was Pascal's Exit(value) (R4): inside a non-Void helper it returns n from the helper, so the program prints `port 2`, carries on, and exits 0",
+        "review": "R4",
+        "fix": "W4-07 exit(n) ends the program (L0, 2026-10-07-1)",
+        "natural_program": "fn parsePort(t: Text) -> Int {\n    if string_len(t) == 0 {\n        fx {\n            println(\"error: bad port \", t);\n            exit(2);\n        }\n    }\n    loop i in 0..string_len(t) {\n        let c: Int = ord(t[i]);\n        if c < 48 || c > 57 {\n            fx {\n                println(\"error: bad port \", t);\n                exit(2);\n            }\n        }\n    }\n    ret parse_int(t);\n}\n\nfn main() -> Void {\n    let values: Text[] = [\"8080\", \"443\", \"80x\", \"22\"];\n    loop i in 0..length(values) {\n        let port: Int = parsePort(values[i]);\n        fx { println(\"port \", port); }\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "pass"
+        }
+      }
+    },
+    {
+      "id": "trap_stdin_filter",
+      "title": "Filter stdin records until end of input",
+      "mechanisms": [
+        "trap",
+        "stdin",
+        "eof"
+      ],
+      "prompt": "Write an Aether program that reads standard input line by line until the end of input. Each line is `<name> <qty>` (a word, one space, a non-negative integer). For every line whose quantity is greater than 0 print `<name>: <qty>`, in input order. After the input is exhausted print `lines = <number of lines read>`, `kept = <number of lines printed>` and `total = <sum of all quantities>`, each on its own line. Print nothing else.",
+      "expected_stdout": "apple: 3\nbanana: 12\ndate: 7\nfig: 21\nlines = 6\nkept = 4\ntotal = 43\n",
+      "stdin": "apple 3\nbanana 12\ncherry 0\ndate 7\nelder 0\nfig 21\n",
+      "reference_solution": "fn main() -> Void {\n    let f: File;\n    let lines: Int = 0;\n    let kept: Int = 0;\n    let total: Int = 0;\n    fx {\n        // Read stdin through a File handle: console eof() is not usable here.\n        assign(f, \"/dev/stdin\");\n        reset(f);\n        loop {\n            if eof(f) {\n                break;\n            }\n            let line: Text;\n            readln(f, line);\n            if string_len(line) == 0 {\n                continue;\n            }\n            let parts: Text[] = split(line, \" \");\n            let name: Text = parts[0];\n            let qty: Int = parse_int(parts[1]);\n            lines = lines + 1;\n            total = total + qty;\n            if qty > 0 {\n                kept = kept + 1;\n                println(name, \": \", qty);\n            }\n        }\n        close(f);\n        println(\"lines = \", lines);\n        println(\"kept = \", kept);\n        println(\"total = \", total);\n    }\n    ret;\n}\n",
+      "trap": {
+        "class": "stdin (R6): `eof()` with no argument is always true, so a read-until-EOF loop processes 0 lines; on 2026-10-06-1 every console `readln` also writes ESC[?25h into stdout",
+        "review": "R6",
+        "fix": "escape gated (L0, 2026-10-07-1); eof()/read_line (open)",
+        "natural_program": "fn main() -> Void {\n    let lines: Int = 0;\n    let kept: Int = 0;\n    let total: Int = 0;\n    fx {\n        loop {\n            if eof() {\n                break;\n            }\n            let line: Text = \"\";\n            readln(line);\n            let parts: Text[] = split(line, \" \");\n            let qty: Int = parse_int(parts[1]);\n            lines = lines + 1;\n            total = total + qty;\n            if qty > 0 {\n                kept = kept + 1;\n                println(parts[0], \": \", qty);\n            }\n        }\n        println(\"lines = \", lines);\n        println(\"kept = \", kept);\n        println(\"total = \", total);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": "silent_wrong",
+          "2026-10-07-1": "silent_wrong"
+        }
+      }
+    }
+  ]
+}

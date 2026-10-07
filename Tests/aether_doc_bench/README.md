@@ -334,7 +334,8 @@ In practice that means:
 
 Tasks live in one manifest per suite. The boards use `tasks_v2_pos.json`
 (simple, the default), `tasks_hard_v2.json`, `tasks_hard_nontoon.json`,
-`tasks_cs.json` and the three `tasks_frontier*.json` suites. `tasks.json` is
+`tasks_cs.json` and the three `tasks_frontier*.json` suites; the trap suite
+`tasks_traps.json` is its own board (below). `tasks.json` is
 the original v1 set, off the boards and kept for history. Check every
 reference solution, negative and the sandbox probe against a binary with
 `python3 tools/aether_oracle_check.py --aether-bin <bin>`; the harness runs the
@@ -363,8 +364,43 @@ Each task currently defines:
   completely; repair rounds still show it (D37a). Only trap suites use it, so
   every existing suite keeps its prompts byte for byte.
 
+- optional `sandbox_allow`: effect classes this one task takes back from the
+  run's `--sandbox-deny` list. Only `["proc"]` is accepted (the oracle lint
+  rejects anything else, `net` above all); it is for tasks graded on
+  `exit(n)` / `halt(n)`, so the rest of the suite keeps `net,proc`.
+
 Entries with `should_fail: true` are negative-tier compiler invariants (a fixed
 `program` plus `expected_error_code`), not tasks; the harness skips them.
+
+### Independent Python references (`py_refs/`)
+
+`py_refs/<task_id>.py` is a Python program written from the task prompt alone
+that must print the same expected stdout (and exit status) through the
+harness's python lane. `tools/aether_oracle_check.py` runs every one of them
+next to the Aether references (`--no-python` skips the lap); a reference whose
+only check is the Aether compiler can bake a compiler bug into the oracle, as
+algo_sliding_window_max once did.
+
+### The silent-wrong trap suite (`tasks_traps.json`, board B1)
+
+Each task is a natural program shape that compiles, exits 0 and prints the
+wrong answer on some aether binary: Int `/` (in `==`, `* k`, a range bound,
+`println`, before `%`), INT32 literal arithmetic, `parse_int` and `<<` past 32
+bits, a nested `continue`, a range bound re-read while popping, 2-D aliasing,
+record `==`, a case-aliased const, Rust-style tail expressions, a top-level
+statement beside `fn main`, `toon_len` of an absent key, `upcase`, `s:8`,
+`exit(n)` and stdin. The suite hides expected stdout on the first attempt,
+so its prompts state the format completely; `expected_stdout` is the answer
+the task specifies (computed by its `py_refs` program), even where the
+current language differs. `reference_solution` is the safe form, passing on
+2026-10-06-1 and 2026-10-07-1. `trap.natural_program` is the plausible program
+the trap catches and `trap.observed` its class on each binary when the suite
+was written; `python3 tools/aether_oracle_check.py --tasks
+Tests/aether_doc_bench/tasks_traps.json --traps --aether-bin <bin>` re-runs
+them. A fix shows up as that trap's class turning `pass`, and its first-attempt
+silent-wrong count on replay going to 0. Report the suite on its own, never
+merged into another: `summary.per_task_first_attempt_classes` holds the
+silent-wrong count per trap per variant.
 
 Keep tasks small, deterministic, and exact-output based.
 

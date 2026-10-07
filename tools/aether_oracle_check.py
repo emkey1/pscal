@@ -10,7 +10,18 @@ what a scored case gets), on a hashed private copy of the binary:
   negatives   every `should_fail` program must be rejected, emitting its
               `expected_error_code`;
   sandbox     a program that opens a socket must be rejected under the
-              harness's --deny net,proc (the 2026-10-06 sandbox fix).
+              harness's --deny net,proc (the 2026-10-06 sandbox fix);
+  python      every Tests/aether_doc_bench/py_refs/<task_id>.py (the
+              independent oracle, W1-11/W1-22) must print the same expected
+              stdout and exit status, through the harness's python lane. A
+              compiler semantics bug can no longer become oracle truth by
+              being the only thing that checks a reference.
+
+With --traps it also runs each trap suite task's `trap.natural_program` (the
+plausible program the trap exists to catch) and reports its failure class on
+this binary -- silent_wrong while the language bug is open, pass once a fix
+lands. That report is informational: a trap that stops firing is the fix
+being measured, not an oracle failure.
 
 Nothing re-checked the oracle when the language changed: 9 references had
 gone stale on FX-001, and algo_sliding_window_max had been "verified by
@@ -43,6 +54,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import aether_doc_bench as adb  # noqa: E402
 
 BENCH_DIR = adb.REPO_ROOT / "Tests" / "aether_doc_bench"
+PY_REFS_DIR = BENCH_DIR / "py_refs"
+# Effects a task may take back from the sandbox (sandbox_allow). Never net:
+# the sandbox exists to keep generated code off the network.
+ALLOWED_SANDBOX_ALLOW = frozenset({"proc"})
 
 # Opens a socket inside fx. Under --deny net the VM must refuse it; if it ever
 # prints its line, the sandbox is not containing generated code.
@@ -75,7 +90,88 @@ def lint_manifest(path: pathlib.Path) -> list[str]:
     for item in raw.get("tasks", []):
         if item.get("should_fail") and not (item.get("program") and item.get("expected_error_code")):
             problems.append(f"{path.name}:{item.get('id')}: should_fail needs program and expected_error_code")
+        bad_allow = sorted(set(item.get("sandbox_allow") or ()) - ALLOWED_SANDBOX_ALLOW)
+        if bad_allow:
+            problems.append(f"{path.name}:{item.get('id')}: sandbox_allow may only name "
+                            f"{sorted(ALLOWED_SANDBOX_ALLOW)}, not {bad_allow}")
+        if "trap" in item:
+            if not (item["trap"] or {}).get("natural_program"):
+                problems.append(f"{path.name}:{item.get('id')}: a trap needs trap.natural_program")
+            if not (item.get("hide_expected_stdout", raw.get("hide_expected_stdout"))):
+                problems.append(f"{path.name}:{item.get('id')}: a trap task must hide its expected stdout")
+            if not python_reference_path(item["id"]).is_file():
+                problems.append(f"{path.name}:{item.get('id')}: a trap needs py_refs/{item['id']}.py")
     return problems
+
+
+def python_reference_path(task_id: str) -> pathlib.Path:
+    return PY_REFS_DIR / f"{task_id}.py"
+
+
+def lint_python_references(manifests: list[pathlib.Path]) -> list[str]:
+    """Every py_refs/<id>.py must belong to a task in some manifest."""
+    if not PY_REFS_DIR.is_dir():
+        return []
+    ids: set[str] = set()
+    for manifest in default_manifests():
+        try:
+            ids.update(t.task_id for t in adb.load_tasks(manifest))
+        except (Exception, SystemExit):  # noqa: BLE001 -- lint_manifest reports it
+            pass
+    return [f"py_refs/{p.name}: no task {p.stem!r} in any manifest"
+            for p in sorted(PY_REFS_DIR.glob("*.py")) if p.stem not in ids]
+
+
+def check_python_reference(task: adb.Task) -> dict[str, Any] | None:
+    """The independent oracle: py_refs/<id>.py through the python lane. None
+    when the task has no Python reference."""
+    path = python_reference_path(task.task_id)
+    if not path.is_file():
+        return None
+    run = adb.run_python_task(task, path.read_text(encoding="utf-8"))
+    ok = bool(run["exact_stdout_match"])
+    detail = ""
+    if not ok:
+        if run.get("timed_out"):
+            detail = f"timeout after {task.timeout_seconds} s"
+        elif run["returncode"] != task.expected_returncode:
+            detail = f"rc={run['returncode']} {(run['stderr'].strip().splitlines() or [''])[-1][:200]}"
+        else:
+            detail = adb.describe_stdout_mismatch(task.expected_stdout, run["stdout"])[:300]
+    return {"task_id": task.task_id, "ok": ok, "detail": detail, "elapsed_seconds": run["elapsed_seconds"]}
+
+
+def check_python_references(tasks: list[adb.Task], workers: int = 8) -> dict[str, dict[str, Any]]:
+    """{task_id: {ok, detail}} for every task with a py_refs file."""
+    results: dict[str, dict[str, Any]] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        for result in pool.map(check_python_reference, tasks):
+            if result is not None:
+                results[result.pop("task_id")] = result
+    return results
+
+
+def trap_items(path: pathlib.Path) -> dict[str, dict[str, Any]]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return {item["id"]: item["trap"] for item in raw.get("tasks", []) if isinstance(item.get("trap"), dict)}
+
+
+def check_traps(path: pathlib.Path, args: Any, version: str | None, workers: int = 8) -> list[dict[str, Any]]:
+    """Run each trap's natural program on this binary and classify it the way
+    a board classifies a first attempt."""
+    traps = trap_items(path)
+    tasks = [t for t in adb.load_tasks(path) if t.task_id in traps]
+
+    def one(task: adb.Task) -> dict[str, Any]:
+        trap = traps[task.task_id]
+        run = adb.compile_and_run(task, trap["natural_program"], args)
+        observed = adb.classify_attempt({"run": run, "generated_ok": True, "source_code": "x"})
+        recorded = (trap.get("observed") or {}).get(version or "")
+        return {"manifest": path.name, "id": task.task_id, "class": observed,
+                "recorded": recorded, "fires": observed != "pass"}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        return list(pool.map(one, tasks))
 
 
 def check_reference(task: adb.Task, args: Any) -> dict[str, Any]:
@@ -144,6 +240,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--sandbox-deny", default="net,proc")
     ap.add_argument("--negatives-only", action="store_true", help="only the should_fail tier")
     ap.add_argument("--lint-only", action="store_true", help="only load-check the manifests (no binary)")
+    ap.add_argument("--no-python", action="store_true", help="skip the py_refs (independent oracle) lap")
+    ap.add_argument("--traps", action="store_true",
+                    help="also run every trap's natural program and report its class (informational)")
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--report-json", type=pathlib.Path)
     ap.add_argument("--quiet", action="store_true", help="print failures and the totals only")
@@ -152,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
     manifests = args.tasks or default_manifests()
     report: dict[str, Any] = {"manifests": [str(adb.display_path(m)) for m in manifests]}
     lint = [problem for m in manifests for problem in lint_manifest(m)]
+    lint += lint_python_references(manifests)
     report["lint_problems"] = lint
     for problem in lint:
         print(f"[LINT] {problem}")
@@ -190,6 +290,21 @@ def main(argv: list[str] | None = None) -> int:
                     elif not args.quiet:
                         print(f"[PASS] reference {manifest.name}:{task_id}")
             report["references_passed"], report["references_total"] = refs_ok, refs_total
+            if not args.no_python:
+                py_total = py_ok = 0
+                report["python_references"] = {}
+                for manifest in manifests:
+                    results = check_python_references(adb.load_tasks(manifest), args.workers)
+                    report["python_references"][manifest.name] = results
+                    for task_id, result in sorted(results.items()):
+                        py_total += 1
+                        py_ok += int(result["ok"])
+                        if not result["ok"]:
+                            failures += 1
+                            print(f"[FAIL] python reference {manifest.name}:{task_id} {result['detail']}")
+                        elif not args.quiet:
+                            print(f"[PASS] python reference {manifest.name}:{task_id}")
+                report["python_references_passed"], report["python_references_total"] = py_ok, py_total
             sandbox = check_sandbox(args)
             report["sandbox_probe"] = sandbox
             if not sandbox["ok"]:
@@ -204,12 +319,24 @@ def main(argv: list[str] | None = None) -> int:
             if not n["ok"] or not args.quiet:
                 print(f"[{'PASS' if n['ok'] else 'FAIL'}] negative {n['manifest']}:{n['id']} "
                       f"rc={n['returncode']} code={n['expected_error_code']} seen={n['code_seen']}")
+        if args.traps:
+            traps = [t for manifest in manifests for t in check_traps(manifest, args, toolchain.get("aether_version"),
+                                                                    args.workers)]
+            report["traps"] = traps
+            for t in traps:
+                drift = "" if t["recorded"] in (None, t["class"]) else f" (recorded {t['recorded']})"
+                print(f"[TRAP] {t['manifest']}:{t['id']} {t['class']}{drift}")
+            fired = sum(t["fires"] for t in traps)
+            silent = sum(t["class"] == "silent_wrong" for t in traps)
+            print(f"traps: {fired}/{len(traps)} fire on this binary ({silent} silent_wrong)")
         elapsed = time.time() - started
         report["elapsed_seconds"] = round(elapsed, 2)
         report["failures"] = failures
         summary = [f"aether {toolchain['aether_version']} sha256 {toolchain['binary_sha256'][:16]}"]
         if not args.negatives_only:
             summary.append(f"references {report['references_passed']}/{report['references_total']}")
+            if not args.no_python:
+                summary.append(f"python {report['python_references_passed']}/{report['python_references_total']}")
             summary.append(f"sandbox {'ok' if report['sandbox_probe']['ok'] else 'FAILED'}")
         summary.append(f"negatives {sum(n['ok'] for n in negatives)}/{len(negatives)}")
         print(f"\noracle: {', '.join(summary)} in {elapsed:.1f}s -- {failures} failure(s)")

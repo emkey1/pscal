@@ -109,6 +109,11 @@ class Task:
     expected_returncode: int = 0
     stdin: Any = None
     hide_expected_stdout: bool = False
+    # Effect classes this one task needs back from the run's --sandbox-deny
+    # list (e.g. ["proc"] for a task graded on exit(n)/halt(n), which are
+    # proc-class). Only this task's runs drop them; every other task, and the
+    # sandbox probe, keep the full list.
+    sandbox_allow: tuple[str, ...] = ()
 
 
 @dataclass
@@ -517,6 +522,7 @@ def load_tasks(path: pathlib.Path) -> list[Task]:
                 expected_returncode=int(item.get("expected_returncode", 0)),
                 stdin=stdin,
                 hide_expected_stdout=bool(item.get("hide_expected_stdout", suite_hide)),
+                sandbox_allow=tuple(str(x) for x in (item.get("sandbox_allow") or ())),
             )
         )
     return tasks
@@ -2537,10 +2543,22 @@ def materialize_task_files(task: Task, work_dir: pathlib.Path) -> None:
         target.write_text(content, encoding="utf-8")
 
 
-def aether_flags(args: Any) -> list[str]:
+def task_sandbox_deny(args: Any, task: Task | None = None) -> str:
+    """The --deny list for one task's runs: the run's list minus whatever the
+    task's sandbox_allow names."""
+    deny = getattr(args, "sandbox_deny", "") or ""
+    allow = set(getattr(task, "sandbox_allow", None) or ())
+    if not allow:
+        return deny
+    return ",".join(part for part in deny.split(",") if part.strip() and part.strip() not in allow)
+
+
+def aether_flags(args: Any, task: Task | None = None) -> list[str]:
     """Every flag the harness puts in front of the program path on an aether
-    call: the sandbox deny list, then each --aether-arg in order."""
-    sandbox_flags = ["--deny", args.sandbox_deny] if getattr(args, "sandbox_deny", "") else []
+    call: the sandbox deny list (narrowed by the task's sandbox_allow), then
+    each --aether-arg in order."""
+    deny = task_sandbox_deny(args, task)
+    sandbox_flags = ["--deny", deny] if deny else []
     return [*sandbox_flags, *[str(a) for a in (getattr(args, "aether_args", None) or [])]]
 
 
@@ -2689,7 +2707,7 @@ def compile_and_run(task: Task, source_code: str, args: argparse.Namespace) -> d
         materialize_task_files(task, tmp_dir)
         program_path.write_text(source_code, encoding="utf-8")
 
-        flags = aether_flags(args)
+        flags = aether_flags(args, task)
         cmd = [str(args.aether_bin), *flags, "--no-cache", str(program_path)]
         # What the report records: the binary the user named (not the per-run
         # snapshot under a random temp dir) and the program by file name.
@@ -3366,7 +3384,8 @@ FAILURE_CLASSES = ("pass", "silent_wrong", "crash_hang", "uncoded_error", "coded
 
 def classify_attempt(attempt: dict[str, Any]) -> str:
     """The thesis failure class of one attempt, worst first: silent_wrong (the
-    program exited as a success but printed the wrong thing), crash_hang
+    program exited as a success -- its expected status, or 0 -- but printed
+    the wrong thing or ended with the wrong status), crash_hang
     (timeout, signal, rc >= 128), uncoded_error (failed with no CODE-NNN),
     coded_error -- plus pass, and the two that measured nothing:
     infra_failed and not_sent (context overflow)."""
@@ -3381,7 +3400,10 @@ def classify_attempt(attempt: dict[str, Any]) -> str:
     expected = run.get("expected_returncode", 0)
     if run.get("timed_out") or (isinstance(returncode, int) and (returncode >= 128 or returncode < 0)):
         return "crash_hang"
-    if returncode == expected:
+    # Exiting as a success -- the status the task expects, or 0 when the task
+    # expects a failure status (the program never stopped) -- with the wrong
+    # result leaves the repair loop nothing to act on.
+    if returncode == expected or returncode == 0:
         return "silent_wrong"
     codes = [d.get("code") for d in (run.get("diagnostics") or []) if isinstance(d, dict) and d.get("code")]
     if codes or _CODE_RE.search(run.get("stderr") or ""):
@@ -3428,6 +3450,9 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     classes = {name: 0 for name in FAILURE_CLASSES}
     infra_cases: list[dict[str, Any]] = []
     per_task: dict[str, dict[str, Any]] = {}
+    # First-attempt class counts per task: the trap board (B1) reports the
+    # silent-wrong rate per trap from this.
+    per_task_classes: dict[str, dict[str, int]] = {}
     first_exact = 0
     for item in results:
         first = first_attempt_of(item)
@@ -3443,6 +3468,8 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
                 or classify_infra_failure(item.get("generation_error")),
             })
         entry = per_task.setdefault(item.get("task_id", ""), {"repeats": 0, "fa_passes": 0, "fx_passes": 0})
+        task_classes = per_task_classes.setdefault(item.get("task_id", ""), {})
+        task_classes[first_class] = task_classes.get(first_class, 0) + 1
         entry["repeats"] += 1
         entry["fa_passes"] += int(fa_ok)
         entry["fx_passes"] += int(bool(item["run"]["exact_stdout_match"]))
@@ -3481,6 +3508,7 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         "flaky_fa": flaky_fa,
         "flaky_fx": flaky_fx,
         "per_task": per_task,
+        "per_task_first_attempt_classes": per_task_classes,
     }
 
 

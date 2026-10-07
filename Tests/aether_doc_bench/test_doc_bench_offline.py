@@ -950,6 +950,7 @@ def test_summary_majority_flaky_and_wilson():
     assert summary["task_majority_fa"] == 2 and summary["tasks"] == 2
     assert summary["flaky_fa"] == ["t"]
     assert summary["per_task"]["t"] == {"repeats": 3, "fa_passes": 2, "fx_passes": 2}
+    assert summary["per_task_first_attempt_classes"]["t"] == {"pass": 2, "silent_wrong": 1}
     assert adb.wilson_interval(15, 15) == [0.7961, 1.0]
     assert adb.wilson_interval(0, 0) is None
 
@@ -1069,8 +1070,15 @@ def test_hidden_prompt_has_no_expected_block_but_repairs_do():
         assert "SECRET-OUTPUT" not in builder(trap)
 
 
+# The trap and scale suites were built on the W1-21 fields (hidden expected,
+# exit status, stdin); every suite before them keeps its prompts byte for byte.
+NEW_SCHEMA_SUITES = {"tasks_traps.json", "tasks_scale.json"}
+
+
 def test_existing_suites_keep_their_prompts():
     for path in sorted(BENCH_DIR.glob("*tasks*.json")):
+        if path.name in NEW_SCHEMA_SUITES:
+            continue
         for task in adb.load_tasks(path):
             assert not task.hide_expected_stdout and task.expected_returncode == 0 and task.stdin is None, task.task_id
             assert task.expected_stdout in adb.build_prompt("medium", "g", task)
@@ -1199,9 +1207,9 @@ def test_sliding_window_expected_matches_a_python_reference():
     assert json.loads((BENCH_DIR / "tasks_frontier_algo.json").read_text())["version"] != "2026-08-10-1"
 
 
-def test_list_tasks_works_on_all_12_manifests():
+def test_list_tasks_works_on_all_13_manifests():
     manifests = sorted(BENCH_DIR.glob("*tasks*.json"))
-    assert len(manifests) == 12, [m.name for m in manifests]
+    assert len(manifests) == 13, [m.name for m in manifests]
     for manifest in manifests:
         proc = run_harness(["--tasks", str(manifest), "--list-tasks"])
         assert proc.returncode == 0 and proc.stdout.strip(), (manifest.name, proc.stderr)
@@ -1214,7 +1222,7 @@ def test_list_tasks_works_on_all_12_manifests():
 def test_oracle_lint_only_needs_no_binary():
     proc = run_harness(["--lint-only"], script=REPO_ROOT / "tools" / "aether_oracle_check.py")
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "12 manifests, 0 problem(s)" in proc.stdout
+    assert "13 manifests, 0 problem(s)" in proc.stdout
 
 
 def test_oracle_check_passes_on_the_real_binary_quickly():
@@ -1225,7 +1233,8 @@ def test_oracle_check_passes_on_the_real_binary_quickly():
                            script=REPO_ROOT / "tools" / "aether_oracle_check.py")
         assert proc.returncode == 0, proc.stdout + proc.stderr
         report = json.loads(out.read_text())
-        assert report["references_passed"] == report["references_total"] == 140
+        assert report["references_passed"] == report["references_total"] == 164
+        assert report["python_references_passed"] == report["python_references_total"] == 24
         assert sum(n["ok"] for n in report["negatives"]) == len(report["negatives"]) == 4
         assert report["sandbox_probe"]["ok"] is True
         # The target is under 10 s on an idle Release build. A loaded machine or an
@@ -1248,6 +1257,82 @@ def test_harness_preflight_aborts_on_a_broken_reference():
         assert report["oracle"]["broken"] == ["broken"] and report["oracle"]["sandbox_probe"]["ok"] is True
         oracle = {c["task_id"]: c["oracle_ok"] for _, _, c in all_cases(report)}
         assert oracle == {"good": True, "broken": False}
+
+
+# --------------------------------------------------------------------------- #
+# W1-22: the silent-wrong trap suite
+# --------------------------------------------------------------------------- #
+
+TRAPS = BENCH_DIR / "tasks_traps.json"
+
+
+def test_trap_suite_shape():
+    raw = json.loads(TRAPS.read_text())
+    items = raw["tasks"]
+    assert raw["hide_expected_stdout"] is True and raw["version"]
+    assert 20 <= len(items) <= 25, len(items)
+    for item in items:
+        assert item["id"].startswith("trap_"), item["id"]
+        trap = item["trap"]
+        assert trap["natural_program"] and trap["class"] and trap["fix"], item["id"]
+        assert (BENCH_DIR / "py_refs" / f"{item['id']}.py").is_file(), item["id"]
+        assert item["reference_solution"], item["id"]
+        assert "Expected stdout" not in adb.build_prompt("none", "", adb.load_tasks(TRAPS)[0])
+    # At least 70% of the traps are silent rc-0 shapes on the frozen B0/B1 binary.
+    frozen = [item["trap"]["observed"]["2026-10-06-1"] for item in items]
+    assert sum(c == "silent_wrong" for c in frozen) >= 0.7 * len(items), frozen
+    assert all(c != "pass" for c in frozen), frozen
+    # Every task is hidden on the first attempt.
+    assert all(t.hide_expected_stdout for t in adb.load_tasks(TRAPS))
+
+
+def test_trap_python_references_match_without_a_compiler():
+    import aether_oracle_check as oracle_check
+
+    results = oracle_check.check_python_references(adb.load_tasks(TRAPS))
+    assert len(results) == 24 and all(r["ok"] for r in results.values()), \
+        {k: v["detail"] for k, v in results.items() if not v["ok"]}
+
+
+def test_sandbox_allow_narrows_only_its_own_task():
+    args = adb.argparse.Namespace(sandbox_deny="net,proc", aether_args=[])
+    plain = adb.Task(task_id="a", title="a", prompt="", expected_stdout="")
+    exits = adb.Task(task_id="b", title="b", prompt="", expected_stdout="", expected_returncode=2,
+                     sandbox_allow=("proc",))
+    assert adb.aether_flags(args, plain) == ["--deny", "net,proc"]
+    assert adb.aether_flags(args, exits) == ["--deny", "net"]
+    assert adb.aether_flags(args) == ["--deny", "net,proc"]
+    task = next(t for t in adb.load_tasks(TRAPS) if t.task_id == "trap_exit_status")
+    assert task.sandbox_allow == ("proc",) and task.expected_returncode == 2
+    import aether_oracle_check as oracle_check
+
+    with workdir() as tmp:
+        bad = write_json(tmp / "tasks_bad.json", {"version": "t", "tasks": [simple_task("x", sandbox_allow=["net"])]})
+        assert any("sandbox_allow" in p for p in oracle_check.lint_manifest(bad))
+
+
+def test_rc0_on_a_failure_status_task_is_silent_wrong():
+    # trap_exit_status on 2026-10-06-1: exit(2) returned from the helper, the
+    # program carried on and exited 0 -- a success status, wrong result.
+    attempt = {"generated_ok": True, "source_code": "x",
+               "run": {"returncode": 0, "expected_returncode": 2, "exact_stdout_match": False, "stderr": ""}}
+    assert adb.classify_attempt(attempt) == "silent_wrong"
+    attempt["run"]["returncode"] = 1
+    assert adb.classify_attempt(attempt) == "uncoded_error"
+
+
+def test_real_aether_trap_programs_match_their_recorded_classes():
+    binary = real_aether_bin()
+    version, _ = adb.capture_aether_version(binary)
+    items = json.loads(TRAPS.read_text())["tasks"]
+    if not any(version in (item["trap"].get("observed") or {}) for item in items):
+        skip(f"no trap classes recorded for aether {version}")
+    import aether_oracle_check as oracle_check
+
+    args = adb.argparse.Namespace(aether_bin=binary, sandbox_deny="net,proc", aether_args=[])
+    results = oracle_check.check_traps(TRAPS, args, version)
+    drift = {r["id"]: (r["recorded"], r["class"]) for r in results if r["recorded"] != r["class"]}
+    assert not drift, drift
 
 
 # --------------------------------------------------------------------------- #
