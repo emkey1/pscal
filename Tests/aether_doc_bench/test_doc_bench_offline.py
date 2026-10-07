@@ -1128,6 +1128,60 @@ def test_real_aether_reads_three_stdin_lines():
     # (B-backend-coupling-4), which is exactly what a stdin trap must see.
 
 
+# --------------------------------------------------------------------------- #
+# W6-03: severity-aware failure summary and fingerprint
+# --------------------------------------------------------------------------- #
+
+SCOPE_ERROR = {"severity": "error", "phase": "semantic", "kind": "scope", "code": "SCOPE-001",
+               "file": "w.aether", "line": 6, "message": "identifier 'printn' not in scope."}
+# --diagnostics-json for a PREC-001 warning ahead of the error, as today's rea
+# emits it (captured from the 2026-10-06-1 binary) ...
+WARNING_FIRST_TODAY = [
+    {"severity": "error", "phase": "compile", "kind": "generic", "code": None, "file": "w.aether", "line": 4,
+     "message": "warning: [PREC-001] Aether precedence warning: '&' binds looser than '==', so this parses as "
+                "`a & (b == c)` and produces an Int, not a Bool."},
+    SCOPE_ERROR,
+]
+# ... and as it will once rea parses "warning: [CODE]" (W6-15).
+WARNING_FIRST_W615 = [
+    {"severity": "warning", "phase": "compile", "kind": "precedence", "code": "PREC-001", "file": "w.aether",
+     "line": 4, "message": "Aether precedence warning: '&' binds looser than '=='."},
+    SCOPE_ERROR,
+]
+
+
+def test_warning_first_diagnostics_summarise_the_error():
+    for fixture in (WARNING_FIRST_TODAY, WARNING_FIRST_W615):
+        run = {"returncode": 1, "stdout": "", "stderr": "", "diagnostics": fixture}
+        assert adb.derive_failure_summary(True, run) == "SCOPE-001: identifier 'printn' not in scope."
+        assert adb.derive_failure_fingerprint({"generated_ok": True, "run": run}) == "run_error_code:SCOPE-001"
+        assert adb.cited_source_line(run) == 6
+    # A warnings-only list still falls back to the first record.
+    only = {"returncode": 1, "stdout": "", "stderr": "", "diagnostics": WARNING_FIRST_W615[:1]}
+    assert adb.derive_failure_summary(True, only).startswith("PREC-001")
+
+
+def test_miner_primary_diagnostic_skips_warnings():
+    sys.path.insert(0, str(REPO_ROOT / "tools"))
+    import aether_idea_miner as miner
+
+    for fixture in (WARNING_FIRST_TODAY, WARNING_FIRST_W615):
+        f = miner.analyze_failure("1\n2\n3\n4\n5\nprintn(c);\n", {"returncode": 1, "stdout": "", "stderr": "",
+                                                                  "diagnostics": fixture})
+        assert f["code"] == "SCOPE-001" and miner.finding_key(f) == "missing:printn", f
+
+
+def test_real_aether_warning_before_error():
+    binary = real_aether_bin()
+    task = adb.Task(task_id="w", title="w", prompt="", expected_stdout="")
+    source = ("fn main() -> Void {\n    let a: Int = 6;\n    let b: Int = 3;\n    let c: Int = a & b == 2;\n"
+              "    fx {\n        printn(c);\n    }\n}\n")
+    run = adb.compile_and_run(task, source, adb.argparse.Namespace(aether_bin=binary, sandbox_deny="net,proc"))
+    assert run["diagnostics"] and "PREC-001" in json.dumps(run["diagnostics"][0]), run["diagnostics"]
+    assert adb.derive_failure_summary(True, run) == "SCOPE-001: identifier 'printn' not in scope."
+    assert adb.derive_failure_fingerprint({"generated_ok": True, "run": run}) == "run_error_code:SCOPE-001"
+
+
 def _main() -> int:
     failures = 0
     skipped = 0

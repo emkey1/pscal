@@ -2987,10 +2987,27 @@ def build_repair_feedback(
     }
 
 
+def is_warning_record(record: dict[str, Any]) -> bool:
+    """A --diagnostics-json record that is a warning. Today rea emits warnings
+    as severity "error", code null, message "warning: [PREC-001] ..."; once it
+    parses the prefix (W6-15) they carry severity "warning" and the code."""
+    if str(record.get("severity") or "").lower() == "warning":
+        return True
+    return str(record.get("message") or "").lstrip().lower().startswith("warning:")
+
+
 def primary_error_diagnostic(diagnostics: Any) -> dict[str, Any] | None:
-    """The diagnostic that names the failure: the first record whose message is
-    an error. (Refined in W6-03 to skip warning records.)"""
+    """The diagnostic that names the failure: the first error-severity record
+    that is not a warning, else the first record.
+
+    A PREC-001/ARR-001 warning printed before the real error used to become
+    diagnostics[0], so the repair round's failure summary quoted the warning
+    and the fingerprint keyed on it. Safe both before and after rea learns to
+    parse "warning: [CODE]" (W6-15)."""
     records = [d for d in (diagnostics or []) if isinstance(d, dict)]
+    for record in records:
+        if str(record.get("severity") or "error").lower() == "error" and not is_warning_record(record):
+            return record
     return records[0] if records else None
 
 
@@ -3130,7 +3147,7 @@ def derive_failure_summary(
         suffix = f" (the task expects exit status {expected_rc})" if expected_rc else ""
         diagnostics = run.get("diagnostics") or []
         if diagnostics:
-            first = diagnostics[0] or {}
+            first = primary_error_diagnostic(diagnostics) or {}
             code = first.get("code")
             message = (first.get("message") or "").strip()
             if code and message:
@@ -3168,7 +3185,7 @@ def _derive_failure_fingerprint(result: dict[str, Any], task_id: str | None = No
     if run["returncode"] != 0:
         diagnostics = run.get("diagnostics") or []
         if diagnostics:
-            first = diagnostics[0] or {}
+            first = primary_error_diagnostic(diagnostics) or {}
             code = first.get("code")
             phase = first.get("phase") or "unknown"
             kind = first.get("kind") or "unknown"

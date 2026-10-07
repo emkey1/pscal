@@ -431,16 +431,27 @@ def run_brief(run: dict[str, Any], stdout_cap: int = 2000, stderr_cap: int = 400
 # Failure analysis
 # --------------------------------------------------------------------------- #
 def primary_diagnostic(run: dict[str, Any]) -> dict[str, Any] | None:
-    """The diagnostic that best describes the failure: first one carrying a code
-    (the compiler pairs a code with a code=null 'help:' line), else the first
-    error-severity diagnostic, else the first."""
+    """The diagnostic that best describes the failure, warnings last: a coded
+    error (the compiler pairs a code with a code=null 'help:' line), else an
+    error-severity record with a message, else any coded record, else the first.
+
+    Warnings are recognised by severity "warning" or a "warning:" message
+    prefix (adb.is_warning_record), so a PREC-001/ARR-001 warning printed
+    before the real error never becomes the finding -- today, when it arrives
+    uncoded, and after rea parses "warning: [CODE]" (W6-15), when it would
+    otherwise win the coded-first rule."""
     diags = run.get("diagnostics") or []
     diags = [d for d in diags if isinstance(d, dict)]
-    for d in diags:
+    errors = [d for d in diags
+              if str(d.get("severity") or "error").lower() == "error" and not adb.is_warning_record(d)]
+    for d in errors:
         if d.get("code"):
             return d
+    for d in errors:
+        if (d.get("message") or "").strip():
+            return d
     for d in diags:
-        if d.get("severity") == "error" and (d.get("message") or "").strip():
+        if d.get("code"):
             return d
     return diags[0] if diags else None
 
