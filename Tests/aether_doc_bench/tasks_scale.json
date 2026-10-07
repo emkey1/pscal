@@ -1,0 +1,354 @@
+{
+  "version": "2026-10-07-1",
+  "_note": "Performance/scale tier (W1-23), reported separately from the correctness boards (board S0). Inputs come from scale_inputs.py (generated_files, sha256-checked). timeout_seconds = max(20, 10 x the reference's time when the suite was written, scale.timing); scale.natural_program is the plausible program each task stresses and scale.observed its class and time on each binary. Never merge into another suite.",
+  "tasks": [
+    {
+      "id": "scale_int_loop",
+      "title": "Ten million generator steps",
+      "mechanisms": [
+        "scale",
+        "int_loop",
+        "lcg"
+      ],
+      "prompt": "Write an Aether program that runs the generator `x = (1103515245 * x + 12345) % 2147483648` for 10000000 steps starting from x = 1, adding `x % 7` to a running total after each step. Print `x = <final x>` and `total = <total>`. Print nothing else.",
+      "expected_stdout": "x = 1347020161\ntotal = 29993999\n",
+      "timeout_seconds": 167,
+      "reference_solution": "fn main() -> Void {\n    let x: Int = 1;\n    let total: Int = 0;\n    loop i in 0..10000000 {\n        x = (1103515245 * x + 12345) % 2147483648;\n        total = total + x % 7;\n    }\n    fx {\n        println(\"x = \", x);\n        println(\"total = \", total);\n    }\n    ret;\n}\n",
+      "scale": {
+        "stresses": "raw VM cost per loop iteration (10^7 steps); the Python reference gives the comparison",
+        "fix": "none planned -- the baseline the other tasks are read against",
+        "timing": {
+          "platform": "darwin-arm64",
+          "build": "Release",
+          "reference_seconds": {
+            "2026-10-06-1": 16.62,
+            "2026-10-07-1": 13.13
+          },
+          "python_seconds": 3.21,
+          "rule": "timeout_seconds = max(20, ceil(10 x the slower reference time))"
+        },
+        "natural_program": "fn main() -> Void {\n    let x: Int = 1;\n    let total: Int = 0;\n    loop i in 0..10000000 {\n        x = (1103515245 * x + 12345) % 2147483648;\n        total = total + x % 7;\n    }\n    fx {\n        println(\"x = \", x);\n        println(\"total = \", total);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": {
+            "class": "pass",
+            "returncode": 0,
+            "seconds": 13.02
+          },
+          "2026-10-07-1": {
+            "class": "pass",
+            "returncode": 0,
+            "seconds": 8.56
+          }
+        }
+      }
+    },
+    {
+      "id": "scale_sort_5000",
+      "title": "Sort 5000 generated Ints",
+      "mechanisms": [
+        "scale",
+        "sort",
+        "lcg"
+      ],
+      "prompt": "Write an Aether program that generates 5000 Ints with the generator `x = (1103515245 * x + 12345) % 2147483648`, starting from x = 42 and stepping once before each value; value k (k = 0..4999) is `x % 100000` after the k+1-th step. Sort the 5000 values ascending. Print `first = <v0> <v1> <v2> <v3> <v4>` (the five smallest, ascending, single spaces), `last = <v4995> <v4996> <v4997> <v4998> <v4999>`, `median = <(v2499 + v2500) / 2 with integer division>` and `checksum = <sum over k of k * v_k, modulo 1000000007>`. Print nothing else.",
+      "expected_stdout": "first = 31 67 100 145 149\nlast = 99930 99960 99967 99967 99980\nmedian = 50282\nchecksum = 588241833\n",
+      "timeout_seconds": 20,
+      "reference_solution": "// Bottom-up merge sort, in place in main: O(n log n) and no array parameters.\nfn main() -> Void {\n    let n: Int = 5000;\n    let xs: Int[] = [];\n    setlength(xs, n);\n    let x: Int = 42;\n    loop k in 0..n {\n        x = (1103515245 * x + 12345) % 2147483648;\n        xs[k] = x % 100000;\n    }\n    let tmp: Int[] = [];\n    setlength(tmp, n);\n    let width: Int = 1;\n    loop width < n {\n        let lo: Int = 0;\n        loop lo < n {\n            let mid: Int = min(lo + width, n);\n            let hi: Int = min(lo + 2 * width, n);\n            let i: Int = lo;\n            let j: Int = mid;\n            let k: Int = lo;\n            loop k < hi {\n                if i < mid && (j >= hi || xs[i] <= xs[j]) {\n                    tmp[k] = xs[i];\n                    i = i + 1;\n                } else {\n                    tmp[k] = xs[j];\n                    j = j + 1;\n                }\n                k = k + 1;\n            }\n            lo = lo + 2 * width;\n        }\n        loop t in 0..n {\n            xs[t] = tmp[t];\n        }\n        width = width * 2;\n    }\n    let checksum: Int = 0;\n    loop k in 0..n {\n        checksum = (checksum + k * xs[k]) % 1000000007;\n    }\n    fx {\n        println(\"first = \", xs[0], \" \", xs[1], \" \", xs[2], \" \", xs[3], \" \", xs[4]);\n        println(\"last = \", xs[n - 5], \" \", xs[n - 4], \" \", xs[n - 3], \" \", xs[n - 2], \" \", xs[n - 1]);\n        println(\"median = \", (xs[2499] + xs[2500]) div 2);\n        println(\"checksum = \", checksum);\n    }\n    ret;\n}\n",
+      "scale": {
+        "stresses": "quadratic insertion sort (the guide's template) on 5000 elements in the VM's per-op cost; P2 on a `sorted(xs)` helper",
+        "fix": "W-runtime VM speed / P2 (open)",
+        "timing": {
+          "platform": "darwin-arm64",
+          "build": "Release",
+          "reference_seconds": {
+            "2026-10-06-1": 0.18,
+            "2026-10-07-1": 0.19
+          },
+          "python_seconds": 0.04,
+          "rule": "timeout_seconds = max(20, ceil(10 x the slower reference time))"
+        },
+        "natural_program": "fn sorted(xs: Int[]) -> Int[] {\n    let out: Int[] = xs;\n    loop i in 1..length(out) {\n        let v: Int = out[i];\n        let j: Int = i - 1;\n        loop j >= 0 {\n            if out[j] <= v {\n                break;\n            }\n            out[j + 1] = out[j];\n            j = j - 1;\n        }\n        out[j + 1] = v;\n    }\n    ret out;\n}\n\nfn main() -> Void {\n    let xs: Int[] = [];\n    let x: Int = 42;\n    loop k in 0..5000 {\n        x = (1103515245 * x + 12345) % 2147483648;\n        xs = xs + [x % 100000];\n    }\n    let s: Int[] = sorted(xs);\n    let n: Int = length(s);\n    let checksum: Int = 0;\n    loop k in 0..n {\n        checksum = (checksum + k * s[k]) % 1000000007;\n    }\n    let median: Int = (s[2499] + s[2500]) / 2;\n    fx {\n        println(\"first = \", s[0], \" \", s[1], \" \", s[2], \" \", s[3], \" \", s[4]);\n        println(\"last = \", s[n - 5], \" \", s[n - 4], \" \", s[n - 3], \" \", s[n - 2], \" \", s[n - 1]);\n        println(\"median = \", median);\n        println(\"checksum = \", checksum);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": {
+            "class": "pass",
+            "returncode": 0,
+            "seconds": 6.23
+          },
+          "2026-10-07-1": {
+            "class": "pass",
+            "returncode": 0,
+            "seconds": 7.23
+          }
+        }
+      }
+    },
+    {
+      "id": "scale_bsearch_queries",
+      "title": "10,000 binary searches over 100,000 sorted Ints",
+      "mechanisms": [
+        "scale",
+        "array_param",
+        "binary_search"
+      ],
+      "prompt": "Write an Aether program that builds a sorted `Int[]` `a` of 100000 elements with `a[i] = 3 * i + 1` for i = 0..99999, then answers 10000 membership queries with binary search: query j (j = 0..9999) looks for `q = (j * 7919) % 300007`. Print `found = <number of queries whose value is in a>` and then `index sum = <sum, over the found queries, of the index where q sits in a>`. Print nothing else.",
+      "expected_stdout": "found = 3328\nindex sum = 166221648\n",
+      "timeout_seconds": 20,
+      "reference_solution": "fn main() -> Void {\n    let n: Int = 100000;\n    let a: Int[] = [];\n    setlength(a, n);\n    loop i in 0..n {\n        a[i] = 3 * i + 1;\n    }\n    let found: Int = 0;\n    let indexSum: Int = 0;\n    // The search runs inline: a helper taking `a` would copy all of it per call.\n    loop j in 0..10000 {\n        let q: Int = (j * 7919) % 300007;\n        let lo: Int = 0;\n        let hi: Int = n - 1;\n        let at: Int = -1;\n        loop lo <= hi && at < 0 {\n            let mid: Int = (lo + hi) div 2;\n            if a[mid] == q {\n                at = mid;\n            } else if a[mid] < q {\n                lo = mid + 1;\n            } else {\n                hi = mid - 1;\n            }\n        }\n        if at >= 0 {\n            found = found + 1;\n            indexSum = indexSum + at;\n        }\n    }\n    fx {\n        println(\"found = \", found);\n        println(\"index sum = \", indexSum);\n    }\n    ret;\n}\n",
+      "scale": {
+        "stresses": "P2: an array parameter is copied eagerly on every call, so a `bsearch(xs: Int[], target: Int)` helper called 10^4 times copies 10^9 elements",
+        "fix": "W-runtime P2 copy-on-write (open)",
+        "timing": {
+          "platform": "darwin-arm64",
+          "build": "Release",
+          "reference_seconds": {
+            "2026-10-06-1": 0.34,
+            "2026-10-07-1": 0.34
+          },
+          "python_seconds": 0.04,
+          "rule": "timeout_seconds = max(20, ceil(10 x the slower reference time))"
+        },
+        "natural_program": "fn bsearch(xs: Int[], target: Int) -> Int {\n    let lo: Int = 0;\n    let hi: Int = length(xs) - 1;\n    loop lo <= hi {\n        let mid: Int = (lo + hi) div 2;\n        if xs[mid] == target {\n            ret mid;\n        }\n        if xs[mid] < target {\n            lo = mid + 1;\n        } else {\n            hi = mid - 1;\n        }\n    }\n    ret -1;\n}\n\nfn main() -> Void {\n    let a: Int[] = [];\n    loop i in 0..100000 {\n        a = a + [3 * i + 1];\n    }\n    let found: Int = 0;\n    let indexSum: Int = 0;\n    loop j in 0..10000 {\n        let q: Int = (j * 7919) % 300007;\n        let idx: Int = bsearch(a, q);\n        if idx >= 0 {\n            found = found + 1;\n            indexSum = indexSum + idx;\n        }\n    }\n    fx {\n        println(\"found = \", found);\n        println(\"index sum = \", indexSum);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": {
+            "class": "crash_hang",
+            "returncode": 124,
+            "seconds": 20.01
+          },
+          "2026-10-07-1": {
+            "class": "crash_hang",
+            "returncode": 124,
+            "seconds": 20.0
+          }
+        }
+      }
+    },
+    {
+      "id": "scale_memo_fib",
+      "title": "Memoised recursive Fibonacci",
+      "mechanisms": [
+        "scale",
+        "array_param",
+        "recursion",
+        "memo"
+      ],
+      "prompt": "Write an Aether program with a memoised recursive Fibonacci (fib(0) = 0, fib(1) = 1, fib(n) = fib(n - 1) + fib(n - 2)): each value is computed once and remembered. Print `fib(30) = <v>`, `fib(60) = <v>` and `fib(90) = <v>` on three lines (fib(90) = 2880067194370816120 fits Aether's 64-bit Int). Then print `sum = <fib(0) + fib(1) + ... + fib(90)>`. Print nothing else.",
+      "expected_stdout": "fib(30) = 832040\nfib(60) = 1548008755920\nfib(90) = 2880067194370816120\nsum = 7540113804746346428\n",
+      "timeout_seconds": 20,
+      "reference_solution": "type Memo {\n    vals: Int[] = [];\n}\n\n// The memo lives in a record: records are pointer-backed, so every call sees\n// the same table (an Int[] parameter would be a fresh copy per call).\nfn fib(n: Int, m: Memo) -> Int {\n    if m.vals[n] >= 0 {\n        ret m.vals[n];\n    }\n    let v: Int = fib(n - 1, m) + fib(n - 2, m);\n    m.vals[n] = v;\n    ret v;\n}\n\nfn main() -> Void {\n    let m: Memo = new Memo();\n    setlength(m.vals, 91);\n    loop i in 0..91 {\n        m.vals[i] = -1;\n    }\n    m.vals[0] = 0;\n    m.vals[1] = 1;\n    let total: Int = 0;\n    loop i in 0..91 {\n        total = total + fib(i, m);\n    }\n    fx {\n        println(\"fib(30) = \", fib(30, m));\n        println(\"fib(60) = \", fib(60, m));\n        println(\"fib(90) = \", fib(90, m));\n        println(\"sum = \", total);\n    }\n    ret;\n}\n",
+      "scale": {
+        "stresses": "P2 and array value semantics: a memo `Int[]` parameter is copied into each call, so the callee's writes never reach the caller and the recursion is exponential",
+        "fix": "W-runtime P2 copy-on-write / by-reference arrays (D8, open)",
+        "timing": {
+          "platform": "darwin-arm64",
+          "build": "Release",
+          "reference_seconds": {
+            "2026-10-06-1": 0.13,
+            "2026-10-07-1": 0.13
+          },
+          "python_seconds": 0.04,
+          "rule": "timeout_seconds = max(20, ceil(10 x the slower reference time))"
+        },
+        "natural_program": "fn fib(n: Int, memo: Int[]) -> Int {\n    if memo[n] != -1 {\n        ret memo[n];\n    }\n    let v: Int = fib(n - 1, memo) + fib(n - 2, memo);\n    memo[n] = v;\n    ret v;\n}\n\nfn main() -> Void {\n    let memo: Int[] = [];\n    loop i in 0..91 {\n        memo = memo + [-1];\n    }\n    memo[0] = 0;\n    memo[1] = 1;\n    let total: Int = 0;\n    loop i in 0..91 {\n        total = total + fib(i, memo);\n    }\n    fx {\n        println(\"fib(30) = \", fib(30, memo));\n        println(\"fib(60) = \", fib(60, memo));\n        println(\"fib(90) = \", fib(90, memo));\n        println(\"sum = \", total);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": {
+            "class": "crash_hang",
+            "returncode": 124,
+            "seconds": 20.02
+          },
+          "2026-10-07-1": {
+            "class": "crash_hang",
+            "returncode": 124,
+            "seconds": 20.01
+          }
+        }
+      }
+    },
+    {
+      "id": "scale_dfs_graph",
+      "title": "Depth-first search over a 1000-node graph",
+      "mechanisms": [
+        "scale",
+        "array_param",
+        "dfs",
+        "graph"
+      ],
+      "prompt": "Write an Aether program for a directed graph with nodes 0..999 where node u has edges, in this order, to `(u * 7 + 3) % 1000`, `(u * 13 + 11) % 1000` and `(u + 1) % 1000`. Run a depth-first search from node 0 that visits neighbours in that edge order and marks a node visited when it is first reached (pre-order). Print `reachable = <number of visited nodes>`, `first = <the first 8 nodes in visit order, single spaces>` and `checksum = <sum over visit positions p (0-based) of p * node, modulo 1000000007>`. Print nothing else.",
+      "expected_stdout": "reachable = 1000\nfirst = 0 3 24 171 200 403 824 771\nchecksum = 251479220\n",
+      "timeout_seconds": 20,
+      "reference_solution": "// Iterative DFS with an explicit stack in main: no array crosses a call.\nfn main() -> Void {\n    let n: Int = 1000;\n    let visited: Bool[] = [];\n    setlength(visited, n);\n    let order: Int[] = [];\n    // A preallocated stack with a top index: slicing to pop would copy it.\n    let stack: Int[] = [];\n    setlength(stack, 3 * n + 1);\n    let top: Int = 1;\n    loop top > 0 {\n        top = top - 1;\n        let u: Int = stack[top];\n        if !visited[u] {\n            visited[u] = true;\n            order = order + [u];\n            // Push in reverse so the first edge is explored first.\n            stack[top] = (u + 1) % n;\n            stack[top + 1] = (u * 13 + 11) % n;\n            stack[top + 2] = (u * 7 + 3) % n;\n            top = top + 3;\n        }\n    }\n    let checksum: Int = 0;\n    loop p in 0..length(order) {\n        checksum = (checksum + p * order[p]) % 1000000007;\n    }\n    let first: Text = \"\";\n    loop p in 0..8 {\n        if p > 0 {\n            first = first + \" \";\n        }\n        first = first + int_to_text(order[p]);\n    }\n    fx {\n        println(\"reachable = \", length(order));\n        println(\"first = \", first);\n        println(\"checksum = \", checksum);\n    }\n    ret;\n}\n",
+      "scale": {
+        "stresses": "P2: a recursive dfs(u, adj: Int[][], visited: Bool[]) copies the adjacency table and the visited array on every call (10^3 calls x 4x10^3 elements)",
+        "fix": "W-runtime P2 copy-on-write (open)",
+        "timing": {
+          "platform": "darwin-arm64",
+          "build": "Release",
+          "reference_seconds": {
+            "2026-10-06-1": 0.12,
+            "2026-10-07-1": 0.13
+          },
+          "python_seconds": 0.07,
+          "rule": "timeout_seconds = max(20, ceil(10 x the slower reference time))"
+        },
+        "natural_program": "type Walk {\n    order: Int[] = [];\n}\n\nfn dfs(u: Int, adj: Int[][], visited: Bool[], walk: Walk) -> Bool[] {\n    visited[u] = true;\n    walk.order = walk.order + [u];\n    loop k in 0..length(adj[u]) {\n        let v: Int = adj[u][k];\n        if !visited[v] {\n            visited = dfs(v, adj, visited, walk);\n        }\n    }\n    ret visited;\n}\n\nfn main() -> Void {\n    let adj: Int[][] = [];\n    loop u in 0..1000 {\n        let row: Int[] = [(u * 7 + 3) % 1000, (u * 13 + 11) % 1000, (u + 1) % 1000];\n        adj = adj + [row];\n    }\n    let visited: Bool[] = [];\n    loop u in 0..1000 {\n        visited = visited + [false];\n    }\n    let walk: Walk = new Walk();\n    visited = dfs(0, adj, visited, walk);\n    let checksum: Int = 0;\n    loop p in 0..length(walk.order) {\n        checksum = (checksum + p * walk.order[p]) % 1000000007;\n    }\n    fx {\n        println(\"reachable = \", length(walk.order));\n        print(\"first =\");\n        loop p in 0..8 {\n            print(\" \", walk.order[p]);\n        }\n        println(\"\");\n        println(\"checksum = \", checksum);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": {
+            "class": "pass",
+            "returncode": 0,
+            "seconds": 0.45
+          },
+          "2026-10-07-1": {
+            "class": "pass",
+            "returncode": 0,
+            "seconds": 0.49
+          }
+        }
+      }
+    },
+    {
+      "id": "scale_text_scan",
+      "title": "Scan a 100 KB text character by character",
+      "mechanisms": [
+        "scale",
+        "text_index",
+        "file"
+      ],
+      "prompt": "A text file named `corpus.txt` (about 100 KB) is in the working directory: lines of lowercase ASCII words separated by single spaces, each line ending with a newline. Write an Aether program that reads the whole file into a single Text (its lines joined with newline characters) and then scans that Text character by character to compute: the number of characters that are letters, the number of vowels (a, e, i, o, u), the number of words (maximal runs of letters), and the length of the longest word. Print `letters = <n>`, `vowels = <n>`, `words = <n>` and `longest = <n>`, one per line. Print nothing else.",
+      "generated_files": {
+        "corpus.txt": {
+          "generator": "text_corpus",
+          "seed": 5,
+          "target_bytes": 100000,
+          "sha256": "d4a3b01294ab90bb751b06226cb246b8e8b1194141fb59f204865f3dad02fe18"
+        }
+      },
+      "expected_stdout": "letters = 84178\nvowels = 35967\nwords = 15867\nlongest = 8\n",
+      "timeout_seconds": 20,
+      "reference_solution": "// The scan runs line by line as the file is read: indexing a short Text is\n// cheap, while s[i] on the joined 100 KB Text is O(i). A newline ends a word,\n// so per-line counting gives the same answers as one scan of the whole text.\nfn main() -> Void {\n    let f: File;\n    let letters: Int = 0;\n    let vowels: Int = 0;\n    let words: Int = 0;\n    let longest: Int = 0;\n    fx {\n        assign(f, \"corpus.txt\");\n        reset(f);\n        loop {\n            if eof(f) {\n                break;\n            }\n            let line: Text;\n            readln(f, line);\n            let run: Int = 0;\n            let n: Int = string_len(line);\n            loop i in 0..n + 1 {\n                let isLetter: Bool = false;\n                if i < n {\n                    let c: Int = ord(line[i]);\n                    isLetter = c >= 97 && c <= 122;\n                    if isLetter {\n                        letters = letters + 1;\n                        if c == 97 || c == 101 || c == 105 || c == 111 || c == 117 {\n                            vowels = vowels + 1;\n                        }\n                    }\n                }\n                if isLetter {\n                    run = run + 1;\n                } else {\n                    if run > 0 {\n                        words = words + 1;\n                        longest = max(longest, run);\n                    }\n                    run = 0;\n                }\n            }\n        }\n        close(f);\n        println(\"letters = \", letters);\n        println(\"vowels = \", vowels);\n        println(\"words = \", words);\n        println(\"longest = \", longest);\n    }\n    ret;\n}\n",
+      "scale": {
+        "stresses": "P3: Text indexing `s[i]` is O(i), so a character scan of a 100 KB Text is quadratic",
+        "fix": "W-runtime P3 O(1) Text indexing (open)",
+        "timing": {
+          "platform": "darwin-arm64",
+          "build": "Release",
+          "reference_seconds": {
+            "2026-10-06-1": 0.45,
+            "2026-10-07-1": 0.46
+          },
+          "python_seconds": 0.08,
+          "rule": "timeout_seconds = max(20, ceil(10 x the slower reference time))"
+        },
+        "natural_program": "fn isVowel(c: Text) -> Bool {\n    ret c == \"a\" || c == \"e\" || c == \"i\" || c == \"o\" || c == \"u\";\n}\n\nfn main() -> Void {\n    let f: File;\n    let doc: Text = \"\";\n    fx {\n        assign(f, \"corpus.txt\");\n        reset(f);\n        loop {\n            if eof(f) {\n                break;\n            }\n            let line: Text;\n            readln(f, line);\n            doc = doc + line + \"\\n\";\n        }\n        close(f);\n    }\n    let letters: Int = 0;\n    let vowels: Int = 0;\n    let words: Int = 0;\n    let longest: Int = 0;\n    let run: Int = 0;\n    loop i in 0..string_len(doc) {\n        let c: Int = ord(doc[i]);\n        if c >= 97 && c <= 122 {\n            letters = letters + 1;\n            if isVowel(doc[i]) {\n                vowels = vowels + 1;\n            }\n            run = run + 1;\n        } else {\n            if run > 0 {\n                words = words + 1;\n                if run > longest {\n                    longest = run;\n                }\n            }\n            run = 0;\n        }\n    }\n    if run > 0 {\n        words = words + 1;\n        if run > longest {\n            longest = run;\n        }\n    }\n    fx {\n        println(\"letters = \", letters);\n        println(\"vowels = \", vowels);\n        println(\"words = \", words);\n        println(\"longest = \", longest);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": {
+            "class": "crash_hang",
+            "returncode": 124,
+            "seconds": 20.0
+          },
+          "2026-10-07-1": {
+            "class": "crash_hang",
+            "returncode": 124,
+            "seconds": 20.0
+          }
+        }
+      }
+    },
+    {
+      "id": "scale_word_count",
+      "title": "Word frequencies over 20,000 words",
+      "mechanisms": [
+        "scale",
+        "word_count",
+        "file",
+        "lookup"
+      ],
+      "prompt": "A text file named `words.txt` is in the working directory: 20000 lowercase words drawn from about 2000 distinct ones, ten per line, separated by single spaces. Write an Aether program that counts how often each distinct word occurs. Print `words = <total words>` and `distinct = <number of distinct words>`, then the 10 most frequent words as `<rank>. <word> <count>` (rank 1 to 10; higher counts first, ties broken by the word in alphabetical order). Print nothing else.",
+      "generated_files": {
+        "words.txt": {
+          "generator": "word_stream",
+          "seed": 3,
+          "words": 20000,
+          "keys": 2000,
+          "sha256": "8b0fd28e56b7aa11223535209a5d51cf810575e4aac58b2d721f72c9c07d00e5"
+        }
+      },
+      "expected_stdout": "words = 20000\ndistinct = 1688\n1. pemadi 45\n2. sesade 41\n3. mazosi 40\n4. golapa 39\n5. radoda 39\n6. busoru 38\n7. rokuko 38\n8. zalize 38\n9. zusesu 38\n10. bogego 37\n",
+      "timeout_seconds": 20,
+      "reference_solution": "// Open addressing over 4096 slots with a polynomial hash of the word: one\n// probe chain per word instead of a scan of every distinct word so far.\n@pure\nfn hashWord(w: Text, size: Int) -> Int {\n    let h: Int = 0;\n    loop i in 0..string_len(w) {\n        h = (h * 31 + ord(w[i])) % 1000003;\n    }\n    ret h % size;\n}\n\nfn main() -> Void {\n    let size: Int = 4096;\n    let keys: Text[] = [];\n    let counts: Int[] = [];\n    setlength(keys, size);\n    setlength(counts, size);\n    let total: Int = 0;\n    let distinct: Int = 0;\n    let f: File;\n    fx {\n        assign(f, \"words.txt\");\n        reset(f);\n        loop {\n            if eof(f) {\n                break;\n            }\n            let line: Text;\n            readln(f, line);\n            if string_len(line) == 0 {\n                continue;\n            }\n            let parts: Text[] = split(line, \" \");\n            loop w in parts {\n                total = total + 1;\n                let slot: Int = hashWord(w, size);\n                loop counts[slot] > 0 && keys[slot] != w {\n                    slot = (slot + 1) % size;\n                }\n                if counts[slot] == 0 {\n                    keys[slot] = w;\n                    distinct = distinct + 1;\n                }\n                counts[slot] = counts[slot] + 1;\n            }\n        }\n        close(f);\n    }\n    // Ten selection passes: the best (count desc, word asc) not yet taken.\n    let taken: Bool[] = [];\n    setlength(taken, size);\n    fx {\n        println(\"words = \", total);\n        println(\"distinct = \", distinct);\n        loop rank in 1..11 {\n            let best: Int = -1;\n            loop s in 0..size {\n                if counts[s] > 0 && !taken[s] {\n                    if best < 0 || counts[s] > counts[best] || (counts[s] == counts[best] && keys[s] < keys[best]) {\n                        best = s;\n                    }\n                }\n            }\n            taken[best] = true;\n            println(rank, \". \", keys[best], \" \", counts[best]);\n        }\n    }\n    ret;\n}\n",
+      "scale": {
+        "stresses": "no map type: the parallel-array lookup the guide teaches is a linear scan per word (20000 x ~1700 Text compares)",
+        "fix": "a Tally/map idiom or builtin (open); VM speed",
+        "timing": {
+          "platform": "darwin-arm64",
+          "build": "Release",
+          "reference_seconds": {
+            "2026-10-06-1": 0.29,
+            "2026-10-07-1": 0.24
+          },
+          "python_seconds": 0.07,
+          "rule": "timeout_seconds = max(20, ceil(10 x the slower reference time))"
+        },
+        "natural_program": "fn main() -> Void {\n    let keys: Text[] = [];\n    let counts: Int[] = [];\n    let total: Int = 0;\n    let f: File;\n    fx {\n        assign(f, \"words.txt\");\n        reset(f);\n        loop {\n            if eof(f) {\n                break;\n            }\n            let line: Text;\n            readln(f, line);\n            let parts: Text[] = split(line, \" \");\n            loop i in 0..length(parts) {\n                let w: Text = parts[i];\n                if string_len(w) == 0 {\n                    continue;\n                }\n                total = total + 1;\n                let found: Int = -1;\n                loop k in 0..length(keys) {\n                    if keys[k] == w {\n                        found = k;\n                        break;\n                    }\n                }\n                if found >= 0 {\n                    counts[found] = counts[found] + 1;\n                } else {\n                    keys = keys + [w];\n                    counts = counts + [1];\n                }\n            }\n        }\n        close(f);\n    }\n    fx {\n        println(\"words = \", total);\n        println(\"distinct = \", length(keys));\n    }\n    let used: Bool[] = [];\n    loop k in 0..length(keys) {\n        used = used + [false];\n    }\n    loop rank in 1..11 {\n        let best: Int = -1;\n        loop k in 0..length(keys) {\n            if !used[k] {\n                if best == -1 || counts[k] > counts[best] || (counts[k] == counts[best] && keys[k] < keys[best]) {\n                    best = k;\n                }\n            }\n        }\n        used[best] = true;\n        fx { println(rank, \". \", keys[best], \" \", counts[best]); }\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": {
+            "class": "pass",
+            "returncode": 0,
+            "seconds": 7.38
+          },
+          "2026-10-07-1": {
+            "class": "pass",
+            "returncode": 0,
+            "seconds": 6.95
+          }
+        }
+      }
+    },
+    {
+      "id": "scale_json_rollup",
+      "title": "Roll up a 5 MB JSON order file by region",
+      "mechanisms": [
+        "scale",
+        "toon_file",
+        "toon_iteration"
+      ],
+      "prompt": "A JSON file named `orders.json` (about 5 MB) is in the working directory, shaped `{\"orders\": [{\"id\": Int, \"region\": Text, \"sku\": Text, \"qty\": Int, \"cents\": Int}, ...]}` with 65000 orders. Regions are `central`, `east`, `north`, `south` and `west`. Write an Aether program that parses the file and, for each region in that alphabetical order, prints `<region>: orders=<count> qty=<sum of qty> revenue=<sum of qty * cents, as dollars with exactly two decimals>`. Then print `orders = <total count>` and `largest = <id of the order with the largest qty * cents; the lowest id on a tie>`. Close the document. Print nothing else.",
+      "generated_files": {
+        "orders.json": {
+          "generator": "orders_json",
+          "seed": 7,
+          "count": 65000,
+          "sha256": "af611e3e6f1a1ba48c60aaadc49dbe9af2c126e5cf8ddf5b55b7f7adf0a68890"
+        }
+      },
+      "expected_stdout": "central: orders=13054 qty=65532 revenue=32952542.22\neast: orders=12900 qty=64845 revenue=32569152.20\nnorth: orders=13115 qty=66173 revenue=33403470.26\nsouth: orders=12937 qty=64646 revenue=32536086.73\nwest: orders=12994 qty=64969 revenue=32769348.18\norders = 65000\nlargest = 4772\n",
+      "timeout_seconds": 627,
+      "reference_solution": "fn regionIndex(r: Text) -> Int {\n    if r == \"central\" {\n        ret 0;\n    }\n    if r == \"east\" {\n        ret 1;\n    }\n    if r == \"north\" {\n        ret 2;\n    }\n    if r == \"south\" {\n        ret 3;\n    }\n    if r == \"west\" {\n        ret 4;\n    }\n    ret -1;\n}\n\nfn dollars(cents: Int) -> Text {\n    let frac: Int = cents % 100;\n    let pad: Text = \"\";\n    if frac < 10 {\n        pad = \"0\";\n    }\n    ret int_to_text(cents div 100) + \".\" + pad + int_to_text(frac);\n}\n\n// The plain getters: every order carries every field, and the `_or` forms\n// cost about three times as much per call on the pinned engines.\nfn main() -> Void {\n    let names: Text[] = [\"central\", \"east\", \"north\", \"south\", \"west\"];\n    let counts: Int[] = [0, 0, 0, 0, 0];\n    let qtys: Int[] = [0, 0, 0, 0, 0];\n    let revenue: Int[] = [0, 0, 0, 0, 0];\n    let total: Int = 0;\n    let bestId: Int = -1;\n    let bestValue: Int = -1;\n    fx {\n        let doc: ToonDoc = toon_parse_file(\"orders.json\");\n        let root: ToonNode = toon_root(doc);\n        let orders: ToonNode = toon_key(root, \"orders\");\n        let n: Int = toon_len(orders);\n        loop i in 0..n {\n            let o: ToonNode = toon_at(orders, i);\n            let r: Int = regionIndex(toon_get_text(o, \"region\"));\n            let qty: Int = toon_get_int(o, \"qty\");\n            let value: Int = qty * toon_get_int(o, \"cents\");\n            let id: Int = toon_get_int(o, \"id\");\n            if r >= 0 {\n                counts[r] = counts[r] + 1;\n                qtys[r] = qtys[r] + qty;\n                revenue[r] = revenue[r] + value;\n            }\n            total = total + 1;\n            if value > bestValue || (value == bestValue && id < bestId) {\n                bestValue = value;\n                bestId = id;\n            }\n        }\n        loop k in 0..5 {\n            println(names[k], \": orders=\", counts[k], \" qty=\", qtys[k], \" revenue=\", dollars(revenue[k]));\n        }\n        println(\"orders = \", total);\n        println(\"largest = \", bestId);\n        toon_close(doc);\n    }\n    ret;\n}\n",
+      "scale": {
+        "stresses": "P4: toon_at(arr, i) walks the array from the start, so iterating 65000 orders is quadratic; there is no linear form today",
+        "fix": "W-runtime P4 TOON cursor (open)",
+        "timing": {
+          "platform": "darwin-arm64",
+          "build": "Release",
+          "reference_seconds": {
+            "2026-10-06-1": 46.46,
+            "2026-10-07-1": 62.68
+          },
+          "python_seconds": 0.13,
+          "rule": "timeout_seconds = max(20, ceil(10 x the slower reference time))"
+        },
+        "natural_program": "type RegionTotals {\n    name: Text = \"\";\n    orders: Int = 0;\n    qty: Int = 0;\n    cents: Int = 0;\n\n    fn add(q: Int, c: Int) -> Void {\n        self.orders = self.orders + 1;\n        self.qty = self.qty + q;\n        self.cents = self.cents + q * c;\n        ret;\n    }\n}\n\nfn main() -> Void {\n    if !has_toon() {\n        fx { println(\"structured data support unavailable\"); }\n        ret;\n    }\n    let regions: RegionTotals[] = [new RegionTotals { name: \"central\" }, new RegionTotals { name: \"east\" }, new RegionTotals { name: \"north\" }, new RegionTotals { name: \"south\" }, new RegionTotals { name: \"west\" }];\n    let total: Int = 0;\n    let bestId: Int = -1;\n    let bestValue: Int = -1;\n    fx {\n        let doc: ToonDoc = toon_parse_file(\"orders.json\");\n        let root: ToonNode = toon_root(doc);\n        let orders: ToonNode = toon_key(root, \"orders\");\n        loop i in 0..toon_len(orders) {\n            let o: ToonNode = toon_at(orders, i);\n            let region: Text = toon_get_text(o, \"region\");\n            let qty: Int = toon_get_int(o, \"qty\");\n            let cents: Int = toon_get_int(o, \"cents\");\n            let id: Int = toon_get_int(o, \"id\");\n            loop k in 0..length(regions) {\n                if regions[k].name == region {\n                    regions[k].add(qty, cents);\n                }\n            }\n            total = total + 1;\n            if qty * cents > bestValue {\n                bestValue = qty * cents;\n                bestId = id;\n            }\n        }\n        loop k in 0..length(regions) {\n            let r: RegionTotals = regions[k];\n            let dollars: Real = r.cents / 100.0;\n            println(r.name, \": orders=\", r.orders, \" qty=\", r.qty, \" revenue=\", dollars:0:2);\n        }\n        println(\"orders = \", total);\n        println(\"largest = \", bestId);\n        toon_close(doc);\n    }\n    ret;\n}\n",
+        "observed": {
+          "2026-10-06-1": {
+            "class": "pass",
+            "returncode": 0,
+            "seconds": 112.2
+          },
+          "2026-10-07-1": {
+            "class": "pass",
+            "returncode": 0,
+            "seconds": 132.51
+          }
+        }
+      }
+    }
+  ]
+}

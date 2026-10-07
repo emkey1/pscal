@@ -70,6 +70,12 @@ SANDBOX_PROBE = """fn main() -> Void {
 """
 
 
+# Suites whose references take minutes (the scale tier's 5 MB TOON rollup is
+# quadratic today): linted always, run only when named with --tasks or with
+# --include-slow, so the default lap stays a pre-commit-sized check.
+SLOW_MANIFESTS = frozenset({"tasks_scale.json"})
+
+
 def default_manifests() -> list[pathlib.Path]:
     return sorted(BENCH_DIR.glob("tasks*.json")) + [BENCH_DIR / "smoke_tasks.json"]
 
@@ -94,6 +100,9 @@ def lint_manifest(path: pathlib.Path) -> list[str]:
         if bad_allow:
             problems.append(f"{path.name}:{item.get('id')}: sandbox_allow may only name "
                             f"{sorted(ALLOWED_SANDBOX_ALLOW)}, not {bad_allow}")
+        for name, spec in (item.get("generated_files") or {}).items():
+            if not (isinstance(spec, dict) and spec.get("generator") and spec.get("sha256")):
+                problems.append(f"{path.name}:{item.get('id')}: generated file {name!r} needs generator and sha256")
         if "trap" in item:
             if not (item["trap"] or {}).get("natural_program"):
                 problems.append(f"{path.name}:{item.get('id')}: a trap needs trap.natural_program")
@@ -243,6 +252,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-python", action="store_true", help="skip the py_refs (independent oracle) lap")
     ap.add_argument("--traps", action="store_true",
                     help="also run every trap's natural program and report its class (informational)")
+    ap.add_argument("--include-slow", action="store_true",
+                    help=f"also run the slow suites' references ({', '.join(sorted(SLOW_MANIFESTS))})")
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--report-json", type=pathlib.Path)
     ap.add_argument("--quiet", action="store_true", help="print failures and the totals only")
@@ -252,11 +263,15 @@ def main(argv: list[str] | None = None) -> int:
     report: dict[str, Any] = {"manifests": [str(adb.display_path(m)) for m in manifests]}
     lint = [problem for m in manifests for problem in lint_manifest(m)]
     lint += lint_python_references(manifests)
+    if not args.tasks and not args.include_slow:
+        skipped = [m for m in manifests if m.name in SLOW_MANIFESTS]
+        manifests = [m for m in manifests if m.name not in SLOW_MANIFESTS]
+        report["skipped_slow_manifests"] = [m.name for m in skipped]
     report["lint_problems"] = lint
     for problem in lint:
         print(f"[LINT] {problem}")
     if args.lint_only:
-        print(f"lint: {len(manifests)} manifests, {len(lint)} problem(s)")
+        print(f"lint: {len(report['manifests'])} manifests, {len(lint)} problem(s)")
         if args.report_json:
             args.report_json.write_text(json.dumps(report, indent=2))
         return 1 if lint else 0
@@ -339,6 +354,8 @@ def main(argv: list[str] | None = None) -> int:
                 summary.append(f"python {report['python_references_passed']}/{report['python_references_total']}")
             summary.append(f"sandbox {'ok' if report['sandbox_probe']['ok'] else 'FAILED'}")
         summary.append(f"negatives {sum(n['ok'] for n in negatives)}/{len(negatives)}")
+        if report.get("skipped_slow_manifests"):
+            summary.append(f"skipped {', '.join(report['skipped_slow_manifests'])} (--include-slow)")
         print(f"\noracle: {', '.join(summary)} in {elapsed:.1f}s -- {failures} failure(s)")
     finally:
         shutil.rmtree(run_dir, ignore_errors=True)

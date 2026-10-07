@@ -29,6 +29,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import math
 import os
 import pathlib
 import subprocess
@@ -1207,9 +1208,9 @@ def test_sliding_window_expected_matches_a_python_reference():
     assert json.loads((BENCH_DIR / "tasks_frontier_algo.json").read_text())["version"] != "2026-08-10-1"
 
 
-def test_list_tasks_works_on_all_13_manifests():
+def test_list_tasks_works_on_all_14_manifests():
     manifests = sorted(BENCH_DIR.glob("*tasks*.json"))
-    assert len(manifests) == 13, [m.name for m in manifests]
+    assert len(manifests) == 14, [m.name for m in manifests]
     for manifest in manifests:
         proc = run_harness(["--tasks", str(manifest), "--list-tasks"])
         assert proc.returncode == 0 and proc.stdout.strip(), (manifest.name, proc.stderr)
@@ -1222,7 +1223,7 @@ def test_list_tasks_works_on_all_13_manifests():
 def test_oracle_lint_only_needs_no_binary():
     proc = run_harness(["--lint-only"], script=REPO_ROOT / "tools" / "aether_oracle_check.py")
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "13 manifests, 0 problem(s)" in proc.stdout
+    assert "14 manifests, 0 problem(s)" in proc.stdout
 
 
 def test_oracle_check_passes_on_the_real_binary_quickly():
@@ -1333,6 +1334,82 @@ def test_real_aether_trap_programs_match_their_recorded_classes():
     results = oracle_check.check_traps(TRAPS, args, version)
     drift = {r["id"]: (r["recorded"], r["class"]) for r in results if r["recorded"] != r["class"]}
     assert not drift, drift
+
+
+# --------------------------------------------------------------------------- #
+# W1-23: the performance/scale tier
+# --------------------------------------------------------------------------- #
+
+SCALE = BENCH_DIR / "tasks_scale.json"
+
+
+def test_scale_suite_shape_and_timeouts():
+    raw = json.loads(SCALE.read_text())
+    items = raw["tasks"]
+    assert len(items) == 8 and raw["version"]
+    for item in items:
+        assert item["id"].startswith("scale_") and item["reference_solution"], item["id"]
+        assert (BENCH_DIR / "py_refs" / f"{item['id']}.py").is_file(), item["id"]
+        scale = item["scale"]
+        assert scale["natural_program"] and scale["stresses"], item["id"]
+        ref = max(scale["timing"]["reference_seconds"].values())
+        assert item["timeout_seconds"] == max(20, math.ceil(10 * ref)), (item["id"], ref)
+    # The instrument has to see the eager-copy / quadratic paths today.
+    frozen = [i["scale"]["observed"].get("2026-10-06-1", {}).get("returncode") for i in items]
+    assert frozen.count(124) >= 3, frozen
+    sizes = {name: len(text) for t in adb.load_tasks(SCALE) for name, text in (t.files or {}).items()}
+    assert sizes["orders.json"] > 4_500_000 and sizes["corpus.txt"] >= 100_000, sizes
+
+
+def test_generated_files_are_deterministic_and_sha_checked():
+    sys.path.insert(0, str(BENCH_DIR))
+    import scale_inputs
+
+    spec = {"generator": "word_stream", "seed": 3, "words": 50, "keys": 20}
+    assert scale_inputs.generate(spec) == scale_inputs.word_stream(3, 50, 20)
+    digest = scale_inputs.sha256_text(scale_inputs.generate(spec))
+    with workdir() as tmp:
+        good = simple_task("g", expected="x\n", generated_files={"w.txt": {**spec, "sha256": digest}})
+        bad = simple_task("b", expected="x\n", generated_files={"w.txt": {**spec, "sha256": "0" * 64}})
+        tasks = adb.load_tasks(write_json(tmp / "tasks_ok.json", {"version": "t", "tasks": [good]}))
+        assert tasks[0].files["w.txt"] == scale_inputs.generate(spec)
+        try:
+            adb.load_tasks(write_json(tmp / "tasks_bad.json", {"version": "t", "tasks": [bad]}))
+        except SystemExit as exc:
+            assert "sha256" in str(exc)
+        else:
+            raise AssertionError("a generated file with the wrong sha256 must not load")
+        import aether_oracle_check as oracle_check
+
+        unpinned = simple_task("u", expected="x\n", generated_files={"w.txt": spec})
+        problems = oracle_check.lint_manifest(write_json(tmp / "tasks_u.json", {"version": "t", "tasks": [unpinned]}))
+        assert any("sha256" in p for p in problems), problems
+
+
+def test_scale_python_references_match():
+    import aether_oracle_check as oracle_check
+
+    results = oracle_check.check_python_references(adb.load_tasks(SCALE))
+    assert len(results) == 8 and all(r["ok"] for r in results.values()), \
+        {k: v["detail"] for k, v in results.items() if not v["ok"]}
+
+
+def test_oracle_default_lap_skips_the_slow_scale_references():
+    import aether_oracle_check as oracle_check
+
+    assert "tasks_scale.json" in oracle_check.SLOW_MANIFESTS
+    assert SCALE in oracle_check.default_manifests()
+
+
+def test_replay_task_keeps_sandbox_allow_and_generated_files():
+    sys.path.insert(0, str(REPO_ROOT / "tools"))
+    import replay_bench
+
+    raw = next(t for t in json.loads(TRAPS.read_text())["tasks"] if t["id"] == "trap_exit_status")
+    assert replay_bench.to_task(raw).sandbox_allow == ("proc",)
+    raw = next(t for t in json.loads(SCALE.read_text())["tasks"] if t["id"] == "scale_text_scan")
+    assert len(replay_bench.to_task(raw).files["corpus.txt"]) >= 100_000
+    assert "sandbox_allow" in replay_bench.GRADING_FIELDS and "generated_files" in replay_bench.GRADING_FIELDS
 
 
 # --------------------------------------------------------------------------- #

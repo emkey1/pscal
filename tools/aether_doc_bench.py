@@ -497,6 +497,29 @@ def summarize_final_usage(
     }
 
 
+def task_files(item: dict[str, Any], where: str = "") -> dict[str, str] | None:
+    """A manifest entry's working-directory files: its literal `files` plus
+    each `generated_files` entry (W1-23), produced by
+    Tests/aether_doc_bench/scale_inputs.py and checked against its sha256 so a
+    generator change cannot silently move the expected output."""
+    files = dict(item.get("files") or {})
+    generated = item.get("generated_files") or {}
+    if generated:
+        bench_dir = str(REPO_ROOT / "Tests" / "aether_doc_bench")
+        if bench_dir not in sys.path:
+            sys.path.insert(0, bench_dir)
+        import scale_inputs
+
+        for name, spec in generated.items():
+            text = scale_inputs.generate(spec)
+            digest = scale_inputs.sha256_text(text)
+            if spec.get("sha256") and spec["sha256"] != digest:
+                raise SystemExit(f"{where}: task {item.get('id')!r}: generated file {name!r} has sha256 "
+                                 f"{digest}, the manifest records {spec['sha256']}")
+            files[name] = text
+    return files or None
+
+
 def load_tasks(path: pathlib.Path) -> list[Task]:
     raw = json.loads(read_text(path))
     suite_hide = bool(raw.get("hide_expected_stdout", False)) if isinstance(raw, dict) else False
@@ -507,7 +530,8 @@ def load_tasks(path: pathlib.Path) -> list[Task]:
             # rejected), checked by tools/aether_oracle_check.py; not tasks.
             continue
         stdin = item.get("stdin")
-        if isinstance(stdin, dict) and stdin.get("file") not in (item.get("files") or {}):
+        files = task_files(item, str(path))
+        if isinstance(stdin, dict) and stdin.get("file") not in (files or {}):
             raise SystemExit(f"{path}: task {item.get('id')!r}: stdin file {stdin.get('file')!r} is not in its files")
         tasks.append(
             Task(
@@ -517,7 +541,7 @@ def load_tasks(path: pathlib.Path) -> list[Task]:
                 expected_stdout=item["expected_stdout"],
                 timeout_seconds=int(item.get("timeout_seconds", 20)),
                 cwd=item.get("cwd"),
-                files=item.get("files"),
+                files=files,
                 reference_solution=item.get("reference_solution"),
                 expected_returncode=int(item.get("expected_returncode", 0)),
                 stdin=stdin,
@@ -4823,7 +4847,8 @@ def prompt_template_fingerprint() -> dict[str, Any]:
     }
 
 
-HARNESS_SOURCE_FILES = ("tools/aether_doc_bench.py", "tools/fleet_env.py", "tools/aether_oracle_check.py")
+HARNESS_SOURCE_FILES = ("tools/aether_doc_bench.py", "tools/fleet_env.py", "tools/aether_oracle_check.py",
+                        "Tests/aether_doc_bench/scale_inputs.py")
 
 
 def harness_fingerprint() -> dict[str, Any]:

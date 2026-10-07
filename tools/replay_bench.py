@@ -51,7 +51,8 @@ ROOT = adb.REPO_ROOT
 DEFAULT_RESULTS = ["Tests/aether_doc_bench/results/**/*.json"]
 DEFAULT_EXCLUDES = ["**/rejected/**"]
 DEFAULT_WAIVERS = ROOT / "Tests" / "aether_doc_bench" / "replay_waivers.json"
-GRADING_FIELDS = ("expected_stdout", "files", "cwd", "stdin", "expected_returncode", "timeout_seconds")
+GRADING_FIELDS = ("expected_stdout", "files", "generated_files", "cwd", "stdin", "expected_returncode",
+                  "timeout_seconds", "sandbox_allow")
 
 
 def sha256_text(text: str) -> str:
@@ -134,8 +135,9 @@ def to_task(raw: dict[str, Any]) -> adb.Task:
     return adb.Task(
         task_id=raw["id"], title=raw.get("title", ""), prompt=raw.get("prompt", ""),
         expected_stdout=raw["expected_stdout"], timeout_seconds=int(raw.get("timeout_seconds", 20)),
-        cwd=raw.get("cwd"), files=raw.get("files"), expected_returncode=int(raw.get("expected_returncode", 0)),
-        stdin=raw.get("stdin"),
+        cwd=raw.get("cwd"), files=adb.task_files(raw, "replay"),
+        expected_returncode=int(raw.get("expected_returncode", 0)),
+        stdin=raw.get("stdin"), sandbox_allow=tuple(str(x) for x in (raw.get("sandbox_allow") or ())),
     )
 
 

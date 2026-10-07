@@ -372,6 +372,29 @@ Each task currently defines:
 Entries with `should_fail: true` are negative-tier compiler invariants (a fixed
 `program` plus `expected_error_code`), not tasks; the harness skips them.
 
+- optional `generated_files`: `{NAME: {"generator": ..., args..., "sha256": ...}}`,
+  produced by `scale_inputs.py` when the manifest loads and checked against the
+  recorded sha256 (a generator change cannot silently move expected output).
+  For inputs too large to check in.
+
+### The scale tier (`tasks_scale.json`, board S0)
+
+Eight workloads the correctness suites never reach (their largest input was
+467 bytes): 10^4 binary searches over 10^5 Ints, memoised Fibonacci, DFS on
+10^3 nodes, a 100 KB Text scan, a 5 MB TOON rollup, 10^7 Int steps, a
+20,000-word count and a 5000-Int sort. Each task's `timeout_seconds` is
+`max(20, ceil(10 x its reference's time))`, recorded in `scale.timing` with
+the Python reference's time for comparison; the references are the fast safe
+form, and `scale.natural_program` is the plausible program each task
+stresses (an array-parameter helper, a memo `Int[]` parameter, `s[i]` over the
+whole text, a parallel-array lookup), with its class and time per binary in
+`scale.observed`. The shipped times come from a loaded development machine:
+before S0, re-time on the board host with `python3 tools/aether_scale_retime.py
+--aether-bin <bin> --write` (it bumps the suite version when a timeout
+moves). Report S0 apart from the correctness boards. The oracle lap skips
+this suite's references unless `--include-slow` or `--tasks` names it (the
+TOON rollup takes minutes until P4 is fixed).
+
 ### Independent Python references (`py_refs/`)
 
 `py_refs/<task_id>.py` is a Python program written from the task prompt alone
