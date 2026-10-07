@@ -52,6 +52,17 @@ python3 tools/aether_specialization_prepare_assets.py \
   --output-dir /tmp/aether-specialization-assets
 ```
 
+Decontamination drops every record whose expected stdout equals a board
+task's: by default all board manifests (`tasks_v2_pos`, `tasks_hard_v2`,
+`tasks_hard_nontoon`, `tasks_cs`, the three `tasks_frontier*`, `tasks.json`,
+and `tasks_traps`/`tasks_scale` once they exist; `--benchmark-tasks` narrows
+it). The checked list, the dropped ids and an advisory 5-gram Jaccard report
+(board reference solutions against the training sources, pairs >= 0.5) go
+into `aether_training_mix.json`. `tools/check_guide_contamination.py
+--docs-dir <aether>/docs` runs the guides' blocks sandboxed against the same
+boards and greps the guides (and, with `--reference-corpus`, an exported
+reference corpus) for board module names, exports and reference lines.
+
 That command exports:
 
 - a raw-code corpus manifest

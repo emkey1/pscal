@@ -8,7 +8,9 @@ else:
 - which goldens can never be training data (the golden backstop: heap
   pointers, raw array dumps, host paths, environment dumps);
 - the oracle vocabulary (`python`, `reviewed`, `none`); an item whose golden
-  has no oracle is never canonical.
+  has no oracle is never canonical;
+- the board manifests that decontamination and the guide-contamination check
+  test against.
 
 This module never runs a corpus program; the only process it starts is
 `aether --version`, to stamp what a dataset was verified against.
@@ -17,12 +19,14 @@ This module never runs a corpus program; the only process it starts is
 from __future__ import annotations
 
 import hashlib
+import json
 import pathlib
 import re
 import subprocess
 from typing import Any, Iterable
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+DEFAULT_BENCH_DIR = REPO_ROOT / "Tests" / "aether_doc_bench"
 
 # --------------------------------------------------------------------------
 # Golden backstop
@@ -128,6 +132,41 @@ def oracle_problem(metadata: dict[str, Any]) -> str | None:
         # item can become canonical only once an oracle is recorded for it.
         return "oracle none requires canonical: false"
     return None
+
+
+# --------------------------------------------------------------------------
+# Board manifests (decontamination)
+# --------------------------------------------------------------------------
+
+# Every manifest a published board scores, plus tasks.json (still the
+# harness default). tasks_traps and tasks_scale join automatically once they
+# exist.
+BOARD_MANIFESTS = (
+    "tasks_v2_pos.json",
+    "tasks_hard_v2.json",
+    "tasks_hard_nontoon.json",
+    "tasks_cs.json",
+    "tasks_frontier.json",
+    "tasks_frontier_algo.json",
+    "tasks_frontier_spec.json",
+    "tasks.json",
+)
+FUTURE_BOARD_MANIFESTS = ("tasks_traps.json", "tasks_scale.json")
+
+
+def default_board_manifests(bench_dir: pathlib.Path = DEFAULT_BENCH_DIR) -> list[pathlib.Path]:
+    missing = [name for name in BOARD_MANIFESTS if not (bench_dir / name).is_file()]
+    if missing:
+        raise SystemExit(f"board manifest(s) missing from {display_path(bench_dir)}: {', '.join(missing)}")
+    paths = [bench_dir / name for name in BOARD_MANIFESTS]
+    paths += [bench_dir / name for name in FUTURE_BOARD_MANIFESTS if (bench_dir / name).is_file()]
+    return paths
+
+
+def load_tasks(path: pathlib.Path) -> list[dict[str, Any]]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    tasks = payload.get("tasks") if isinstance(payload, dict) else payload
+    return [task for task in tasks or [] if isinstance(task, dict)]
 
 
 # --------------------------------------------------------------------------

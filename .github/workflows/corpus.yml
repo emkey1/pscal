@@ -1,0 +1,42 @@
+name: Corpus
+
+# Fast, binary-free checks of the Aether fine-tuning corpus. The gates that
+# run programs (exact stdout, drill polarity, recapture --check, the guide
+# blocks' stdout) need an aether binary and run in
+# tools/aether_specialization_prepare_assets.py on the rig; here they are
+# covered by offline tests against a mock compiler.
+
+on:
+  push:
+    paths:
+      - "Tests/aether_specialization/**"
+      - "Tests/aether_doc_bench/tasks*.json"
+      - "tools/aether_specialization_*.py"
+      - "tools/recapture_expected.py"
+      - "tools/check_guide_contamination.py"
+      - "components/aether"
+      - ".github/workflows/corpus.yml"
+  pull_request:
+    paths:
+      - "Tests/aether_specialization/**"
+      - "Tests/aether_doc_bench/tasks*.json"
+      - "tools/aether_specialization_*.py"
+      - "tools/recapture_expected.py"
+      - "tools/check_guide_contamination.py"
+      - "components/aether"
+      - ".github/workflows/corpus.yml"
+
+jobs:
+  corpus-static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch the guides (components/aether only, not recursive)
+        run: git submodule update --init --depth 1 components/aether
+      - name: Corpus layout, oracle field and host data in goldens
+        run: python3 tools/aether_specialization_validate_corpus.py --strict > /dev/null
+      - name: Gate logic against a mock compiler
+        run: python3 Tests/aether_specialization/test_corpus_gates_offline.py
+      - name: Guide contamination (report mode until guide pass 1 renames land)
+        run: python3 tools/check_guide_contamination.py --docs-dir components/aether/docs

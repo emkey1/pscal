@@ -594,6 +594,59 @@ def drop_benchmark_overlap(
     return kept, dropped
 
 
+_TOKEN_RE = re.compile(r'"(?:\\.|[^"\\\n])*"|[A-Za-z_][A-Za-z0-9_]*|\d+(?:\.\d+)?|\S')
+SIMILARITY_SHINGLE = 5
+SIMILARITY_THRESHOLD = 0.5
+
+
+def source_shingles(source: str, size: int = SIMILARITY_SHINGLE) -> set[tuple[str, ...]]:
+    """Token 5-grams of an Aether source, comments dropped."""
+    text = "\n".join(line.split("//", 1)[0] for line in source.splitlines())
+    tokens = _TOKEN_RE.findall(text)
+    return {tuple(tokens[i:i + size]) for i in range(len(tokens) - size + 1)}
+
+
+def reference_similarity(
+    manifests: list[pathlib.Path], records: list[dict[str, Any]], threshold: float = SIMILARITY_THRESHOLD
+) -> dict[str, Any]:
+    """Advisory: 5-gram Jaccard of each board reference_solution against every
+    record's assistant source. The corpus teaches the same idioms the tasks
+    test, so a high score is a prompt to look, never a failure."""
+    sources = []
+    for record in records:
+        shingles = source_shingles(record["messages"][-1]["content"])
+        if shingles:
+            sources.append((record["id"], shingles))
+    pairs = []
+    tasks_checked = 0
+    for manifest in manifests:
+        for task in policy.load_tasks(manifest):
+            reference = task.get("reference_solution")
+            if not isinstance(reference, str) or not reference.strip():
+                continue
+            ref = source_shingles(reference)
+            if not ref:
+                continue
+            tasks_checked += 1
+            for record_id, shingles in sources:
+                union = len(ref | shingles)
+                score = len(ref & shingles) / union if union else 0.0
+                if score >= threshold:
+                    pairs.append({
+                        "task": f"{manifest.stem}:{task.get('id')}",
+                        "record": record_id,
+                        "jaccard": round(score, 3),
+                    })
+    pairs.sort(key=lambda pair: -pair["jaccard"])
+    return {
+        "shingle": SIMILARITY_SHINGLE,
+        "threshold": threshold,
+        "tasks_with_reference": tasks_checked,
+        "records": len(sources),
+        "pairs_over_threshold": pairs,
+    }
+
+
 def verification_failures(records: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
     """(exit-code failures, exact-stdout mismatches) among built records."""
     rc_failures: list[str] = []
@@ -715,6 +768,25 @@ def main() -> int:
             f"repair={len(dropped_repair)} ids={sorted(dropped_instruction + dropped_repair)}"
         )
 
+    remaining_overlap = sorted(
+        r["id"] for r in instruction_records + repair_records
+        if isinstance(r.get("expected_stdout"), str) and r["expected_stdout"] in exclude_stdout
+    )
+    similarity = reference_similarity(args.exclude_benchmark_tasks, instruction_records + repair_records)
+    if args.exclude_benchmark_tasks:
+        print(
+            f"checked_benchmark_manifests={len(args.exclude_benchmark_tasks)} "
+            f"({', '.join(path.name for path in args.exclude_benchmark_tasks)}) "
+            f"remaining_overlap={len(remaining_overlap)}"
+        )
+        print(
+            f"reference_similarity (advisory) tasks={similarity['tasks_with_reference']} "
+            f"records={similarity['records']} pairs_jaccard>={similarity['threshold']}="
+            f"{len(similarity['pairs_over_threshold'])}"
+        )
+        for pair in similarity["pairs_over_threshold"][:10]:
+            print(f"  {pair['jaccard']:.3f} {pair['task']} ~ {pair['record']}")
+
     selection = corpus_selection_summary(corpus_payload)
     rc_instruction, mismatch_instruction = verification_failures(instruction_records)
     rc_repair, mismatch_repair = verification_failures(repair_records)
@@ -752,7 +824,9 @@ def main() -> int:
         "benchmark_overlap": {
             "manifests": [policy.display_path(path) for path in args.exclude_benchmark_tasks],
             "dropped": sorted(dropped_instruction + dropped_repair),
+            "remaining": remaining_overlap,
         },
+        "reference_similarity": similarity,
         "records": {
             "instruction": len(instruction_records),
             "corpus_instruction": sum(1 for r in instruction_records if r["kind"] == "corpus_instruction_sft"),

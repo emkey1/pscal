@@ -16,11 +16,15 @@ import pathlib
 import subprocess
 import sys
 
+_SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+import aether_specialization_corpus_policy as policy  # noqa: E402
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_AETHER_BIN = REPO_ROOT / "build" / "bin" / "aether"
 DEFAULT_INSTRUCTION_MANIFEST = REPO_ROOT / "Tests" / "aether_specialization" / "seed_instruction_pairs.json"
 DEFAULT_REPAIR_MANIFEST = REPO_ROOT / "Tests" / "aether_specialization" / "seed_repair_pairs.json"
-DEFAULT_BENCHMARK_TASKS = REPO_ROOT / "Tests" / "aether_doc_bench" / "tasks.json"
 DEFAULT_CORPUS_MANIFEST = REPO_ROOT / "Tests" / "aether_specialization" / "corpus_candidates_manifest.json"
 TOOLS_DIR = REPO_ROOT / "tools"
 
@@ -35,10 +39,12 @@ def main() -> int:
     parser.add_argument("--aether-bin", type=pathlib.Path, default=DEFAULT_AETHER_BIN)
     parser.add_argument("--instruction-manifest", type=pathlib.Path, default=DEFAULT_INSTRUCTION_MANIFEST)
     parser.add_argument("--repair-manifest", type=pathlib.Path, default=DEFAULT_REPAIR_MANIFEST)
-    parser.add_argument("--benchmark-tasks", type=pathlib.Path, default=DEFAULT_BENCHMARK_TASKS,
-                        help="benchmark task manifest used to de-contaminate training data")
+    parser.add_argument("--benchmark-tasks", type=pathlib.Path, action="append", default=None,
+                        help="benchmark task manifest whose expected stdouts are dropped from training "
+                        "(repeatable). Default: every board manifest (" + ", ".join(policy.BOARD_MANIFESTS)
+                        + ", plus " + " and ".join(policy.FUTURE_BOARD_MANIFESTS) + " once they exist).")
     parser.add_argument("--include-benchmark-overlap", action="store_true", default=False,
-                        help="train on records that reproduce benchmark outputs (contaminates tasks.json as a metric)")
+                        help="train on records that reproduce benchmark outputs (contaminates the boards as a metric)")
     parser.add_argument("--corpus-manifest", type=pathlib.Path, default=DEFAULT_CORPUS_MANIFEST,
                         help="corpus manifest passed through to build_dataset (selects which corpus "
                         "candidates are promoted to instruction pairs).")
@@ -57,6 +63,12 @@ def main() -> int:
 
     if not args.aether_bin.exists():
         raise SystemExit(f"missing aether binary: {args.aether_bin}")
+    benchmark_tasks = args.benchmark_tasks or policy.default_board_manifests()
+    checked_manifests = [] if args.include_benchmark_overlap else benchmark_tasks
+    print(
+        f"decontamination: {len(checked_manifests)} board manifest(s): "
+        + (", ".join(policy.display_path(path) for path in checked_manifests) or "none (--include-benchmark-overlap)")
+    )
 
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -136,8 +148,8 @@ def main() -> int:
         "--report-json",
         str(build_report_json),
     ]
-    if not args.include_benchmark_overlap:
-        build_dataset_cmd += ["--exclude-benchmark-tasks", str(args.benchmark_tasks)]
+    for path in checked_manifests:
+        build_dataset_cmd += ["--exclude-benchmark-tasks", str(path)]
     run(build_dataset_cmd)
 
     def count_records(path: pathlib.Path) -> int:
@@ -174,6 +186,10 @@ def main() -> int:
                 "repair_records": repair_records,
                 "corpus_selection": build_report["corpus_selection"],
                 "benchmark_overlap": build_report["benchmark_overlap"],
+                "reference_similarity": {
+                    key: build_report["reference_similarity"][key]
+                    for key in ("shingle", "threshold", "tasks_with_reference", "records")
+                } | {"pairs_over_threshold": build_report["reference_similarity"]["pairs_over_threshold"][:25]},
                 "preflight": preflight,
                 "gates": {
                     "exact_stdout_mismatches": sum(
