@@ -343,6 +343,21 @@ Each task currently defines:
 - optional `timeout_seconds`
 - optional `cwd`
 - optional `files`
+- optional `reference_solution` (checked by `tools/aether_oracle_check.py`)
+- optional `expected_returncode` (default 0). A case is exact only when the
+  exit status AND stdout match. Note that `halt` is a proc-class effect, so a
+  task that needs it must run with `--sandbox-deny net`, not the default
+  `net,proc`.
+- optional `stdin`: a string, or `{"file": NAME}` naming one of `files`, fed to
+  the program; without it the program reads EOF.
+- optional `hide_expected_stdout` (also settable for the whole suite at the
+  top level of the manifest). The first-attempt prompt then omits the
+  `Expected stdout` block, so the task prompt must specify the output format
+  completely; repair rounds still show it (D37a). Only trap suites use it, so
+  every existing suite keeps its prompts byte for byte.
+
+Entries with `should_fail: true` are negative-tier compiler invariants (a fixed
+`program` plus `expected_error_code`), not tasks; the harness skips them.
 
 Keep tasks small, deterministic, and exact-output based.
 

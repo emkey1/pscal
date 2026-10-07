@@ -98,6 +98,15 @@ class Task:
     cwd: str | None = None
     files: dict[str, str] | None = None
     reference_solution: str | None = None
+    # W1-21. exact_match means returncode == expected_returncode AND stdout ==
+    # expected_stdout. stdin is a literal string or {"file": NAME} naming one
+    # of `files`. hide_expected_stdout (task- or suite-level; D37a: trap suites
+    # only) leaves the Expected stdout block out of the FIRST-attempt prompt,
+    # so the task prompt must specify the format completely; repair rounds
+    # still show it.
+    expected_returncode: int = 0
+    stdin: Any = None
+    hide_expected_stdout: bool = False
 
 
 @dataclass
@@ -483,8 +492,16 @@ def summarize_final_usage(
 
 def load_tasks(path: pathlib.Path) -> list[Task]:
     raw = json.loads(read_text(path))
+    suite_hide = bool(raw.get("hide_expected_stdout", False)) if isinstance(raw, dict) else False
     tasks: list[Task] = []
     for item in raw["tasks"]:
+        if item.get("should_fail"):
+            # Negative-tier compiler invariants (a fixed program that must be
+            # rejected), checked by tools/aether_oracle_check.py; not tasks.
+            continue
+        stdin = item.get("stdin")
+        if isinstance(stdin, dict) and stdin.get("file") not in (item.get("files") or {}):
+            raise SystemExit(f"{path}: task {item.get('id')!r}: stdin file {stdin.get('file')!r} is not in its files")
         tasks.append(
             Task(
                 task_id=item["id"],
@@ -495,9 +512,27 @@ def load_tasks(path: pathlib.Path) -> list[Task]:
                 cwd=item.get("cwd"),
                 files=item.get("files"),
                 reference_solution=item.get("reference_solution"),
+                expected_returncode=int(item.get("expected_returncode", 0)),
+                stdin=stdin,
+                hide_expected_stdout=bool(item.get("hide_expected_stdout", suite_hide)),
             )
         )
     return tasks
+
+
+def task_stdin_text(task: Task) -> str | None:
+    """The text a task feeds the program on stdin, or None (the program then
+    reads EOF)."""
+    stdin = getattr(task, "stdin", None)
+    if stdin is None:
+        return None
+    if isinstance(stdin, dict):
+        return (task.files or {})[stdin["file"]]
+    return str(stdin)
+
+
+def is_exact(task: Task, returncode: int, stdout: str) -> bool:
+    return returncode == getattr(task, "expected_returncode", 0) and stdout == task.expected_stdout
 
 
 def _expand_fleet_refs(value: Any) -> Any:
@@ -853,6 +888,61 @@ def sanitize_code(raw: str) -> str:
 
 
 def build_prompt(doc_name: str, doc_text: str, task: Task) -> str:
+    """The first-attempt prompt. Byte-identical to every earlier board for a
+    task with no W1-21 flags; a hidden or non-zero-exit task is adapted."""
+    return adapt_prompt_for_task(_build_prompt_plain(doc_name, doc_text, task), task, "Aether source:", hide=True)
+
+
+def build_python_prompt(task: Task) -> str:
+    return adapt_prompt_for_task(_build_python_prompt_plain(task), task, "Python source:", hide=True)
+
+
+def build_rust_prompt(task: Task) -> str:
+    return adapt_prompt_for_task(_build_rust_prompt_plain(task), task, "Rust source:", hide=True)
+
+
+def adapt_prompt_for_task(prompt: str, task: Task, final_label: str, hide: bool) -> str:
+    """Apply a task's W1-21 flags to a rendered prompt.
+
+    hide=True (first attempts only, D37a) drops the Expected stdout block when
+    the task asks for it, and the requirement points at the task's own format
+    instead. A non-zero expected_returncode adds an Expected exit status block
+    and requirement (shown in repair rounds too). A task with neither flag is
+    returned unchanged, so every existing suite keeps today's prompts."""
+    hidden = hide and getattr(task, "hide_expected_stdout", False)
+    status = int(getattr(task, "expected_returncode", 0) or 0)
+    if not hidden and not status:
+        return prompt
+    start = prompt.rfind("Expected stdout:\n")
+    label_at = prompt.rfind(final_label)
+    if start == -1 or label_at == -1 or label_at < start:
+        return prompt
+    line_start = prompt.rfind("\n", 0, label_at) + 1
+    block_start = prompt.rfind("\n", 0, start) + 1
+    indent = prompt[line_start:label_at]
+    expected_block = prompt[block_start:line_start]
+    replacement = "" if hidden else expected_block
+    if status:
+        replacement += f"{indent}Expected exit status:\n{indent}{status}\n\n"
+    prompt = prompt[:block_start] + replacement + prompt[line_start:]
+    if hidden:
+        prompt = prompt.replace(
+            "- The program must print exactly the expected output.",
+            "- The program must print exactly the output the task specifies, in exactly that format.",
+        )
+    if status:
+        prompt = prompt.replace(
+            "- The program must print exactly the expected output.",
+            f"- The program must print exactly the expected output and exit with status {status}.",
+        ).replace(
+            "- The program must print exactly the output the task specifies, in exactly that format.",
+            "- The program must print exactly the output the task specifies, in exactly that format, "
+            f"and exit with status {status}.",
+        )
+    return prompt
+
+
+def _build_prompt_plain(doc_name: str, doc_text: str, task: Task) -> str:
     return textwrap.dedent(
         f"""\
         You are writing Aether code.
@@ -883,7 +973,7 @@ def build_prompt(doc_name: str, doc_text: str, task: Task) -> str:
     )
 
 
-def build_python_prompt(task: Task) -> str:
+def _build_python_prompt_plain(task: Task) -> str:
     return textwrap.dedent(
         f"""\
         You are writing Python code.
@@ -912,7 +1002,7 @@ def build_python_prompt(task: Task) -> str:
     )
 
 
-def build_rust_prompt(task: Task) -> str:
+def _build_rust_prompt_plain(task: Task) -> str:
     return textwrap.dedent(
         f"""\
         You are writing Rust code.
@@ -945,8 +1035,9 @@ def build_rust_prompt(task: Task) -> str:
 def build_batch_prompt(doc_name: str, doc_text: str, tasks: list[Task]) -> str:
     task_sections: list[str] = []
     for task in tasks:
-        task_sections.append(
-            textwrap.dedent(
+        # Indentation kept exactly as it always was: when dedent finds no
+        # common prefix (multi-line content), it shows up in the prompt.
+        section = textwrap.dedent(
                 f"""\
                 Task ID: {task.task_id}
                 Task Title: {task.title}
@@ -957,7 +1048,11 @@ def build_batch_prompt(doc_name: str, doc_text: str, tasks: list[Task]) -> str:
                 {task.expected_stdout}
                 """
             ).strip()
-        )
+        if getattr(task, "hide_expected_stdout", False):
+            section = section[: section.rfind("Expected stdout:")].rstrip()
+        if getattr(task, "expected_returncode", 0):
+            section += f"\n\nExpected exit status:\n{task.expected_returncode}"
+        task_sections.append(section)
 
     tasks_blob = "\n\n--- NEXT TASK ---\n\n".join(task_sections)
     return textwrap.dedent(
@@ -992,7 +1087,13 @@ def build_batch_prompt(doc_name: str, doc_text: str, tasks: list[Task]) -> str:
     )
 
 
-def build_repair_prompt(
+def build_repair_prompt(**kwargs: Any) -> str:
+    """Repair rounds always show the expected stdout (D37a option b); a
+    non-zero expected exit status is added."""
+    return adapt_prompt_for_task(_build_repair_prompt_plain(**kwargs), kwargs["task"], "Corrected Aether source:", hide=False)
+
+
+def _build_repair_prompt_plain(
     doc_name: str,
     doc_text: str,
     task: Task,
@@ -1048,7 +1149,13 @@ def build_repair_prompt(
     )
 
 
-def build_python_repair_prompt(
+def build_python_repair_prompt(**kwargs: Any) -> str:
+    """Repair rounds always show the expected stdout (D37a option b); a
+    non-zero expected exit status is added."""
+    return adapt_prompt_for_task(_build_python_repair_prompt_plain(**kwargs), kwargs["task"], "Corrected Python source:", hide=False)
+
+
+def _build_python_repair_prompt_plain(
     task: Task,
     previous_source: str,
     attempt_number: int,
@@ -1099,7 +1206,13 @@ def build_python_repair_prompt(
     )
 
 
-def build_rust_repair_prompt(
+def build_rust_repair_prompt(**kwargs: Any) -> str:
+    """Repair rounds always show the expected stdout (D37a option b); a
+    non-zero expected exit status is added."""
+    return adapt_prompt_for_task(_build_rust_repair_prompt_plain(**kwargs), kwargs["task"], "Corrected Rust source:", hide=False)
+
+
+def _build_rust_repair_prompt_plain(
     task: Task,
     previous_source: str,
     attempt_number: int,
@@ -2413,7 +2526,11 @@ TIMEOUT_RETURNCODE = 124
 # random per case, so leaving it in kept identical failures from clustering,
 # showed the model a meaningless path, and leaked the account's temp dir into
 # reports.
-_RUN_DIR_RE = re.compile(r"(?:/[^\s:'\"()\[\]]*?)?/(?:aether|python|rust)-doc-bench-[A-Za-z0-9_]+/")
+# The VM's runtime errors print the path without its leading "/", hence the
+# match from any token start rather than from a "/".
+_RUN_DIR_RE = re.compile(
+    r"(?<![^\s:'\"(\[=])[^\s:'\"()\[\]]*?(?:aether|python|rust)-doc-bench-[A-Za-z0-9_]+/"
+)
 
 
 def strip_run_dirs(text: Any) -> Any:
@@ -2552,19 +2669,20 @@ def compile_and_run(task: Task, source_code: str, args: argparse.Namespace) -> d
             "--no-cache",
             program_path.name,
         ]
-        main_run = run_captured(cmd, cwd=work_dir, timeout=task.timeout_seconds)
+        main_run = run_captured(cmd, cwd=work_dir, timeout=task.timeout_seconds, input_text=task_stdin_text(task))
 
         stdout = main_run["stdout"]
         stderr = strip_run_dirs(main_run["stderr"])
-        exact_match = main_run["returncode"] == 0 and stdout == task.expected_stdout
+        exact_match = is_exact(task, main_run["returncode"], stdout)
         diagnostics = None
         diagnostics_timed_out = False
 
         # The --diagnostics-json rerun repeats the whole run, so it is skipped
         # after a timeout (it would only time out again) and is itself bounded.
-        if main_run["returncode"] != 0 and not main_run["timed_out"]:
+        if main_run["returncode"] != 0 and not main_run["timed_out"] and not exact_match:
             diag_cmd = [str(args.aether_bin), *flags, "--diagnostics-json", "--no-cache", str(program_path)]
-            diag_run = run_captured(diag_cmd, cwd=work_dir, timeout=task.timeout_seconds)
+            diag_run = run_captured(diag_cmd, cwd=work_dir, timeout=task.timeout_seconds,
+                                    input_text=task_stdin_text(task))
             diagnostics_timed_out = bool(diag_run["timed_out"])
             diag_text = (diag_run["stderr"] or "").strip()
             if diag_text and not diagnostics_timed_out:
@@ -2581,6 +2699,7 @@ def compile_and_run(task: Task, source_code: str, args: argparse.Namespace) -> d
             "diagnostics": diagnostics,
             "elapsed_seconds": main_run["elapsed_seconds"],
             "exact_stdout_match": exact_match,
+            "expected_returncode": task.expected_returncode,
             "timed_out": main_run["timed_out"],
             "binary_sha256": getattr(args, "binary_sha256", None),
         }
@@ -2592,7 +2711,7 @@ def compile_and_run(task: Task, source_code: str, args: argparse.Namespace) -> d
         return result
 
 
-def _run_record(cmd: list[str], run: dict[str, Any], expected_stdout: str) -> dict[str, Any]:
+def _run_record(cmd: list[str], run: dict[str, Any], task: Task) -> dict[str, Any]:
     record = {
         "command": cmd,
         "returncode": run["returncode"],
@@ -2600,7 +2719,8 @@ def _run_record(cmd: list[str], run: dict[str, Any], expected_stdout: str) -> di
         "stderr": strip_run_dirs(run["stderr"]),
         "diagnostics": None,
         "elapsed_seconds": run["elapsed_seconds"],
-        "exact_stdout_match": run["returncode"] == 0 and run["stdout"] == expected_stdout,
+        "exact_stdout_match": is_exact(task, run["returncode"], run["stdout"]),
+        "expected_returncode": task.expected_returncode,
         "timed_out": run["timed_out"],
     }
     for key in ("timeout_seconds", "killed_returncode", "stdout_truncated", "stderr_truncated"):
@@ -2619,8 +2739,8 @@ def run_python_task(task: Task, source_code: str) -> dict[str, Any]:
         program_path.write_text(source_code, encoding="utf-8")
 
         cmd = ["python3", str(program_path)]
-        run = run_captured(cmd, cwd=work_dir, timeout=task.timeout_seconds)
-        return _run_record(["python3", program_path.name], run, task.expected_stdout)
+        run = run_captured(cmd, cwd=work_dir, timeout=task.timeout_seconds, input_text=task_stdin_text(task))
+        return _run_record(["python3", program_path.name], run, task)
 
 
 def run_rust_task(task: Task, source_code: str) -> dict[str, Any]:
@@ -2638,14 +2758,14 @@ def run_rust_task(task: Task, source_code: str) -> dict[str, Any]:
         started = time.time()
         compile_run = run_captured(compile_cmd, cwd=work_dir, timeout=task.timeout_seconds)
         if compile_run["returncode"] != 0:
-            record = _run_record(recorded_compile, compile_run, task.expected_stdout)
+            record = _run_record(recorded_compile, compile_run, task)
             record["stdout"] = ""
             record["exact_stdout_match"] = False
             return record
 
         remaining = max(1.0, task.timeout_seconds - (time.time() - started))
-        run = run_captured([str(binary_path)], cwd=work_dir, timeout=remaining)
-        record = _run_record([binary_path.name], run, task.expected_stdout)
+        run = run_captured([str(binary_path)], cwd=work_dir, timeout=remaining, input_text=task_stdin_text(task))
+        record = _run_record([binary_path.name], run, task)
         record["elapsed_seconds"] = round(time.time() - started, 3)
         return record
 
@@ -3000,22 +3120,29 @@ def derive_failure_summary(
             "(an infinite loop, or work far too slow for the input). Any output it printed "
             "before the kill is shown under Observed stdout."
         )
-    if run["returncode"] != 0:
+    expected_rc = int(run.get("expected_returncode", 0) or 0)
+    if run["returncode"] != expected_rc and run["returncode"] == 0:
+        detail = f"exit_status_mismatch: the task requires exit status {expected_rc}, the program exited 0"
+        if expected_stdout is not None and run.get("stdout", "") != expected_stdout:
+            detail += "; also " + describe_stdout_mismatch(expected_stdout, run.get("stdout", ""))
+        return detail
+    if run["returncode"] != expected_rc:
+        suffix = f" (the task expects exit status {expected_rc})" if expected_rc else ""
         diagnostics = run.get("diagnostics") or []
         if diagnostics:
             first = diagnostics[0] or {}
             code = first.get("code")
             message = (first.get("message") or "").strip()
             if code and message:
-                return f"{code}: {message}"
+                return f"{code}: {message}{suffix}"
             if code:
-                return code
+                return code + suffix
             if message:
-                return message
+                return message + suffix
         stderr = (run.get("stderr") or "").strip()
         if stderr:
-            return stderr.splitlines()[0]
-        return f"nonzero_exit:{run['returncode']}"
+            return stderr.splitlines()[0] + suffix
+        return f"nonzero_exit:{run['returncode']}{suffix}"
     if expected_stdout is not None:
         return describe_stdout_mismatch(expected_stdout, run.get("stdout", ""))
     return "stdout_mismatch"
@@ -3033,6 +3160,11 @@ def _derive_failure_fingerprint(result: dict[str, Any], task_id: str | None = No
     run = result["run"]
     if run.get("timed_out"):
         return f"timeout:{task_id or result.get('task_id') or 'unknown'}"
+    expected_rc = int(run.get("expected_returncode", 0) or 0)
+    if run["returncode"] == expected_rc:
+        return "stdout_mismatch"
+    if run["returncode"] == 0:
+        return "exit_status_mismatch"
     if run["returncode"] != 0:
         diagnostics = run.get("diagnostics") or []
         if diagnostics:
@@ -4506,6 +4638,10 @@ def prompt_template_fingerprint() -> dict[str, Any]:
         prompt="{TASK_PROMPT}",
         expected_stdout="{EXPECTED_STDOUT}",
     )
+    hidden = Task(task_id="{TASK_ID}", title="{TASK_TITLE}", prompt="{TASK_PROMPT}",
+                  expected_stdout="{EXPECTED_STDOUT}", hide_expected_stdout=True)
+    status = Task(task_id="{TASK_ID}", title="{TASK_TITLE}", prompt="{TASK_PROMPT}",
+                  expected_stdout="{EXPECTED_STDOUT}", expected_returncode=3)
     repair_inputs = dict(
         previous_source="{PREVIOUS_SOURCE}",
         attempt_number=1,
@@ -4522,6 +4658,11 @@ def prompt_template_fingerprint() -> dict[str, Any]:
         "python_repair": build_python_repair_prompt(task=task, **repair_inputs),
         "rust": build_rust_prompt(task),
         "rust_repair": build_rust_repair_prompt(task=task, **repair_inputs),
+        "initial_hidden": build_prompt("{DOC_NAME}", "{DOC_TEXT}", hidden),
+        "initial_exit_status": build_prompt("{DOC_NAME}", "{DOC_TEXT}", status),
+        "repair_hidden": build_repair_prompt(doc_name="{DOC_NAME}", doc_text="{DOC_TEXT}", task=hidden, **repair_inputs),
+        "repair_exit_status": build_repair_prompt(doc_name="{DOC_NAME}", doc_text="{DOC_TEXT}", task=status, **repair_inputs),
+        "batch_hidden": build_batch_prompt("{DOC_NAME}", "{DOC_TEXT}", [hidden]),
     }
     per_template = {name: sha256_text(text) for name, text in sorted(rendered.items())}
     return {

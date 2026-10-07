@@ -1041,6 +1041,93 @@ def test_paired_bootstrap_non_inferiority():
     assert round(mean, 1) == -33.3 and hi < -3, (mean, lo, hi)
 
 
+# --------------------------------------------------------------------------- #
+# W1-21: expected exit code, stdin, hidden expected stdout
+# --------------------------------------------------------------------------- #
+
+
+def test_hidden_prompt_has_no_expected_block_but_repairs_do():
+    with workdir() as tmp:
+        manifest = write_json(tmp / "traps.json", {"version": "t", "hide_expected_stdout": True, "tasks": [
+            simple_task("trap", expected="SECRET-OUTPUT\n", prompt="Print the secret word, then a newline."),
+            simple_task("shown", expected="VISIBLE\n", hide_expected_stdout=False)]})
+        tasks = {t.task_id: t for t in adb.load_tasks(manifest)}
+    trap, shown = tasks["trap"], tasks["shown"]
+    assert trap.hide_expected_stdout and not shown.hide_expected_stdout
+    prompt = adb.build_prompt("medium", "guide", trap)
+    assert "Expected stdout" not in prompt and "SECRET-OUTPUT" not in prompt
+    assert "the output the task specifies" in prompt
+    assert prompt.rstrip().endswith("\n        Aether source:") or prompt.rstrip().endswith("\nAether source:")
+    assert "        Aether source:" not in prompt.replace("\n        Aether source:", "")
+    assert "VISIBLE" in adb.build_prompt("medium", "guide", shown)
+    repair = adb.build_repair_prompt(doc_name="medium", doc_text="g", task=trap, previous_source="s",
+                                     attempt_number=1, failure_summary="f", observed_stdout="o", observed_stderr="")
+    assert "Expected stdout:" in repair and "SECRET-OUTPUT" in repair, "repairs show it (D37a option b)"
+    batch = adb.build_batch_prompt("medium", "guide", [trap, shown])
+    assert "SECRET-OUTPUT" not in batch and "VISIBLE" in batch
+    for builder in (adb.build_python_prompt, adb.build_rust_prompt):
+        assert "SECRET-OUTPUT" not in builder(trap)
+
+
+def test_existing_suites_keep_their_prompts():
+    for path in sorted(BENCH_DIR.glob("*tasks*.json")):
+        for task in adb.load_tasks(path):
+            assert not task.hide_expected_stdout and task.expected_returncode == 0 and task.stdin is None, task.task_id
+            assert task.expected_stdout in adb.build_prompt("medium", "g", task)
+
+
+def test_expected_returncode_task_passes_with_exit_3():
+    with workdir() as tmp:
+        task = simple_task("halts", expected="bye\n", expected_returncode=3)
+        plan = {"initial": "//! print bye\n//! exit 3\n"}
+        proc, report = scripted_run(tmp, plan, [], [task])
+        assert proc.returncode == 0, proc.stderr
+        case = next(c for _, _, c in all_cases(report))
+        assert case["run"]["returncode"] == 3 and case["run"]["exact_stdout_match"] is True
+        assert report["destinations"][0]["variants"][0]["summary"]["fa_rate"] == 1.0
+        status = adb.Task(task_id="halts", title="t", prompt="p", expected_stdout="bye\n", expected_returncode=3)
+        assert "Expected exit status:" in adb.build_prompt("none", "", status)
+        summary = adb.derive_failure_summary(True, {"returncode": 0, "stdout": "bye\n", "expected_returncode": 3},
+                                             expected_stdout="bye\n")
+        assert summary.startswith("exit_status_mismatch: the task requires exit status 3")
+
+
+def test_real_aether_halt_3_passes_an_rc_3_task():
+    binary = real_aether_bin()
+    task = adb.Task(task_id="halts", title="t", prompt="", expected_stdout="bye\n", expected_returncode=3)
+    source = 'fn main() -> Void {\n    fx {\n        println("bye");\n        halt(3);\n    }\n}\n'
+    # halt is a proc-class effect: under the bench's default --deny net,proc it
+    # is refused, so an exit-status task has to run with proc allowed.
+    denied = adb.compile_and_run(task, source, adb.argparse.Namespace(aether_bin=binary, sandbox_deny="net,proc"))
+    assert denied["returncode"] != 3 and "denied" in denied["stderr"], denied
+    run = adb.compile_and_run(task, source, adb.argparse.Namespace(aether_bin=binary, sandbox_deny="net"))
+    assert run["returncode"] == 3 and run["exact_stdout_match"] is True, run
+
+
+def test_stdin_task_reads_three_lines():
+    with workdir() as tmp:
+        task = simple_task("filter", expected="lines=3\n", stdin="one\ntwo\nthree\n")
+        proc, report = scripted_run(tmp, {"initial": "//! count-stdin\n"}, [], [task])
+        assert proc.returncode == 0, proc.stderr
+        assert next(c for _, _, c in all_cases(report))["run"]["exact_stdout_match"] is True
+    from_file = adb.Task(task_id="f", title="f", prompt="", expected_stdout="three|two|one\n",
+                         files={"in.txt": "one\ntwo\nthree\n"}, stdin={"file": "in.txt"})
+    py = adb.run_python_task(from_file, "import sys\nprint('|'.join(reversed(sys.stdin.read().split())))\n")
+    assert py["exact_stdout_match"] is True, py
+
+
+def test_real_aether_reads_three_stdin_lines():
+    binary = real_aether_bin()
+    task = adb.Task(task_id="rd", title="t", prompt="", expected_stdout="three|two|one\n", stdin="one\ntwo\nthree\n")
+    source = ('fn main() -> Void {\n    let a: Text = "";\n    let b: Text = "";\n    let c: Text = "";\n'
+              '    fx {\n        readln(a);\n        readln(b);\n        readln(c);\n'
+              '        println(c, "|", b, "|", a);\n    }\n}\n')
+    run = adb.compile_and_run(task, source, adb.argparse.Namespace(aether_bin=binary, sandbox_deny="net,proc"))
+    assert run["returncode"] == 0 and "three|two|one" in run["stdout"], run
+    # Not asserted exact: today's readln writes ESC[?25h to a piped stdout
+    # (B-backend-coupling-4), which is exactly what a stdin trap must see.
+
+
 def _main() -> int:
     failures = 0
     skipped = 0
