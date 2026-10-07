@@ -174,7 +174,9 @@ def main() -> int:
 
         record = {"repo_path": repo_path, "expected": expected, "actual": stdout}
         if item.get("metadata", {}).get("environment_dependent"):
-            env_dep_drifted.append(record)
+            # Only the path: this output is the running host's cwd, HOME,
+            # clock or heap addresses, and the report may be shared.
+            env_dep_drifted.append({"repo_path": repo_path})
         else:
             drifted.append(record)
             pending.append((item, {

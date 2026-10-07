@@ -51,6 +51,12 @@ def main() -> int:
     parser.add_argument("--validate-manifest", type=pathlib.Path, default=None,
                         help="manifest used for the strict corpus-layout validation step "
                         "(default: the --corpus-manifest value).")
+    parser.add_argument("--aether-docs-dir", type=pathlib.Path,
+                        default=REPO_ROOT / "components" / "aether" / "docs",
+                        help="directory holding the Aether guides (default: components/aether/docs)")
+    parser.add_argument("--reference-doc", action="append", default=None,
+                        help="guide exported into the reference corpus (repeatable; default: the "
+                        "medium guide, decision D10). Its stamp and sha256 are recorded.")
     parser.add_argument("--skip-recapture-check", action="store_true",
                         help="skip the recapture_expected.py --check pre-flight (iteration only; "
                         "aether_training_mix.json records that it was skipped)")
@@ -123,7 +129,12 @@ def main() -> int:
             str(TOOLS_DIR / "aether_specialization_export_reference_corpus.py"),
             "--output-json",
             str(reference_json),
+            "--docs-dir",
+            str(args.aether_docs_dir),
+            "--aether-bin",
+            str(args.aether_bin),
         ]
+        + [arg for doc in (args.reference_doc or []) for arg in ("--doc", doc)]
     )
     # v7: build real, compiler-verified instruction + repair supervision instead of
     # emitting empty JSONL. Each canonical corpus case is promoted to an instruction
@@ -166,6 +177,7 @@ def main() -> int:
         )
 
     build_report = json.loads(build_report_json.read_text(encoding="utf-8"))
+    reference_docs = json.loads(reference_json.read_text(encoding="utf-8")).get("source_docs", [])
     dataset_version = args.version or f"{datetime.date.today().isoformat()}-1"
 
     summary_path = output_dir / "aether_training_mix.json"
@@ -179,6 +191,7 @@ def main() -> int:
                 "aether_sha256": build_report["aether_sha256"],
                 "raw_corpus": corpus_json.name,
                 "reference_corpus": reference_json.name,
+                "reference_docs": reference_docs,
                 "instruction_jsonl": instruction_jsonl.name,
                 "repair_jsonl": repair_jsonl.name,
                 "build_report": build_report_json.name,
@@ -206,8 +219,9 @@ def main() -> int:
                     "instruction-only SFT: canonical corpus cases with an oracle are promoted to "
                     "verified instruction pairs + seed instruction/repair pairs; every record "
                     "reproduces its expected stdout exactly. Environment-dependent and harvested "
-                    "(no-oracle) items never train. Raw corpus and reference guide are still "
-                    "exported for provenance but are NOT language-modeled as bare completions "
+                    "(no-oracle) items never train. The raw corpus selects by the same canonical "
+                    "definition; the reference corpus is the medium guide (D10). Both are still "
+                    "exported for provenance and are NOT language-modeled as bare completions "
                     "(trainer --include-raw-corpus / --include-reference default off)."
                 ),
             },

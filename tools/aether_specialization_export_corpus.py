@@ -1,13 +1,25 @@
 #!/usr/bin/env python3
-"""Export a raw Aether corpus manifest from example files."""
+"""Export the raw Aether corpus from the corpus manifest.
+
+Selection is the manifest's canonical flag, through the same
+policy.canonical_exclusion the SFT builder uses (plus the raw pipeline's own
+opt-out, include_in_training: false, and items without a golden, which are
+support modules). There is no source-text heuristic any more: the regex that
+dropped every `par` program and the numbered-name filter are gone.
+"""
 
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import pathlib
-import re
+import sys
 
+_SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+import aether_specialization_corpus_policy as policy  # noqa: E402
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_ROOTS = [
@@ -26,39 +38,6 @@ def looks_like_source(path: pathlib.Path) -> bool:
     if path.suffix in {".json", ".md"}:
         return False
     return path.is_file()
-
-
-NON_CANONICAL_PATTERNS = [
-    r"\bwriteln\s*\(",
-    r"\bwrite\s*\(",
-    r"^\s*use\s+[A-Za-z_][A-Za-z0-9_]*\s*;",
-    r"\bwhile\b",
-    r"\bfor\b",
-    r"\bpar\s*\{",
-    r"\bmyself\.",
-    r"\bTOON\b",
-]
-
-_STRING_LITERAL_RE = re.compile(r'"(?:\\.|[^"\\\n])*"')
-
-
-def _mask_string_literals(text: str) -> str:
-    def _mask(match: re.Match[str]) -> str:
-        body = match.group(0)[1:-1]
-        return '"' + "".join("\n" if c == "\n" else " " for c in body) + '"'
-
-    return _STRING_LITERAL_RE.sub(_mask, text)
-
-
-def looks_canonical_for_training(text: str) -> bool:
-    filtered = "\n".join(
-        line for line in text.splitlines() if not line.lstrip().startswith("//")
-    )
-    filtered = _mask_string_literals(filtered)
-    for pattern in NON_CANONICAL_PATTERNS:
-        if re.search(pattern, filtered, flags=re.MULTILINE):
-            return False
-    return True
 
 
 def load_manifest_metadata(path: pathlib.Path) -> dict[str, dict]:
@@ -83,10 +62,6 @@ def load_manifest_items(path: pathlib.Path) -> list[dict]:
     return payload.get("items", [])
 
 
-def is_numbered_case_name(name: str) -> bool:
-    return re.match(r"^\d+_", name) is not None
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-json", type=pathlib.Path, required=True)
@@ -96,32 +71,27 @@ def main() -> int:
     manifest_items = load_manifest_items(args.manifest)
     items: list[dict[str, str]] = []
     missing_manifest_paths: list[str] = []
+    excluded: collections.Counter[str] = collections.Counter()
     for item in manifest_items:
         repo_path = item.get("repo_path")
         if not isinstance(repo_path, str) or not repo_path:
             continue
-        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
-        if metadata.get("include_in_training") is False:
+        reason = policy.raw_exclusion(item)
+        if reason is not None:
+            excluded[reason] += 1
             continue
-        if not is_numbered_case_name(pathlib.Path(repo_path).name):
-            continue
-        if not isinstance(item.get("stdout"), str) or not item.get("stdout"):
-            continue
+        metadata = policy.item_metadata(item)
         path = REPO_ROOT / repo_path
         if not path.exists():
             missing_manifest_paths.append(repo_path)
             continue
-        if path.suffix == ".json":
-            continue
-        if str(DEFAULT_CORPUS_DIR) not in str(path.parent):
-            continue
-        text = path.read_text(encoding="utf-8")
-        if not looks_canonical_for_training(text):
+        if path.suffix == ".json" or DEFAULT_CORPUS_DIR.resolve() not in path.resolve().parents:
+            excluded["outside_corpus_dir"] += 1
             continue
         record = {
             "path": repo_path,
             "kind": "raw_aether_corpus",
-            "content": text,
+            "content": path.read_text(encoding="utf-8"),
         }
         if metadata:
             record["metadata"] = metadata
@@ -134,7 +104,10 @@ def main() -> int:
 
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
     args.output_json.write_text(json.dumps({"items": items}, indent=2), encoding="utf-8")
-    print(f"items={len(items)} -> {args.output_json}")
+    print(
+        f"items={len(items)} -> {args.output_json} "
+        + " ".join(f"excluded_{reason}={count}" for reason, count in sorted(excluded.items()))
+    )
     return 0
 
 

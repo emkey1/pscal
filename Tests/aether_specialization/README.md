@@ -70,12 +70,12 @@ That command exports:
 - verified instruction JSONL
 - verified repair JSONL
 
-The raw corpus currently pulls from:
-
-- `Examples/aether/base/*`
-- `Examples/aether/showcase/*`
-- manifest-approved entries from
-  `Tests/aether_specialization/corpus_candidates_manifest.json`
+The raw corpus pulls from the manifest-approved entries of
+`Tests/aether_specialization/corpus_candidates_manifest.json`, selected by the
+same canonical definition as the SFT build
+(`tools/aether_specialization_corpus_policy.py`: not `canonical: false`, an
+oracle, a golden) plus the raw pipeline's own opt-out
+(`include_in_training: false`). No source-text heuristic filters it.
 
 Raw corpus export can also carry lightweight per-example metadata from
 `Tests/aether_specialization/corpus_candidates_manifest.json`. Intended keys:
@@ -128,13 +128,15 @@ the manifest (canonical or not) and has a meaningful descriptive name.
 Exploratory probes, scratch outputs, and duplicate drafts live in `scratch/`
 and are not referenced by the manifest or the training export pipeline.
 
-The separate reference corpus currently pulls from:
-
-- `components/aether/docs/aether_for_llms_with_small_contexts.md`
-
-By default, only the small-context guide is exported into the reference corpus.
-Use `tools/aether_specialization_export_reference_corpus.py --include-full-guide`
-when a run explicitly needs the full guide as reference ballast.
+The separate reference corpus exports one guide, by default the medium guide
+`aether_for_llms_medium_contexts.md` (decision D10: the hard-ceilinged,
+snippet-gated variant every current board uses), plus a builtin reference
+generated from the binary. `--doc` picks another guide, `--docs-dir` (or
+prepare_assets `--aether-docs-dir`) points at a checkout other than
+`components/aether/docs`, and `--include-full-guide` adds the full guide. The
+export records each guide's `*Guide version*` stamp and sha256 (top-level
+`source_docs`, also copied into `aether_training_mix.json`). Re-export after
+a guide pass lands, so its fixes reach the corpus.
 
 Keep that reference corpus separate from raw executable Aether source. It is
 meant for instruction-style conditioning, synthetic-pair generation, or

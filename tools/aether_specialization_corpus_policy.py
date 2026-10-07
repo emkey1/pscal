@@ -4,7 +4,8 @@
 Every corpus tool must agree on these rules, so they live here and nowhere
 else:
 
-- which manifest items are canonical, and so may train;
+- which manifest items are canonical, and so may train (one definition for the
+  raw exporter and the SFT builder alike);
 - which goldens can never be training data (the golden backstop: heap
   pointers, raw array dumps, host paths, environment dumps);
 - the oracle vocabulary (`python`, `reviewed`, `none`); an item whose golden
@@ -91,7 +92,10 @@ def canonical_exclusion(metadata: dict[str, Any]) -> str | None:
     """The one definition of a canonical corpus item; None means canonical.
 
     An item is canonical unless the manifest says `canonical: false` or its
-    golden has no oracle.
+    golden has no oracle. Both the raw exporter and the SFT builder use this,
+    so the two can no longer disagree about what canonical Aether is; the
+    pipeline flags (include_in_training, include_in_supervised) only opt an
+    item out of one pipeline.
     """
     if metadata.get("oracle") == "none":
         return "no_oracle"
@@ -117,6 +121,19 @@ def sft_exclusion(item: dict[str, Any]) -> str | None:
         return "not_supervised"
     if metadata.get("environment_dependent"):
         return "environment_dependent"
+    return None
+
+
+def raw_exclusion(item: dict[str, Any]) -> str | None:
+    """Why a manifest item is not exported to the raw corpus (None: it is)."""
+    metadata = item_metadata(item)
+    if not has_golden(item):
+        return "no_expected_stdout"
+    reason = canonical_exclusion(metadata)
+    if reason:
+        return reason
+    if metadata.get("include_in_training") is False:
+        return "not_in_training"
     return None
 
 
