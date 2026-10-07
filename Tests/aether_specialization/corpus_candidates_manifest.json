@@ -9355,7 +9355,7 @@
       "source_path": "/tmp/aether_batch6_examples/22_game_of_life_random.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/22_game_of_life_random.aether_9e9d276805e0",
       "sha256": "9e9d276805e05efea8b10346676d61a1d7b5280049572a7032eea272497efaaf",
-      "stdout": "...........X.XXX..X.\n.....XXX........XX..\nX...XX.XX..X.......X\nXXX.XX....X.X....X.X\n..X.....X.....X.X...\n..X.....X.X..X.X...X\n.XX.X..X.......X.X.X\nXX........X....X..X.\n.XX.......X......XXX\n...X...X.X....X...X.\n...............X....\n......XX......X..XX.\n....XX.XX.......X...\n.X..XXXX............\n..XX.....X........X.\n...X..........XXX...\n..X......X....X.....\nX.X...............X.\n.XX..............XXX\n..................XX\n....................\n.......X.......X....\n.....X.XX........X..\n....XXXX............\n..XXXXX.............\n...X................\n..............X.....\n.X..................\n.XX..............XXX\n..................XX\n",
+      "stdout": "X..XXX.........X..X.\nX........XXXX..X..X.\nX...X....X........X.\nX..X..X..X.X...X..X.\n.X...X.......X..X..X\n.XXX....XX...X..X.X.\nX.X..XX...X.....X..X\n.X....X.X...X.X.....\nX.X...X.X.X.......X.\n...X.X.XX......X...X\n....X.....XX........\nXX.X.X...XXX.....XXX\nXX......XX..X....XXX\nXX..XX....X......XXX\nXX.XX...XXX.X.XXX.XX\nX..XXXX..X.....XX.XX\nX..X.XX.X....X.X.X..\nX.X...X....X........\n.XX..XX.X...........\n......XXXX..........\n....X....X.X......X.\nXXX.X...X...X....X.X\n.....X..X.......X...\n...XXX....X..X.X....\n......X.X.XX..X.....\nX.....X...X..X.....X\nX.XX..........XX.XX.\nX.XXX...............\n.XX..X..XX..........\n.....XX.XX..........\n",
       "metadata": {
         "canonical": true,
         "oracle": "reviewed",
@@ -9365,7 +9365,11 @@
           "imported_2026-07-19"
         ],
         "environment_dependent": true,
-        "audit_notes": "[2026-07-19 corpus audit] marked environment_dependent: calls randomize() to seed the initial board; non-reproducible across runs."
+        "audit_notes": "[2026-07-19 corpus audit] marked environment_dependent: calls randomize() to seed the initial board; non-reproducible across runs. [2026-10-07 recaptured by hand] the recorded board came from aether before release L0, whose nested `continue` stepped the outer loop counter in count_neighbors; recapture_expected.py never rewrites an environment-dependent golden, so this one sample run on 2026-10-07-1 replaces it.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-10-07-1 (latest tag: untagged)",
+          "date": "2026-10-07"
+        }
       }
     },
     {
