@@ -220,7 +220,7 @@ def guide_version(text: str) -> str | None:
     """
     if not text:
         return None
-    m = re.search(r"Guide version:\s*([0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+)", text[:4000])
+    m = re.search(r"(?:Guide|Card) version:\s*([0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+)", text[:4000])
     return m.group(1) if m else None
 
 
