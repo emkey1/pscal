@@ -41,3 +41,22 @@ comparable across these harness changes, which landed together before B0:
   to be filed as a generation error with no attempts.
 - **Temp paths (W1-06).** stderr in repair prompts names the program as
   `task.aether:N:` instead of an absolute temp path.
+
+## Replay and the instrument log
+
+`tools/replay_bench.py --aether-bin BIN [GLOB ...]` re-grades every stored
+program (default: the tracked `results/**`, minus `rejected/`) on another
+binary and reports fail->pass, pass->fail and failure-class transitions. A
+pass->fail, or a move into silent_wrong, must be waived in
+`../replay_waivers.json` (keyed by the CHANGELOG version that declared the
+break, plus task id and source sha256) or the replay exits 1. Untracked sets
+such as `harness_out/**` and the cs-aug20 `none` evals are passed as extra
+globs on the machine that holds them.
+
+`tools/instrument_check.sh --aether-bin BIN --log` runs the oracle check, the
+replay, the corpus recapture `--check` and (once they exist) the corpus build
+gates and the guide contamination check, and appends one row to
+`instrument_log.csv`. Baseline row, 2026-10-07, on the standalone 2026-10-06-1
+binary: 274 tracked first attempts 242 -> 245 (11 fail->pass, 8 pass->fail),
+every regression waived (12 programs: 11 under 2026-07-26-1 0-based Text, 1
+under 2026-08-09-1 array `+`), 0 unwaived, 140/140 references.

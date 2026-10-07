@@ -17,6 +17,9 @@ is a list of directives, one per line, and every other line is ignored.
   //! diag JSON        with --diagnostics-json, write JSON to stderr
   //! exit N           exit status N (default 0)
 
+`--fake-flip` (pass it with --aether-arg) reverses every printed line: a
+stand-in for a deliberately broken semantics arm, for the replay gate's tests.
+
 `--version` prints "Aether Compiler Version: $FAKE_AETHER_VERSION" (default
 2026-10-06-1+fake000). With $FAKE_AETHER_LOG set, every call appends one JSON
 line {"argv": [...]} to that file, so a test can see exactly which binary and
@@ -44,6 +47,7 @@ def main(argv: list[str]) -> int:
         return 0
 
     diagnostics_json = "--diagnostics-json" in argv
+    flip = "--fake-flip" in argv
     program = None
     skip_next = False
     for arg in argv:
@@ -70,7 +74,7 @@ def main(argv: list[str]) -> int:
         directives += 1
         verb, _, rest = stripped[3:].strip().partition(" ")
         if verb == "print":
-            sys.stdout.write(rest + "\n")
+            sys.stdout.write((rest[::-1] if flip else rest) + "\n")
         elif verb == "write":
             sys.stdout.write(rest)
         elif verb == "stderr":

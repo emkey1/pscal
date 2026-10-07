@@ -1246,6 +1246,75 @@ def test_harness_preflight_aborts_on_a_broken_reference():
         assert oracle == {"good": True, "broken": False}
 
 
+# --------------------------------------------------------------------------- #
+# W1-16: paired replay with declared-break waivers
+# --------------------------------------------------------------------------- #
+
+REPLAY = REPO_ROOT / "tools" / "replay_bench.py"
+
+
+def _replay_fixture(tmp: pathlib.Path) -> pathlib.Path:
+    manifest = write_json(tmp / "tasks.json", {"version": "r-1", "tasks": [simple_task("t1", expected="hello\n")]})
+    source = "//! print hello\n"
+    report = {
+        "tasks_file": str(manifest), "tasks_version": "r-1", "aether_version": "2026-01-01-1+abc1234",
+        "destinations": [{"destination_id": "m", "variants": [{"doc_name": "medium", "results": [{
+            "task_id": "t1", "repeat_index": 0, "generated_ok": True,
+            "attempts": [{"generated_ok": True, "source_code": source,
+                          "run": {"returncode": 0, "stdout": "hello\n", "stderr": "", "exact_stdout_match": True}}],
+        }]}]}],
+    }
+    (tmp / "board").mkdir()
+    return write_json(tmp / "board" / "r.json", report)
+
+
+def test_replay_gate_fails_on_a_broken_arm_and_honours_waivers():
+    import hashlib as _h
+
+    with workdir() as tmp:
+        report = _replay_fixture(tmp)
+        out = tmp / "replay.json"
+        base = ["--aether-bin", str(FAKE_AETHER), str(report), "--report-json", str(out)]
+        same = run_harness(base + ["--waivers", str(tmp / "none.json")], script=REPLAY)
+        assert same.returncode == 0, same.stdout + same.stderr
+        assert json.loads(out.read_text())["tallies"]["first"]["new_pass"] == 1
+        broken = run_harness(base + ["--aether-arg=--fake-flip", "--waivers", str(tmp / "none.json")], script=REPLAY)
+        assert broken.returncode == 1 and "UNWAIVED pass->fail" in broken.stdout, broken.stdout
+        sha = _h.sha256(b"//! print hello\n").hexdigest()
+        for version, expect in (("2026-10-06-1", 0), ("2025-12-31-1", 1), ("2026-12-01-1", 1)):
+            write_json(tmp / "w.json", {"schema": 1, "waivers": {version: {
+                "reason": "declared", "entries": [{"task_id": "t1", "source_sha256": sha}]}}})
+            proc = run_harness(base + ["--aether-arg=--fake-flip", "--waivers", str(tmp / "w.json")], script=REPLAY)
+            assert proc.returncode == expect, (version, proc.stdout)
+
+
+def test_tracked_waiver_file_is_valid():
+    proc = run_harness(["--check-waivers"], script=REPLAY)
+    assert proc.returncode == 0, proc.stdout
+    data = json.loads((BENCH_DIR / "replay_waivers.json").read_text())
+    assert set(data["waivers"]) == {"2026-07-26-1", "2026-08-09-1"}
+
+
+def test_instrument_check_lint_only_runs_without_a_binary():
+    proc = subprocess.run(["bash", str(REPO_ROOT / "tools" / "instrument_check.sh"), "--lint-only"],
+                          cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=120)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_tracked_replay_reproduces_242_to_245_with_every_regression_waived():
+    binary = real_aether_bin()
+    with workdir() as tmp:
+        out = tmp / "replay.json"
+        proc = run_harness(["--aether-bin", str(binary), "--report-json", str(out)], script=REPLAY, timeout=600)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        result = json.loads(out.read_text())
+        first = result["tallies"]["first"]
+        assert (first["attempts"], first["old_pass"], first["new_pass"]) == (274, 242, 245), first
+        assert (first["fail_to_pass"], first["pass_to_fail"]) == (11, 8), first
+        assert result["unwaived"] == []
+        assert sum(1 for r in result["waived"] if r["kind"] == "first" and r["transition"] == "pass->fail") == 8
+
+
 def _main() -> int:
     failures = 0
     skipped = 0

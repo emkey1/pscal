@@ -1,0 +1,107 @@
+{
+  "schema": 1,
+  "_note": [
+    "Waivers for tools/replay_bench.py. A stored program that goes pass->fail, or moves into",
+    "silent_wrong, under a new binary is a regression unless it is waived here. Each block is keyed",
+    "by the CHANGELOG version that declared the break, and an entry names one program exactly",
+    "(task_id + sha256 of its source). A waiver applies only to reports whose binary predates that",
+    "version. Add entries only after checking that the declared change explains the flip; the",
+    "evidence field says how each one was checked."
+  ],
+  "waivers": {
+    "2026-07-26-1": {
+      "reason": "Text is 0-based (CHANGELOG 2026-07-26-1): s[0] is the first character, and copy(s, start, count) takes a 0-based start. Programs written against the 1-based Text of 2026-06/07 boards (copy(s, i + 1, n), copy(s, i, 1) over 1..m, s[i] over 1..m) now print the wrong answer or index past the end. The entry predicts exactly this: such code still compiles and silently does the wrong thing.",
+      "entries": [
+        {
+          "task_id": "cs_substring",
+          "source_sha256": "505af2ad497ee9e29054af339af4f0a298149735e005556edf73b9212f6106bb",
+          "transition": "pass->fail",
+          "note": "history/ornith/ornith_cs.json attempt 0: pass->silent_wrong",
+          "evidence": "1-based `copy(text, i + 1, n)`; with `copy(text, i, n)` it passes on 2026-10-06-1"
+        },
+        {
+          "task_id": "cs_edit_distance",
+          "source_sha256": "7be9f6dda655d58262bdc150bc0eee495da20fe9e3a9b8ff0828613610a75bc1",
+          "transition": "into_silent_wrong",
+          "note": "history/ornith/ornith_cs.json attempt 0: uncoded_error->silent_wrong",
+          "evidence": "1-based `copy(s, i, 1)` over i in 1..m; with `copy(s, i - 1, 1)` it passes on 2026-10-06-1"
+        },
+        {
+          "task_id": "cs_edit_distance",
+          "source_sha256": "14ab9cced6f5cabf54f760596851df4da072c032cb4c17652de664dc7fd82c55",
+          "transition": "into_silent_wrong",
+          "note": "history/ornith/ornith_cs.json attempt 1: uncoded_error->silent_wrong",
+          "evidence": "1-based `copy(s, i, 1)` over i in 1..m; with `copy(s, i - 1, 1)` it passes on 2026-10-06-1"
+        },
+        {
+          "task_id": "cs_edit_distance",
+          "source_sha256": "3339b37ba6920b7aedd20626d20df60b53c4d4338c605d5bcb1872c7013db75b",
+          "transition": "into_silent_wrong",
+          "note": "history/ornith/ornith_cs.json attempt 2: uncoded_error->silent_wrong",
+          "evidence": "1-based `copy(s, i, 1)` over i in 1..m; with `copy(s, i - 1, 1)` it passes on 2026-10-06-1"
+        },
+        {
+          "task_id": "cs_substring",
+          "source_sha256": "4f7f819b84cf9960ea0665cf4c2010614bcf63f1306dc15bc891d91f88d3b829",
+          "transition": "pass->fail",
+          "note": "history/ornith/ornith_cs.json attempt 0: pass->silent_wrong",
+          "evidence": "1-based `copy(text, i + 1, n)`; with `copy(text, i, n)` it passes on 2026-10-06-1"
+        },
+        {
+          "task_id": "cs_substring",
+          "source_sha256": "06c1b35d76b3b27bd5a997cec61a655b4626dbe168a73b04a28ad68b72c16629",
+          "transition": "pass->fail",
+          "note": "history/ornith_20260705/ornith_cs_repeat1.json attempt 0: pass->silent_wrong",
+          "evidence": "1-based `copy(text, i + 1, n)`; with `copy(text, i, n)` it passes on 2026-10-06-1"
+        },
+        {
+          "task_id": "cs_edit_distance",
+          "source_sha256": "9c62244a2a9a60db266758cb6e11271b3543a5b0e1ab1e4a6dd5914b7436c8c9",
+          "transition": "pass->fail",
+          "note": "history/ornith_20260705/ornith_cs_repeat1.json attempt 0: pass->silent_wrong",
+          "evidence": "1-based `copy(s, i, 1)` over i in 1..m; with `copy(s, i - 1, 1)` it passes on 2026-10-06-1"
+        },
+        {
+          "task_id": "cs_substring",
+          "source_sha256": "ff885a2536a412ec5cb4ac0ddc81f169e202f28a7d777893596b70e3ac33cfb6",
+          "transition": "pass->fail",
+          "note": "history/ornith_20260705/ornith_cs_repeat1.json attempt 0: pass->silent_wrong",
+          "evidence": "1-based `copy(text, i + 1, n)`; with `copy(text, i, n)` it passes on 2026-10-06-1"
+        },
+        {
+          "task_id": "cs_lcs",
+          "source_sha256": "9dcaf3f4163ed4fd86e3b3f54226769c696687832cd579f28a9a396dcf893bb0",
+          "transition": "pass->fail",
+          "note": "history/ornith_20260705/ornith_cs_repeat2.json attempt 1: pass->uncoded_error",
+          "evidence": "1-based `x[i] == y[j]` over i in 1..m (now 'String index 5 out of bounds'); with `x[i - 1] == y[j - 1]` it passes"
+        },
+        {
+          "task_id": "cs_edit_distance",
+          "source_sha256": "da9a232a2e24078e53c1fb36f705629272b42eba7ac198c0b8a85b11142be87a",
+          "transition": "pass->fail",
+          "note": "history/ornith_20260705/ornith_cs_repeat2.json attempt 0: pass->silent_wrong",
+          "evidence": "1-based `copy(s, i, 1)` over i in 1..m; with `copy(s, i - 1, 1)` it passes on 2026-10-06-1"
+        },
+        {
+          "task_id": "cs_substring",
+          "source_sha256": "28a96998ea4f1a46ec62454b45bac9b27d14aceed2133e69d37ada8ce3272ff1",
+          "transition": "pass->fail",
+          "note": "history/ornith_20260705/ornith_cs_repeat2.json attempt 0: pass->silent_wrong",
+          "evidence": "1-based `copy(text, i + 1, n)`; with `copy(text, i, n)` it passes on 2026-10-06-1"
+        }
+      ]
+    },
+    "2026-08-09-1": {
+      "reason": "Array + works for chains of any length (CHANGELOG 2026-08-09-1). A program whose chained array + used to fail loudly now runs; a bug of its own then shows as silent_wrong.",
+      "entries": [
+        {
+          "task_id": "cs_quick_sort",
+          "source_sha256": "e624cb7d547e5a60c8640b5e6c73b70d8c483f8569b724b5aa36f5bd0226244e",
+          "transition": "into_silent_wrong",
+          "note": "history/ornith_20260705/ornith_cs_repeat2.json attempt 0: uncoded_error->silent_wrong",
+          "evidence": "used `sortedLess + equal + sortedGreater`, which failed loudly ('Got ARRAY and ARRAY') before array `+` was fixed; it now runs, and its own println-per-element output is wrong"
+        }
+      ]
+    }
+  }
+}
