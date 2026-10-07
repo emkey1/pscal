@@ -98,7 +98,10 @@ wraps steps 1–4.
   not `-e`, so any death resumes with no lost work. Inside a unit,
   `tools/aether_doc_bench.py --resume --output-json <same path>` continues a
   killed run from its checkpoint: finished cases are kept, missing and
-  infra-failed ones run, and a changed configuration is refused.
+  infra-failed ones run, and a changed configuration is refused. When a run is
+  done with a T'Ra destination (or is killed), it asks the queue to unload that
+  model (`POST /api/llm/release`; the queue keeps it if a running job still uses
+  it). A driver that runs the same model again next passes `--keep-loaded`.
 - **Smoke-test every new script on one item and inspect the real output
   artifact before trusting it for a long/overnight run.** "Process alive" and
   completion echoes prove nothing. Watch macOS↔Linux mismatches (`timeout`

@@ -1385,6 +1385,56 @@ def test_resume_without_a_report_starts_fresh_and_needs_output_json():
         assert proc.returncode != 0 and "--resume needs --output-json" in proc.stderr, proc.stderr
 
 
+def test_release_posts_the_model_to_the_queue_and_skips_other_kinds():
+    import http.server
+    import threading
+
+    seen: list[dict] = []
+
+    class Queue(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            seen.append({"path": self.path, "body": body})
+            reply = json.dumps({"model": body["model"], "targets": [
+                {"target": "m5_remote", "model": body["model"],
+                 "released": [{"model": body["model"], "instance_id": "i1"}]}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(reply)))
+            self.end_headers()
+            self.wfile.write(reply)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Queue)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        dest = adb.Destination(destination_id="q", kind="tra_queue", model="qwen/qwen3.6-35b-a3b",
+                               base_url=f"http://127.0.0.1:{server.server_port}",
+                               preferred_targets=["m5_remote"])
+        reply = adb.release_destination_model(dest)
+        assert seen == [{"path": "/api/llm/release", "body": {
+            "model": "qwen/qwen3.6-35b-a3b", "submitter": "aether_doc_bench", "targets": ["m5_remote"]}}], seen
+        assert reply["targets"][0]["released"][0]["instance_id"] == "i1"
+    finally:
+        server.shutdown()
+    # An unreachable queue is reported, never raised: the run's results stand.
+    dead = adb.Destination(destination_id="q", kind="tra_queue", model="m", base_url="http://127.0.0.1:9")
+    assert "error" in adb.release_destination_model(dead)
+    assert "skipped" in adb.release_destination_model(adb.Destination(destination_id="c", kind="command"))
+
+
+def test_each_destination_records_its_release_unless_kept_loaded():
+    with workdir() as tmp:
+        proc, report = fake_run(tmp, ["--task", "hello_fx"])
+        assert proc.returncode == 0, proc.stderr
+        assert "skipped" in report["destinations"][0]["model_release"]
+        proc, report = fake_run(tmp, ["--task", "hello_fx", "--keep-loaded"])
+        assert proc.returncode == 0, proc.stderr
+        assert "model_release" not in report["destinations"][0]
+
+
 def _main() -> int:
     failures = 0
     skipped = 0

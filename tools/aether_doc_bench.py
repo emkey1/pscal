@@ -2374,6 +2374,34 @@ def invoke_command(
     }
 
 
+def release_destination_model(destination: Destination) -> dict[str, Any]:
+    """Tell the T'Ra queue this run is done with its model, so the queue can
+    unload it wherever no running job uses it (POST /api/llm/release). Loading a
+    model never unloaded the previous one, and on 2026-10-07 the models a board
+    had finished with, plus a co-tenant, ran m5 out of GPU memory. Other kinds
+    load nothing through the harness, so they have nothing to release."""
+    if destination.kind not in ("tra_queue", "tra_scheduler") or not destination.base_url or not destination.model:
+        return {"skipped": f"nothing to release for a {destination.kind} destination"}
+    eb = destination.extra_body or {}
+    body: dict[str, Any] = {
+        "model": destination.model,
+        "submitter": eb.get("submitter", "aether_doc_bench"),
+    }
+    targets = eb.get("preferred_targets", destination.preferred_targets)
+    if targets:
+        body["targets"] = list(targets)
+    try:
+        reply = http_json_request(destination.base_url.rstrip("/") + "/api/llm/release", body, None,
+                                  timeout_seconds=180, extra_headers=destination.extra_headers)
+    except Exception as exc:  # noqa: BLE001 -- releasing is best effort; the run's results stand
+        return {"error": f"{type(exc).__name__}: {str(exc)[:300]}"}
+    released = [u.get("model") for tgt in reply.get("targets") or [] for u in tgt.get("released") or []]
+    print(f"[release] {destination.destination_id} ({destination.model}): unloaded on "
+          f"{[tgt.get('target') for tgt in reply.get('targets') or [] if tgt.get('released')]}"
+          + ("" if released else " (nothing loaded or still in use)"), file=sys.stderr)
+    return reply
+
+
 def run_destination_cleanup(destination: Destination, task: Task, doc_name: str, repeat_index: int) -> None:
     if destination.after_each_command:
         command = destination.after_each_command.format(
@@ -4451,6 +4479,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--output-json", type=pathlib.Path, default=None, help="write full JSON report to this path")
     parser.add_argument(
+        "--keep-loaded",
+        action="store_true",
+        help="do not ask the T'Ra queue to unload each destination's model when this run is done "
+        "with it (a driver that runs the same model again next can pass this to skip a reload)",
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         help="continue the run checkpointed in --output-json: keep its finished cases, run only the "
@@ -4806,7 +4840,20 @@ def guide_record(name: str, path: pathlib.Path | None, text: str) -> dict[str, A
     }
 
 
+def _exit_through_finally(signum, _frame) -> None:
+    # SIGTERM/SIGHUP (a driver killed, a screen closed) would otherwise end the
+    # process without running `finally`, leaving the run's model loaded.
+    raise SystemExit(128 + signum)
+
+
 def main(argv: list[str] | None = None) -> int:
+    import signal
+
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            signal.signal(sig, _exit_through_finally)
+        except (ValueError, OSError):  # not the main thread, or no such signal here
+            pass
     parser = build_arg_parser()
     args = parser.parse_args(argv)
 
@@ -5247,71 +5294,78 @@ def _run_benchmark(
 
         groups = chunk_list(tasks, effective_shared_guide_batch_size(args, destination))
         workers = max(1, int(os.environ.get("AETHER_BENCH_WORKERS", "1") or "1"))
-        for repeat_index in range(args.start_repeat, args.start_repeat + args.repeats):
-            options = RequestOptions(seed=request_seed(destination, repeat_index, args.seed_base))
-            units: list[tuple[int, int]] = []
-            for group_index, _group in enumerate(groups):
-                for variant_index in interleaved_variant_order(len(variant_reports), group_index + repeat_index):
-                    units.append((group_index, variant_index))
+        try:
+            for repeat_index in range(args.start_repeat, args.start_repeat + args.repeats):
+                options = RequestOptions(seed=request_seed(destination, repeat_index, args.seed_base))
+                units: list[tuple[int, int]] = []
+                for group_index, _group in enumerate(groups):
+                    for variant_index in interleaved_variant_order(len(variant_reports), group_index + repeat_index):
+                        units.append((group_index, variant_index))
 
-            def run_unit(unit: tuple[int, int]) -> None:
-                group_index, variant_index = unit
-                group = groups[group_index]
-                variant_report = variant_reports[variant_index]
-                doc_name, _doc_path = doc_variants[variant_index]
-                finished = done.get((variant_index, "results", repeat_index), set())
-                aether_group = [task for task in group if task.task_id not in finished]
-                if not args.skip_aether and aether_group:
-                    _results, batch_meta = run_aether_task_group(
-                        destination=destination,
-                        doc_name=doc_name,
-                        doc_text=doc_texts[doc_name],
-                        task_group=aether_group,
-                        repeat_index=repeat_index,
-                        args=args,
-                        doc_token_reference=doc_token_reference,
-                        options=options,
-                        on_case_complete=lambda case_record, vr=variant_report: append_case(vr, "results", case_record),
-                    )
-                    if batch_meta is not None:
-                        with report_lock:
-                            variant_report["batch_runs"].append(batch_meta)
-                for runner, key, enabled in (
-                    ("python", "python_baseline_results", args.python_baseline),
-                    ("rust", "rust_baseline_results", args.rust_baseline),
-                ):
-                    if not enabled:
-                        continue
-                    for task in group:
-                        if task.task_id in done.get((variant_index, key, repeat_index), set()):
-                            continue
-                        case = run_baseline_case(
-                            runner=runner,
+                def run_unit(unit: tuple[int, int]) -> None:
+                    group_index, variant_index = unit
+                    group = groups[group_index]
+                    variant_report = variant_reports[variant_index]
+                    doc_name, _doc_path = doc_variants[variant_index]
+                    finished = done.get((variant_index, "results", repeat_index), set())
+                    aether_group = [task for task in group if task.task_id not in finished]
+                    if not args.skip_aether and aether_group:
+                        _results, batch_meta = run_aether_task_group(
                             destination=destination,
-                            task=task,
+                            doc_name=doc_name,
+                            doc_text=doc_texts[doc_name],
+                            task_group=aether_group,
                             repeat_index=repeat_index,
                             args=args,
                             doc_token_reference=doc_token_reference,
                             options=options,
+                            on_case_complete=lambda case_record, vr=variant_report: append_case(vr, "results", case_record),
                         )
-                        append_case(variant_report, key, case)
+                        if batch_meta is not None:
+                            with report_lock:
+                                variant_report["batch_runs"].append(batch_meta)
+                    for runner, key, enabled in (
+                        ("python", "python_baseline_results", args.python_baseline),
+                        ("rust", "rust_baseline_results", args.rust_baseline),
+                    ):
+                        if not enabled:
+                            continue
+                        for task in group:
+                            if task.task_id in done.get((variant_index, key, repeat_index), set()):
+                                continue
+                            case = run_baseline_case(
+                                runner=runner,
+                                destination=destination,
+                                task=task,
+                                repeat_index=repeat_index,
+                                args=args,
+                                doc_token_reference=doc_token_reference,
+                                options=options,
+                            )
+                            append_case(variant_report, key, case)
 
-            if workers > 1 and len(units) > 1:
-                # Concurrent fan-out (LM Studio PARALLEL and the like). Units are
-                # submitted in the interleaved order; results land as they finish
-                # and carry case_sequence, so the order stays reconstructible.
-                import concurrent.futures as _cf
+                if workers > 1 and len(units) > 1:
+                    # Concurrent fan-out (LM Studio PARALLEL and the like). Units are
+                    # submitted in the interleaved order; results land as they finish
+                    # and carry case_sequence, so the order stays reconstructible.
+                    import concurrent.futures as _cf
 
-                with _cf.ThreadPoolExecutor(max_workers=workers) as executor:
-                    for future in [executor.submit(run_unit, unit) for unit in units]:
-                        future.result()
-            else:
-                for unit in units:
-                    run_unit(unit)
-            with report_lock:
-                for variant_report in variant_reports:
-                    refresh_variant_report(variant_report)
-                persist_report_checkpoint()
+                    with _cf.ThreadPoolExecutor(max_workers=workers) as executor:
+                        for future in [executor.submit(run_unit, unit) for unit in units]:
+                            future.result()
+                else:
+                    for unit in units:
+                        run_unit(unit)
+                with report_lock:
+                    for variant_report in variant_reports:
+                        refresh_variant_report(variant_report)
+                    persist_report_checkpoint()
+        finally:
+            # Also on an interrupt: a killed run must not leave its model resident.
+            if not args.keep_loaded:
+                destination_report["model_release"] = release_destination_model(destination)
+                with report_lock:
+                    persist_report_checkpoint()
 
     # --resume with fewer destinations than the report: keep the others as they were.
     ran = {d.get("destination_id") for d in report["destinations"]}
