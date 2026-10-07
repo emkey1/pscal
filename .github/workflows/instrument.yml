@@ -1,0 +1,49 @@
+name: instrument
+
+# The benchmark instrument's own checks, python only: no compiler build, no
+# submodules, no model calls. The harness runs end to end against
+# Tests/aether_doc_bench/fake_aether.py; the checks that need a real aether
+# binary (the oracle's references and negatives, replay) skip here and run in
+# tools/instrument_check.sh on a machine with a build.
+on:
+  push:
+    paths:
+      - "components/aether"
+      - "components/aether/**"
+      - "Tests/aether_doc_bench/**"
+      - "tools/aether_*"
+      - "tools/fleet_env.py"
+      - "tools/replay_bench.py"
+      - "tools/instrument_check.sh"
+      - "tools/run_aether_doc_bench_with_doc.py"
+      - ".github/workflows/instrument.yml"
+  pull_request:
+    paths:
+      - "components/aether"
+      - "components/aether/**"
+      - "Tests/aether_doc_bench/**"
+      - "tools/aether_*"
+      - "tools/fleet_env.py"
+      - "tools/replay_bench.py"
+      - "tools/instrument_check.sh"
+      - "tools/run_aether_doc_bench_with_doc.py"
+      - ".github/workflows/instrument.yml"
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Manifests load (oracle lint, --list-tasks on every suite)
+        run: python3 tools/aether_oracle_check.py --lint-only
+      - name: Harness offline tests
+        run: python3 Tests/aether_doc_bench/test_doc_bench_offline.py
+      - name: Idea-miner offline tests
+        run: python3 Tests/aether_doc_bench/test_miner_offline.py
+      - name: Replay waivers parse
+        if: hashFiles('tools/replay_bench.py') != ''
+        run: python3 tools/replay_bench.py --check-waivers

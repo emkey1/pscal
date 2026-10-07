@@ -1,5 +1,5 @@
 {
-  "version": "v2-draft",
+  "version": "v2-draft-2026-10-07-1",
   "description": "Benchmark v2 (see Docs/aether_benchmark_gaps.md \u00a77): TOON trimmed 8->5, release_board + module_toon_report + config_validator kitchen-sinks dropped in favour of single-skill splits (real_mean_format, clamp_scores, count_by_category), recursion + real-mean + clamp holes filled, and a negative-invariant tier (should_fail). Positive tasks carry a verified reference_solution; negative tasks carry a fixed program + expected_error_code.",
   "tasks": [
     {
@@ -260,7 +260,7 @@
       "files": {
         "payload.json": "{\"name\":\"Aether\",\"enabled\":true,\"count\":2}\n"
       },
-      "reference_solution": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse_file(\"payload.json\");\n    let root: ToonNode = toon_root(doc);\n    let name: Text = toon_get_text_or(root, \"name\", \"NONE\");\n    let enabled: Bool = toon_get_bool_or(root, \"enabled\", false);\n    let count: Int = toon_get_int_or(root, \"count\", 0);\n    fx {\n        println(name);\n        println(enabled);\n        println(count);\n    }\n    toon_close(doc);\n    ret;\n}\n"
+      "reference_solution": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n    fx {\n        let doc: ToonDoc = toon_parse_file(\"payload.json\");\n        let root: ToonNode = toon_root(doc);\n        let name: Text = toon_get_text_or(root, \"name\", \"NONE\");\n        let enabled: Bool = toon_get_bool_or(root, \"enabled\", false);\n        let count: Int = toon_get_int_or(root, \"count\", 0);\n        fx {\n            println(name);\n            println(enabled);\n            println(count);\n        }\n        toon_close(doc);\n    }\n    ret;\n}\n"
     },
     {
       "id": "toon_type_probe",
@@ -285,7 +285,7 @@
       "files": {
         "rows.json": "{\"rows\":[{\"meta\":{\"code\":\"A1\"}},{\"meta\":{}},{\"broken\":true}]}\n"
       },
-      "reference_solution": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse_file(\"rows.json\");\n    let root: ToonNode = toon_root(doc);\n    let rows: ToonNode = toon_key(root, \"rows\");\n    let missing: Int = 0;\n    loop i in 0..toon_len(rows) {\n        let row: ToonNode = toon_at(rows, i);\n        let code: Text = \"EMPTY\";\n        if toon_has_key(row, \"meta\") {\n            let meta: ToonNode = toon_key(row, \"meta\");\n            code = toon_get_text_or(meta, \"code\", \"EMPTY\");\n        }\n        if code == \"EMPTY\" {\n            missing = missing + 1;\n        }\n        fx {\n            println(\"row \", i, \" = \", code);\n        }\n    }\n    fx {\n        println(\"missing = \", missing);\n    }\n    toon_close(doc);\n    ret;\n}\n"
+      "reference_solution": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n    fx {\n        let doc: ToonDoc = toon_parse_file(\"rows.json\");\n        let root: ToonNode = toon_root(doc);\n        let rows: ToonNode = toon_key(root, \"rows\");\n        let missing: Int = 0;\n        loop i in 0..toon_len(rows) {\n            let row: ToonNode = toon_at(rows, i);\n            let code: Text = \"EMPTY\";\n            if toon_has_key(row, \"meta\") {\n                let meta: ToonNode = toon_key(row, \"meta\");\n                code = toon_get_text_or(meta, \"code\", \"EMPTY\");\n            }\n            if code == \"EMPTY\" {\n                missing = missing + 1;\n            }\n            fx {\n                println(\"row \", i, \" = \", code);\n            }\n        }\n        fx {\n            println(\"missing = \", missing);\n        }\n        toon_close(doc);\n    }\n    ret;\n}\n"
     },
     {
       "id": "toon_deep_nested",
@@ -299,7 +299,7 @@
       "files": {
         "rosters.json": "{\"teams\":[{\"name\":\"Reds\",\"members\":[\"a\",\"b\",\"c\"]},{\"name\":\"Blues\",\"members\":[\"x\",\"y\"]}]}\n"
       },
-      "reference_solution": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse_file(\"rosters.json\");\n    let root: ToonNode = toon_root(doc);\n    let teams: ToonNode = toon_key(root, \"teams\");\n    let grand: Int = 0;\n    loop i in 0..toon_len(teams) {\n        let team: ToonNode = toon_at(teams, i);\n        let name: Text = toon_get_text_or(team, \"name\", \"UNKNOWN\");\n        let members: ToonNode = toon_key(team, \"members\");\n        let count: Int = toon_len(members);\n        grand = grand + count;\n        fx {\n            println(\"team \", i, \": \", name, \" / \", count);\n        }\n    }\n    fx {\n        println(\"total members = \", grand);\n    }\n    toon_close(doc);\n    ret;\n}\n"
+      "reference_solution": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n    fx {\n        let doc: ToonDoc = toon_parse_file(\"rosters.json\");\n        let root: ToonNode = toon_root(doc);\n        let teams: ToonNode = toon_key(root, \"teams\");\n        let grand: Int = 0;\n        loop i in 0..toon_len(teams) {\n            let team: ToonNode = toon_at(teams, i);\n            let name: Text = toon_get_text_or(team, \"name\", \"UNKNOWN\");\n            let members: ToonNode = toon_key(team, \"members\");\n            let count: Int = toon_len(members);\n            grand = grand + count;\n            fx {\n                println(\"team \", i, \": \", name, \" / \", count);\n            }\n        }\n        fx {\n            println(\"total members = \", grand);\n        }\n        toon_close(doc);\n    }\n    ret;\n}\n"
     },
     {
       "id": "real_mean_format",

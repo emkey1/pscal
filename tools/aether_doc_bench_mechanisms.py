@@ -16,7 +16,7 @@ import json
 import pathlib
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
-DEFAULT_TASKS = REPO_ROOT / "Tests" / "aether_doc_bench" / "tasks.json"
+DEFAULT_TASKS = REPO_ROOT / "Tests" / "aether_doc_bench" / "tasks_v2_pos.json"
 
 
 def main() -> int:

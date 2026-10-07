@@ -1182,6 +1182,70 @@ def test_real_aether_warning_before_error():
     assert adb.derive_failure_fingerprint({"generated_ok": True, "run": run}) == "run_error_code:SCOPE-001"
 
 
+# --------------------------------------------------------------------------- #
+# W1-10: the oracle lap
+# --------------------------------------------------------------------------- #
+
+
+def test_sliding_window_expected_matches_a_python_reference():
+    task = next(t for t in json.loads((BENCH_DIR / "tasks_frontier_algo.json").read_text())["tasks"]
+                if t["id"] == "algo_sliding_window_max")
+    xs, k = [1, 3, -1, -3, 5, 3, 6, 7], 3
+    maxes = [max(xs[i:i + k]) for i in range(len(xs) - k + 1)]
+    python_expected = "maxes:" + "".join(f" {m}" for m in maxes) + f"\nwindows={len(maxes)}\n"
+    assert python_expected == "maxes: 3 3 5 5 6 7\nwindows=6\n"
+    assert task["expected_stdout"] == python_expected
+    assert "loop t in 0..pending" in task["reference_solution"], "the reference must hoist the bound"
+    assert json.loads((BENCH_DIR / "tasks_frontier_algo.json").read_text())["version"] != "2026-08-10-1"
+
+
+def test_list_tasks_works_on_all_12_manifests():
+    manifests = sorted(BENCH_DIR.glob("*tasks*.json"))
+    assert len(manifests) == 12, [m.name for m in manifests]
+    for manifest in manifests:
+        proc = run_harness(["--tasks", str(manifest), "--list-tasks"])
+        assert proc.returncode == 0 and proc.stdout.strip(), (manifest.name, proc.stderr)
+    assert adb.DEFAULT_TASKS.name == "tasks_v2_pos.json"
+    ids = [t.task_id for t in adb.load_tasks(BENCH_DIR / "tasks_v2.json")]
+    assert "effect_boundary_reject" not in ids, "should_fail entries are not tasks"
+    assert "module_toon_report" not in [t.task_id for t in adb.load_tasks(BENCH_DIR / "tasks.json")], "D37c"
+
+
+def test_oracle_lint_only_needs_no_binary():
+    proc = run_harness(["--lint-only"], script=REPO_ROOT / "tools" / "aether_oracle_check.py")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "12 manifests, 0 problem(s)" in proc.stdout
+
+
+def test_oracle_check_passes_on_the_real_binary_in_under_10s():
+    binary = real_aether_bin()
+    with workdir() as tmp:
+        out = tmp / "oracle.json"
+        proc = run_harness(["--aether-bin", str(binary), "--quiet", "--report-json", str(out)],
+                           script=REPO_ROOT / "tools" / "aether_oracle_check.py")
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        report = json.loads(out.read_text())
+        assert report["references_passed"] == report["references_total"] == 140
+        assert sum(n["ok"] for n in report["negatives"]) == len(report["negatives"]) == 4
+        assert report["sandbox_probe"]["ok"] is True
+        assert report["elapsed_seconds"] < 10, report["elapsed_seconds"]
+
+
+def test_harness_preflight_aborts_on_a_broken_reference():
+    with workdir() as tmp:
+        good = simple_task("good", reference_solution="//! print ok\n")
+        broken = simple_task("broken", reference_solution="//! print WRONG\n")
+        plan = {"initial": "//! print ok\n"}
+        proc, report = scripted_run(tmp, plan, [], [good, broken])
+        assert proc.returncode != 0 and "oracle pre-flight failed" in proc.stderr, proc.stderr
+        assert "broken" in proc.stderr and report is None
+        proc, report = scripted_run(tmp, plan, ["--allow-broken-oracle"], [good, broken])
+        assert proc.returncode == 0, proc.stderr
+        assert report["oracle"]["broken"] == ["broken"] and report["oracle"]["sandbox_probe"]["ok"] is True
+        oracle = {c["task_id"]: c["oracle_ok"] for _, _, c in all_cases(report)}
+        assert oracle == {"good": True, "broken": False}
+
+
 def _main() -> int:
     failures = 0
     skipped = 0

@@ -47,7 +47,9 @@ from typing import Any
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
-DEFAULT_TASKS = REPO_ROOT / "Tests" / "aether_doc_bench" / "tasks.json"
+# The board's simple suite. tasks.json is off the boards (and kept only for
+# history); it used to be the default, so a bare run scored the wrong suite.
+DEFAULT_TASKS = REPO_ROOT / "Tests" / "aether_doc_bench" / "tasks_v2_pos.json"
 DEFAULT_AETHER_BIN = REPO_ROOT / "build" / "bin" / "aether"
 DEFAULT_DESTINATIONS_CONFIG = REPO_ROOT / "Tests" / "aether_doc_bench" / "destinations.template.json"
 # The aether checkout the guides (and, for the skew guard, the binary's +sha) come
@@ -4348,6 +4350,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "(prompt_context_limit) nor detectable; the context guard is then inert for it",
     )
     parser.add_argument(
+        "--allow-broken-oracle",
+        action="store_true",
+        help="score tasks even when their reference_solution fails on this binary, or the sandbox "
+        "probe is not rejected (the failures are recorded under oracle)",
+    )
+    parser.add_argument(
         "--preflight-only",
         action="store_true",
         help="run the start-up checks (docs, binary snapshot and hash, skew guard) and exit",
@@ -4688,7 +4696,7 @@ def prompt_template_fingerprint() -> dict[str, Any]:
     }
 
 
-HARNESS_SOURCE_FILES = ("tools/aether_doc_bench.py", "tools/fleet_env.py")
+HARNESS_SOURCE_FILES = ("tools/aether_doc_bench.py", "tools/fleet_env.py", "tools/aether_oracle_check.py")
 
 
 def harness_fingerprint() -> dict[str, Any]:
@@ -4988,6 +4996,30 @@ def _run_benchmark(
         "destinations": [],
     }
 
+    # Oracle pre-flight (W1-10): every selected task's reference must still
+    # print its expected stdout on THIS binary with THESE flags, and the
+    # sandbox must still refuse a socket -- before any model is paid for.
+    import aether_oracle_check as oracle_check
+
+    oracle_refs = oracle_check.check_references(tasks, args)
+    sandbox_probe = oracle_check.check_sandbox(args) if "net" in (args.sandbox_deny or "") else None
+    broken = sorted(tid for tid, result in oracle_refs.items() if result["ok"] is False)
+    report["oracle"] = {
+        "references": oracle_refs,
+        "broken": broken,
+        "sandbox_probe": sandbox_probe,
+        "allowed_broken": bool(args.allow_broken_oracle),
+    }
+    oracle_status = {tid: result["ok"] for tid, result in oracle_refs.items()}
+    oracle_problems = [f"reference {tid}: {oracle_refs[tid]['detail']}" for tid in broken]
+    if sandbox_probe and not sandbox_probe["ok"]:
+        oracle_problems.append(f"sandbox probe was not rejected under --deny {sandbox_probe['deny']}")
+    if oracle_problems and not args.allow_broken_oracle:
+        raise SystemExit(
+            "oracle pre-flight failed on this binary:\n  - " + "\n  - ".join(oracle_problems)
+            + "\nFix the task (or the compiler), or pass --allow-broken-oracle (recorded)."
+        )
+
     context_limits: dict[str, dict[str, Any]] = {}
     unknown_context: list[str] = []
     for destination in destinations:
@@ -5006,6 +5038,9 @@ def _run_benchmark(
 
     if args.preflight_only:
         print(json.dumps({
+            "oracle": {"checked": sum(1 for v in oracle_status.values() if v is not None),
+                       "broken": broken,
+                       "sandbox_probe_ok": None if sandbox_probe is None else sandbox_probe["ok"]},
             "context_limits": context_limits,
             "preflight": "ok",
             "aether_version": toolchain["aether_version"],
@@ -5088,6 +5123,7 @@ def _run_benchmark(
 
         def append_case(variant_report: dict[str, Any], key: str, case_record: dict[str, Any]) -> None:
             with report_lock:
+                case_record["oracle_ok"] = oracle_status.get(case_record.get("task_id"))
                 case_record["case_sequence"] = sequence["next"]
                 sequence["next"] += 1
                 variant_report[key].append(case_record)

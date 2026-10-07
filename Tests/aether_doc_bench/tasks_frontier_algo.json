@@ -1,5 +1,5 @@
 {
-  "version": "2026-08-10-1",
+  "version": "2026-10-07-1",
   "tasks": [
     {
       "id": "algo_topo_sort_cycle",
@@ -118,10 +118,13 @@
         "monotonic_queue"
       ],
       "prompt": "Write an Aether program that reports the maximum of every window of size 3 over [1,3,-1,-3,5,3,6,7]. Aether has no deque type, so maintain the monotonic index queue yourself in an array. Print `maxes:` followed by each window maximum preceded by a space, then `windows=<n>`.",
-      "expected_stdout": "maxes: 3 3 5 5 5 7\nwindows=6\n",
+      "expected_stdout": "maxes: 3 3 5 5 6 7\nwindows=6\n",
       "files": {},
-      "reference_solution": "fn main() -> Void {\n    let xs: Int[] = [1, 3, -1, -3, 5, 3, 6, 7];\n    let k: Int = 3;\n    let maxes: Int[] = [];\n    let dq: Int[] = [];\n    loop i in 0..length(xs) {\n        loop t in 0..length(dq) {\n            let last: Int = length(dq) - 1;\n            if last >= 0 && xs[dq[last]] <= xs[i] {\n                let nd: Int[] = [];\n                loop z in 0..last { nd = nd + [dq[z]]; }\n                dq = nd;\n            }\n        }\n        dq = dq + [i];\n        if dq[0] <= i - k {\n            let nd2: Int[] = [];\n            loop z in 1..length(dq) { nd2 = nd2 + [dq[z]]; }\n            dq = nd2;\n        }\n        if i >= k - 1 { maxes = maxes + [xs[dq[0]]]; }\n    }\n    fx {\n        print(\"maxes:\");\n        loop i in 0..length(maxes) { print(\" \", maxes[i]); }\n        println(\"\");\n        println(\"windows=\", length(maxes));\n    }\n}\n",
-      "achievability": "verified: reference_solution compiles and produces expected_stdout byte-exact"
+      "reference_solution": "fn main() -> Void {\n    let xs: Int[] = [1, 3, -1, -3, 5, 3, 6, 7];\n    let k: Int = 3;\n    let maxes: Int[] = [];\n    let dq: Int[] = [];\n    loop i in 0..length(xs) {\n        let pending: Int = length(dq);\n        loop t in 0..pending {\n            let last: Int = length(dq) - 1;\n            if last >= 0 && xs[dq[last]] <= xs[i] {\n                let nd: Int[] = [];\n                loop z in 0..last { nd = nd + [dq[z]]; }\n                dq = nd;\n            }\n        }\n        dq = dq + [i];\n        if dq[0] <= i - k {\n            let nd2: Int[] = [];\n            loop z in 1..length(dq) { nd2 = nd2 + [dq[z]]; }\n            dq = nd2;\n        }\n        if i >= k - 1 { maxes = maxes + [xs[dq[0]]]; }\n    }\n    fx {\n        print(\"maxes:\");\n        loop i in 0..length(maxes) { print(\" \", maxes[i]); }\n        println(\"\");\n        println(\"windows=\", length(maxes));\n    }\n}\n",
+      "achievability": "verified: reference_solution (range bound hoisted into `pending`, so it does not depend on whether a range bound is re-read each iteration) produces expected_stdout byte-exact; expected_stdout matches an independent Python computation of the window maxima",
+      "semantics_sensitive": [
+        "R2: a range bound re-read every iteration (B-runtime-semantics-5) made the previous reference print `maxes: 3 3 5 5 5 7`; a correct program must print `maxes: 3 3 5 5 6 7`"
+      ]
     },
     {
       "id": "algo_bracket_validate",

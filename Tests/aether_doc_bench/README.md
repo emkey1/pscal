@@ -332,7 +332,14 @@ In practice that means:
 
 ## Task manifest
 
-Tasks live in `tasks.json`.
+Tasks live in one manifest per suite. The boards use `tasks_v2_pos.json`
+(simple, the default), `tasks_hard_v2.json`, `tasks_hard_nontoon.json`,
+`tasks_cs.json` and the three `tasks_frontier*.json` suites. `tasks.json` is
+the original v1 set, off the boards and kept for history. Check every
+reference solution, negative and the sandbox probe against a binary with
+`python3 tools/aether_oracle_check.py --aether-bin <bin>`; the harness runs the
+reference and sandbox checks for the tasks it is about to score as a
+pre-flight and stops on a failure unless `--allow-broken-oracle`.
 
 Each task currently defines:
 
