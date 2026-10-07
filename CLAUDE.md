@@ -95,7 +95,10 @@ wraps steps 1–4.
   (they die on session interrupt/compaction) and never a foreground Bash call
   that can hit the 2-minute timeout.
 - Drivers must be resumable: per-unit output + skip-finished check, `set -u`
-  not `-e`, so any death resumes with no lost work.
+  not `-e`, so any death resumes with no lost work. Inside a unit,
+  `tools/aether_doc_bench.py --resume --output-json <same path>` continues a
+  killed run from its checkpoint: finished cases are kept, missing and
+  infra-failed ones run, and a changed configuration is refused.
 - **Smoke-test every new script on one item and inspect the real output
   artifact before trusting it for a long/overnight run.** "Process alive" and
   completion echoes prove nothing. Watch macOS↔Linux mismatches (`timeout`

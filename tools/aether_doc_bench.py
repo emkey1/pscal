@@ -3616,6 +3616,64 @@ def report_infra_failed(report: dict[str, Any]) -> int:
     return count
 
 
+# --resume: what must match between a checkpointed report and this run for its
+# finished cases to count. Anything that changes what a model is asked, or how
+# its answer is scored, is here. The destinations file's sha is not: an endpoint
+# address can move between hosts mid-board, and each destination is matched by
+# id and model instead.
+RESUME_REPORT_KEYS = ("tasks_sha256", "binary_sha256", "aether_version")
+RESUME_RUN_CONFIG_KEYS = (
+    "docs", "repeats", "start_repeat", "seed_base", "repair_attempts",
+    "repair_feedback_limit", "repair_source_limit", "context_margin",
+    "min_output_tokens", "shared_guide_batch_size", "python_baseline",
+    "rust_baseline", "skip_aether", "task_ids",
+)
+CASE_KEYS = ("results", "python_baseline_results", "rust_baseline_results")
+
+
+def resume_mismatches(prior: dict[str, Any], report: dict[str, Any],
+                      destination_models: dict[str, str]) -> list[str]:
+    """Why a checkpointed report cannot be resumed by this run (empty: it can)."""
+    problems = []
+    for key in RESUME_REPORT_KEYS:
+        if prior.get(key) != report.get(key):
+            problems.append(f"{key}: the report has {prior.get(key)!r}, this run {report.get(key)!r}")
+    prior_guides = prior.get("guides") or {}
+    for name, record in (report.get("guides") or {}).items():
+        before = (prior_guides.get(name) or {}).get("sha256")
+        if before != record.get("sha256"):
+            problems.append(f"guide {name}: the report has sha256 {before}, this run {record.get('sha256')}")
+    prior_config = prior.get("run_config") or {}
+    for key in RESUME_RUN_CONFIG_KEYS:
+        if prior_config.get(key) != report["run_config"].get(key):
+            problems.append(f"run_config.{key}: the report has {prior_config.get(key)!r}, "
+                            f"this run {report['run_config'].get(key)!r}")
+    for dest in prior.get("destinations") or []:
+        dest_id = dest.get("destination_id")
+        if dest_id in destination_models and dest.get("model") != destination_models[dest_id]:
+            problems.append(f"destination {dest_id}: the report ran model {dest.get('model')!r}, "
+                            f"this run {destination_models[dest_id]!r}")
+    return problems
+
+
+def resume_kept_cases(prior: dict[str, Any]) -> tuple[dict[tuple[str, str, str], list[dict[str, Any]]], int, int]:
+    """The checkpointed cases a resumed run keeps, keyed by (destination id, doc
+    name, case key), with (kept, dropped) counts. A case that failed in the
+    infrastructure measured nothing, so it is dropped and runs again."""
+    kept: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    n_kept = n_dropped = 0
+    for dest in prior.get("destinations") or []:
+        for variant in dest.get("variants") or []:
+            for key in CASE_KEYS:
+                for case in variant.get(key) or []:
+                    if case_is_infra_failed(case):
+                        n_dropped += 1
+                        continue
+                    kept.setdefault((dest["destination_id"], variant["doc_name"], key), []).append(case)
+                    n_kept += 1
+    return kept, n_kept, n_dropped
+
+
 def refresh_variant_summaries(variant_report: dict[str, Any]) -> None:
     """Recompute every summary block of a variant from its results."""
     for prefix, key in (("", "results"), ("python_baseline_", "python_baseline_results"),
@@ -4392,6 +4450,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="when > 1, batch that many Aether tasks behind one shared guide prompt before splitting results back per case",
     )
     parser.add_argument("--output-json", type=pathlib.Path, default=None, help="write full JSON report to this path")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="continue the run checkpointed in --output-json: keep its finished cases, run only the "
+        "missing ones and those that failed in the infrastructure. Refused when the tasks, binary, "
+        "guides, run settings or a destination's model differ. Starts fresh when the file is absent",
+    )
     parser.add_argument("--text-summary", action="store_true", help="print compact text summary")
     parser.add_argument("--progress", action="store_true", help="print per-task progress to stderr")
     return parser
@@ -4860,6 +4925,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--repeats must be at least 1")
     if args.start_repeat < 0:
         raise SystemExit("--start-repeat must be >= 0")
+    if args.resume and not args.output_json:
+        raise SystemExit("--resume needs --output-json (the checkpointed report to continue)")
 
     doc_overrides = parse_doc_overrides(args.doc)
     variants = doc_variant_paths(args.aether_root, doc_overrides)
@@ -5052,6 +5119,36 @@ def _run_benchmark(
         }, indent=2))
         return 0
 
+    # --resume: a run killed part-way (a host crash, a laptop asleep, a wedged
+    # backend) continues from the report it checkpointed after every case,
+    # instead of paying for the finished cases again.
+    resume_kept: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    prior_destination_reports: dict[str, dict[str, Any]] = {}
+    if args.resume and args.output_json.exists():
+        prior = json.loads(args.output_json.read_text(encoding="utf-8"))
+        problems = resume_mismatches(prior, report, {d.destination_id: d.model for d in destinations})
+        if problems:
+            raise SystemExit(
+                f"--resume: {args.output_json} was not made by this configuration:\n  - "
+                + "\n  - ".join(problems)
+                + "\nRun it to a new --output-json, or restore the configuration it was made with."
+            )
+        resume_kept, n_kept, n_dropped = resume_kept_cases(prior)
+        prior_destination_reports = {d["destination_id"]: d for d in prior.get("destinations") or []}
+        report["created_at_unix"] = prior.get("created_at_unix", report["created_at_unix"])
+        report["resumed"] = list(prior.get("resumed") or []) + [{
+            "at_unix": int(time.time()),
+            "kept_cases": n_kept,
+            "dropped_infra_cases": n_dropped,
+            "prior_updated_at_unix": prior.get("updated_at_unix"),
+            "prior_destinations_sha256": prior.get("destinations_sha256"),
+            "prior_harness_sha256": ((prior.get("harness") or {}).get("files") or {}).get("tools/aether_doc_bench.py"),
+        }]
+        print(f"[resume] {args.output_json}: keeping {n_kept} finished case(s), re-running "
+              f"{n_dropped} infra-failed case(s) and every missing one", file=sys.stderr)
+    elif args.resume:
+        print(f"[resume] {args.output_json} does not exist yet; starting a fresh run", file=sys.stderr)
+
     report_lock = threading.Lock()
 
     def persist_report_checkpoint() -> None:
@@ -5075,6 +5172,9 @@ def _run_benchmark(
                 "model": destination.model,
                 "detail": detail,
             })
+            if destination.destination_id in prior_destination_reports:
+                # Never lose checkpointed cases because a host is down today.
+                report["destinations"].append(prior_destination_reports[destination.destination_id])
             continue
 
         destination_report = {
@@ -5114,12 +5214,27 @@ def _run_benchmark(
                 variant_report["python_baseline_results"] = []
             if args.rust_baseline:
                 variant_report["rust_baseline_results"] = []
+            for key in CASE_KEYS:
+                if key in variant_report:
+                    variant_report[key].extend(resume_kept.get((destination.destination_id, doc_name, key), []))
+            prior_dest = prior_destination_reports.get(destination.destination_id) or {}
+            for prior_variant in prior_dest.get("variants") or []:
+                if prior_variant.get("doc_name") == doc_name:
+                    variant_report["batch_runs"].extend(prior_variant.get("batch_runs") or [])
             refresh_variant_report(variant_report)
             destination_report["variants"].append(variant_report)
             variant_reports.append(variant_report)
         persist_report_checkpoint()
 
-        sequence = {"next": 0}
+        sequence = {"next": 1 + max(
+            (case.get("case_sequence", -1) for vr in variant_reports for key in CASE_KEYS
+             for case in vr.get(key, [])), default=-1)}
+        # (variant index, case key, repeat) -> task ids already measured, from --resume.
+        done: dict[tuple[int, str, int], set[str]] = {}
+        for vi, vr in enumerate(variant_reports):
+            for key in CASE_KEYS:
+                for case in vr.get(key, []):
+                    done.setdefault((vi, key, case.get("repeat_index")), set()).add(case.get("task_id"))
 
         def append_case(variant_report: dict[str, Any], key: str, case_record: dict[str, Any]) -> None:
             with report_lock:
@@ -5144,12 +5259,14 @@ def _run_benchmark(
                 group = groups[group_index]
                 variant_report = variant_reports[variant_index]
                 doc_name, _doc_path = doc_variants[variant_index]
-                if not args.skip_aether:
+                finished = done.get((variant_index, "results", repeat_index), set())
+                aether_group = [task for task in group if task.task_id not in finished]
+                if not args.skip_aether and aether_group:
                     _results, batch_meta = run_aether_task_group(
                         destination=destination,
                         doc_name=doc_name,
                         doc_text=doc_texts[doc_name],
-                        task_group=group,
+                        task_group=aether_group,
                         repeat_index=repeat_index,
                         args=args,
                         doc_token_reference=doc_token_reference,
@@ -5166,6 +5283,8 @@ def _run_benchmark(
                     if not enabled:
                         continue
                     for task in group:
+                        if task.task_id in done.get((variant_index, key, repeat_index), set()):
+                            continue
                         case = run_baseline_case(
                             runner=runner,
                             destination=destination,
@@ -5193,6 +5312,12 @@ def _run_benchmark(
                 for variant_report in variant_reports:
                     refresh_variant_report(variant_report)
                 persist_report_checkpoint()
+
+    # --resume with fewer destinations than the report: keep the others as they were.
+    ran = {d.get("destination_id") for d in report["destinations"]}
+    for dest_id, prior_dest in prior_destination_reports.items():
+        if dest_id not in ran:
+            report["destinations"].append(prior_dest)
 
     # The snapshot must still be the binary every case was scored with.
     final_sha = sha256_file(snapshot_path)

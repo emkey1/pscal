@@ -1319,6 +1319,72 @@ def test_tracked_replay_reproduces_242_to_245_with_every_regression_waived():
         assert sum(1 for r in result["waived"] if r["kind"] == "first" and r["transition"] == "pass->fail") == 8
 
 
+def _seed_log_calls(log: pathlib.Path) -> list[tuple[str, str]]:
+    return [(json.loads(x)["task_ids"][0], json.loads(x)["seed"]) for x in log.read_text().splitlines()]
+
+
+def test_resume_runs_only_missing_and_infra_failed_cases():
+    with workdir() as tmp:
+        log = tmp / "seeds.jsonl"
+        argv = ["--repeats", "2", "--seed-base", "42", "--task", "hello_fx", "--task", "classify_scores"]
+        proc, report = fake_run(tmp, argv, env={"MOCK_SEED_LOG": str(log)})
+        assert proc.returncode == 0, proc.stderr
+        assert len(list(all_cases(report))) == 4
+        # A crash after three cases: the checkpoint lost the fourth, and one of the
+        # three it kept measured nothing.
+        results = report["destinations"][0]["variants"][0]["results"]
+        results.sort(key=lambda c: c["case_sequence"])
+        lost = results.pop()
+        infra = results[0]
+        infra["infra_failed"] = True
+        (tmp / "report.json").write_text(json.dumps(report), encoding="utf-8")
+        log.unlink()
+        proc, resumed = fake_run(tmp, argv + ["--resume"], env={"MOCK_SEED_LOG": str(log)})
+        assert proc.returncode == 0, proc.stderr
+        assert "[resume]" in proc.stderr and "keeping 2 finished case(s)" in proc.stderr, proc.stderr
+        rerun = sorted(_seed_log_calls(log))
+        want = sorted((c["task_id"], str(c["seed"])) for c in (lost, infra))
+        assert rerun == want, (rerun, want)
+        cases = list(all_cases(resumed))
+        assert sorted((c["task_id"], c["repeat_index"]) for _, _, c in cases) == sorted(
+            (t, r) for t in ("hello_fx", "classify_scores") for r in (0, 1))
+        assert not any(c.get("infra_failed") for _, _, c in cases)
+        sequences = [c["case_sequence"] for _, _, c in cases]
+        assert len(set(sequences)) == len(sequences), sequences
+        assert resumed["created_at_unix"] == report["created_at_unix"]
+        entry = resumed["resumed"][-1]
+        assert entry["kept_cases"] == 2 and entry["dropped_infra_cases"] == 1, entry
+        # Resuming a finished report runs nothing.
+        log.unlink()
+        proc, again = fake_run(tmp, argv + ["--resume"], env={"MOCK_SEED_LOG": str(log)})
+        assert proc.returncode == 0, proc.stderr
+        assert not log.exists() or not log.read_text().strip()
+        assert len(list(all_cases(again))) == 4 and len(again["resumed"]) == 2
+
+
+def test_resume_refuses_a_report_from_another_configuration():
+    with workdir() as tmp:
+        argv = ["--seed-base", "42", "--task", "hello_fx"]
+        proc, _ = fake_run(tmp, argv)
+        assert proc.returncode == 0, proc.stderr
+        proc, _ = fake_run(tmp, ["--seed-base", "7", "--task", "hello_fx", "--resume"])
+        assert proc.returncode != 0
+        assert "was not made by this configuration" in proc.stderr and "run_config.seed_base" in proc.stderr, proc.stderr
+        proc, _ = fake_run(tmp, argv + ["--resume"], destinations=[mock_destination(model="other-model")])
+        assert proc.returncode != 0 and "destination mock" in proc.stderr, proc.stderr
+
+
+def test_resume_without_a_report_starts_fresh_and_needs_output_json():
+    with workdir() as tmp:
+        proc, report = fake_run(tmp, ["--task", "hello_fx", "--resume"])
+        assert proc.returncode == 0, proc.stderr
+        assert "starting a fresh run" in proc.stderr
+        assert len(list(all_cases(report))) == 1 and "resumed" not in report
+        proc = run_harness(["--task", "hello_fx", "--resume", "--allow-skew", "--docs", "none",
+                            "--aether-bin", str(FAKE_AETHER)])
+        assert proc.returncode != 0 and "--resume needs --output-json" in proc.stderr, proc.stderr
+
+
 def _main() -> int:
     failures = 0
     skipped = 0
