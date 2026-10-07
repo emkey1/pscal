@@ -548,6 +548,152 @@ def test_smoke_run_on_the_real_binary_has_one_binary_sha256():
 
 
 
+# --------------------------------------------------------------------------- #
+# W1-06: a run timeout is a measured failure that keeps its source
+# --------------------------------------------------------------------------- #
+
+# A command "model" driven by a JSON plan in $SCRIPTED_MODEL_PLAN:
+#   {"initial": SOURCE, "repair": SOURCE, "fail_on": "initial"|"repair"|null,
+#    "prompt_log": FILE}
+# It answers SOURCE for the matching round (repair rounds are recognised by the
+# repair prompt's "Repair attempt number:" line), exits 1 for a fail_on round,
+# and appends every prompt it is sent to prompt_log as one JSON line.
+SCRIPTED_MODEL = r'''
+import json, os, pathlib, sys
+plan = json.loads(os.environ["SCRIPTED_MODEL_PLAN"])
+prompt = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+kind = "repair" if "Repair attempt number:" in prompt else "initial"
+if plan.get("prompt_log"):
+    with open(plan["prompt_log"], "a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"kind": kind, "prompt": prompt}) + "\n")
+if plan.get("fail_on") == kind:
+    sys.stderr.write("upstream exploded\n")
+    raise SystemExit(1)
+sys.stdout.write(plan.get(kind) or plan.get("initial") or "")
+'''
+
+
+def scripted_run(tmp: pathlib.Path, plan: dict, extra_argv: list[str], tasks: list[dict],
+                 env: dict | None = None) -> tuple[subprocess.CompletedProcess, dict | None]:
+    script = tmp / "scripted_model.py"
+    script.write_text(SCRIPTED_MODEL, encoding="utf-8")
+    manifest = write_json(tmp / "tasks.json", {"version": "test-1", "tasks": tasks})
+    full_env = {"SCRIPTED_MODEL_PLAN": json.dumps(plan)}
+    full_env.update(env or {})
+    return fake_run(tmp, extra_argv, tasks=manifest,
+                    destinations=[mock_destination("scripted", model_script=script)], env=full_env)
+
+
+def simple_task(task_id: str = "t1", expected: str = "ok\n", **extra) -> dict:
+    task = {"id": task_id, "title": task_id, "prompt": f"Print {expected!r}.", "expected_stdout": expected}
+    task.update(extra)
+    return task
+
+
+def test_strip_run_dirs_from_paths():
+    samples = {
+        "/var/folders/0s/n0_9/T/aether-doc-bench-ab12_x/t1.aether:3: [FX-001] boom":
+            "t1.aether:3: [FX-001] boom",
+        "/private/var/folders/0s/T/aether-doc-bench-zz9/t1.aether:3: x": "t1.aether:3: x",
+        "error in /tmp/python-doc-bench-q1w2/t1.py line 2": "error in t1.py line 2",
+        "no paths here": "no paths here",
+    }
+    for raw, want in samples.items():
+        assert adb.strip_run_dirs(raw) == want, (raw, adb.strip_run_dirs(raw))
+    fp = adb.derive_failure_fingerprint({
+        "generated_ok": True,
+        "run": {"returncode": 1, "stderr": "/tmp/aether-doc-bench-k3/t1.aether:1: boom\n", "diagnostics": None},
+    })
+    assert fp == "run_error:boom", fp
+
+
+def test_run_captured_times_out_without_raising_and_caps_output():
+    with workdir() as tmp:
+        looping = adb.run_captured([sys.executable, "-c", "import time\nprint('partial', flush=True)\nwhile True: time.sleep(0.05)"],
+                                   cwd=tmp, timeout=1)
+        assert looping["returncode"] == 124 and looping["timed_out"] is True
+        assert looping["stdout"] == "partial\n"
+        flood = adb.run_captured([sys.executable, "-c", "import sys\nsys.stdout.write('x' * 50000)"],
+                                 cwd=tmp, timeout=20, cap_bytes=1000)
+        assert flood["returncode"] == 0 and len(flood["stdout"]) == 1000 and flood["stdout_truncated"] is True
+        echoed = adb.run_captured([sys.executable, "-c", "import sys; print(sys.stdin.read().count('\\n'))"],
+                                  cwd=tmp, timeout=20)
+        assert echoed["stdout"] == "0\n", "a program with no task stdin reads EOF, not the harness's terminal"
+
+
+def test_python_lane_timeout_is_rc_124():
+    task = adb.Task(task_id="loop", title="loop", prompt="", expected_stdout="", timeout_seconds=1)
+    run = adb.run_python_task(task, "while True:\n    pass\n")
+    assert run["returncode"] == 124 and run["timed_out"] is True
+    assert adb.derive_failure_fingerprint({"generated_ok": True, "run": run}, "loop") == "timeout:loop"
+
+
+def test_infinite_loop_is_a_measured_timeout_with_a_repair_round():
+    import importlib.util
+
+    with workdir() as tmp:
+        log = tmp / "prompts.jsonl"
+        plan = {"initial": "//! print partial\n//! loop\n", "repair": "//! loop\n", "prompt_log": str(log)}
+        proc, report = scripted_run(tmp, plan, ["--repair-attempts", "1"],
+                                    [simple_task("hangs", timeout_seconds=2)])
+        assert proc.returncode == 0, proc.stderr
+        case = next(c for _, _, c in all_cases(report))
+        first = case["attempts"][0]
+        assert first["run"]["returncode"] == 124 and first["run"]["timed_out"] is True
+        assert first["run"]["stdout"] == "partial\n", "partial stdout must survive the kill"
+        assert first["source_code"].startswith("//! print partial"), "the source must be kept"
+        assert case["generated_ok"] is True
+        assert case["attempt_count"] == 2, "a repair round is issued after a timeout"
+        assert case["failure_fingerprint"] == "timeout:hangs", case["failure_fingerprint"]
+        prompts = [json.loads(x) for x in log.read_text().splitlines()]
+        assert [p["kind"] for p in prompts] == ["initial", "repair"]
+        assert "your program exceeded 2 s" in prompts[1]["prompt"]
+        assert "partial" in prompts[1]["prompt"]
+        # rerun_nogen_cases.py re-rolls provider events only; a timeout is a
+        # measurement and must be left alone.
+        spec = importlib.util.spec_from_file_location("rerun_nogen_cases", BENCH_DIR / "rerun_nogen_cases.py")
+        rerun = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(rerun)
+        board = tmp / "board"
+        board.mkdir()
+        (board / "scripted_simple.json").write_text(json.dumps(report))
+        assert rerun.find_nogen(board) == []
+        assert rerun.find_nogen(board, include_truncated=True) == []
+
+
+def test_real_aether_infinite_loop_times_out():
+    binary = real_aether_bin()
+    task = adb.Task(task_id="spin", title="spin", prompt="", expected_stdout="", timeout_seconds=2)
+    source = "fn main() -> Void {\n    let i: Int = 0;\n    loop i >= 0 {\n        i = i + 1;\n    }\n    ret;\n}\n"
+    run = adb.compile_and_run(task, source, adb.argparse.Namespace(aether_bin=binary, sandbox_deny="net,proc"))
+    assert run["returncode"] == 124 and run["timed_out"] is True, run
+    assert "diagnostics_timed_out" not in run, "the diagnostics rerun is skipped after a timeout"
+
+
+def test_compile_error_stderr_and_fingerprint_carry_no_temp_path():
+    with workdir() as tmp:
+        plan = {"initial": "not a directive program\n"}
+        proc, report = scripted_run(tmp, plan, [], [simple_task("broken")])
+        assert proc.returncode == 0, proc.stderr
+        case = next(c for _, _, c in all_cases(report))
+        assert case["run"]["stderr"].startswith("broken.aether:1: [SYN-001]"), case["run"]["stderr"]
+        assert "-doc-bench-" not in json.dumps(case)
+
+
+def test_provider_error_in_a_repair_round_keeps_the_first_attempt():
+    with workdir() as tmp:
+        plan = {"initial": "//! print wrong\n", "fail_on": "repair"}
+        proc, report = scripted_run(tmp, plan, ["--repair-attempts", "2"], [simple_task("t1")])
+        assert proc.returncode in (0, 3), proc.stderr
+        case = next(c for _, _, c in all_cases(report))
+        assert len(case["attempts"]) == 2, case["attempts"]
+        assert case["attempts"][0]["source_code"] == "//! print wrong"
+        assert case["attempts"][0]["run"]["stdout"] == "wrong\n"
+        assert case["attempts"][1]["generated_ok"] is False
+        assert "command provider failed" in case["attempts"][1]["generation_error"]
+
+
+
 def _main() -> int:
     failures = 0
     skipped = 0

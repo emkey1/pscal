@@ -453,6 +453,29 @@ def analyze_failure(source_code: str, run: dict[str, Any]) -> dict[str, Any] | N
     if run.get("returncode", -1) == 0:
         return None
 
+    # A program the harness killed at its time limit (compile_and_run returns rc
+    # 124 with timed_out). It used to raise out of compile_and_run and abort the
+    # whole destination; now it is a finding of its own kind -- a hang or a
+    # performance trap -- and never "silent".
+    if run.get("timed_out"):
+        limit = run.get("timeout_seconds")
+        stdout = run.get("stdout") or ""
+        return {
+            "returncode": run.get("returncode"),
+            "code": None,
+            "phase": "runtime",
+            "kind": "timeout",
+            "message": f"timeout: exceeded {limit} s" if limit is not None else "timeout",
+            "diag_line": None,
+            "offending_identifier": None,
+            "offending_line": None,
+            "is_missing_identifier": False,
+            "stderr_head": (run.get("stderr") or "").strip().splitlines()[0] if (run.get("stderr") or "").strip() else "",
+            "stdout_tail": stdout[-200:],
+            "silent": False,
+            "timed_out": True,
+        }
+
     diag = primary_diagnostic(run)
     code = phase = kind = message = diag_line = None
     if diag:
@@ -516,6 +539,8 @@ def finding_key(f: dict[str, Any]) -> str:
     code; runtime/silent failures key by a normalized message."""
     if f.get("is_missing_identifier"):
         return f"missing:{f['offending_identifier']}"
+    if f.get("timed_out"):
+        return "timeout"
     if f.get("code"):
         return f"code:{f['code']}"
     if f.get("phase") == "runtime" and f.get("message"):
@@ -653,6 +678,8 @@ def mine_findings(model_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             key = finding_key(f)
             if f.get("is_missing_identifier"):
                 kind = "missing_construct"
+            elif f.get("timed_out"):
+                kind = "timeout"
             elif f.get("code"):
                 kind = "error_code"
             elif f.get("phase") == "runtime":
@@ -732,6 +759,8 @@ def finding_headline(f: dict[str, Any]) -> str:
         return f"Tripped on `{f['code']}`"
     if f["kind"] == "runtime":
         return "Runtime error"
+    if f["kind"] == "timeout":
+        return "Timed out (killed at the time limit)"
     if f["kind"] == "silent":
         return "Silent failure (nonzero exit, no diagnostic)"
     return f["key"]
@@ -749,6 +778,10 @@ def suggested_action(f: dict[str, Any]) -> str:
                 "rule harder to miss) or a friendlier diagnostic.")
     if f["kind"] == "runtime":
         return "Models write compiling-but-crashing code here — usually program logic, not a language gap."
+    if f["kind"] == "timeout":
+        return ("A hang or a performance trap: check whether the natural program is accidentally "
+                "quadratic in Aether (array arguments copied per call, a bound re-read each iteration) "
+                "before blaming the model.")
     if f["kind"] == "silent":
         return ("**Diagnostic gap**: the program fails with no coded error or stderr. The compiler should "
                 "emit a diagnostic for this shape.")

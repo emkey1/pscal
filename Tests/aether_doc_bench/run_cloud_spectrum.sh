@@ -97,9 +97,13 @@ dests = d.get("destinations") or []
 variants = dests[0].get("variants") if dests else []
 if not variants:
     print("REJECT zero variants (target unreachable / preflight skip)"); raise SystemExit(0)
-TRANSPORT = ("timed out", "timeout", "http api request failed", "connection",
-             "refused", "unreachable", "reset by peer", " 502", " 503", " 504",
-             " 429", "rate limit", " 401", " 404")
+# Explicit provider/HTTP-level messages only, and only on generation failures
+# (a program timeout is fingerprinted timeout:<task> and is a measurement).
+TRANSPORT = ("http api error", "http api request failed", "http api request timed out",
+             "provider request exceeded", "connection refused", "connection reset",
+             "reset by peer", "unreachable", " 502", " 503", " 504",
+             " 429", "rate limit", " 401", " 402", " 404", "insufficient_quota",
+             "resource_exhausted")
 notes = []
 for v in variants:
     s = v.get("summary", {})
@@ -111,7 +115,8 @@ for v in variants:
         raise SystemExit(0)
     hit = 0
     for fp in v.get("failure_patterns", []):
-        if any(t in str(fp.get("fingerprint", "")).lower() for t in TRANSPORT):
+        fingerprint = str(fp.get("fingerprint", "")).lower()
+        if fingerprint.startswith("generation:") and any(t in fingerprint for t in TRANSPORT):
             hit += int(fp.get("count", 0))
     if tot and hit / tot > 0.25:
         print(f"REJECT variant {v.get('doc_name')}: {hit}/{tot} cases failed in transport, not generation")

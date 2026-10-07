@@ -163,6 +163,22 @@ def test_clean_run_returns_none():
     assert m.analyze_failure("", _run(returncode=0, stdout="ok\n")) is None
 
 
+def test_timed_out_program_is_a_timeout_finding_not_silent():
+    # compile_and_run now returns rc 124 + timed_out instead of raising, which
+    # used to abort mining for the whole destination.
+    run = _run(returncode=124, stdout="partial\n", stderr="")
+    run["timed_out"] = True
+    run["timeout_seconds"] = 20
+    f = m.analyze_failure("src", run)
+    assert f["silent"] is False and f["kind"] == "timeout"
+    assert m.finding_key(f) == "timeout"
+    findings = m.mine_findings([{
+        "destination_id": "d", "model": "x",
+        "programs": [{"initial_failure": f, "initial_source": "src", "intent": "spin"}],
+    }])
+    assert findings[0]["kind"] == "timeout"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

@@ -91,8 +91,14 @@ dests = d.get("destinations") or []
 variants = dests[0].get("variants") if dests else []
 if not variants:
     print("REJECT zero variants (target unreachable / preflight skip)"); raise SystemExit(0)
-TRANSPORT = ("timed out", "timeout", "http api request failed", "connection",
-             "refused", "unreachable", "reset by peer", " 502", " 503", " 504")
+# Explicit provider/HTTP-level messages only, and only on generation failures.
+# This list used to match "timed out" anywhere, so a program that ran past its
+# time limit (now fingerprinted timeout:<task>, a real measurement) counted
+# toward rejecting the variant as a transport outage.
+TRANSPORT = ("http api error", "http api request failed", "http api request timed out",
+             "provider request exceeded", "tra_queue unreachable", "not done within deadline",
+             "connection refused", "connection reset", "reset by peer", "unreachable",
+             " 502", " 503", " 504")
 notes = []
 for v in variants:
     s = v.get("summary", {})
@@ -104,7 +110,8 @@ for v in variants:
         raise SystemExit(0)
     hit = 0
     for fp in v.get("failure_patterns", []):
-        if any(t in str(fp.get("fingerprint", "")).lower() for t in TRANSPORT):
+        fingerprint = str(fp.get("fingerprint", "")).lower()
+        if fingerprint.startswith("generation:") and any(t in fingerprint for t in TRANSPORT):
             hit += int(fp.get("count", 0))
     # Proportional, not absolute. An outage looks like most of the suite failing
     # in transport; a single blip is one unmeasured case in an otherwise good

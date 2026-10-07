@@ -96,7 +96,8 @@ def main(argv: list[str]) -> int:
             status = int(rest or "0")
         sys.stdout.flush()
     if directives == 0:
-        print(f"{pathlib.Path(program).name}:1: [SYN-001] fake_aether: no //! directives", file=sys.stderr)
+        # Like the real compiler, name the program by the path it was given.
+        print(f"{program}:1: [SYN-001] fake_aether: no //! directives", file=sys.stderr)
         return 1
     return status
 

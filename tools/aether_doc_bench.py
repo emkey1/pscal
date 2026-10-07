@@ -2161,6 +2161,138 @@ def aether_flags(args: Any) -> list[str]:
     return [*sandbox_flags, *[str(a) for a in (getattr(args, "aether_args", None) or [])]]
 
 
+# Per-stream cap on captured program output. A runaway print loop used to be
+# buffered whole until the timeout fired; the head is all a report or a repair
+# prompt can use, and no expected stdout is anywhere near this size.
+OUTPUT_CAP_BYTES = 1_000_000
+TIMEOUT_RETURNCODE = 124
+
+# A per-case temp dir the harness creates (aether-doc-bench-*, and the python/
+# rust lanes' equivalents), with whatever absolute prefix the platform puts in
+# front of it. Stripped from stderr, diagnostics and fingerprints: the path is
+# random per case, so leaving it in kept identical failures from clustering,
+# showed the model a meaningless path, and leaked the account's temp dir into
+# reports.
+_RUN_DIR_RE = re.compile(r"(?:/[^\s:'\"()\[\]]*?)?/(?:aether|python|rust)-doc-bench-[A-Za-z0-9_]+/")
+
+
+def strip_run_dirs(text: Any) -> Any:
+    """`/var/folders/.../aether-doc-bench-x1y2/task.aether:3: ...` -> `task.aether:3: ...`."""
+    if not isinstance(text, str) or "-doc-bench-" not in text:
+        return text
+    return _RUN_DIR_RE.sub("", text)
+
+
+def _strip_run_dirs_in_diagnostics(diagnostics: Any) -> Any:
+    if isinstance(diagnostics, list):
+        return [_strip_run_dirs_in_diagnostics(item) for item in diagnostics]
+    if isinstance(diagnostics, dict):
+        return {key: _strip_run_dirs_in_diagnostics(value) for key, value in diagnostics.items()}
+    return strip_run_dirs(diagnostics)
+
+
+def _decode_output(data: bytes) -> str:
+    # Same decoding and newline translation subprocess's text mode applied, so
+    # stored stdout stays comparable with every earlier report.
+    return data.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def run_captured(
+    cmd: list[str],
+    *,
+    cwd: pathlib.Path,
+    timeout: float,
+    input_text: str | None = None,
+    cap_bytes: int = OUTPUT_CAP_BYTES,
+) -> dict[str, Any]:
+    """Run a program to completion or to its timeout, never raising on either.
+
+    A timeout kills the program and comes back as returncode 124 with
+    timed_out=True and whatever output arrived before the kill -- it used to
+    raise TimeoutExpired, which the case loop filed as a generation error,
+    discarding the source and every attempt. stdin is the given text, or empty
+    (never the harness's own terminal). Each stream keeps at most cap_bytes;
+    *_truncated says whether more was dropped."""
+    started = time.time()
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(cwd),
+        stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    truncated = {"stdout": False, "stderr": False}
+
+    def drain(stream: Any, key: str) -> None:
+        buffer = buffers[key]
+        try:
+            while True:
+                chunk = stream.read(65536)
+                if not chunk:
+                    break
+                room = cap_bytes - len(buffer)
+                if room > 0:
+                    buffer.extend(chunk[:room])
+                if len(chunk) > max(room, 0):
+                    truncated[key] = True
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+    readers = [
+        threading.Thread(target=drain, args=(proc.stdout, "stdout"), daemon=True),
+        threading.Thread(target=drain, args=(proc.stderr, "stderr"), daemon=True),
+    ]
+    for reader in readers:
+        reader.start()
+    writer = None
+    if input_text is not None:
+        def feed() -> None:
+            try:
+                proc.stdin.write(input_text.encode("utf-8"))
+            except (BrokenPipeError, OSError, ValueError):
+                pass
+            finally:
+                try:
+                    proc.stdin.close()
+                except (BrokenPipeError, OSError, ValueError):
+                    pass
+
+        writer = threading.Thread(target=feed, daemon=True)
+        writer.start()
+
+    timed_out = False
+    try:
+        returncode = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        proc.kill()
+        returncode = proc.wait()
+    for reader in readers:
+        reader.join(timeout=10)
+    if writer is not None:
+        writer.join(timeout=5)
+    result: dict[str, Any] = {
+        "returncode": TIMEOUT_RETURNCODE if timed_out else returncode,
+        "stdout": _decode_output(bytes(buffers["stdout"])),
+        "stderr": _decode_output(bytes(buffers["stderr"])),
+        "elapsed_seconds": round(time.time() - started, 3),
+        "timed_out": timed_out,
+    }
+    if timed_out:
+        result["timeout_seconds"] = timeout
+        result["killed_returncode"] = returncode
+    for key in ("stdout", "stderr"):
+        if truncated[key]:
+            result[f"{key}_truncated"] = True
+    return result
+
+
 def compile_and_run(task: Task, source_code: str, args: argparse.Namespace) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="aether-doc-bench-") as tmp_name:
         tmp_dir = pathlib.Path(tmp_name)
@@ -2180,49 +2312,61 @@ def compile_and_run(task: Task, source_code: str, args: argparse.Namespace) -> d
             "--no-cache",
             program_path.name,
         ]
-        started = time.time()
-        proc = subprocess.run(
-            cmd,
-            cwd=str(work_dir),
-            text=True,
-            errors="replace",
-            capture_output=True,
-            timeout=task.timeout_seconds,
-        )
-        elapsed = time.time() - started
+        main_run = run_captured(cmd, cwd=work_dir, timeout=task.timeout_seconds)
 
-        stdout = proc.stdout
-        stderr = proc.stderr
-        exact_match = proc.returncode == 0 and stdout == task.expected_stdout
+        stdout = main_run["stdout"]
+        stderr = strip_run_dirs(main_run["stderr"])
+        exact_match = main_run["returncode"] == 0 and stdout == task.expected_stdout
         diagnostics = None
+        diagnostics_timed_out = False
 
-        if proc.returncode != 0:
+        # The --diagnostics-json rerun repeats the whole run, so it is skipped
+        # after a timeout (it would only time out again) and is itself bounded.
+        if main_run["returncode"] != 0 and not main_run["timed_out"]:
             diag_cmd = [str(args.aether_bin), *flags, "--diagnostics-json", "--no-cache", str(program_path)]
-            diag_proc = subprocess.run(
-                diag_cmd,
-                cwd=str(work_dir),
-                text=True,
-                errors="replace",
-                capture_output=True,
-                timeout=task.timeout_seconds,
-            )
-            diag_text = (diag_proc.stderr or "").strip()
-            if diag_text:
+            diag_run = run_captured(diag_cmd, cwd=work_dir, timeout=task.timeout_seconds)
+            diagnostics_timed_out = bool(diag_run["timed_out"])
+            diag_text = (diag_run["stderr"] or "").strip()
+            if diag_text and not diagnostics_timed_out:
                 try:
-                    diagnostics = json.loads(diag_text)
+                    diagnostics = _strip_run_dirs_in_diagnostics(json.loads(diag_text))
                 except json.JSONDecodeError:
                     diagnostics = None
 
-        return {
+        result = {
             "command": recorded_cmd,
-            "returncode": proc.returncode,
+            "returncode": main_run["returncode"],
             "stdout": stdout,
             "stderr": stderr,
             "diagnostics": diagnostics,
-            "elapsed_seconds": round(elapsed, 3),
+            "elapsed_seconds": main_run["elapsed_seconds"],
             "exact_stdout_match": exact_match,
+            "timed_out": main_run["timed_out"],
             "binary_sha256": getattr(args, "binary_sha256", None),
         }
+        for key in ("timeout_seconds", "killed_returncode", "stdout_truncated", "stderr_truncated"):
+            if key in main_run:
+                result[key] = main_run[key]
+        if diagnostics_timed_out:
+            result["diagnostics_timed_out"] = True
+        return result
+
+
+def _run_record(cmd: list[str], run: dict[str, Any], expected_stdout: str) -> dict[str, Any]:
+    record = {
+        "command": cmd,
+        "returncode": run["returncode"],
+        "stdout": run["stdout"],
+        "stderr": strip_run_dirs(run["stderr"]),
+        "diagnostics": None,
+        "elapsed_seconds": run["elapsed_seconds"],
+        "exact_stdout_match": run["returncode"] == 0 and run["stdout"] == expected_stdout,
+        "timed_out": run["timed_out"],
+    }
+    for key in ("timeout_seconds", "killed_returncode", "stdout_truncated", "stderr_truncated"):
+        if key in run:
+            record[key] = run[key]
+    return record
 
 
 def run_python_task(task: Task, source_code: str) -> dict[str, Any]:
@@ -2235,30 +2379,8 @@ def run_python_task(task: Task, source_code: str) -> dict[str, Any]:
         program_path.write_text(source_code, encoding="utf-8")
 
         cmd = ["python3", str(program_path)]
-        started = time.time()
-        proc = subprocess.run(
-            cmd,
-            cwd=str(work_dir),
-            text=True,
-            errors="replace",
-            capture_output=True,
-            timeout=task.timeout_seconds,
-        )
-        elapsed = time.time() - started
-
-        stdout = proc.stdout
-        stderr = proc.stderr
-        exact_match = proc.returncode == 0 and stdout == task.expected_stdout
-
-        return {
-            "command": cmd,
-            "returncode": proc.returncode,
-            "stdout": stdout,
-            "stderr": stderr,
-            "diagnostics": None,
-            "elapsed_seconds": round(elapsed, 3),
-            "exact_stdout_match": exact_match,
-        }
+        run = run_captured(cmd, cwd=work_dir, timeout=task.timeout_seconds)
+        return _run_record(["python3", program_path.name], run, task.expected_stdout)
 
 
 def run_rust_task(task: Task, source_code: str) -> dict[str, Any]:
@@ -2272,51 +2394,20 @@ def run_rust_task(task: Task, source_code: str) -> dict[str, Any]:
         program_path.write_text(source_code, encoding="utf-8")
 
         compile_cmd = ["rustc", "-O", "-o", str(binary_path), str(program_path)]
+        recorded_compile = ["rustc", "-O", "-o", binary_path.name, program_path.name]
         started = time.time()
-        compile_proc = subprocess.run(
-            compile_cmd,
-            cwd=str(work_dir),
-            text=True,
-            errors="replace",
-            capture_output=True,
-            timeout=task.timeout_seconds,
-        )
-        if compile_proc.returncode != 0:
-            elapsed = time.time() - started
-            return {
-                "command": compile_cmd,
-                "returncode": compile_proc.returncode,
-                "stdout": "",
-                "stderr": compile_proc.stderr,
-                "diagnostics": None,
-                "elapsed_seconds": round(elapsed, 3),
-                "exact_stdout_match": False,
-            }
+        compile_run = run_captured(compile_cmd, cwd=work_dir, timeout=task.timeout_seconds)
+        if compile_run["returncode"] != 0:
+            record = _run_record(recorded_compile, compile_run, task.expected_stdout)
+            record["stdout"] = ""
+            record["exact_stdout_match"] = False
+            return record
 
-        run_cmd = [str(binary_path)]
-        run_proc = subprocess.run(
-            run_cmd,
-            cwd=str(work_dir),
-            text=True,
-            errors="replace",
-            capture_output=True,
-            timeout=task.timeout_seconds,
-        )
-        elapsed = time.time() - started
-
-        stdout = run_proc.stdout
-        stderr = run_proc.stderr
-        exact_match = run_proc.returncode == 0 and stdout == task.expected_stdout
-
-        return {
-            "command": run_cmd,
-            "returncode": run_proc.returncode,
-            "stdout": stdout,
-            "stderr": stderr,
-            "diagnostics": None,
-            "elapsed_seconds": round(elapsed, 3),
-            "exact_stdout_match": exact_match,
-        }
+        remaining = max(1.0, task.timeout_seconds - (time.time() - started))
+        run = run_captured([str(binary_path)], cwd=work_dir, timeout=remaining)
+        record = _run_record([binary_path.name], run, task.expected_stdout)
+        record["elapsed_seconds"] = round(time.time() - started, 3)
+        return record
 
 
 def build_attempt_from_source(
@@ -2492,9 +2583,17 @@ def derive_failure_summary(
 ) -> str:
     if not generated_ok:
         if generation_error:
-            first_line = generation_error.strip().splitlines()[0]
+            first_line = strip_run_dirs(generation_error.strip().splitlines()[0])
             return f"generation_error: {first_line}"
         return "generation_error: empty model output"
+    if run.get("timed_out"):
+        limit = run.get("timeout_seconds")
+        limit_text = f"{limit:g} s" if isinstance(limit, (int, float)) else "its time limit"
+        return (
+            f"timeout: your program exceeded {limit_text} and was killed before it finished "
+            "(an infinite loop, or work far too slow for the input). Any output it printed "
+            "before the kill is shown under Observed stdout."
+        )
     if run["returncode"] != 0:
         diagnostics = run.get("diagnostics") or []
         if diagnostics:
@@ -2516,11 +2615,18 @@ def derive_failure_summary(
     return "stdout_mismatch"
 
 
-def derive_failure_fingerprint(result: dict[str, Any]) -> str:
+def derive_failure_fingerprint(result: dict[str, Any], task_id: str | None = None) -> str:
+    """A compact failure class for clustering. Never carries a run's temp path."""
+    return strip_run_dirs(_derive_failure_fingerprint(result, task_id))
+
+
+def _derive_failure_fingerprint(result: dict[str, Any], task_id: str | None = None) -> str:
     if not result.get("generated_ok", False):
-        err = result.get("generation_error", "empty model output")
-        return "generation:" + err.strip().splitlines()[0][:160]
+        err = result.get("generation_error") or "empty model output"
+        return "generation:" + strip_run_dirs(err.strip().splitlines()[0])[:160]
     run = result["run"]
+    if run.get("timed_out"):
+        return f"timeout:{task_id or result.get('task_id') or 'unknown'}"
     if run["returncode"] != 0:
         diagnostics = run.get("diagnostics") or []
         if diagnostics:
@@ -2790,7 +2896,7 @@ def print_progress_done(
     )
 
 
-def finalize_case_record(attempts: list[dict[str, Any]]) -> dict[str, Any]:
+def finalize_case_record(attempts: list[dict[str, Any]], task_id: str | None = None) -> dict[str, Any]:
     final_attempt = attempts[-1]
     case_record = dict(final_attempt)
     case_record["attempts"] = attempts
@@ -2799,9 +2905,37 @@ def finalize_case_record(attempts: list[dict[str, Any]]) -> dict[str, Any]:
         case_record["run"]["exact_stdout_match"] and len(attempts) > 1
     )
     case_record["failure_fingerprint"] = (
-        "" if case_record["run"]["exact_stdout_match"] else derive_failure_fingerprint(case_record)
+        "" if case_record["run"]["exact_stdout_match"] else derive_failure_fingerprint(case_record, task_id)
     )
     return case_record
+
+
+def failed_generation_attempt(
+    prompt_kind: str,
+    runner: str,
+    exc: BaseException,
+    options: RequestOptions | None = None,
+) -> dict[str, Any]:
+    """The attempt record for a generation that raised (provider error, deadline,
+    malformed reply). Kept in the case's attempts so the rounds already measured
+    survive, instead of the whole case collapsing to attempts=[]."""
+    message = strip_run_dirs(str(exc)) or type(exc).__name__
+    return {
+        "prompt_kind": prompt_kind,
+        "runner": runner,
+        "request": {"seed": None if options is None else options.seed},
+        "generated_ok": False,
+        "generation_error": message,
+        "source_code": "",
+        "source_approx_tokens": 0,
+        "run": {
+            "returncode": -1,
+            "stdout": "",
+            "stderr": message,
+            "elapsed_seconds": 0.0,
+            "exact_stdout_match": False,
+        },
+    }
 
 
 def apply_repairs(
@@ -2833,15 +2967,19 @@ def apply_repairs(
                 observed_stdout=truncate_for_prompt(attempt["run"].get("stdout", ""), args.repair_feedback_limit),
                 observed_stderr=truncate_for_prompt(attempt["run"].get("stderr", ""), args.repair_feedback_limit),
             )
-            attempt = evaluate_attempt(
-                prompt=repair_prompt,
-                prompt_kind="repair",
-                destination=destination,
-                task=task,
-                args=args,
-                runner=runner,
-                options=options,
-            )
+            try:
+                attempt = evaluate_attempt(
+                    prompt=repair_prompt,
+                    prompt_kind="repair",
+                    destination=destination,
+                    task=task,
+                    args=args,
+                    runner=runner,
+                    options=options,
+                )
+            except Exception as exc:  # keep the rounds already measured
+                attempts.append(failed_generation_attempt("repair", runner, exc, options))
+                break
             attempts.append(attempt)
             if attempt["run"]["exact_stdout_match"]:
                 break
@@ -2859,15 +2997,18 @@ def execute_case(
     repair_prompt_builder: Any,
     options: RequestOptions | None = None,
 ) -> dict[str, Any]:
-    attempt = evaluate_attempt(
-        prompt=initial_prompt,
-        prompt_kind="initial",
-        destination=destination,
-        task=task,
-        args=args,
-        runner=runner,
-        options=options,
-    )
+    try:
+        attempt = evaluate_attempt(
+            prompt=initial_prompt,
+            prompt_kind="initial",
+            destination=destination,
+            task=task,
+            args=args,
+            runner=runner,
+            options=options,
+        )
+    except Exception as exc:
+        return finalize_case_record([failed_generation_attempt("initial", runner, exc, options)], task.task_id)
     attempts = apply_repairs(
         initial_attempt=attempt,
         destination=destination,
@@ -2877,7 +3018,7 @@ def execute_case(
         repair_prompt_builder=repair_prompt_builder,
         options=options,
     )
-    return finalize_case_record(attempts)
+    return finalize_case_record(attempts, task.task_id)
 
 
 def chunk_list(items: list[Any], size: int) -> list[list[Any]]:
@@ -2949,7 +3090,7 @@ def run_single_aether_task(
         }
         case_record["attempt_count"] = len(case_record["attempts"])
         case_record["resolved_after_repair"] = False
-        case_record["failure_fingerprint"] = derive_failure_fingerprint(case_record)
+        case_record["failure_fingerprint"] = derive_failure_fingerprint(case_record, task.task_id)
     finally:
         try:
             run_destination_cleanup(destination, task, doc_name, repeat_index)
@@ -3083,7 +3224,7 @@ def run_aether_task_group(
                 ),
                 options=options,
             )
-            case_record.update(finalize_case_record(attempts))
+            case_record.update(finalize_case_record(attempts, task.task_id))
             case_record["doc_token_reference"] = doc_token_reference
         except Exception as exc:  # pragma: no cover - surfaced in JSON report
             case_record["generated_ok"] = False
@@ -3097,7 +3238,7 @@ def run_aether_task_group(
             }
             case_record["attempt_count"] = 0
             case_record["resolved_after_repair"] = False
-            case_record["failure_fingerprint"] = derive_failure_fingerprint(case_record)
+            case_record["failure_fingerprint"] = derive_failure_fingerprint(case_record, task.task_id)
         finally:
             try:
                 run_destination_cleanup(destination, task, doc_name, repeat_index)
@@ -3196,7 +3337,7 @@ def run_baseline_case(
             "attempt_count": 0,
             "resolved_after_repair": False,
         }
-        case["failure_fingerprint"] = derive_failure_fingerprint(case)
+        case["failure_fingerprint"] = derive_failure_fingerprint(case, task.task_id)
     case["task_id"] = task.task_id
     case["task_title"] = task.title
     case["repeat_index"] = repeat_index
