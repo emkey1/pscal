@@ -565,7 +565,9 @@ prompt = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
 kind = "repair" if "Repair attempt number:" in prompt else "initial"
 if plan.get("prompt_log"):
     with open(plan["prompt_log"], "a", encoding="utf-8") as handle:
-        handle.write(json.dumps({"kind": kind, "prompt": prompt}) + "\n")
+        handle.write(json.dumps({"kind": kind, "prompt": prompt,
+                                 "max_tokens": os.environ.get("AETHER_BENCH_MAX_TOKENS", ""),
+                                 "seed": os.environ.get("AETHER_BENCH_SEED", "")}) + "\n")
 if plan.get("fail_on") == kind:
     sys.stderr.write("upstream exploded\n")
     raise SystemExit(1)
@@ -747,6 +749,151 @@ def test_repair_attempt_records_truncation_end_to_end():
         prompt = json.loads(log.read_text().splitlines()[1])["prompt"]
         assert "lines omitted" in prompt
         assert case["run"]["exact_stdout_match"] is True
+
+
+# --------------------------------------------------------------------------- #
+# W1-08: the context guard counts output and measured tokens
+# --------------------------------------------------------------------------- #
+
+# Synthetic guides sized like the real tiers in measured tokens (~29K full,
+# ~15.9K medium, ~11.9K small; chars/3.4 when tiktoken is not installed).
+GUIDE_CHARS = {"full": 29000 * 34 // 10, "medium": 15913 * 34 // 10, "small": 11898 * 34 // 10}
+
+
+def _synthetic_guides(tmp: pathlib.Path) -> dict:
+    variants = {}
+    for name, chars in GUIDE_CHARS.items():
+        path = tmp / f"{name}.md"
+        path.write_text(f"*Guide version: 2026-09-05-1*\n" + ("word " * (chars // 5)), encoding="utf-8")
+        variants[name] = path
+    variants["none"] = None
+    return variants
+
+
+def test_context_guard_clamps_a_32k_request_and_records_it():
+    with workdir() as tmp:
+        guides = _synthetic_guides(tmp)
+        log = tmp / "prompts.jsonl"
+        plan = {"initial": "//! print ok\n", "prompt_log": str(log)}
+        script = tmp / "scripted_model.py"
+        script.write_text(SCRIPTED_MODEL, encoding="utf-8")
+        manifest = write_json(tmp / "tasks.json", {"version": "t", "tasks": [simple_task("t1")]})
+        dest = mock_destination("q32k", model_script=script, prompt_context_limit=32768, max_output_tokens=24000)
+        proc, report = fake_run(tmp, ["--doc", f"medium={guides['medium']}"], tasks=manifest,
+                                destinations=[dest], env={"SCRIPTED_MODEL_PLAN": json.dumps(plan)})
+        assert proc.returncode == 0, proc.stderr
+        case = next(c for _, _, c in all_cases(report))
+        fit = case["attempts"][0]["context_fit"]
+        assert fit["context_limit"] == 32768 and fit["context_source"] == "config"
+        assert fit["clamped"] is True
+        assert fit["max_tokens_sent"] == 32768 - fit["prompt_tokens_measured"] - 512
+        assert 14000 < fit["max_tokens_sent"] < 18000, fit
+        assert case["attempts"][0]["request"]["max_tokens"] == fit["max_tokens_sent"]
+        sent = json.loads(log.read_text().splitlines()[0])["max_tokens"]
+        assert sent == str(fit["max_tokens_sent"]), "the clamp must reach the request"
+        assert report["destinations"][0]["variants"][0]["doc_tokens_o200k"] is None or \
+            report["destinations"][0]["variants"][0]["doc_tokens_o200k"] > 10000
+
+
+def test_context_overflow_is_not_sent_blind():
+    with workdir() as tmp:
+        guides = _synthetic_guides(tmp)
+        log = tmp / "prompts.jsonl"
+        plan = {"initial": "//! print ok\n", "prompt_log": str(log)}
+        script = tmp / "scripted_model.py"
+        script.write_text(SCRIPTED_MODEL, encoding="utf-8")
+        manifest = write_json(tmp / "tasks.json", {"version": "t", "tasks": [simple_task("t1")]})
+        dest = mock_destination("q8k", model_script=script, prompt_context_limit=8192, max_output_tokens=4000)
+        proc, report = fake_run(tmp, ["--doc", f"small={guides['small']}"], tasks=manifest,
+                                destinations=[dest], env={"SCRIPTED_MODEL_PLAN": json.dumps(plan)})
+        case = next(c for _, _, c in all_cases(report))
+        assert case["attempts"][0]["not_sent"] == "context_overflow"
+        assert "context_overflow" in case["attempts"][0]["generation_error"]
+        assert not log.exists(), "the model must not be called"
+
+
+def test_token_counting_and_context_detection_paths():
+    calls = []
+
+    def fake_post(url, body, api_key, **kwargs):
+        calls.append(url)
+        return {"tokens": list(range(37))}
+
+    def fake_get(url, api_key):
+        if url.endswith("/v1/models"):
+            return {"data": [{"id": "m", "max_model_len": 32768}]}
+        raise RuntimeError("404")
+
+    saved = (adb.http_json_request, adb.http_json_get)
+    adb.http_json_request, adb.http_json_get = fake_post, fake_get
+    try:
+        local = adb.Destination(destination_id="vllm-x", kind="openai_chat_completions", model="m",
+                                base_url="http://claw9:8000/v1")
+        assert adb.count_prompt_tokens("hello world", local) == (37, "provider_tokenize:llama_cpp")
+        assert calls == ["http://claw9:8000/tokenize"]
+        assert adb.resolve_context_limit(local) == (32768, "models_api")
+        cloud = adb.Destination(destination_id="cloud-x", kind="openai_chat_completions", model="m",
+                                base_url="https://api.example.com/v1")
+        count, method = adb.count_prompt_tokens("x" * 340, cloud)
+        assert method in ("tiktoken_o200k", "chars_div_3.4") and calls == ["http://claw9:8000/tokenize"]
+        if method == "chars_div_3.4":
+            assert count == 100
+        assert adb.resolve_context_limit(cloud) == (None, None)
+        assert adb.context_limit_required(local) and not adb.context_limit_required(cloud)
+        assert adb.context_limit_required(adb.Destination(destination_id="t", kind="tra_queue"))
+        assert not adb.context_limit_required(adb.Destination(destination_id="c", kind="command"))
+    finally:
+        adb.http_json_request, adb.http_json_get = saved
+
+
+def test_unknown_context_on_a_self_hosted_destination_is_refused():
+    def fail_get(url, api_key):
+        raise RuntimeError("unreachable")
+
+    with workdir() as tmp:
+        config = write_json(tmp / "d.json", {"destinations": [
+            {"id": "lane", "type": "openai_chat_completions", "model": "m", "base_url": "http://127.0.0.1:9/v1"}]})
+        # In-process so no socket is opened: the detector is stubbed to fail.
+        saved = adb.http_json_get
+        adb.http_json_get = fail_get
+        try:
+            try:
+                adb.main(["--tasks", str(SMOKE_TASKS), "--destinations-config", str(config), "--docs", "none",
+                          "--aether-bin", str(FAKE_AETHER), "--allow-skew", "--preflight-only"])
+            except SystemExit as exc:
+                assert "prompt_context_limit" in str(exc), exc
+            else:
+                raise AssertionError("an unknown self-hosted context must be refused")
+        finally:
+            adb.http_json_get = saved
+
+
+def test_prompt_token_gap_is_recorded():
+    attempt = {"usage": {"prompt_tokens": 1000}, "context_fit": {"prompt_tokens_measured": 1100,
+                                                                 "prompt_tokens_method": "chars_div_3.4"}}
+    adb.record_prompt_token_gap(attempt, adb.Destination(destination_id="gap", kind="command"))
+    assert attempt["prompt_token_gap"] == 0.1
+
+
+def test_miner_routes_by_measured_fit():
+    sys.path.insert(0, str(REPO_ROOT / "tools"))
+    import aether_idea_miner as miner
+
+    with workdir() as tmp:
+        guides = _synthetic_guides(tmp)
+
+        def prompt_for(name, text):
+            return miner.build_generation_prompt(guide_name=name, guide_text=text, n_programs=5, avoid_intents=[])
+
+        def pick(context, output):
+            dest = adb.Destination(destination_id=f"m{context}", kind="command",
+                                   prompt_context_limit=context, max_output_tokens=output)
+            return miner.choose_guide_name(dest, "auto", None, guides, prompt_for_guide=prompt_for)
+
+        assert pick(32768, 8000) == "medium"
+        assert pick(8192, 2000) is None, "small (~11.9K) cannot fit 8K; never route it there"
+        assert pick(131072, 8000) == "full"
+        assert pick(24576, 8000) == "small"
 
 
 def _main() -> int:

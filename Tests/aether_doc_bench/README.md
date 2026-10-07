@@ -125,6 +125,22 @@ when it cannot:
 - **Extra compiler flags.** `--aether-arg=FLAG` (repeatable) goes in front of
   the program on every aether call and is recorded, for language A/Bs.
 
+- **Context fit.** Every request is guarded on measured prompt tokens +
+  the output budget + a 512-token margin (`--context-margin`) <= the context
+  window. Tokens are counted with the server's own `/tokenize` (llama.cpp,
+  vLLM) on self-hosted http endpoints, else tiktoken o200k when importable,
+  else chars/3.4; `context_fit.prompt_tokens_method` says which. The output
+  budget is clamped to what is left (`context_fit.clamped`,
+  `max_tokens_sent`); below `--min-output-tokens` (1024) the request is not
+  sent and the attempt records `not_sent: context_overflow`. The window comes
+  from `prompt_context_limit`, else LM Studio / vLLM / llama.cpp / T'Ra
+  `/api/targets`. A self-hosted or T'Ra destination whose window is neither
+  configured nor detectable is refused at start-up unless
+  `--allow-unknown-context`. A >5% gap between the measured prompt and the
+  provider's `usage.prompt_tokens` is recorded (`prompt_token_gap`) and warned
+  about. `doc_approx_tokens` (chars/4) stays for comparability next to
+  `doc_tokens_o200k`.
+
 `--preflight-only` runs these checks and prints what it found. The drivers
 (`bench_one_destination.sh`, `bench_one_destination_cfg.sh`,
 `run_cloud_spectrum.sh`) call it once before their suite loop, take guide

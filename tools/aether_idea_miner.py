@@ -11,10 +11,11 @@ write-ups ``aether_guided_benchmark.md`` / ``aether_specialization_findings.md``
 
 Per LLM destination the loop is:
 
-  1. Inject the Aether guide into the prompt — the **concise** guide for
-     small-context/small models, the **full** guide for large-context ones
-     (``--guide auto`` picks; override with ``--guide full|small`` or a per-
-     destination ``"guide"`` field).
+  1. Inject the Aether guide into the prompt — ``--guide auto`` picks the
+     largest guide (full, medium, small) whose measured prompt plus the
+     destination's output budget fits its context window, and skips a
+     destination nothing fits; override with ``--guide full|medium|small``, a
+     per-destination ``"guide"`` field, or ``--doc NAME=PATH``.
   2. Ask the model to invent several *interesting / useful / novel* Aether
      programs **of its own choosing** (open-ended, no task list), each with a
      stated intent. Variety is encouraged (algorithms, data processing, records
@@ -106,26 +107,47 @@ SUGGESTED_AREAS = [
 # --------------------------------------------------------------------------- #
 # Guide selection
 # --------------------------------------------------------------------------- #
+GUIDE_TIERS_LARGEST_FIRST = ("full", "medium", "small")
+
+
 def choose_guide_name(
     destination: adb.Destination,
     override: str,
     per_destination_hint: str | None,
-) -> str:
-    """Return 'full' or 'small' for this destination.
+    variants: dict[str, pathlib.Path | None] | None = None,
+    prompt_for_guide: Any = None,
+    margin: int = adb.CONTEXT_MARGIN_TOKENS,
+) -> str | None:
+    """Return the guide tier for this destination, or None when none fits.
 
     Precedence: explicit CLI ``--guide`` > per-destination ``"guide"`` hint >
-    auto. Auto picks the concise guide when the loaded context is small or the
-    model is small (<= ~9B), else the full guide.
+    auto. With a known context window, auto picks the LARGEST guide whose
+    measured generation prompt plus the destination's output budget (plus a
+    margin) fits -- it used to send any context under 16,384 to small, which at
+    ~11.9K tokens cannot fit an 8K window, and never chose medium for a 32K one.
+    No guide fitting returns None (the destination is skipped, not sent blind).
+    With an unknown window, a small model (<= ~9B) gets small, others full.
     """
-    if override in ("full", "small"):
+    if override in GUIDE_TIERS_LARGEST_FIRST:
         return override
-    if per_destination_hint in ("full", "small"):
+    if per_destination_hint in GUIDE_TIERS_LARGEST_FIRST:
         return per_destination_hint
 
     try:
         limit = adb.get_destination_context_limit(destination)
     except Exception:
         limit = None
+    variants = variants if variants is not None else adb.DOC_VARIANTS
+    if limit is not None and prompt_for_guide is not None:
+        for name in GUIDE_TIERS_LARGEST_FIRST:
+            path = variants.get(name)
+            if path is None or not pathlib.Path(path).is_file():
+                continue
+            prompt = prompt_for_guide(name, adb.read_text(pathlib.Path(path)))
+            tokens, _method = adb.count_prompt_tokens(prompt, destination)
+            if tokens + int(destination.max_output_tokens) + margin <= limit:
+                return name
+        return None
     if limit is not None and limit < SMALL_CONTEXT_TOKEN_THRESHOLD:
         return "small"
 
@@ -952,7 +974,7 @@ def load_destination_guide_hints(config_path: pathlib.Path) -> dict[str, str]:
     except Exception:
         return hints
     for item in raw.get("destinations", []):
-        if isinstance(item, dict) and item.get("guide") in ("full", "small"):
+        if isinstance(item, dict) and item.get("guide") in GUIDE_TIERS_LARGEST_FIRST:
             hints[item["id"]] = item["guide"]
     return hints
 
@@ -1111,7 +1133,27 @@ def run_miner(args: argparse.Namespace) -> dict[str, Any]:
         if args.temperature is not None:
             destination.temperature = args.temperature
 
-        guide_name = choose_guide_name(destination, args.guide, guide_hints.get(did))
+        guide_name = choose_guide_name(
+            destination, args.guide, guide_hints.get(did), variants,
+            prompt_for_guide=lambda name, text: build_generation_prompt(
+                guide_name=name, guide_text=text, n_programs=args.programs_per_model,
+                avoid_intents=[], theme=args.theme,
+            ),
+        )
+        if guide_name is None:
+            with lock:
+                report["models"].append({
+                    "destination_id": did,
+                    "model": destination.model,
+                    "type": destination.kind,
+                    "guide": None,
+                    "programs": [],
+                    "error": "no guide fits this destination's context window with its output budget",
+                    "stats": model_stats([]),
+                })
+                persist_locked()
+            log(f"[skip] {did}: no guide fits its context window")
+            return
         guide_path = guide_path_for(guide_name, variants)
         guide_text = adb.read_text(guide_path)
 
@@ -1236,8 +1278,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="use the guide file at PATH for tier NAME (full/medium/small); repeatable")
     p.add_argument("--aether-root", type=pathlib.Path, default=adb.DEFAULT_AETHER_ROOT,
                    help="aether checkout the default guides come from (default: components/aether)")
-    p.add_argument("--guide", choices=("auto", "full", "small"), default="auto",
-                   help="which guide to inject (default: auto by context/model size)")
+    p.add_argument("--guide", choices=("auto", "full", "medium", "small"), default="auto",
+                   help="which guide to inject (default: auto -- the largest guide whose measured "
+                        "prompt plus output budget fits the destination's context)")
     p.add_argument("--programs-per-model", type=int, default=5,
                    help="programs requested per generation call (default: 5)")
     p.add_argument("--rounds", type=int, default=1,

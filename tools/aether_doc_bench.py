@@ -1388,33 +1388,257 @@ def http_json_get(url: str, api_key: str | None) -> dict[str, Any]:
         raise RuntimeError(f"HTTP API error {exc.code}: {detail}") from exc
 
 
-def get_destination_context_limit(destination: Destination) -> int | None:
-    if destination.prompt_context_limit is not None:
-        return destination.prompt_context_limit
+class ContextOverflowError(RuntimeError):
+    """The prompt plus the minimum output budget does not fit the context."""
 
-    if not destination.model or not destination.base_url:
+
+# The context guard: measured prompt tokens + the output budget + this margin
+# (chat-template tokens, tokenizer disagreement) must fit the window.
+CONTEXT_MARGIN_TOKENS = 512
+MIN_OUTPUT_TOKENS = 1024
+CHARS_PER_TOKEN_FALLBACK = 3.4  # measured 3.43-3.47 chars/token on the guides
+_TOKEN_COUNT_CACHE: dict[tuple[str, str], tuple[int, str]] = {}
+_TOKENIZE_METHOD_CACHE: dict[str, str | None] = {}
+_CONTEXT_SOURCE_CACHE: dict[str, tuple[int | None, str | None]] = {}
+_O200K: Any = None
+_PROMPT_GAP_WARNED: set[str] = set()
+
+
+def _o200k_encoding() -> Any:
+    """tiktoken's o200k_base when importable (and its BPE file is cached), else False."""
+    global _O200K
+    if _O200K is None:
+        try:
+            import tiktoken  # type: ignore
+
+            _O200K = tiktoken.get_encoding("o200k_base")
+        except Exception:
+            _O200K = False
+    return _O200K
+
+
+def tokens_o200k(text: str) -> int | None:
+    encoding = _o200k_encoding()
+    if not encoding:
+        return None
+    try:
+        return len(encoding.encode(text, disallowed_special=()))
+    except Exception:
         return None
 
-    normalized_base_url = destination.base_url.rstrip("/")
-    if normalized_base_url not in ("http://127.0.0.1:1215/v1", "http://localhost:1215/v1"):
+
+def _server_root(base_url: str) -> str:
+    root = base_url.rstrip("/")
+    return root[:-3] if root.endswith("/v1") else root
+
+
+def _provider_tokenize(text: str, destination: Destination) -> tuple[int, str] | None:
+    """Count with the serving stack's own tokenizer: llama.cpp `POST /tokenize
+    {"content"}` or vLLM `POST /tokenize {"model", "prompt"}`. Only tried on
+    self-hosted http endpoints (never a cloud API); the working shape is cached."""
+    if destination.kind not in ("openai_chat_completions", "openai_completions"):
         return None
-
-    cache_key = (destination.destination_id, destination.model, normalized_base_url)
-    if cache_key in _DESTINATION_CONTEXT_CACHE:
-        return _DESTINATION_CONTEXT_CACHE[cache_key]
-
-    api_key = resolve_api_key(destination)
-    payload = http_json_get(normalized_base_url[:-3] + "/api/v0/models", api_key)
-    for item in payload.get("data", []):
-        if item.get("id") != destination.model:
+    if not destination.base_url or not str(destination.base_url).startswith("http://"):
+        return None
+    key = destination.destination_id
+    method = _TOKENIZE_METHOD_CACHE.get(key, "probe")
+    if method is None:
+        return None
+    root = _server_root(destination.base_url)
+    shapes = [method] if method != "probe" else ["llama_cpp", "vllm"]
+    for shape in shapes:
+        body = {"content": text} if shape == "llama_cpp" else {"model": destination.model, "prompt": text}
+        try:
+            payload = http_json_request(f"{root}/tokenize", body, resolve_api_key(destination), timeout_seconds=30)
+        except Exception:
             continue
-        limit = item.get("loaded_context_length") or item.get("max_context_length")
-        value = int(limit) if limit else None
-        _DESTINATION_CONTEXT_CACHE[cache_key] = value
-        return value
-
-    _DESTINATION_CONTEXT_CACHE[cache_key] = None
+        count = None
+        if isinstance(payload, dict):
+            if isinstance(payload.get("count"), int):
+                count = payload["count"]
+            elif isinstance(payload.get("tokens"), list):
+                count = len(payload["tokens"])
+        if count is not None:
+            _TOKENIZE_METHOD_CACHE[key] = shape
+            return count, f"provider_tokenize:{shape}"
+    _TOKENIZE_METHOD_CACHE[key] = None
     return None
+
+
+def count_prompt_tokens(text: str, destination: Destination | None = None) -> tuple[int, str]:
+    """(prompt tokens, estimator): the provider's tokenize endpoint where it
+    exists, else tiktoken o200k, else chars/3.4. chars/4 (approx_tokens, kept
+    for the historical *_approx_tokens fields) undercounts the guides by 15-17%."""
+    cache_key = (destination.destination_id if destination else "", sha256_text(text))
+    if cache_key in _TOKEN_COUNT_CACHE:
+        return _TOKEN_COUNT_CACHE[cache_key]
+    result: tuple[int, str] | None = None
+    if destination is not None:
+        result = _provider_tokenize(text, destination)
+    if result is None:
+        count = tokens_o200k(text)
+        if count is not None:
+            result = (count, "tiktoken_o200k")
+    if result is None:
+        # ceil(chars / 3.4) in integers (float floor division undercounts 340/3.4).
+        result = (max(1, -(-len(text) * 10 // 34)), "chars_div_3.4")
+    _TOKEN_COUNT_CACHE[cache_key] = result
+    return result
+
+
+def _context_from_record(item: dict[str, Any]) -> int | None:
+    for key in ("loaded_context_length", "max_model_len", "n_ctx", "context_length",
+                "context_window", "ctx", "max_context_length"):
+        value = item.get(key)
+        if isinstance(value, (int, float)) and value > 0:
+            return int(value)
+    for nested in ("meta", "default_generation_settings", "settings", "config"):
+        inner = item.get(nested)
+        if isinstance(inner, dict):
+            value = _context_from_record(inner)
+            if value:
+                return value
+    return None
+
+
+def _autodetect_context(destination: Destination) -> tuple[int | None, str | None]:
+    if destination.kind in ("tra_queue", "tra_scheduler") and destination.base_url:
+        # T'Ra lists its targets; take the context of the preferred one.
+        eb = destination.extra_body or {}
+        wanted = list(eb.get("preferred_targets") or destination.preferred_targets or [])
+        for key in ("target_name", "target"):
+            if eb.get(key):
+                wanted.insert(0, eb[key])
+        try:
+            payload = http_json_get(destination.base_url.rstrip("/") + "/api/targets", None)
+        except Exception:
+            return None, None
+        items = payload if isinstance(payload, list) else (payload.get("targets") or payload.get("data") or [])
+        for item in items if isinstance(items, list) else []:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name") or item.get("id") or item.get("target")
+            if wanted and name not in wanted:
+                continue
+            value = _context_from_record(item)
+            if value:
+                return value, "tra_targets"
+        return None, None
+    if destination.kind not in ("openai_chat_completions", "openai_completions"):
+        return None, None
+    if not destination.base_url or not str(destination.base_url).startswith("http://"):
+        return None, None
+    base = destination.base_url.rstrip("/")
+    root = _server_root(base)
+    api_key = resolve_api_key(destination)
+    probes = (
+        (f"{root}/api/v0/models", "lmstudio_api"),  # LM Studio: loaded_context_length
+        (f"{base}/models", "models_api"),  # vLLM: max_model_len; llama.cpp: meta
+        (f"{root}/props", "llama_cpp_props"),  # llama.cpp: default_generation_settings.n_ctx
+    )
+    for url, source in probes:
+        try:
+            payload = http_json_get(url, api_key)
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        items = payload.get("data")
+        if isinstance(items, list):
+            for item in items:
+                if isinstance(item, dict) and item.get("id") in (destination.model, None):
+                    value = _context_from_record(item)
+                    if value:
+                        return value, source
+        value = _context_from_record(payload) if source == "llama_cpp_props" else None
+        if value:
+            return value, source
+    return None, None
+
+
+def resolve_context_limit(destination: Destination) -> tuple[int | None, str | None]:
+    """(context window, where it came from). The destination's
+    prompt_context_limit wins; otherwise ask the serving stack once."""
+    if destination.prompt_context_limit is not None:
+        return int(destination.prompt_context_limit), "config"
+    key = destination.destination_id
+    if key not in _CONTEXT_SOURCE_CACHE:
+        _CONTEXT_SOURCE_CACHE[key] = _autodetect_context(destination)
+    return _CONTEXT_SOURCE_CACHE[key]
+
+
+def get_destination_context_limit(destination: Destination) -> int | None:
+    return resolve_context_limit(destination)[0]
+
+
+def context_limit_required(destination: Destination) -> bool:
+    """A self-hosted model endpoint runs the guide near its window (medium plus
+    24K of output overflows a 32K Qwen lane), so its context must be known.
+    Cloud APIs and local command stand-ins are exempt."""
+    if destination.kind in ("tra_queue", "tra_scheduler"):
+        return True
+    return destination.kind in ("openai_chat_completions", "openai_completions") and is_self_hosted(destination)
+
+
+def fit_request(
+    prompt: str,
+    destination: Destination,
+    options: RequestOptions | None,
+    margin: int = CONTEXT_MARGIN_TOKENS,
+    min_output: int = MIN_OUTPUT_TOKENS,
+) -> tuple[RequestOptions, dict[str, Any]]:
+    """Apply the context guard to one request: measured prompt tokens + output
+    budget + margin must fit. The budget is clamped to what is left (and the
+    clamp recorded); below min_output the request is not sent at all."""
+    prompt_tokens, method = count_prompt_tokens(prompt, destination)
+    limit, source = resolve_context_limit(destination)
+    requested = _max_tokens_for(destination, options)
+    fit: dict[str, Any] = {
+        "context_limit": limit,
+        "context_source": source,
+        "prompt_tokens_measured": prompt_tokens,
+        "prompt_tokens_method": method,
+        "margin": margin,
+        "max_output_tokens": requested,
+        "max_tokens_sent": requested,
+        "clamped": False,
+    }
+    if limit is not None:
+        available = int(limit) - prompt_tokens - margin
+        if available < min_output:
+            fit["max_tokens_sent"] = None
+            raise ContextOverflowError(
+                f"context_overflow: prompt {prompt_tokens} tokens ({method}) + margin {margin} leaves "
+                f"{available} of the {limit}-token context for output, below the {min_output} minimum"
+            )
+        if requested > available:
+            fit["max_tokens_sent"] = available
+            fit["clamped"] = True
+    new_options = RequestOptions(
+        seed=None if options is None else options.seed,
+        max_tokens=fit["max_tokens_sent"] if fit["clamped"] else (None if options is None else options.max_tokens),
+    )
+    return new_options, fit
+
+
+def record_prompt_token_gap(attempt: dict[str, Any], destination: Destination) -> None:
+    """Compare the measured prompt with the provider's usage.prompt_tokens and
+    warn (once per destination) when they differ by more than 5%."""
+    usage = attempt.get("usage") or {}
+    reported = usage.get("prompt_tokens") if isinstance(usage, dict) else None
+    measured = (attempt.get("context_fit") or {}).get("prompt_tokens_measured")
+    if not isinstance(reported, int) or not isinstance(measured, int) or reported <= 0:
+        return
+    gap = (measured - reported) / reported
+    attempt["prompt_token_gap"] = round(gap, 4)
+    if abs(gap) > 0.05 and destination.destination_id not in _PROMPT_GAP_WARNED:
+        _PROMPT_GAP_WARNED.add(destination.destination_id)
+        print(
+            f"[context] WARNING {destination.destination_id}: measured prompt {measured} tokens "
+            f"({attempt['context_fit'].get('prompt_tokens_method')}) vs provider usage {reported} "
+            f"({gap:+.1%}); the context guard may be off -- set prompt_context_limit conservatively",
+            file=sys.stderr,
+        )
 
 
 def _max_tokens_for(destination: Destination, options: RequestOptions | None) -> int:
@@ -2825,26 +3049,30 @@ def evaluate_attempt(
     options: RequestOptions | None = None,
 ) -> dict[str, Any]:
     prompt_tokens = approx_tokens(prompt)
+    options, fit = fit_request(
+        prompt,
+        destination,
+        options,
+        margin=getattr(args, "context_margin", CONTEXT_MARGIN_TOKENS),
+        min_output=getattr(args, "min_output_tokens", MIN_OUTPUT_TOKENS),
+    )
     attempt: dict[str, Any] = {
         "prompt_kind": prompt_kind,
         "prompt_approx_tokens": prompt_tokens,
+        "prompt_tokens_measured": fit["prompt_tokens_measured"],
         "runner": runner,
         "prompt_sha256": sha256_text(prompt),
         "request": {
-            "seed": None if options is None else options.seed,
+            "seed": options.seed,
             "max_tokens": _max_tokens_for(destination, options),
         },
+        "context_fit": fit,
     }
-    context_limit = get_destination_context_limit(destination)
-    if context_limit is not None and prompt_tokens >= context_limit:
-        raise RuntimeError(
-            "prompt_too_large: approx prompt tokens "
-            f"{prompt_tokens} exceed loaded context {context_limit} for model {destination.model}"
-        )
     generation = run_model_with_deadline(prompt, destination, options)
     source_code = sanitize_code(generation["raw_text"])
     attempt["generation"] = generation
     attempt["usage"] = normalize_usage(generation.get("usage"))
+    record_prompt_token_gap(attempt, destination)
     attempt["generated_ok"] = bool(source_code.strip())
     attempt["source_code"] = source_code
     attempt["source_approx_tokens"] = approx_tokens(source_code) if source_code.strip() else 0
@@ -3086,7 +3314,12 @@ def failed_generation_attempt(
     malformed reply). Kept in the case's attempts so the rounds already measured
     survive, instead of the whole case collapsing to attempts=[]."""
     message = strip_run_dirs(str(exc)) or type(exc).__name__
+    extra: dict[str, Any] = {}
+    if isinstance(exc, ContextOverflowError):
+        # Deterministic, not a provider event: the request was never sent.
+        extra["not_sent"] = "context_overflow"
     return {
+        **extra,
         "prompt_kind": prompt_kind,
         "runner": runner,
         "request": {"seed": None if options is None else options.seed},
@@ -3233,18 +3466,6 @@ def run_single_aether_task(
         "attempts": [],
         "doc_token_reference": doc_token_reference,
     }
-    context_limit = get_destination_context_limit(destination)
-    if context_limit is not None and approx_tokens(prompt) >= context_limit:
-        case_record.update(
-            make_prompt_too_large_record(
-                prompt=prompt,
-                context_limit=context_limit,
-                destination=destination,
-            )
-        )
-        if args.progress:
-            print_progress_done(destination, doc_name, task, repeat_index, case_record)
-        return case_record
     try:
         aether_case = execute_case(
             initial_prompt=prompt,
@@ -3327,8 +3548,13 @@ def run_aether_task_group(
             print_progress_start(destination, doc_name, task, repeat_index)
 
     batch_prompt = build_batch_prompt(doc_name=doc_name, doc_text=doc_text, tasks=task_group)
-    context_limit = get_destination_context_limit(destination)
-    if context_limit is not None and approx_tokens(batch_prompt) >= context_limit:
+    try:
+        batch_options, batch_fit = fit_request(
+            batch_prompt, destination, options,
+            margin=getattr(args, "context_margin", CONTEXT_MARGIN_TOKENS),
+            min_output=getattr(args, "min_output_tokens", MIN_OUTPUT_TOKENS),
+        )
+    except ContextOverflowError:
         for task in task_group:
             emit(single(task))
         return results, None
@@ -3341,10 +3567,11 @@ def run_aether_task_group(
         "task_ids": [task.task_id for task in task_group],
         "prompt_approx_tokens": batch_prompt_tokens,
         "doc_name": doc_name,
+        "context_fit": batch_fit,
     }
 
     try:
-        shared_generation = run_model_with_deadline(batch_prompt, destination, options)
+        shared_generation = run_model_with_deadline(batch_prompt, destination, batch_options)
         shared_usage = normalize_usage(shared_generation.get("usage"))
         split_usage = split_usage_across_tasks(shared_usage, len(task_group))
         split_prompt_tokens = split_int_total(batch_prompt_tokens, len(task_group))
@@ -3698,6 +3925,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="build type to record for the binary (default: read CMAKE_BUILD_TYPE from a "
         "CMakeCache.txt beside it, else unknown)",
+    )
+    parser.add_argument(
+        "--context-margin",
+        type=int,
+        default=CONTEXT_MARGIN_TOKENS,
+        help="tokens kept free beside measured prompt + output budget (default 512)",
+    )
+    parser.add_argument(
+        "--min-output-tokens",
+        type=int,
+        default=MIN_OUTPUT_TOKENS,
+        help="a request whose clamped output budget falls below this is not sent (context_overflow)",
+    )
+    parser.add_argument(
+        "--allow-unknown-context",
+        action="store_true",
+        help="run a self-hosted destination whose context window is neither configured "
+        "(prompt_context_limit) nor detectable; the context guard is then inert for it",
     )
     parser.add_argument(
         "--preflight-only",
@@ -4062,6 +4307,7 @@ def guide_record(name: str, path: pathlib.Path | None, text: str) -> dict[str, A
             "sha256": None,
             "bytes": 0,
             "approx_tokens": 0,
+            "tokens_o200k": 0,
             "checkout": None,
         }
     return {
@@ -4070,6 +4316,7 @@ def guide_record(name: str, path: pathlib.Path | None, text: str) -> dict[str, A
         "sha256": sha256_text(text),
         "bytes": len(text.encode("utf-8")),
         "approx_tokens": approx_tokens(text),
+        "tokens_o200k": tokens_o200k(text),
         "checkout": git_checkout_info(path),
     }
 
@@ -4277,7 +4524,7 @@ def _run_benchmark(
     # Each case carries this slim copy (the full record, with each guide's
     # checkout, is the report-level "guides" block).
     doc_token_reference: dict[str, dict[str, Any]] = {
-        name: {key: record[key] for key in ("path", "version", "sha256", "bytes", "approx_tokens")}
+        name: {key: record[key] for key in ("path", "version", "sha256", "bytes", "approx_tokens", "tokens_o200k")}
         for name, record in guides.items()
     }
 
@@ -4304,6 +4551,9 @@ def _run_benchmark(
             "repair_attempts": args.repair_attempts,
             "repair_feedback_limit": args.repair_feedback_limit,
             "repair_source_limit": args.repair_source_limit,
+            "context_margin": args.context_margin,
+            "min_output_tokens": args.min_output_tokens,
+            "allow_unknown_context": bool(args.allow_unknown_context),
             "shared_guide_batch_size": args.shared_guide_batch_size,
             "python_baseline": bool(args.python_baseline),
             "rust_baseline": bool(args.rust_baseline),
@@ -4321,8 +4571,25 @@ def _run_benchmark(
         "destinations": [],
     }
 
+    context_limits: dict[str, dict[str, Any]] = {}
+    unknown_context: list[str] = []
+    for destination in destinations:
+        limit, source = resolve_context_limit(destination)
+        context_limits[destination.destination_id] = {"context_limit": limit, "context_source": source}
+        if limit is None and context_limit_required(destination):
+            unknown_context.append(destination.destination_id)
+    if unknown_context and not args.allow_unknown_context:
+        raise SystemExit(
+            "context guard: cannot determine the context window of "
+            + ", ".join(unknown_context)
+            + "; set prompt_context_limit on the destination (or pass --allow-unknown-context, "
+            "which leaves the guard inert for it)"
+        )
+    report["context_limits"] = context_limits
+
     if args.preflight_only:
         print(json.dumps({
+            "context_limits": context_limits,
             "preflight": "ok",
             "aether_version": toolchain["aether_version"],
             "binary_sha256": toolchain["binary_sha256"],
@@ -4401,6 +4668,9 @@ def _run_benchmark(
             "base_url": destination.base_url,
             # The seed repeat 0 is requested with; repeat r adds r.
             "seed_base": request_seed(destination, 0, args.seed_base),
+            "context_limit": context_limits[destination.destination_id]["context_limit"],
+            "context_source": context_limits[destination.destination_id]["context_source"],
+            "max_output_tokens": destination.max_output_tokens,
             "variants": [],
         }
         report["destinations"].append(destination_report)
@@ -4417,6 +4687,7 @@ def _run_benchmark(
                 "doc_sha256": record["sha256"],
                 "doc_bytes": len(doc_text.encode("utf-8")),
                 "doc_approx_tokens": approx_tokens(doc_text) if doc_text else 0,
+                "doc_tokens_o200k": record.get("tokens_o200k"),
                 "shared_guide_batch_size_requested": max(1, int(args.shared_guide_batch_size)),
                 "shared_guide_batch_size": batch_size,
                 "batch_mode_enabled": bool(batch_size > 1),
