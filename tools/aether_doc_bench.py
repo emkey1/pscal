@@ -1708,7 +1708,16 @@ def invoke_openai_responses(
         "raw_text": output_text,
         "response_id": payload.get("id"),
         "usage": payload.get("usage"),
+        "finish_reason": _responses_finish_reason(payload),
     }
+
+
+def _responses_finish_reason(payload: dict[str, Any]) -> str | None:
+    details = payload.get("incomplete_details")
+    if isinstance(details, dict) and details.get("reason"):
+        return str(details["reason"])
+    status = payload.get("status")
+    return "stop" if status == "completed" else status
 
 
 def flatten_chat_content(content: Any) -> str:
@@ -1800,6 +1809,7 @@ def invoke_openai_chat_completions(
         "raw_text": output_text,
         "response_id": payload.get("id"),
         "usage": payload.get("usage"),
+        "finish_reason": finish_reason,
     }
 
 
@@ -1853,6 +1863,7 @@ def invoke_openai_chat_completions_messages(
         "raw_text": output_text,
         "response_id": payload.get("id"),
         "usage": payload.get("usage"),
+        "finish_reason": choices[0].get("finish_reason"),
     }
 
 
@@ -1909,6 +1920,7 @@ def invoke_openai_responses_session(
         "raw_text": output_text,
         "response_id": payload.get("id"),
         "usage": payload.get("usage"),
+        "finish_reason": _responses_finish_reason(payload),
     }
 
 
@@ -2119,6 +2131,7 @@ def invoke_tra_queue(
                     "usage": (result or {}).get("usage") or status.get("usage"),
                     "response_id": job_id,
                     "model": status.get("target_name"),
+                    "finish_reason": (result or {}).get("finish_reason") or status.get("finish_reason"),
                 }
             if st in ("failed", "error", "canceled", "cancelled", "archived_canceled", "rejected"):
                 why = status.get("error") or status.get("display_error") or status.get("scheduler_note") or "unknown"
@@ -2172,6 +2185,7 @@ def invoke_openai_completions(
         "raw_text": output_text,
         "response_id": payload.get("id"),
         "usage": payload.get("usage"),
+        "finish_reason": choices[0].get("finish_reason"),
     }
 
 
@@ -2235,6 +2249,8 @@ def invoke_command(
             result["response_id"] = payload.get("response_id")
         if payload.get("model") is not None:
             result["model"] = payload.get("model")
+        if payload.get("finish_reason") is not None:
+            result["finish_reason"] = payload.get("finish_reason")
         return result
 
     return {
@@ -3071,6 +3087,7 @@ def evaluate_attempt(
     generation = run_model_with_deadline(prompt, destination, options)
     source_code = sanitize_code(generation["raw_text"])
     attempt["generation"] = generation
+    attempt["finish_reason"] = generation.get("finish_reason")
     attempt["usage"] = normalize_usage(generation.get("usage"))
     record_prompt_token_gap(attempt, destination)
     attempt["generated_ok"] = bool(source_code.strip())
@@ -3091,6 +3108,10 @@ def evaluate_attempt(
             "elapsed_seconds": 0.0,
             "exact_stdout_match": False,
         }
+        # An empty reply is a serving problem (stop marker, output budget,
+        # template), not a verdict on the guide: measured nothing, re-run it.
+        attempt["infra_failed"] = True
+        attempt["infra_kind"] = "empty_output"
     return attempt
 
 
@@ -3121,12 +3142,137 @@ def make_prompt_too_large_record(
     }
 
 
+# Generation failures that measured nothing: re-run them (rerun_nogen_cases.py),
+# never score them and never drop them from the denominator (D37d).
+_INFRA_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("insufficient_quota", "quota"),
+    ("resource_exhausted", "quota"),
+    ("http api error 402", "quota"),
+    ("http api error 429", "rate_limited"),
+    ("rate limit", "rate_limited"),
+    ("http api error 4", "http_4xx"),
+    ("http api error 5", "http_5xx"),
+    ("http api request timed out", "provider_timeout"),
+    ("provider request exceeded", "provider_timeout"),
+    ("not done within deadline", "provider_timeout"),
+    ("http api request failed", "transport"),
+    ("tra_queue unreachable", "transport"),
+    ("connection refused", "transport"),
+    ("connection reset", "transport"),
+    ("reset by peer", "transport"),
+    ("hit max_tokens", "output_budget"),
+    ("did not contain", "malformed_reply"),
+    ("tra_queue job", "provider_error"),
+    ("scheduler will not route", "provider_error"),
+    ("command provider failed", "provider_error"),
+    ("empty model output", "empty_output"),
+    ("shared batch did not return", "empty_output"),
+)
+
+
+def classify_infra_failure(message: str | None) -> str | None:
+    """The infra kind of a generation error message, or None if it is not one."""
+    text = (message or "").lower()
+    if not text:
+        return None
+    for needle, kind in _INFRA_PATTERNS:
+        if needle in text:
+            return kind
+    return None
+
+
+_CODE_RE = re.compile(r"\b[A-Z]+-\d{3}\b")
+FAILURE_CLASSES = ("pass", "silent_wrong", "crash_hang", "uncoded_error", "coded_error", "infra_failed", "not_sent")
+
+
+def classify_attempt(attempt: dict[str, Any]) -> str:
+    """The thesis failure class of one attempt, worst first: silent_wrong (the
+    program exited as a success but printed the wrong thing), crash_hang
+    (timeout, signal, rc >= 128), uncoded_error (failed with no CODE-NNN),
+    coded_error -- plus pass, and the two that measured nothing:
+    infra_failed and not_sent (context overflow)."""
+    if attempt.get("not_sent") or "prompt_too_large" in str(attempt.get("generation_error") or ""):
+        return "not_sent"
+    run = attempt.get("run") or {}
+    if attempt.get("infra_failed") or not attempt.get("generated_ok", bool(attempt.get("source_code"))):
+        return "infra_failed"
+    if run.get("exact_stdout_match"):
+        return "pass"
+    returncode = run.get("returncode", -1)
+    expected = run.get("expected_returncode", 0)
+    if run.get("timed_out") or (isinstance(returncode, int) and (returncode >= 128 or returncode < 0)):
+        return "crash_hang"
+    if returncode == expected:
+        return "silent_wrong"
+    codes = [d.get("code") for d in (run.get("diagnostics") or []) if isinstance(d, dict) and d.get("code")]
+    if codes or _CODE_RE.search(run.get("stderr") or ""):
+        return "coded_error"
+    return "uncoded_error"
+
+
+def first_attempt_of(case: dict[str, Any]) -> dict[str, Any]:
+    attempts = case.get("attempts") or []
+    return attempts[0] if attempts else case
+
+
+def case_is_infra_failed(case: dict[str, Any]) -> bool:
+    if case.get("infra_failed"):
+        return True
+    if any(a.get("infra_failed") for a in case.get("attempts") or []):
+        return True
+    # Records written before infra tagging: a generation error that classifies.
+    if not case.get("generated_ok", True) and not (case.get("attempts") or []):
+        return classify_attempt(case) == "infra_failed"
+    return False
+
+
+def wilson_interval(successes: int, total: int, z: float = 1.96) -> list[float] | None:
+    """Wilson score 95% interval for a binomial rate, as [low, high]. Case-level:
+    repeats of one task are not independent, so read it as a lower bound on the
+    real uncertainty."""
+    if total <= 0:
+        return None
+    p = successes / total
+    denom = 1 + z * z / total
+    center = (p + z * z / (2 * total)) / denom
+    half = z * ((p * (1 - p) / total + z * z / (4 * total * total)) ** 0.5) / denom
+    return [round(max(0.0, center - half), 4), round(min(1.0, center + half), 4)]
+
+
 def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     total = len(results)
     generated = sum(1 for item in results if item["generated_ok"])
     compiled_and_ran = sum(1 for item in results if item["run"]["returncode"] == 0)
     exact = sum(1 for item in results if item["run"]["exact_stdout_match"])
     repaired = sum(1 for item in results if item.get("resolved_after_repair", False))
+
+    classes = {name: 0 for name in FAILURE_CLASSES}
+    infra_cases: list[dict[str, Any]] = []
+    per_task: dict[str, dict[str, Any]] = {}
+    first_exact = 0
+    for item in results:
+        first = first_attempt_of(item)
+        first_class = classify_attempt(first)
+        classes[first_class] += 1
+        fa_ok = first_class == "pass"
+        first_exact += int(fa_ok)
+        if case_is_infra_failed(item):
+            infra_cases.append({
+                "task_id": item.get("task_id"),
+                "repeat_index": item.get("repeat_index"),
+                "kind": item.get("infra_kind") or first.get("infra_kind")
+                or classify_infra_failure(item.get("generation_error")),
+            })
+        entry = per_task.setdefault(item.get("task_id", ""), {"repeats": 0, "fa_passes": 0, "fx_passes": 0})
+        entry["repeats"] += 1
+        entry["fa_passes"] += int(fa_ok)
+        entry["fx_passes"] += int(bool(item["run"]["exact_stdout_match"]))
+
+    tasks_total = len(per_task)
+    fa_majority = sum(1 for e in per_task.values() if e["fa_passes"] * 2 > e["repeats"])
+    fx_majority = sum(1 for e in per_task.values() if e["fx_passes"] * 2 > e["repeats"])
+    flaky_fa = sorted(t for t, e in per_task.items() if 0 < e["fa_passes"] < e["repeats"])
+    flaky_fx = sorted(t for t, e in per_task.items() if 0 < e["fx_passes"] < e["repeats"])
     return {
         "total_cases": total,
         "generated_ok": generated,
@@ -3137,6 +3283,25 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         "run_rate": round(compiled_and_ran / total, 4) if total else 0.0,
         "exact_match_rate": round(exact / total, 4) if total else 0.0,
         "repair_recovery_rate": round(repaired / total, 4) if total else 0.0,
+        # FA / FX: first-attempt and final exact, with Wilson 95% intervals.
+        # infra_failed cases stay in the denominator (dropping them would break
+        # the pairing between variants); headline_ok is False while any remain.
+        "first_attempt_exact": first_exact,
+        "fa_rate": round(first_exact / total, 4) if total else 0.0,
+        "fa_ci95": wilson_interval(first_exact, total),
+        "final_exact": exact,
+        "fx_rate": round(exact / total, 4) if total else 0.0,
+        "fx_ci95": wilson_interval(exact, total),
+        "first_attempt_classes": classes,
+        "infra_failed": len(infra_cases),
+        "infra_failed_cases": infra_cases,
+        "headline_ok": not infra_cases,
+        "tasks": tasks_total,
+        "task_majority_fa": fa_majority,
+        "task_majority_fx": fx_majority,
+        "flaky_fa": flaky_fa,
+        "flaky_fx": flaky_fx,
+        "per_task": per_task,
     }
 
 
@@ -3204,6 +3369,15 @@ def print_text_summary(report: dict[str, Any]) -> None:
                 f"exact={variant['summary']['exact_stdout_match']}/{variant['summary']['total_cases']}  "
                 f"repaired={variant['summary']['resolved_after_repair']}/{variant['summary']['total_cases']}"
             )
+            summary = variant["summary"]
+            if "fa_rate" in summary and summary.get("total_cases"):
+                print("       " + headline_line(summary))
+                classes = summary.get("first_attempt_classes") or {}
+                print("       first-attempt classes: " + "  ".join(
+                    f"{name}={classes.get(name, 0)}" for name in FAILURE_CLASSES if name != "pass"))
+                if summary.get("flaky_fa") or summary.get("flaky_fx"):
+                    print(f"       flaky: FA {', '.join(summary.get('flaky_fa') or []) or '-'}; "
+                          f"FX {', '.join(summary.get('flaky_fx') or []) or '-'}")
             if usage_bits:
                 print(f"       usage : {'  '.join(usage_bits)}")
             if python_summary:
@@ -3264,6 +3438,68 @@ def print_text_summary(report: dict[str, Any]) -> None:
         print("")
 
 
+def headline_line(summary: dict[str, Any]) -> str:
+    """FA and FX with their intervals -- or, while infra failures remain, why
+    there is no headline."""
+    total = summary.get("total_cases", 0)
+    if summary.get("infra_failed"):
+        return (f"HEADLINE WITHHELD: {summary['infra_failed']}/{total} case(s) failed in the "
+                "infrastructure (re-run them: Tests/aether_doc_bench/rerun_nogen_cases.py --report ...)")
+
+    def fmt(count: int, ci: Any) -> str:
+        interval = f" [{ci[0] * 100:.1f}-{ci[1] * 100:.1f}%]" if ci else ""
+        return f"{count}/{total} ({(count / total * 100) if total else 0:.1f}%{interval})"
+
+    return (f"FA {fmt(summary['first_attempt_exact'], summary.get('fa_ci95'))}  "
+            f"FX {fmt(summary['final_exact'], summary.get('fx_ci95'))}  "
+            f"task-majority FA {summary.get('task_majority_fa')}/{summary.get('tasks')} "
+            f"FX {summary.get('task_majority_fx')}/{summary.get('tasks')}")
+
+
+def report_infra_failed(report: dict[str, Any]) -> int:
+    count = 0
+    for destination in report.get("destinations", []):
+        for variant in destination.get("variants", []):
+            for key in ("results", "python_baseline_results", "rust_baseline_results"):
+                count += sum(1 for case in variant.get(key, []) if case_is_infra_failed(case))
+    return count
+
+
+def refresh_variant_summaries(variant_report: dict[str, Any]) -> None:
+    """Recompute every summary block of a variant from its results."""
+    for prefix, key in (("", "results"), ("python_baseline_", "python_baseline_results"),
+                        ("rust_baseline_", "rust_baseline_results")):
+        if key not in variant_report:
+            continue
+        results = variant_report[key]
+        variant_report[f"{prefix}summary"] = summarize(results)
+        variant_report[f"{prefix}usage_summary"] = summarize_usage(results)
+        variant_report[f"{prefix}source_token_summary"] = summarize_source_tokens(results)
+        variant_report[f"{prefix}final_usage_summary"] = summarize_final_usage(results, "all")
+        variant_report[f"{prefix}run_ok_final_usage_summary"] = summarize_final_usage(results, "run_ok")
+        variant_report[f"{prefix}exact_final_usage_summary"] = summarize_final_usage(results, "exact")
+        variant_report[f"{prefix}final_source_token_summary"] = summarize_final_source_tokens(results, "all")
+        variant_report[f"{prefix}run_ok_final_source_token_summary"] = summarize_final_source_tokens(results, "run_ok")
+        variant_report[f"{prefix}exact_final_source_token_summary"] = summarize_final_source_tokens(results, "exact")
+        patterns_key = "failure_patterns" if not prefix else f"{prefix.split('_')[0]}_failure_patterns"
+        variant_report[patterns_key] = summarize_failure_patterns(results)
+
+
+def resummarize_report(path: pathlib.Path, write: bool = False) -> int:
+    """Recompute the summaries of an existing report with today's summarize()
+    (FA/FX, classes, CIs) and print them. Exit 3 while infra failures remain."""
+    report = load_report_json(path)
+    for destination in report.get("destinations", []):
+        for variant in destination.get("variants", []):
+            refresh_variant_summaries(variant)
+    if write:
+        write_json_atomic(path, report)
+    report.setdefault("tasks_file", str(path))
+    report.setdefault("summary", {"total_cases_per_destination": "?", "destination_count": len(report.get("destinations", []))})
+    print_text_summary(report)
+    return 3 if report_infra_failed(report) else 0
+
+
 def print_progress_start(destination: Destination, doc_name: str, task: Task, repeat_index: int) -> None:
     print(
         f"[progress] {destination.destination_id} {doc_name} {task.task_id} repeat={repeat_index} start",
@@ -3301,6 +3537,13 @@ def finalize_case_record(attempts: list[dict[str, Any]], task_id: str | None = N
     case_record["failure_fingerprint"] = (
         "" if case_record["run"]["exact_stdout_match"] else derive_failure_fingerprint(case_record, task_id)
     )
+    infra = [a for a in attempts if a.get("infra_failed")]
+    case_record["infra_failed"] = bool(infra)
+    if infra:
+        case_record["infra_kind"] = infra[0].get("infra_kind")
+        case_record["infra_stage"] = infra[0].get("prompt_kind")
+    else:
+        case_record.pop("infra_kind", None)
     return case_record
 
 
@@ -3318,6 +3561,9 @@ def failed_generation_attempt(
     if isinstance(exc, ContextOverflowError):
         # Deterministic, not a provider event: the request was never sent.
         extra["not_sent"] = "context_overflow"
+    else:
+        extra["infra_failed"] = True
+        extra["infra_kind"] = classify_infra_failure(message) or "provider_error"
     return {
         **extra,
         "prompt_kind": prompt_kind,
@@ -3927,6 +4173,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "CMakeCache.txt beside it, else unknown)",
     )
     parser.add_argument(
+        "--resummarize",
+        type=pathlib.Path,
+        default=None,
+        metavar="REPORT",
+        help="recompute and print an existing report's summaries (FA/FX, failure classes, Wilson "
+        "CIs) and exit; 3 while infra-failed cases remain. With --output-json, write it back there",
+    )
+    parser.add_argument(
         "--context-margin",
         type=int,
         default=CONTEXT_MARGIN_TOKENS,
@@ -4325,6 +4579,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
 
+    if args.resummarize is not None:
+        if args.output_json and args.output_json.resolve() != args.resummarize.resolve():
+            raise SystemExit("--resummarize writes back only to the same file (--output-json REPORT)")
+        return resummarize_report(args.resummarize, write=args.output_json is not None)
+
     tasks = load_tasks(args.tasks)
     tasks_bytes = args.tasks.read_bytes()
 
@@ -4609,43 +4868,7 @@ def _run_benchmark(
         write_json_atomic(args.output_json, report)
 
     def refresh_variant_report(variant_report: dict[str, Any]) -> None:
-        results = variant_report["results"]
-        variant_report["summary"] = summarize(results)
-        variant_report["usage_summary"] = summarize_usage(results)
-        variant_report["source_token_summary"] = summarize_source_tokens(results)
-        variant_report["final_usage_summary"] = summarize_final_usage(results, "all")
-        variant_report["run_ok_final_usage_summary"] = summarize_final_usage(results, "run_ok")
-        variant_report["exact_final_usage_summary"] = summarize_final_usage(results, "exact")
-        variant_report["final_source_token_summary"] = summarize_final_source_tokens(results, "all")
-        variant_report["run_ok_final_source_token_summary"] = summarize_final_source_tokens(results, "run_ok")
-        variant_report["exact_final_source_token_summary"] = summarize_final_source_tokens(results, "exact")
-        variant_report["failure_patterns"] = summarize_failure_patterns(results)
-
-        if "python_baseline_results" in variant_report:
-            python_results = variant_report["python_baseline_results"]
-            variant_report["python_baseline_summary"] = summarize(python_results)
-            variant_report["python_baseline_usage_summary"] = summarize_usage(python_results)
-            variant_report["python_baseline_source_token_summary"] = summarize_source_tokens(python_results)
-            variant_report["python_baseline_final_usage_summary"] = summarize_final_usage(python_results, "all")
-            variant_report["python_baseline_run_ok_final_usage_summary"] = summarize_final_usage(python_results, "run_ok")
-            variant_report["python_baseline_exact_final_usage_summary"] = summarize_final_usage(python_results, "exact")
-            variant_report["python_baseline_final_source_token_summary"] = summarize_final_source_tokens(python_results, "all")
-            variant_report["python_baseline_run_ok_final_source_token_summary"] = summarize_final_source_tokens(python_results, "run_ok")
-            variant_report["python_baseline_exact_final_source_token_summary"] = summarize_final_source_tokens(python_results, "exact")
-            variant_report["python_failure_patterns"] = summarize_failure_patterns(python_results)
-
-        if "rust_baseline_results" in variant_report:
-            rust_results = variant_report["rust_baseline_results"]
-            variant_report["rust_baseline_summary"] = summarize(rust_results)
-            variant_report["rust_baseline_usage_summary"] = summarize_usage(rust_results)
-            variant_report["rust_baseline_source_token_summary"] = summarize_source_tokens(rust_results)
-            variant_report["rust_baseline_final_usage_summary"] = summarize_final_usage(rust_results, "all")
-            variant_report["rust_baseline_run_ok_final_usage_summary"] = summarize_final_usage(rust_results, "run_ok")
-            variant_report["rust_baseline_exact_final_usage_summary"] = summarize_final_usage(rust_results, "exact")
-            variant_report["rust_baseline_final_source_token_summary"] = summarize_final_source_tokens(rust_results, "all")
-            variant_report["rust_baseline_run_ok_final_source_token_summary"] = summarize_final_source_tokens(rust_results, "run_ok")
-            variant_report["rust_baseline_exact_final_source_token_summary"] = summarize_final_source_tokens(rust_results, "exact")
-            variant_report["rust_failure_patterns"] = summarize_failure_patterns(rust_results)
+        refresh_variant_summaries(variant_report)
 
     for destination in destinations:
         ok, detail = preflight_destination(destination)
@@ -4790,6 +5013,19 @@ def _run_benchmark(
     if args.text_summary or not args.output_json:
         print_text_summary(report)
 
+    infra = report_infra_failed(report)
+    report["infra_failed"] = infra
+    if args.output_json:
+        persist_report_checkpoint()
+    if infra:
+        # No headline while any case measured nothing (D37d): re-run them.
+        print(
+            f"[infra] {infra} case(s) failed in the infrastructure and were not measured; no headline. "
+            f"Re-run them: python3 Tests/aether_doc_bench/rerun_nogen_cases.py --report "
+            f"{args.output_json or '<report.json>'} --apply",
+            file=sys.stderr,
+        )
+        return 3
     return 0
 
 

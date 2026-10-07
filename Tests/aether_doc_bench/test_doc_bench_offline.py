@@ -571,6 +571,13 @@ if plan.get("prompt_log"):
 if plan.get("fail_on") == kind:
     sys.stderr.write("upstream exploded\n")
     raise SystemExit(1)
+if plan.get("fail_first_n"):
+    counter = pathlib.Path(plan["counter"])
+    seen = int(counter.read_text()) if counter.exists() else 0
+    counter.write_text(str(seen + 1))
+    if seen < plan["fail_first_n"]:
+        sys.stderr.write("HTTP API error 429: rate limited\n")
+        raise SystemExit(1)
 sys.stdout.write(plan.get(kind) or plan.get("initial") or "")
 '''
 
@@ -894,6 +901,144 @@ def test_miner_routes_by_measured_fit():
         assert pick(8192, 2000) is None, "small (~11.9K) cannot fit 8K; never route it there"
         assert pick(131072, 8000) == "full"
         assert pick(24576, 8000) == "small"
+
+
+# --------------------------------------------------------------------------- #
+# W1-09: FA/FX, thesis failure classes, CIs, infra separation
+# --------------------------------------------------------------------------- #
+
+
+def _case(task_id, first_run, final_run=None, repeat=0, **first_extra):
+    first = {"generated_ok": True, "source_code": "src", "run": first_run, **first_extra}
+    attempts = [first] + ([{"generated_ok": True, "source_code": "src2", "run": final_run}] if final_run else [])
+    final = attempts[-1]
+    return {"task_id": task_id, "repeat_index": repeat, "attempts": attempts,
+            "generated_ok": final["generated_ok"], "run": final["run"],
+            "resolved_after_repair": bool(final_run and final_run["exact_stdout_match"])}
+
+
+def _r(rc=0, exact=False, stdout="", stderr="", **extra):
+    return {"returncode": rc, "exact_stdout_match": exact, "stdout": stdout, "stderr": stderr, **extra}
+
+
+def test_summary_classifies_first_attempt_failures():
+    results = [
+        _case("a", _r(exact=True)),                                       # pass
+        _case("b", _r(rc=0, stdout="wrong\n")),                           # silent_wrong
+        _case("c", _r(rc=124, timed_out=True), _r(exact=True)),           # crash_hang, fixed
+        _case("d", _r(rc=139)),                                           # crash_hang (signal)
+        _case("e", _r(rc=1, stderr="t.aether:3: [FX-001] needs fx\n"), _r(exact=True)),  # coded
+        _case("f", _r(rc=1, stderr="Aether @post failed in g\n")),       # uncoded
+        _case("g", _r(rc=1, stderr="", diagnostics=[{"code": "SCOPE-001"}])),  # coded via diagnostics
+        _case("h", _r(rc=3, stdout="x\n", expected_returncode=3)),        # silent_wrong at expected rc
+    ]
+    summary = adb.summarize(results)
+    assert summary["first_attempt_classes"] == {
+        "pass": 1, "silent_wrong": 2, "crash_hang": 2, "uncoded_error": 1, "coded_error": 2,
+        "infra_failed": 0, "not_sent": 0,
+    }, summary["first_attempt_classes"]
+    assert summary["first_attempt_exact"] == 1 and summary["final_exact"] == 3
+    lo, hi = summary["fa_ci95"]
+    assert 0 < lo < 0.125 < hi < 0.6, summary["fa_ci95"]
+    assert summary["headline_ok"] is True
+
+
+def test_summary_majority_flaky_and_wilson():
+    results = [_case("t", _r(exact=True), repeat=0), _case("t", _r(rc=0, stdout="no"), repeat=1),
+               _case("t", _r(exact=True), repeat=2), _case("u", _r(exact=True), repeat=0)]
+    summary = adb.summarize(results)
+    assert summary["task_majority_fa"] == 2 and summary["tasks"] == 2
+    assert summary["flaky_fa"] == ["t"]
+    assert summary["per_task"]["t"] == {"repeats": 3, "fa_passes": 2, "fx_passes": 2}
+    assert adb.wilson_interval(15, 15) == [0.7961, 1.0]
+    assert adb.wilson_interval(0, 0) is None
+
+
+def test_infra_failures_stay_in_the_denominator_and_block_the_headline():
+    infra = {"task_id": "z", "repeat_index": 0, "generated_ok": False, "infra_failed": True,
+             "infra_kind": "rate_limited", "generation_error": "HTTP API error 429: slow down",
+             "attempts": [{"generated_ok": False, "infra_failed": True, "infra_kind": "rate_limited",
+                           "run": _r(rc=-1)}], "run": _r(rc=-1)}
+    legacy = {"task_id": "y", "generated_ok": False, "generation_error": "HTTP API error 402: insufficient_quota",
+              "attempts": [], "run": _r(rc=-1)}
+    summary = adb.summarize([_case("a", _r(exact=True)), infra, legacy])
+    assert summary["total_cases"] == 3, "never dropped from the denominator"
+    assert summary["infra_failed"] == 2 and summary["headline_ok"] is False
+    assert summary["first_attempt_classes"]["infra_failed"] == 2
+    assert "HEADLINE WITHHELD" in adb.headline_line(summary)
+    for message, kind in (("HTTP API error 429: x", "rate_limited"), ("insufficient_quota", "quota"),
+                          ("RESOURCE_EXHAUSTED", "quota"), ("HTTP API error 503: x", "http_5xx"),
+                          ("provider request exceeded 900 seconds", "provider_timeout"),
+                          ("HTTP API request failed: [Errno 61] Connection refused", "transport")):
+        assert adb.classify_infra_failure(message) == kind, message
+    assert adb.classify_infra_failure("t.aether:3: [FX-001] boom") is None
+
+
+def test_infra_failure_exits_3_and_rerun_nogen_cases_measures_it():
+    with workdir() as tmp:
+        plan = {"initial": "//! print ok\n", "fail_first_n": 1, "counter": str(tmp / "count")}
+        proc, report = scripted_run(tmp, plan, [], [simple_task("t1"), simple_task("t2")])
+        assert proc.returncode == 3, (proc.returncode, proc.stderr)
+        assert "no headline" in proc.stderr
+        variant = report["destinations"][0]["variants"][0]
+        assert variant["summary"]["infra_failed"] == 1 and variant["summary"]["total_cases"] == 2
+        bad = [c for c in variant["results"] if c.get("infra_failed")]
+        assert bad and bad[0]["infra_kind"] == "rate_limited"
+        rerun = run_harness(["--report", str(tmp / "report.json"), "--apply"],
+                            env={"MOCK_MODEL_FAKE_PROGRAMS": "1",
+                                 "SCRIPTED_MODEL_PLAN": json.dumps(plan)},
+                            script=BENCH_DIR / "rerun_nogen_cases.py")
+        assert rerun.returncode == 0, rerun.stdout + rerun.stderr
+        patched = json.loads((tmp / "report.json").read_text())
+        variant = patched["destinations"][0]["variants"][0]
+        assert variant["summary"]["infra_failed"] == 0 and variant["summary"]["headline_ok"] is True
+        assert variant["summary"]["final_exact"] == 2
+        fixed = [c for c in variant["results"] if c.get("rerun_of_infra_failure")]
+        assert len(fixed) == 1 and fixed[0]["task_id"] == bad[0]["task_id"]
+
+
+def test_finish_reason_is_stored_on_each_attempt():
+    def fake_request(url, body, api_key, **kwargs):
+        return {"choices": [{"message": {"content": "x"}, "finish_reason": "length"}]}
+
+    original = adb.http_json_request
+    adb.http_json_request = fake_request
+    try:
+        dest = adb.Destination(destination_id="l", kind="openai_chat_completions", model="m",
+                               base_url="https://h/v1")
+        out = adb.invoke_openai_chat_completions("p", dest)
+    finally:
+        adb.http_json_request = original
+    assert out["finish_reason"] == "length"
+
+
+def test_resummarize_ds4_board_reproduces_15_of_15_with_a_ci():
+    path = BENCH_DIR / "results" / "local_tiers_20260811" / "high-ds4__tasks_frontier.json"
+    proc = run_harness(["--resummarize", str(path)])
+    assert proc.returncode == 0, proc.stderr
+    assert "FA 15/15" in proc.stdout and "FX 15/15" in proc.stdout and "[79.6-100.0%]" in proc.stdout, proc.stdout
+
+
+def test_paired_bootstrap_non_inferiority():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("sfm", BENCH_DIR / "summarize_full_vs_medium.py")
+    sfm = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sfm)
+
+    def report(full_pass, medium_pass):
+        def variant(name, passes):
+            return {"doc_name": name, "results": [
+                {"task_id": f"t{i}", "run": {"exact_stdout_match": ok},
+                 "attempts": [{"run": {"exact_stdout_match": ok}}]} for i, ok in enumerate(passes)]}
+        return {"destinations": [{"variants": [variant("full", full_pass), variant("medium", medium_pass)]}]}
+
+    equal = {("m", "simple"): report([True] * 30, [True] * 30)}
+    mean, lo, hi = sfm.bootstrap_ci(sfm.paired_differences(equal, "fa"), 500, 1)
+    assert mean == 0 and lo == 0 and hi == 0
+    worse = {("m", "simple"): report([True] * 30, [True] * 20 + [False] * 10)}
+    mean, lo, hi = sfm.bootstrap_ci(sfm.paired_differences(worse, "fx"), 500, 1)
+    assert round(mean, 1) == -33.3 and hi < -3, (mean, lo, hi)
 
 
 def _main() -> int:

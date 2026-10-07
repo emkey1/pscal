@@ -361,6 +361,31 @@ rollups. When batch mode is enabled it also includes:
 Each `batch_runs` entry records the grouped task ids, shared prompt token
 estimate, and shared provider-usage block for that batch request.
 
+## Headline metrics and infra failures
+
+Each variant `summary` carries, besides the old counts:
+
+- `first_attempt_exact` / `fa_rate` / `fa_ci95` (FA) and `final_exact` /
+  `fx_rate` / `fx_ci95` (FX), with Wilson 95% intervals over cases (repeats of
+  a task are not independent, so read them as a lower bound on uncertainty);
+- `first_attempt_classes`: the thesis failure classes of each first attempt,
+  worst first -- `silent_wrong` (exited as a success, wrong stdout),
+  `crash_hang` (timeout, signal, rc >= 128), `uncoded_error` (no `CODE-NNN`),
+  `coded_error` -- plus `pass`, `infra_failed` and `not_sent`;
+- `per_task`, `task_majority_fa/fx` and the `flaky_fa/fx` task sets.
+
+A case whose generation measured nothing (HTTP 4xx/5xx, 402/429/quota,
+`RESOURCE_EXHAUSTED`, transport, a provider deadline, an empty reply) is
+tagged `infra_failed` with an `infra_kind`. It stays in the denominator, the
+text summary prints `HEADLINE WITHHELD`, and the harness exits **3** after
+writing the report. Re-run those cases with
+`Tests/aether_doc_bench/rerun_nogen_cases.py --report REPORT --apply`, which
+reads everything it needs (binary and its sha256, guide, seed base, repeat)
+from the report; the drivers do this automatically. Each attempt also stores
+the provider's `finish_reason`. `--resummarize REPORT` recomputes an old
+report's summaries; `summarize_full_vs_medium.py` adds a paired bootstrap
+non-inferiority test (`--margin`, default 3 points).
+
 ## Interpreting repeated failures
 
 If one task fails far more often than the others:

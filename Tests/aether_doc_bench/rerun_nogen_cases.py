@@ -6,16 +6,29 @@ the guide, but it scores identically to a wrong answer. These arrive in bursts �
 five consecutive tasks failing together is one outage, not five judgments — so
 leaving them in biases whichever variant happened to be in flight at the time.
 
-Scans reports for generated_ok == false, re-runs exactly those (model, suite,
-variant, task) combinations, splices the new case records into the original
-reports, and recomputes every summary from the patched results list using the
-harness's own summary functions.
+Scans reports for cases that measured nothing -- infra_failed (HTTP 4xx/5xx,
+402/429/quota, transport, provider deadline, empty reply) or, in reports
+written before that tag, generated_ok == false -- re-runs exactly those
+(model, suite, variant, task, repeat) combinations, splices the new case
+records into the original reports, and recomputes every summary from the
+patched results list using the harness's own summary functions. A program
+that timed out is a measurement (rc 124, generated_ok true) and is left alone.
+
+Two modes:
+  --report GLOB   (repeatable) any harness report. Everything a re-run needs is
+                  read from the report itself: tasks file, destinations config,
+                  guide path, the binary and its sha256 (so the re-run uses the
+                  same binary), --aether-arg, seed base and the repeat index (so
+                  repeat r is re-requested with seed base + r). Exits 3 while
+                  infra-failed cases remain after --max-rounds.
+  --board NAME    the two pre-2026-08-10 boards, as before.
 
 Dry-run by default; pass --apply to actually spend tokens and rewrite reports.
 """
 from __future__ import annotations
 
 import argparse
+import glob
 import importlib.util
 import json
 import os
@@ -24,7 +37,7 @@ import subprocess
 import sys
 import tempfile
 
-ROOT = pathlib.Path("/Users/mke/PBuild")
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 BENCH = ROOT / "Tests" / "aether_doc_bench"
 HARNESS = ROOT / "tools" / "aether_doc_bench.py"
 AETHER_BIN = ROOT / "build" / "bin" / "aether"
@@ -55,17 +68,19 @@ def load_harness():
 
 def recompute(hb, variant: dict) -> None:
     """Rebuild every summary block on a variant from its (patched) results."""
-    results = variant["results"]
-    variant["summary"] = hb.summarize(results)
-    variant["usage_summary"] = hb.summarize_usage(results)
-    variant["source_token_summary"] = hb.summarize_source_tokens(results)
-    variant["final_usage_summary"] = hb.summarize_final_usage(results, "all")
-    variant["run_ok_final_usage_summary"] = hb.summarize_final_usage(results, "run_ok")
-    variant["exact_final_usage_summary"] = hb.summarize_final_usage(results, "exact")
-    variant["final_source_token_summary"] = hb.summarize_final_source_tokens(results, "all")
-    variant["run_ok_final_source_token_summary"] = hb.summarize_final_source_tokens(results, "run_ok")
-    variant["exact_final_source_token_summary"] = hb.summarize_final_source_tokens(results, "exact")
-    variant["failure_patterns"] = hb.summarize_failure_patterns(results)
+    hb.refresh_variant_summaries(variant)
+
+
+def needs_rerun(result: dict) -> bool:
+    """A case that measured nothing: tagged infra_failed, or (older reports) a
+    case whose model call produced nothing. Timeouts keep generated_ok."""
+    if result.get("infra_failed"):
+        return True
+    if any(a.get("infra_failed") for a in result.get("attempts") or []):
+        return True
+    return not result.get("generated_ok") and not any(
+        a.get("not_sent") for a in result.get("attempts") or []
+    )
 
 
 def find_nogen(outdir: pathlib.Path, include_truncated: bool = False) -> list[dict]:
@@ -100,7 +115,7 @@ def find_nogen(outdir: pathlib.Path, include_truncated: bool = False) -> list[di
                         and not run.get("exact_stdout_match")
                         and ("to close" in err or "unterminated" in err or "unexpected end" in err)
                     )
-                    if not result.get("generated_ok") or truncated:
+                    if needs_rerun(result) or truncated:
                         todo.append({
                             "report": path,
                             "model": model,
@@ -145,10 +160,118 @@ def rerun_one(item: dict, config: pathlib.Path, env: dict) -> dict | None:
     return None
 
 
+def _expand(recorded: str | None) -> pathlib.Path | None:
+    """A path as reports record it (repo-relative, ~/..., or absolute)."""
+    if not recorded:
+        return None
+    path = pathlib.Path(recorded).expanduser()
+    return path if path.is_absolute() else ROOT / path
+
+
+def harness_rerun_argv(report: dict, dest_id: str, variant: dict, task_id: str, repeat_index: int,
+                       out: pathlib.Path) -> list[str]:
+    """The harness command line that re-runs one case exactly as the report ran it."""
+    toolchain = report.get("toolchain") or {}
+    config = report.get("run_config") or {}
+    skew = report.get("skew_guard") or {}
+    argv = [
+        sys.executable, str(HARNESS),
+        "--tasks", str(_expand(report.get("tasks_file"))),
+        "--destinations-config", str(_expand(report.get("destinations_config"))),
+        "--destination", dest_id,
+        "--task", task_id,
+        "--start-repeat", str(int(repeat_index or 0)),
+        "--repeats", "1",
+        "--aether-bin", str(_expand(toolchain.get("aether_bin") or report.get("aether_bin"))),
+        "--output-json", str(out),
+    ]
+    doc_name, doc_path = variant.get("doc_name"), variant.get("doc_path")
+    if doc_path:
+        argv += ["--doc", f"{doc_name}={_expand(doc_path)}", "--docs", doc_name]
+    else:
+        argv += ["--docs", doc_name or "none"]
+    if report.get("binary_sha256"):
+        argv += ["--aether-bin-sha256", report["binary_sha256"]]
+    if skew.get("allowed_by_flag"):
+        argv.append("--allow-skew")
+    root = (report.get("provenance") or {}).get("aether_root")
+    if root:
+        argv += ["--aether-root", str(_expand(root))]
+    if "sandbox_deny" in toolchain:
+        argv += ["--sandbox-deny", toolchain.get("sandbox_deny") or ""]
+    argv += [f"--aether-arg={arg}" for arg in toolchain.get("aether_args") or []]
+    for flag, key in (("--repair-attempts", "repair_attempts"), ("--repair-feedback-limit", "repair_feedback_limit"),
+                      ("--repair-source-limit", "repair_source_limit"), ("--seed-base", "seed_base"),
+                      ("--context-margin", "context_margin"), ("--min-output-tokens", "min_output_tokens")):
+        if config.get(key) is not None:
+            argv += [flag, str(config[key])]
+    if config.get("allow_unknown_context"):
+        argv.append("--allow-unknown-context")
+    return argv
+
+
+def rerun_report(report_path: pathlib.Path, hb, env: dict, apply: bool) -> tuple[int, int]:
+    """Re-run every infra-failed case of one report. Returns (found, still failing)."""
+    report = json.loads(report_path.read_text())
+    todo = []
+    for dest in report.get("destinations", []):
+        for variant in dest.get("variants", []):
+            for index, result in enumerate(variant.get("results", [])):
+                if needs_rerun(result):
+                    todo.append((dest, variant, index, result))
+    print(f"\n=== {report_path}: {len(todo)} case(s) that measured nothing ===")
+    for dest, variant, _, result in todo:
+        print(f"  {dest['destination_id']:24} {variant['doc_name']:8} {result['task_id']} "
+              f"repeat={result.get('repeat_index', 0)} {result.get('infra_kind') or ''}")
+    if not apply or not todo:
+        return len(todo), len(todo)
+    still = 0
+    for dest, variant, index, result in todo:
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
+            out = pathlib.Path(tmp.name)
+        argv = harness_rerun_argv(report, dest["destination_id"], variant, result["task_id"],
+                                  result.get("repeat_index", 0), out)
+        proc = subprocess.run(argv, capture_output=True, text=True, env=env)
+        fresh = None
+        try:
+            fresh_report = json.loads(out.read_text())
+            for fdest in fresh_report.get("destinations", []):
+                for fvariant in fdest.get("variants", []):
+                    for fresult in fvariant.get("results", []):
+                        if fresult["task_id"] == result["task_id"]:
+                            fresh = fresult
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ! unreadable re-run output ({exc}); harness said: {proc.stderr.strip()[:300]}")
+        finally:
+            out.unlink(missing_ok=True)
+        if fresh is None or needs_rerun(fresh):
+            still += 1
+            print(f"  -> {result['task_id']} still unmeasured; original kept")
+            continue
+        fresh["rerun_of_infra_failure"] = {
+            "infra_kind": result.get("infra_kind"),
+            "fingerprint": result.get("failure_fingerprint"),
+        }
+        fresh["case_sequence"] = result.get("case_sequence")
+        variant["results"][index] = fresh
+        print(f"  -> {result['task_id']} measured: exact={bool(fresh['run']['exact_stdout_match'])}")
+    for dest in report.get("destinations", []):
+        for variant in dest.get("variants", []):
+            recompute(hb, variant)
+    report["patched_no_generation_cases"] = report.get("patched_no_generation_cases", 0) + len(todo) - still
+    report["infra_failed"] = hb.report_infra_failed(report)
+    report_path.write_text(json.dumps(report, indent=2))
+    return len(todo), still
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--apply", action="store_true", help="actually re-run and rewrite reports")
     ap.add_argument("--board", choices=sorted(BOARDS), action="append", default=[])
+    ap.add_argument("--report", action="append", default=[], metavar="GLOB",
+                    help="re-run the infra-failed cases of these harness reports (repeatable)")
+    ap.add_argument("--max-rounds", type=int, default=2,
+                    help="--report mode: re-run rounds before giving up (default 2)")
     ap.add_argument("--include-truncated", action="store_true",
                     help="also re-run cases whose source failed to parse on an unclosed "
                          "construct (provider cut the reply off mid-statement)")
@@ -158,13 +281,32 @@ def main() -> int:
                     help="restrict to these destination ids; repeatable")
     args = ap.parse_args()
 
+    env = dict(os.environ)
+    # Credentials come from the environment only (see tools/fleet_env.py for
+    # the private overlay); this public tool names no key file.
+
+    if args.report:
+        hb = load_harness()
+        paths = sorted({pathlib.Path(p) for pattern in args.report for p in glob.glob(pattern, recursive=True)})
+        if not paths:
+            print("no reports matched", file=sys.stderr)
+            return 1
+        remaining = 0
+        for path in paths:
+            still = 0
+            for _round in range(max(1, args.max_rounds)):
+                found, still = rerun_report(path, hb, env, args.apply)
+                if not args.apply or still == 0 or found == 0:
+                    break
+            remaining += still
+        if not args.apply:
+            print("dry run — pass --apply to re-run and patch")
+            return 3 if remaining else 0
+        print(f"\n{remaining} case(s) still unmeasured")
+        return 3 if remaining else 0
+
     boards = args.board or sorted(BOARDS)
     hb = load_harness() if args.apply else None
-
-    env = dict(os.environ)
-    key_file = pathlib.Path.home() / "aic"
-    if key_file.exists():
-        env["OPENAI_API_KEY"] = key_file.read_text().strip()
 
     grand = 0
     for board in boards:

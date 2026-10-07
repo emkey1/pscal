@@ -83,6 +83,19 @@ for suite in $SUITES; do
     rc=$?
     elapsed=$(( SECONDS - started ))
 
+    # rc 3: some cases failed in the infrastructure and measured nothing. They
+    # are re-run (never dropped, never scored) before the run is judged.
+    if [ $rc -eq 3 ] && [ -s "$out.tmp" ]; then
+        echo "[infra] $name: re-running the cases that measured nothing"
+        python3 Tests/aether_doc_bench/rerun_nogen_cases.py --report "$out.tmp" --apply >>"$log" 2>&1
+        rc=$?
+        if [ $rc -ne 0 ]; then
+            mkdir -p "$OUTDIR/infra_pending"; mv "$out.tmp" "$OUTDIR/infra_pending/${name}.json"
+            echo "[FAIL] $name -- infra-failed cases remain; kept in infra_pending/ (rerun_nogen_cases.py --report)"
+            continue
+        fi
+    fi
+
     if [ $rc -ne 0 ] || [ ! -s "$out.tmp" ]; then
         rm -f "$out.tmp"; echo "[FAIL] $name rc=$rc ${elapsed}s -- see $log"; continue
     fi

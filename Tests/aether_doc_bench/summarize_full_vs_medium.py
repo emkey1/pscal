@@ -5,12 +5,17 @@ Reads every <model>_<suite>.json report in a results directory and prints:
   1. a per-model, per-suite exact-match table with the full->medium delta
   2. a per-model roll-up across all suites
   3. token accounting, including how much the provider served from cache
+  4. a paired non-inferiority test of medium against full: the per-(model,
+     suite, task) difference in first-attempt (FA) and final (FX) exact rate,
+     averaged over repeats, with a bootstrap 95% CI blocked on those pairs.
+     Medium is non-inferior when the CI's lower bound is above -margin points.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import pathlib
+import random
 import sys
 
 SUITES = ["simple", "large", "cs", "nontoon"]
@@ -53,9 +58,65 @@ def cell(variant: dict | None) -> tuple[int, int, int, int]:
     )
 
 
+def first_attempt_exact(case: dict) -> bool:
+    attempts = case.get("attempts") or []
+    run = (attempts[0] if attempts else case).get("run") or {}
+    return bool(run.get("exact_stdout_match"))
+
+
+def paired_differences(reports: dict, metric: str) -> list[float]:
+    """medium minus full, per (model, suite, task), each side averaged over its
+    repeats; pairs missing either side are skipped (and so are not counted)."""
+    diffs: list[float] = []
+    for (model, suite), report in sorted(reports.items()):
+        sides = {}
+        for name in VARIANTS:
+            variant = variant_of(report, name)
+            if not variant:
+                break
+            per_task: dict[str, list[bool]] = {}
+            for case in variant.get("results", []):
+                ok = first_attempt_exact(case) if metric == "fa" else bool(case.get("run", {}).get("exact_stdout_match"))
+                per_task.setdefault(case["task_id"], []).append(ok)
+            sides[name] = {task: sum(v) / len(v) for task, v in per_task.items()}
+        if len(sides) != len(VARIANTS):
+            continue
+        for task in sorted(set(sides["full"]) & set(sides["medium"])):
+            diffs.append(sides["medium"][task] - sides["full"][task])
+    return diffs
+
+
+def bootstrap_ci(diffs: list[float], samples: int, seed: int) -> tuple[float, float, float]:
+    """Mean paired difference and its percentile 95% CI, in percentage points."""
+    rng = random.Random(seed)
+    n = len(diffs)
+    means = sorted(sum(diffs[rng.randrange(n)] for _ in range(n)) / n for _ in range(samples))
+    lo = means[int(0.025 * (samples - 1))]
+    hi = means[int(0.975 * (samples - 1))]
+    return 100 * sum(diffs) / n, 100 * lo, 100 * hi
+
+
+def print_non_inferiority(reports: dict, margin: float, samples: int, seed: int) -> None:
+    print(f"\n## Paired non-inferiority, medium vs full (margin {margin:g} points, "
+          f"bootstrap {samples}x blocked on (model, suite, task))\n")
+    for metric, label in (("fa", "first attempt (FA)"), ("fx", "final (FX)")):
+        diffs = paired_differences(reports, metric)
+        if not diffs:
+            print(f"- {label}: no complete pairs")
+            continue
+        mean, lo, hi = bootstrap_ci(diffs, samples, seed)
+        verdict = "NON-INFERIOR" if lo > -margin else "not shown non-inferior"
+        print(f"- {label}: medium - full = {mean:+.1f} pts, 95% CI [{lo:+.1f}, {hi:+.1f}] over "
+              f"{len(diffs)} pairs -> {verdict}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("outdir", type=pathlib.Path)
+    ap.add_argument("--margin", type=float, default=3.0,
+                    help="non-inferiority margin in percentage points (default 3)")
+    ap.add_argument("--bootstrap", type=int, default=2000, help="bootstrap resamples (default 2000)")
+    ap.add_argument("--seed", type=int, default=20261006, help="bootstrap RNG seed")
     args = ap.parse_args()
 
     reports = load_reports(args.outdir)
@@ -175,6 +236,8 @@ def main() -> int:
         if flips:
             print(f"  {model}")
             print("\n".join(flips))
+
+    print_non_inferiority(reports, args.margin, args.bootstrap, args.seed)
     return 0
 
 
