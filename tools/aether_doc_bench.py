@@ -2468,6 +2468,172 @@ def truncate_for_prompt(text: str, limit: int) -> str:
     return text[:limit] + "\n...[truncated]..."
 
 
+# The previous program's share of a repair prompt. The old 1,200-character cap
+# (shared with stdout/stderr, head only) cut large and hard tasks by 22-47% of
+# their lines, often including the line the diagnostic cites. 8,000 covers the
+# largest reference (3,501 chars) with room; it is not unbounded because one
+# stored "source" was 87K characters of leaked reasoning.
+REPAIR_SOURCE_LIMIT_DEFAULT = 8000
+REPAIR_FEEDBACK_LIMIT_DEFAULT = 1200
+SOURCE_HEAD_CHARS = 2000
+SOURCE_TAIL_CHARS = 1000
+SOURCE_WINDOW_RADIUS = 20
+SOURCE_LINE_CAP = 1000
+
+
+def collapse_repeated_lines(text: str) -> tuple[str, int]:
+    """Collapse each run of identical consecutive lines to one line plus
+    ` [repeated N times]`. Returns (text, number of lines removed). A flood of
+    1,024 identical warnings used to fill the whole stderr budget and hide the
+    coded error behind it."""
+    if not text:
+        return text, 0
+    lines = text.split("\n")
+    out: list[str] = []
+    removed = 0
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        run_end = index + 1
+        while run_end < len(lines) and lines[run_end] == line:
+            run_end += 1
+        count = run_end - index
+        if count > 1 and line.strip():
+            out.append(f"{line} [repeated {count} times]")
+            removed += count - 1
+        else:
+            out.extend(lines[index:run_end])
+        index = run_end
+    return "\n".join(out), removed
+
+
+def cited_source_line(run: dict[str, Any]) -> int | None:
+    """The source line a failure points at: the primary diagnostic's line, else
+    the first `:N:` in stderr."""
+    diagnostic = primary_error_diagnostic(run.get("diagnostics"))
+    if diagnostic:
+        line = diagnostic.get("line")
+        if isinstance(line, int) and line >= 1:
+            return line
+    match = re.search(r"\.aether:(\d+):", run.get("stderr") or "")
+    if match:
+        return int(match.group(1))
+    match = re.search(r":(\d+):", run.get("stderr") or "")
+    return int(match.group(1)) if match else None
+
+
+def window_source(
+    source: str,
+    cap: int,
+    cited_line: int | None = None,
+    head_chars: int = SOURCE_HEAD_CHARS,
+    tail_chars: int = SOURCE_TAIL_CHARS,
+    radius: int = SOURCE_WINDOW_RADIUS,
+) -> tuple[str, dict[str, Any]]:
+    """The previous source as a repair prompt shows it. Whole when it fits in
+    `cap`; otherwise the first ~2K characters, +/-20 lines around the cited
+    line, and the last ~1K, each gap marked `...[N lines omitted (lines a-b)]...`."""
+    meta: dict[str, Any] = {
+        "source_truncated": False,
+        "source_cap": cap,
+        "source_chars": len(source),
+        "cited_line": cited_line,
+    }
+    if len(source) <= cap:
+        return source, meta
+    lines = source.split("\n")
+    total = len(lines)
+
+    def take_from(indices: range, budget: int) -> list[int]:
+        chosen: list[int] = []
+        used = 0
+        for idx in indices:
+            used += len(lines[idx]) + 1
+            if chosen and used > budget:
+                break
+            chosen.append(idx)
+        return chosen
+
+    head = take_from(range(total), head_chars)
+    tail = take_from(range(total - 1, -1, -1, ), tail_chars)
+
+    def render(window_radius: int) -> tuple[str, int]:
+        keep = set(head) | set(tail)
+        if cited_line is not None and 1 <= cited_line <= total:
+            lo = max(0, cited_line - 1 - window_radius)
+            hi = min(total, cited_line + window_radius)
+            keep.update(range(lo, hi))
+        parts: list[str] = []
+        omitted = 0
+        idx = 0
+        while idx < total:
+            if idx in keep:
+                line = lines[idx]
+                if len(line) > SOURCE_LINE_CAP:
+                    line = line[:SOURCE_LINE_CAP] + " ...[line truncated]..."
+                parts.append(line)
+                idx += 1
+                continue
+            gap_end = idx
+            while gap_end < total and gap_end not in keep:
+                gap_end += 1
+            count = gap_end - idx
+            omitted += count
+            parts.append(f"...[{count} lines omitted (lines {idx + 1}-{gap_end})]...")
+            idx = gap_end
+        return "\n".join(parts), omitted
+
+    window_radius = radius
+    text, omitted = render(window_radius)
+    while len(text) > cap and window_radius > 0:
+        window_radius = max(0, window_radius // 2 if window_radius > 1 else 0)
+        text, omitted = render(window_radius)
+    if len(text) > cap:
+        text = text[:cap] + "\n...[truncated]..."
+    meta.update({
+        "source_truncated": True,
+        "source_lines": total,
+        "omitted_lines": omitted,
+        "window_radius": window_radius,
+    })
+    return text, meta
+
+
+def build_repair_feedback(
+    source: str,
+    run: dict[str, Any],
+    *,
+    source_limit: int = REPAIR_SOURCE_LIMIT_DEFAULT,
+    feedback_limit: int = REPAIR_FEEDBACK_LIMIT_DEFAULT,
+) -> dict[str, Any]:
+    """The previous source, stdout and stderr exactly as a repair prompt shows
+    them, plus what was cut. Shared by the bench, session mode and the idea
+    miner so all three repair from the same view of a failure."""
+    previous_source, meta = window_source(source or "", source_limit, cited_source_line(run))
+    stdout = run.get("stdout") or ""
+    stderr, collapsed = collapse_repeated_lines(run.get("stderr") or "")
+    meta.update({
+        "stderr_collapsed": collapsed > 0,
+        "stderr_collapsed_lines": collapsed,
+        "stdout_truncated": len(stdout) > feedback_limit,
+        "stderr_truncated": len(stderr) > feedback_limit,
+        "feedback_limit": feedback_limit,
+    })
+    return {
+        "previous_source": previous_source,
+        "observed_stdout": truncate_for_prompt(stdout, feedback_limit),
+        "observed_stderr": truncate_for_prompt(stderr, feedback_limit),
+        "meta": meta,
+    }
+
+
+def primary_error_diagnostic(diagnostics: Any) -> dict[str, Any] | None:
+    """The diagnostic that names the failure: the first record whose message is
+    an error. (Refined in W6-03 to skip warning records.)"""
+    records = [d for d in (diagnostics or []) if isinstance(d, dict)]
+    return records[0] if records else None
+
+
 def count_trailing_newlines(text: str) -> int:
     return len(text) - len(text.rstrip("\n"))
 
@@ -2938,6 +3104,14 @@ def failed_generation_attempt(
     }
 
 
+def _record_feedback(attempt: dict[str, Any], meta: dict[str, Any]) -> None:
+    """What this repair round was shown of the previous attempt."""
+    attempt["repair_feedback"] = meta
+    attempt["source_truncated"] = bool(meta.get("source_truncated"))
+    attempt["source_cap"] = meta.get("source_cap")
+    attempt["stderr_collapsed"] = bool(meta.get("stderr_collapsed"))
+
+
 def apply_repairs(
     *,
     initial_attempt: dict[str, Any],
@@ -2959,13 +3133,19 @@ def apply_repairs(
                 generation_error=attempt.get("generation_error"),
                 expected_stdout=task.expected_stdout,
             )
+            feedback = build_repair_feedback(
+                attempt.get("source_code", ""),
+                attempt["run"],
+                source_limit=getattr(args, "repair_source_limit", REPAIR_SOURCE_LIMIT_DEFAULT),
+                feedback_limit=args.repair_feedback_limit,
+            )
             repair_prompt = repair_prompt_builder(
                 task=task,
-                previous_source=truncate_for_prompt(attempt.get("source_code", ""), args.repair_feedback_limit),
+                previous_source=feedback["previous_source"],
                 attempt_number=repair_index + 1,
                 failure_summary=failure_summary,
-                observed_stdout=truncate_for_prompt(attempt["run"].get("stdout", ""), args.repair_feedback_limit),
-                observed_stderr=truncate_for_prompt(attempt["run"].get("stderr", ""), args.repair_feedback_limit),
+                observed_stdout=feedback["observed_stdout"],
+                observed_stderr=feedback["observed_stderr"],
             )
             try:
                 attempt = evaluate_attempt(
@@ -2978,8 +3158,11 @@ def apply_repairs(
                     options=options,
                 )
             except Exception as exc:  # keep the rounds already measured
-                attempts.append(failed_generation_attempt("repair", runner, exc, options))
+                attempt = failed_generation_attempt("repair", runner, exc, options)
+                _record_feedback(attempt, feedback["meta"])
+                attempts.append(attempt)
                 break
+            _record_feedback(attempt, feedback["meta"])
             attempts.append(attempt)
             if attempt["run"]["exact_stdout_match"]:
                 break
@@ -3476,8 +3659,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--repair-feedback-limit",
         type=int,
-        default=1200,
-        help="max characters of stdout/stderr/source included in a repair prompt section",
+        default=REPAIR_FEEDBACK_LIMIT_DEFAULT,
+        help="max characters of stdout and of stderr included in a repair prompt (stderr after "
+        "identical-line runs are collapsed)",
+    )
+    parser.add_argument(
+        "--repair-source-limit",
+        type=int,
+        default=REPAIR_SOURCE_LIMIT_DEFAULT,
+        help="max characters of the previous source in a repair prompt; above it the prompt shows "
+        "the head, +/-20 lines round the cited line and the tail (default 8000)",
     )
     parser.add_argument("--aether-bin", type=pathlib.Path, default=DEFAULT_AETHER_BIN, help="path to local aether binary")
     parser.add_argument(
@@ -4112,6 +4303,7 @@ def _run_benchmark(
             "seed_base": args.seed_base,
             "repair_attempts": args.repair_attempts,
             "repair_feedback_limit": args.repair_feedback_limit,
+            "repair_source_limit": args.repair_source_limit,
             "shared_guide_batch_size": args.shared_guide_batch_size,
             "python_baseline": bool(args.python_baseline),
             "rust_baseline": bool(args.rust_baseline),

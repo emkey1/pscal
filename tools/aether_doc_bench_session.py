@@ -236,16 +236,23 @@ def run_task_session(
                 generation_error=attempt.get("generation_error"),
                 expected_stdout=task.expected_stdout,
             )
+            feedback = adb.build_repair_feedback(
+                attempt.get("source_code", ""),
+                attempt["run"],
+                source_limit=args.repair_source_limit,
+                feedback_limit=args.repair_feedback_limit,
+            )
             repair_prompt = build_followup_repair_prompt(
                 task=task,
-                previous_source=adb.truncate_for_prompt(attempt.get("source_code", ""), args.repair_feedback_limit),
+                previous_source=feedback["previous_source"],
                 attempt_number=repair_index + 1,
                 failure_summary=failure_summary,
-                observed_stdout=adb.truncate_for_prompt(attempt["run"].get("stdout", ""), args.repair_feedback_limit),
-                observed_stderr=adb.truncate_for_prompt(attempt["run"].get("stderr", ""), args.repair_feedback_limit),
+                observed_stdout=feedback["observed_stdout"],
+                observed_stderr=feedback["observed_stderr"],
             )
             cumulative_before = getattr(session, "_cumulative_tokens", 0)
             attempt = evaluate_attempt_session(session, repair_prompt, "repair", task, args, cumulative_before)
+            adb._record_feedback(attempt, feedback["meta"])
             attempts.append(attempt)
             if attempt["run"]["exact_stdout_match"]:
                 break
@@ -320,7 +327,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--destination", action="append", default=[])
     parser.add_argument("--docs", default="full", choices=("full", "small"))
     parser.add_argument("--repair-attempts", type=int, default=0)
-    parser.add_argument("--repair-feedback-limit", type=int, default=1200)
+    parser.add_argument("--repair-feedback-limit", type=int, default=adb.REPAIR_FEEDBACK_LIMIT_DEFAULT)
+    parser.add_argument("--repair-source-limit", type=int, default=adb.REPAIR_SOURCE_LIMIT_DEFAULT)
     parser.add_argument("--aether-bin", type=pathlib.Path, default=adb.DEFAULT_AETHER_BIN)
     parser.add_argument("--sandbox-deny", default="net,proc")
     parser.add_argument("--output-json", type=pathlib.Path, default=None)

@@ -606,17 +606,24 @@ def process_program(
         cur_source = source
         for i in range(args.repair_attempts):
             failure_summary = adb.derive_failure_summary(generated_ok=True, run=cur_run)
+            feedback = adb.build_repair_feedback(
+                cur_source,
+                cur_run,
+                source_limit=getattr(args, "repair_source_limit", adb.REPAIR_SOURCE_LIMIT_DEFAULT),
+                feedback_limit=args.repair_feedback_limit,
+            )
             prompt = build_repair_prompt(
                 guide_name=guide_name,
                 guide_text=guide_text,
                 intent=intent,
-                previous_source=adb.truncate_for_prompt(cur_source, args.repair_feedback_limit),
+                previous_source=feedback["previous_source"],
                 attempt_number=i + 1,
                 failure_summary=failure_summary,
-                observed_stdout=adb.truncate_for_prompt(cur_run.get("stdout", ""), args.repair_feedback_limit),
-                observed_stderr=adb.truncate_for_prompt(cur_run.get("stderr", ""), args.repair_feedback_limit),
+                observed_stdout=feedback["observed_stdout"],
+                observed_stderr=feedback["observed_stderr"],
             )
             attempt: dict[str, Any] = {"kind": "repair", "attempt_number": i + 1}
+            adb._record_feedback(attempt, feedback["meta"])
             try:
                 generation = generate(prompt, destination)
                 new_source = adb.sanitize_code(generation.get("raw_text", ""))
@@ -1237,8 +1244,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="generation calls per model; later rounds nudge away from prior intents (default: 1)")
     p.add_argument("--repair-attempts", type=int, default=1,
                    help="repair passes on a failing program, fed the coded diagnostic (default: 1)")
-    p.add_argument("--repair-feedback-limit", type=int, default=1200,
-                   help="max chars of source/stdout/stderr in a repair prompt section")
+    p.add_argument("--repair-feedback-limit", type=int, default=adb.REPAIR_FEEDBACK_LIMIT_DEFAULT,
+                   help="max chars of stdout and of stderr in a repair prompt section")
+    p.add_argument("--repair-source-limit", type=int, default=adb.REPAIR_SOURCE_LIMIT_DEFAULT,
+                   help="max chars of the previous source in a repair prompt (head, a window round "
+                        "the cited line, and the tail above it)")
     p.add_argument("--timeout-seconds", type=int, default=20, help="per-program compile+run timeout")
     p.add_argument(
         "--sandbox-deny",

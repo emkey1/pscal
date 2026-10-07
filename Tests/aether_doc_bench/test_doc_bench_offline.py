@@ -694,6 +694,61 @@ def test_provider_error_in_a_repair_round_keeps_the_first_attempt():
 
 
 
+# --------------------------------------------------------------------------- #
+# W1-07: repair prompt -- bounded full source, a window round the cited line
+# --------------------------------------------------------------------------- #
+
+
+def _long_program(lines: int = 400, width: int = 30) -> str:
+    return "\n".join(f"    let v{i:04d}: Int = {i};".ljust(width) for i in range(1, lines + 1)) + "\n"
+
+
+def test_long_source_window_contains_the_cited_line():
+    source = _long_program()
+    assert len(source) > 10000
+    run = {"returncode": 1, "stdout": "", "stderr": "", "diagnostics": [
+        {"severity": "error", "code": "TYPE-001", "line": 300, "message": "bad"}]}
+    feedback = adb.build_repair_feedback(source, run, source_limit=8000, feedback_limit=1200)
+    shown = feedback["previous_source"]
+    assert "let v0300: Int = 300;" in shown
+    assert "let v0280: Int = 280;" in shown and "let v0320: Int = 320;" in shown
+    assert "let v0001: Int = 1;" in shown and "let v0400: Int = 400;" in shown
+    assert "lines omitted" in shown
+    assert len(shown) <= 8000
+    assert feedback["meta"]["source_truncated"] is True and feedback["meta"]["cited_line"] == 300
+    # The repair prompt carries it, and the cited line is found from stderr too.
+    stderr_run = {"returncode": 1, "stdout": "", "stderr": "t.aether:300: [TYPE-001] bad\n", "diagnostics": None}
+    assert adb.cited_source_line(stderr_run) == 300
+    small = adb.build_repair_feedback("fn main() -> Void { ret; }\n", run)
+    assert small["meta"]["source_truncated"] is False
+
+
+def test_warning_flood_collapses_to_one_line():
+    flood = "t.aether:1: warning: [NARROW-001] narrowing\n" * 1024 + "t.aether:9: [SCOPE-001] identifier 'x' not in scope.\n"
+    feedback = adb.build_repair_feedback("src", {"returncode": 1, "stdout": "", "stderr": flood, "diagnostics": None})
+    stderr = feedback["observed_stderr"]
+    assert "[repeated 1024 times]" in stderr
+    assert stderr.count("NARROW-001") == 1
+    assert "SCOPE-001" in stderr, "the coded error must survive the cap"
+    assert feedback["meta"]["stderr_collapsed"] is True
+
+
+def test_repair_attempt_records_truncation_end_to_end():
+    with workdir() as tmp:
+        log = tmp / "prompts.jsonl"
+        long_source = "".join(f"// filler line {i}\n" for i in range(1, 500))  # >8K chars, no directives
+        plan = {"initial": long_source, "repair": "//! print ok\n", "prompt_log": str(log)}
+        proc, report = scripted_run(tmp, plan, ["--repair-attempts", "1"], [simple_task("big")])
+        assert proc.returncode == 0, proc.stderr
+        case = next(c for _, _, c in all_cases(report))
+        repair = case["attempts"][1]
+        assert repair["source_truncated"] is True and repair["source_cap"] == 8000
+        assert "stderr_collapsed" in repair
+        prompt = json.loads(log.read_text().splitlines()[1])["prompt"]
+        assert "lines omitted" in prompt
+        assert case["run"]["exact_stdout_match"] is True
+
+
 def _main() -> int:
     failures = 0
     skipped = 0
