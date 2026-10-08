@@ -1,0 +1,30 @@
+{
+  "destinations": [
+    {
+      "id": "apple-ondevice-afm3",
+      "type": "openai_chat_completions",
+      "base_url": "http://<ipad-bridge>:8799/v1",
+      "api_key_env": "APPLE_FM_BRIDGE_TOKEN",
+      "model": "apple-on-device",
+      "temperature": 0.2,
+      "max_output_tokens": 1500,
+      "prompt_context_limit": 4096,
+      "request_timeout_seconds": 600,
+      "request_max_retries": 2,
+      "retry_backoff_seconds": 10
+    },
+    {
+      "id": "apple-pcc",
+      "type": "openai_chat_completions",
+      "base_url": "http://<ipad-bridge>:8799/v1",
+      "api_key_env": "APPLE_FM_BRIDGE_TOKEN",
+      "model": "apple-pcc",
+      "temperature": 0.2,
+      "max_output_tokens": 8000,
+      "prompt_context_limit": 32768,
+      "request_timeout_seconds": 900,
+      "request_max_retries": 2,
+      "retry_backoff_seconds": 30
+    }
+  ]
+}
