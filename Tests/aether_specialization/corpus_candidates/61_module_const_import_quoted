@@ -6,11 +6,11 @@
 use "102_bench_consts";
 
 fn main() -> Void {
-    let greeting: Text = Greeting;
-    let answer: Int = Answer;
+    let message: Text = Greeting;
+    let value: Int = Answer;
     fx {
-        println(greeting);
-        println(answer);
+        println(message);
+        println(value);
     }
     ret;
 }

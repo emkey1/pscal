@@ -31,7 +31,7 @@ type LinkedList {
         ret;
     }
 
-    fn length() -> Int {
+    fn size() -> Int {
         let count: Int = 0;
         let current: Node = self.head;
         loop current != nil {
@@ -68,7 +68,7 @@ fn main() -> Void {
 
     fx {
         println("List: ", list.toText());
-        println("Length: ", list.length());
+        println("Length: ", list.size());
     }
     ret;
 }

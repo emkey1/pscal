@@ -9,6 +9,16 @@
       "id": "06-29a_claw1_mistral_small__00_This_program_sorts_an_array_of.aether",
       "retired": "2026-10-06",
       "reason": "harvested; off-by-one bubble sort (never compares the last pair) whose golden is a raw array dump (elements_at:0x...)"
+    },
+    {
+      "id": "06-29a_claw1_mistral_small__04_This_program_demonstrates_the_.aether",
+      "retired": "2026-10-08",
+      "reason": "its golden recorded an array pointer dump (ARRAY(dims:1,...)); printing an array is TYPE-001 since aether 2026-10-08-1 (W8-15, D14)"
+    },
+    {
+      "id": "pass5gem_gemini_2_5_flash_lit_03_This_program_simulates_a_simpl.aether_9c4ef02385c6",
+      "retired": "2026-10-08",
+      "reason": "its golden recorded an array pointer dump (ARRAY(dims:1,...)); printing an array is TYPE-001 since aether 2026-10-08-1 (W8-15, D14)"
     }
   ],
   "items": [
@@ -7299,7 +7309,7 @@
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/61_module_const_import_quoted",
       "repo_path": "Tests/aether_specialization/corpus_candidates/61_module_const_import_quoted",
-      "sha256": "cf7c4e922f0e8a3e074f8e8acc12913a53372afb578adbd638d6f8eaf86f7630",
+      "sha256": "fd69ef02efd9828fe791e1dad72f2758b48b2a759e863e447bab0202c310f08b",
       "stdout": "Aether\n42\n",
       "metadata": {
         "canonical": true,
@@ -7312,7 +7322,13 @@
           "const"
         ],
         "notes": "Canonical quoted module import with direct exported const access.",
-        "audit_notes": "Imported module reconstructed 2026-06-12 from golden stdout; verified with build/bin/aether."
+        "audit_notes": "Imported module reconstructed 2026-06-12 from golden stdout; verified with build/bin/aether.",
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-10-08-1 (latest tag: untagged)",
+          "date": "2026-10-08",
+          "source_rebaselined": true,
+          "note": "locals renamed greeting -> message and answer -> value (NAME-001 beside imported consts Greeting/Answer, L1/D17); run by hand beside its module, which recapture_expected.py does not copy"
+        }
       }
     },
     {
@@ -9039,7 +9055,7 @@
     {
       "source_path": "/tmp/aether_batch4_examples/09_linked_list.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/09_linked_list.aether",
-      "sha256": "68eaec693104adb88e504109212bb3bac1e024facfa7bd780b70282d3bd10583",
+      "sha256": "5cf663837f1e2c52c5ac22ea50798983e01dbb3bdf1827d93902dd50b82df494",
       "stdout": "List: [1, 5, 10, 20, 30]\nLength: 5\n",
       "metadata": {
         "canonical": true,
@@ -9048,7 +9064,12 @@
         "assumption_bearing": false,
         "tags": [
           "imported_2026-07-19"
-        ]
+        ],
+        "recaptured": {
+          "aether_version": "Aether Compiler Version: 2026-10-08-1 (latest tag: untagged)",
+          "date": "2026-10-08",
+          "source_rebaselined": true
+        }
       }
     },
     {
@@ -9498,23 +9519,6 @@
         "tags": [
           "harvested_idea_miner_2026-07-19"
         ]
-      }
-    },
-    {
-      "source_path": "/tmp/aether_harvest/06-29a_claw1_mistral_small__04_This_program_demonstrates_the_.aether",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/06-29a_claw1_mistral_small__04_This_program_demonstrates_the_.aether",
-      "sha256": "51b5feb55820a3f03b0ee9732953b5d8b1d6f376fd4516f04933f9b76ab9372e",
-      "stdout": "Dimensions:ARRAY(dims:1, base_type:REAL, elements_at:0x1039e2020)\nCalculated Area:7.000000\n",
-      "metadata": {
-        "canonical": false,
-        "oracle": "none",
-        "fixture_required": false,
-        "assumption_bearing": false,
-        "tags": [
-          "harvested_idea_miner_2026-07-19"
-        ],
-        "environment_dependent": true,
-        "audit_notes": "[2026-07-19 corpus audit] marked environment_dependent: default array print includes elements_at:0x... raw pointer; address varies per-process (ASLR). [2026-10-06] canonical: false: the golden is a raw array dump (elements_at:0x...), not program output."
       }
     },
     {
@@ -11586,23 +11590,6 @@
         "tags": [
           "harvested_idea_miner_2026-07-19"
         ]
-      }
-    },
-    {
-      "source_path": "/tmp/aether_harvest_pass5/pass5gem_gemini_2_5_flash_lit_03_This_program_simulates_a_simpl.aether",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/pass5gem_gemini_2_5_flash_lit_03_This_program_simulates_a_simpl.aether_9c4ef02385c6",
-      "sha256": "9c4ef02385c65b6f8d77258db9767d0cdfb2ae575fffdff563f550e9881154a6",
-      "stdout": "Spawned task for item 1 with handle 1000\nSpawned task for item 2 with handle 1001\nSpawned task for item 3 with handle 1002\nSpawned task for item 4 with handle 1003\nSpawned task for item 5 with handle 1004\nTask handle 1000 completed with result: 0\nTask handle 1001 completed with result: 2\nTask handle 1002 completed with result: 4\nTask handle 1003 completed with result: 6\nTask handle 1004 completed with result: 8\nAll tasks completed. Final results: ARRAY(dims:1, base_type:INT64, elements_at:0x7f6c08480)\n",
-      "metadata": {
-        "canonical": false,
-        "oracle": "none",
-        "fixture_required": false,
-        "assumption_bearing": false,
-        "tags": [
-          "harvested_idea_miner_2026-07-19"
-        ],
-        "environment_dependent": true,
-        "audit_notes": "[2026-07-19 corpus audit] marked environment_dependent: default array print includes elements_at:0x... raw pointer; address varies per-process (ASLR). [2026-10-06] canonical: false: the golden is a raw array dump (elements_at:0x...), not program output."
       }
     },
     {
