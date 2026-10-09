@@ -28,6 +28,14 @@ modes:
             --dump, writes them as `should_fail` entries in the benchmark's
             task format, for tools/aether_oracle_check.py --tasks FILE.
 
+--suite properties swaps the value templates for contract property tasks:
+the model writes one function with a fixed signature, and the harness wraps
+it in a checked twin carrying @pre/@post properties, calls that on generated
+inputs (edge cases included) and expects `checked K`. No expected answer is
+needed: a wrong function stops with [CON-001] (aether 2026-10-09-1 on), a
+contract_violation. validate runs each template's reference (must pass) and
+its deliberately broken versions (each must be a contract_violation).
+
 The generator is deterministic given --seed, so a run is reproducible. Templates
 draw from the §1 mechanism inventory; this is the smoke-scale set, easily
 extended. Tasks are *not* frozen here -- freezing a curated subset is what turns
@@ -277,7 +285,7 @@ MUTATORS = [
     ("misspelled_type", "TYPE-002", m_misspelled_type),
     ("failing_contract", "CON-001", m_failing_contract),
 ]
-NEGATIVE_FLAGS = ("--deny", "net,proc")  # the harness's sandbox, as the oracle check runs it
+SANDBOX_FLAGS = ("--deny", "net,proc")  # the harness's sandbox, as the oracle check runs it
 _CODE = re.compile(r"\b[A-Z]+-\d{3}\b")
 
 
@@ -298,7 +306,7 @@ def negatives(tasks: list[dict]) -> list[dict]:
 
 def check_negative(item: dict, run=run_aether_full) -> tuple[bool, str]:
     """(kept, why): a mutant is kept only if it fails with exactly its code."""
-    rc, out, err = run(item["program"], NEGATIVE_FLAGS)
+    rc, out, err = run(item["program"], SANDBOX_FLAGS)
     codes = sorted(set(_CODE.findall(out + err)))
     if rc == 0:
         return False, "exit 0"
@@ -307,25 +315,141 @@ def check_negative(item: dict, run=run_aether_full) -> tuple[bool, str]:
     return True, f"rc={rc}"
 
 
+# ---- contract property templates (--suite properties): each returns dict(template, kind,
+# fn, params, prompt, reference, contracts, inputs, broken, mechanisms). `broken` holds
+# deliberately wrong versions that the contracts must catch on `inputs`. ----
+def _fn(sig: str, body: str) -> str:
+    return f"{sig} {{\n{body}}}\n"
+
+
+def _prop(template: str, fn: str, params: list[str], doc: str, reference: str, contracts: list[str],
+          inputs: list[tuple[int, ...]], broken: dict[str, str], mechanisms: list[str]) -> dict:
+    sig = f"fn {fn}({', '.join(p + ': Int' for p in params)}) -> Int"
+    prompt = (f"Write the Aether function `{sig}`. {doc} Write only that one function with exactly that "
+              f"signature: no main and no other functions.")
+    return dict(template=template, kind="property", fn=fn, params=params, prompt=prompt,
+                reference=_fn(sig, reference), contracts=contracts, inputs=inputs,
+                broken={k: _fn(sig, v) for k, v in broken.items()},
+                expected_stdout=f"checked {len(inputs)}\n", mechanisms=["contracts", *mechanisms])
+
+
+def p_clamp_into(rng: random.Random) -> dict:
+    lo = rng.randint(0, 20)
+    hi = lo + rng.randint(10, 50)
+    inputs = [(lo - rng.randint(1, 30), lo, hi), (hi + rng.randint(1, 30), lo, hi),
+              (rng.randint(lo + 1, hi - 1), lo, hi), (lo, lo, hi), (hi, lo, hi)]
+    return _prop("clamp_into", "clampInto", ["v", "lo", "hi"],
+                 "It returns v limited to the inclusive range lo to hi (lo <= hi): lo when v is below "
+                 "lo, hi when v is above hi, otherwise v.",
+                 "    if v < lo { ret lo; }\n    if v > hi { ret hi; }\n    ret v;\n",
+                 # The range bounds alone let a swapped clamp through (hi for a v below lo):
+                 # each case of the definition is its own property.
+                 ["@pre lo <= hi", "@post result >= lo", "@post result <= hi",
+                  "@post result == lo || v >= lo", "@post result == hi || v <= hi",
+                  "@post result == v || v < lo || v > hi"], inputs,
+                 {"no_upper_bound": "    if v < lo { ret lo; }\n    ret v;\n",
+                  "swapped_bounds": "    if v < lo { ret hi; }\n    if v > hi { ret lo; }\n    ret v;\n",
+                  "always_lo": "    ret lo;\n"}, ["branching"])
+
+
+def p_abs_val(rng: random.Random) -> dict:
+    inputs = [(-rng.randint(1, 500),), (rng.randint(1, 500),), (0,), (-1,)]
+    return _prop("abs_val", "absVal", ["x"], "It returns the absolute value of x.",
+                 "    if x < 0 { ret 0 - x; }\n    ret x;\n",
+                 ["@post result >= 0", "@post result == x || result == 0 - x"], inputs,
+                 {"identity": "    ret x;\n", "negate": "    ret 0 - x;\n",
+                  "off_by_one": "    if x < 0 { ret 0 - x + 1; }\n    ret x;\n"}, ["branching"])
+
+
+def p_max_of_two(rng: random.Random) -> dict:
+    a, b = rng.randint(1, 200), rng.randint(1, 200)
+    inputs = [(a, a + rng.randint(1, 50)), (b + rng.randint(1, 50), b), (a, a), (0, -rng.randint(1, 9))]
+    return _prop("max_of_two", "maxOf", ["a", "b"], "It returns the larger of a and b.",
+                 "    if a > b { ret a; }\n    ret b;\n",
+                 ["@post result >= a", "@post result >= b", "@post result == a || result == b"], inputs,
+                 {"min": "    if a < b { ret a; }\n    ret b;\n", "sum": "    ret a + b;\n",
+                  "always_a": "    ret a;\n"}, ["branching"])
+
+
+def p_gcd(rng: random.Random) -> dict:
+    g = rng.randint(2, 9)
+    inputs = [(g * rng.randint(2, 7), g * rng.randint(8, 13)), (rng.randint(2, 60), rng.randint(2, 60)),
+              (12, 18), (7, 7), (1, rng.randint(2, 30))]
+    # The properties say "a common divisor", not "the greatest": no forall in contracts.
+    return _prop("gcd", "gcd", ["a", "b"],
+                 "It returns the greatest common divisor of a and b (both positive).",
+                 "    let x: Int = a;\n    let y: Int = b;\n    while y != 0 {\n        let t: Int = x % y;\n"
+                 "        x = y;\n        y = t;\n    }\n    ret x;\n",
+                 ["@pre a > 0 && b > 0", "@post result > 0", "@post a % result == 0 && b % result == 0"], inputs,
+                 {"returns_zero": "    ret 0;\n", "min_of_two": "    if a < b { ret a; }\n    ret b;\n",
+                  "product": "    ret a * b;\n"}, ["loops", "arithmetic"])
+
+
+PROPERTY_TEMPLATES = [p_clamp_into, p_abs_val, p_max_of_two, p_gcd]
+
+
+def generate_properties(n: int, seed: int) -> list[dict]:
+    rng = random.Random(seed)
+    out = []
+    for i in range(n):
+        task = PROPERTY_TEMPLATES[i % len(PROPERTY_TEMPLATES)](rng)
+        task["id"] = f"prop_{task['template']}_{i:03d}"
+        out.append(task)
+    return out
+
+
+def property_program(task: dict, fn_source: str) -> str:
+    """The model's function, its checked twin carrying the contracts, and a main
+    that calls the twin on every input."""
+    params = ", ".join(p + ": Int" for p in task["params"])
+    checked = "checked" + task["fn"][0].upper() + task["fn"][1:]
+    calls = "".join(f"    let r{i}: Int = {checked}({', '.join(map(str, args))});\n"
+                    for i, args in enumerate(task["inputs"]))
+    return (f"{fn_source.rstrip()}\n\n" + "".join(c + "\n" for c in task["contracts"])
+            + f"fn {checked}({params}) -> Int {{\n    ret {task['fn']}({', '.join(task['params'])});\n}}\n\n"
+            + f"fn main() -> Void {{\n{calls}    fx {{ println(\"checked {len(task['inputs'])}\"); }}\n    ret;\n}}\n")
+
+
+def property_class(task: dict, rc: int, out: str, err: str) -> str:
+    if rc == 0 and out == task["expected_stdout"]:
+        return "pass"
+    if "CON-001" in _CODE.findall(out + err):
+        return "contract_violation"
+    return f"other (rc={rc})"
+
+
+def check_property(task: dict, fn_source: str, run=run_aether_full) -> str:
+    return property_class(task, *run(property_program(task, fn_source), SANDBOX_FLAGS))
+
+
 def wordings(task: dict) -> list[str]:
     return [task["prompt"], *task.get("paraphrases", [])]
 
 
-def score(tasks: list[dict], n: int, ask, run=run_aether) -> list[dict]:
+def score(tasks: list[dict], n: int, ask, run=run_aether, run_full=run_aether_full) -> list[dict]:
     """Ask each task in its first n wordings; one verdict per wording, all
-    against the task's one expected_stdout."""
+    against the task's one expected_stdout. A property task's answer is a
+    function: it runs inside property_program, under the sandbox, and a
+    failed contract is counted."""
     results = []
     for t in tasks:
-        verdicts, rcs = [], []
+        verdicts, rcs, contract = [], [], 0
         for prompt in wordings(t)[:n]:
             try:
-                code = sanitize(ask(prompt))
-                rc, out = (run(code) if code.strip() else (-1, ""))
+                code = sanitize(ask(prompt, t))
+                if not code.strip():
+                    rc, out = -1, ""
+                elif t.get("kind") == "property":
+                    rc, out, err = run_full(property_program(t, code), SANDBOX_FLAGS)
+                    contract += property_class(t, rc, out, err) == "contract_violation"
+                else:
+                    rc, out = run(code)
             except Exception as exc:  # noqa: BLE001
                 rc, out = -2, f"<{type(exc).__name__}>"
             verdicts.append(rc == 0 and out == t["expected_stdout"])
             rcs.append(rc)
-        results.append({"id": t["id"], "template": t["template"], "verdicts": verdicts, "rcs": rcs})
+        results.append({"id": t["id"], "template": t["template"], "verdicts": verdicts, "rcs": rcs,
+                        "contract_violations": contract})
     return results
 
 
@@ -355,12 +479,15 @@ def report_score(results: list[dict], n: int) -> list[str]:
     if n > 1:
         same = sum(1 for r in results if len(set(r["verdicts"])) == 1)
         lines.append(f"rewording: {same}/{len(results)} tasks keep one verdict across {n} wordings")
+    violations = sum(r.get("contract_violations", 0) for r in results)
+    if violations:
+        lines.append(f"contract violations: {violations} (a property caught a wrong function)")
     lines.append(f"model calls: {len(results)} tasks x {n} wording(s) = {len(results) * n}")
     return lines
 
 
-def query_model(prompt: str, endpoint: str, model: str) -> str:
-    full = (f"You are writing Aether code. Write exactly one complete Aether program for the "
+def query_model(prompt: str, endpoint: str, model: str, what: str = "one complete Aether program") -> str:
+    full = (f"You are writing Aether code. Write exactly {what} for the "
             f"task below. Return only raw Aether source code, no Markdown fences, no explanation. "
             f"After the program, output a final line containing exactly {END_MARKER}.\n\nTask:\n{prompt}")
     body = json.dumps({"model": model, "messages": [{"role": "user", "content": full}],
@@ -375,6 +502,8 @@ def main() -> None:
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--mode", choices=["validate", "score", "negatives"], default="validate")
+    ap.add_argument("--suite", choices=["values", "properties"], default="values",
+                    help="values: expected-output tasks; properties: contract property tasks")
     ap.add_argument("--endpoint", default="http://localhost:8019/v1/chat/completions")
     ap.add_argument("--model", default=None, help="served model name (required for --mode score)")
     ap.add_argument("--paraphrases", type=int, default=1, metavar="N",
@@ -383,7 +512,31 @@ def main() -> None:
                     "with --mode negatives, the kept should_fail entries")
     args = ap.parse_args()
 
-    tasks = generate(args.n, args.seed)
+    if args.suite == "properties":
+        if args.mode == "negatives":
+            ap.error("--mode negatives works on the values suite")
+        tasks = generate_properties(args.n, args.seed)
+    else:
+        tasks = generate(args.n, args.seed)
+    if args.suite == "properties" and args.mode == "validate":
+        if args.dump:
+            with open(args.dump, "w", encoding="utf-8") as fh:
+                json.dump({"seed": args.seed, "tasks": tasks}, fh, indent=2)
+        bad = 0
+        for t in tasks:
+            got = {"reference": check_property(t, t["reference"])}
+            got.update({name: check_property(t, src) for name, src in t["broken"].items()})
+            wrong = {k: v for k, v in got.items()
+                     if v != ("pass" if k == "reference" else "contract_violation")}
+            bad += bool(wrong)
+            print(f"[{'BAD' if wrong else 'ok '}] {t['id']:<24} reference {got['reference']}, "
+                  f"{sum(v == 'contract_violation' for k, v in got.items() if k != 'reference')}/"
+                  f"{len(t['broken'])} broken versions caught" + (f"  {wrong}" if wrong else ""))
+        print(f"\nproperty validation: {len(tasks) - bad}/{len(tasks)} tasks: reference passes and every "
+              f"broken version is a contract_violation")
+        if bad:
+            raise SystemExit(1)
+        return
     if args.mode == "negatives":
         kept: list[dict] = []
         by_t: dict[str, list[int]] = {}
@@ -426,7 +579,12 @@ def main() -> None:
     most = min(len(wordings(t)) for t in tasks)
     if not 1 <= args.paraphrases <= most:
         ap.error(f"--paraphrases must be 1..{most}")
-    results = score(tasks, args.paraphrases, lambda prompt: query_model(prompt, args.endpoint, args.model))
+    def ask(prompt: str, task: dict) -> str:
+        what = ("one Aether function, only the function," if task.get("kind") == "property"
+                else "one complete Aether program")
+        return query_model(prompt, args.endpoint, args.model, what)
+
+    results = score(tasks, args.paraphrases, ask)
     for line in report_score(results, args.paraphrases):
         print(line)
 

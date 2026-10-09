@@ -155,7 +155,7 @@ def _tasks(n=3):
 def test_one_wording_asks_once_per_task_in_the_original_words():
     asked: list[str] = []
 
-    def ask(prompt):
+    def ask(prompt, task):
         asked.append(prompt)
         return "REF" if prompt != "p1" else "nope"
 
@@ -172,7 +172,7 @@ def test_one_wording_asks_once_per_task_in_the_original_words():
 def test_rewordings_report_flips_against_one_reference():
     asked: list[str] = []
 
-    def ask(prompt):
+    def ask(prompt, task):
         asked.append(prompt)
         return "nope" if prompt == "p0-2" or prompt.startswith("p1") else "REF"
 
@@ -185,6 +185,72 @@ def test_rewordings_report_flips_against_one_reference():
     assert "  a              1/2  all wordings 2/6  same verdict in every wording 1/2" in lines
     assert "rewording: 2/3 tasks keep one verdict across 3 wordings" in lines
     assert lines[-1] == "model calls: 3 tasks x 3 wording(s) = 9"
+
+
+# --------------------------------------------------------------------------- #
+# J5: contract property tasks
+# --------------------------------------------------------------------------- #
+
+def test_property_tasks_have_contracts_inputs_and_three_broken_versions():
+    tasks = we.generate_properties(8, seed=3)
+    assert tasks == we.generate_properties(8, seed=3)
+    assert {t["template"] for t in tasks} == {"clamp_into", "abs_val", "max_of_two", "gcd"}
+    for t in tasks:
+        assert t["kind"] == "property" and len(t["broken"]) >= 3, t["id"]
+        assert any(c.startswith("@post") for c in t["contracts"]), t["id"]
+        assert t["expected_stdout"] == f"checked {len(t['inputs'])}\n"
+        assert we.wordings(t) == [t["prompt"]] and "no main" in t["prompt"]
+        sig = t["reference"].splitlines()[0]
+        assert all(src.splitlines()[0] == sig for src in t["broken"].values()), t["id"]
+
+
+def test_property_program_wraps_the_function_in_a_checked_twin():
+    task = we.generate_properties(1, seed=3)[0]
+    program = we.property_program(task, "fn clampInto(v: Int, lo: Int, hi: Int) -> Int {\n    ret v;\n}\n")
+    assert program.startswith("fn clampInto(v: Int, lo: Int, hi: Int) -> Int {\n    ret v;\n}\n\n@pre lo <= hi\n")
+    assert "fn checkedClampInto(v: Int, lo: Int, hi: Int) -> Int {\n    ret clampInto(v, lo, hi);\n}" in program
+    assert program.count("checkedClampInto(") == 1 + len(task["inputs"])
+    assert program.endswith(f'    fx {{ println("checked {len(task["inputs"])}"); }}\n    ret;\n}}\n')
+
+
+def test_property_class_and_score_count_contract_violations():
+    task = we.generate_properties(1, seed=3)[0]
+    ok = task["expected_stdout"]
+    assert we.property_class(task, 0, ok, "") == "pass"
+    assert we.property_class(task, 1, "", "[CON-001] Aether @post failed in checkedClampInto\n") == "contract_violation"
+    assert we.property_class(task, 1, "", "Aether @post failed in checkedClampInto\n") == "other (rc=1)"
+    seen_flags = []
+
+    def run(program, flags):
+        seen_flags.append(flags)
+        return (0, ok, "") if "GOOD" in program else (1, "", "[CON-001] Aether @post failed in x\n")
+
+    results = we.score([task], 1, lambda prompt, t: "GOOD" if t is task else "", run_full=run)
+    assert results[0]["verdicts"] == [True] and results[0]["contract_violations"] == 0
+    results = we.score([task], 1, lambda prompt, t: "fn clampInto() -> Int {}", run_full=run)
+    assert results[0]["verdicts"] == [False] and results[0]["contract_violations"] == 1
+    assert seen_flags == [we.SANDBOX_FLAGS] * 2, "model functions run under the sandbox"
+    assert "contract violations: 1 (a property caught a wrong function)" in we.report_score(results, 1)
+
+
+def test_real_aether_property_references_pass_and_broken_versions_are_caught():
+    binary = real_aether_bin()
+    we.AETHER_BIN = str(binary)
+    version = we.subprocess.run([str(binary), "--version"], capture_output=True, text=True).stdout
+    for task in we.generate_properties(len(we.PROPERTY_TEMPLATES) * 2, seed=7):
+        assert we.check_property(task, task["reference"]) == "pass", task["id"]
+        for name, src in task["broken"].items():
+            got = we.check_property(task, src)
+            if "CON-001" not in we.run_aether_full(we.property_program(task, src), we.SANDBOX_FLAGS)[2]:
+                skip(f"this aether has no CON-001 (before 2026-10-09-1): {version.strip()}")
+            assert got == "contract_violation", (task["id"], name, got)
+    # Through score's default runners, as --mode score runs a model's answer.
+    tasks = we.generate_properties(len(we.PROPERTY_TEMPLATES), seed=7)
+    answers = {t["prompt"]: (t["reference"] if i % 2 == 0 else next(iter(t["broken"].values())))
+               for i, t in enumerate(tasks)}
+    results = we.score(tasks, 1, lambda prompt, t: answers[prompt])
+    assert [r["verdicts"] for r in results] == [[True], [False], [True], [False]], results
+    assert [r["contract_violations"] for r in results] == [0, 1, 0, 1], results
 
 
 def _main() -> int:
