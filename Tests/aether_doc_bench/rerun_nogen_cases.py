@@ -71,16 +71,29 @@ def recompute(hb, variant: dict) -> None:
     hb.refresh_variant_summaries(variant)
 
 
+_HARNESS_MODULE = None
+
+
+def _harness():
+    """The harness module, loaded once (needs_rerun also runs on dry-run paths)."""
+    global _HARNESS_MODULE
+    if _HARNESS_MODULE is None:
+        _HARNESS_MODULE = load_harness()
+    return _HARNESS_MODULE
+
+
 def needs_rerun(result: dict) -> bool:
     """A case that measured nothing: tagged infra_failed, or (older reports) a
-    case whose model call produced nothing. Timeouts keep generated_ok."""
-    if result.get("infra_failed"):
+    case whose model call produced nothing. Timeouts keep generated_ok. A
+    no_answer attempt (the model generated for its whole budget without a
+    program) is a verdict on the model and is never re-run."""
+    hb = _harness()
+    if hb.case_is_infra_failed(result):
         return True
-    if any(a.get("infra_failed") for a in result.get("attempts") or []):
-        return True
-    return not result.get("generated_ok") and not any(
-        a.get("not_sent") for a in result.get("attempts") or []
-    )
+    attempts = result.get("attempts") or []
+    if any(hb.attempt_is_no_answer(a) for a in attempts):
+        return False
+    return not result.get("generated_ok") and not any(a.get("not_sent") for a in attempts)
 
 
 def find_nogen(outdir: pathlib.Path, include_truncated: bool = False) -> list[dict]:

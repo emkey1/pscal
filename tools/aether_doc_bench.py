@@ -90,6 +90,36 @@ class ProviderTimeoutError(RuntimeError):
     pass
 
 
+class NoAnswerError(RuntimeError):
+    """The model was generating for its whole budget and gave no answer: its
+    output cap ran out (finish_reason "length"), or the request deadline expired
+    while the job was running (not queued). A verdict on the model -- first-
+    attempt class no_answer, repaired like any failure -- never an infra failure,
+    so it is not re-run. kind is "length" or "deadline"."""
+
+    def __init__(self, message: str, kind: str, detail: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.kind = kind
+        self.detail = detail or {}
+
+
+# A request deadline counts as the model's no_answer only when the T'Ra job
+# spent at least this share of the deadline running; a job that sat queued
+# (scheduler busy, endpoint unreachable) is still an infra failure.
+NO_ANSWER_MIN_RUN_FRACTION = 0.9
+
+# What the repair round tells the model after a no_answer attempt.
+NO_ANSWER_FEEDBACK = (
+    "no_answer: your previous reply contained no program -- it was still reasoning when the output "
+    "budget or time limit ran out. Write the complete program now and keep any reasoning short."
+)
+
+# Set inside the request-deadline worker process: invoke_tra_queue calls it with
+# (queue base url, job id) right after a submit, so the parent can ask the queue
+# whether the job was running when the deadline hit.
+_JOB_REPORTER: Any = None
+
+
 @dataclass
 class Task:
     task_id: str
@@ -1942,11 +1972,11 @@ def invoke_openai_chat_completions(
         ) or flatten_chat_content(message.get("reasoning"))
     if not output_text:
         if finish_reason == "length":
-            raise RuntimeError(
-                "chat completions reply hit max_tokens "
+            raise NoAnswerError(
+                "no answer: chat completions reply hit max_tokens "
                 f"({destination.max_output_tokens}) before emitting any content -- "
-                "the model was still reasoning when the budget ran out; "
-                "raise max_output_tokens for this destination"
+                "the model was still reasoning when the budget ran out",
+                "length", {"finish_reason": "length"},
             )
         raise RuntimeError("chat completions reply did not contain message content")
 
@@ -2232,6 +2262,11 @@ def invoke_tra_queue(
     job_id = submit.get("id")
     if not job_id:
         raise RuntimeError(f"tra_queue submit returned no job id: {submit}")
+    if _JOB_REPORTER is not None:
+        try:
+            _JOB_REPORTER(base, job_id)
+        except Exception:
+            pass
 
     def _cancel() -> None:
         try:
@@ -2251,6 +2286,7 @@ def invoke_tra_queue(
     )
     consecutive_errors = 0
     last_status = None
+    last_status_record: dict[str, Any] = {}
     try:
         while time.time() < poll_deadline:
             try:
@@ -2280,8 +2316,23 @@ def invoke_tra_queue(
                 }
             if st in ("failed", "error", "canceled", "cancelled", "archived_canceled", "rejected"):
                 why = status.get("error") or status.get("display_error") or status.get("scheduler_note") or "unknown"
+                ran = _tra_job_run_seconds(status)
+                limit = float(payload.get("max_runtime_seconds") or destination.request_timeout_seconds)
+                if ran is not None and "timed out" in str(why).lower() and ran >= NO_ANSWER_MIN_RUN_FRACTION * limit:
+                    raise NoAnswerError(
+                        f"no answer: tra_queue job {job_id} generated for {ran:.0f} s and was stopped at its "
+                        f"runtime limit ({why})",
+                        "deadline", {"job_id": job_id, "job_status": st, "run_seconds": round(ran, 1)},
+                    )
                 raise RuntimeError(f"tra_queue job {job_id} {st}: {why}")
             last_status = st
+            last_status_record = status
+        ran = _tra_job_run_seconds(last_status_record) if last_status == "running" else None
+        if ran is not None and ran >= NO_ANSWER_MIN_RUN_FRACTION * float(destination.request_timeout_seconds):
+            raise NoAnswerError(
+                f"no answer: tra_queue job {job_id} was still generating after {ran:.0f} s",
+                "deadline", {"job_id": job_id, "job_status": last_status, "run_seconds": round(ran, 1)},
+            )
         raise ProviderTimeoutError(
             f"tra_queue job {job_id} not done within deadline (last status={last_status})"
         )
@@ -2522,11 +2573,56 @@ def run_model(
     raise RuntimeError(f"unsupported destination type {destination.kind}")
 
 
+def _tra_job_run_seconds(status: dict[str, Any], now: float | None = None) -> float | None:
+    """Seconds a T'Ra job spent running (start to completion, or to now), from
+    its status record; None when it never started."""
+    from datetime import datetime, timezone
+
+    def parse(value: Any) -> float | None:
+        if not value:
+            return None
+        try:
+            stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        return stamp.timestamp()
+
+    started = parse((status or {}).get("started_at"))
+    if started is None:
+        return None
+    ended = parse(status.get("completed_at")) or (time.time() if now is None else now)
+    return max(0.0, ended - started)
+
+
+def _deadline_verdict(job: tuple[str, str] | None, deadline: float) -> dict[str, Any] | None:
+    """At the request deadline: the no_answer detail when the T'Ra job had been
+    running for most of the deadline (the model was generating), else None (it
+    sat queued or the queue is unreachable: an infra failure)."""
+    if not job:
+        return None
+    base, job_id = job
+    try:
+        status = http_json_get(f"{base}/jobs/{job_id}", None)
+    except Exception:
+        return None
+    st = str((status or {}).get("status") or "").lower()
+    ran = _tra_job_run_seconds(status)
+    if st == "running" and ran is not None and ran >= NO_ANSWER_MIN_RUN_FRACTION * deadline:
+        return {"job_id": job_id, "job_status": st, "run_seconds": round(ran, 1)}
+    return None
+
+
 def _run_model_worker(
     prompt: str, destination: Destination, queue: Any, options: RequestOptions | None = None
 ) -> None:
+    global _JOB_REPORTER
+    _JOB_REPORTER = lambda base, job_id: queue.put(("job", (base, job_id)))
     try:
         queue.put(("ok", run_model(prompt, destination, options)))
+    except NoAnswerError as exc:
+        queue.put(("no_answer", (str(exc), exc.kind, exc.detail)))
     except Exception as exc:
         queue.put(("err", str(exc)))
 
@@ -2543,18 +2639,35 @@ def run_model_with_deadline(
     # the OS pipe buffer (~64KB on macOS) blocks in queue.put() until drained,
     # so joining first (without reading) can deadlock both sides for up to
     # the full deadline instead of returning promptly.
-    try:
-        status, payload = queue.get(timeout=deadline)
-    except queue_module.Empty:
-        proc.terminate()
-        proc.join(5)
-        raise ProviderTimeoutError(f"provider request exceeded {deadline} seconds")
+    ends = time.time() + deadline
+    job: tuple[str, str] | None = None
+    while True:
+        try:
+            status, payload = queue.get(timeout=max(0.0, ends - time.time()))
+        except queue_module.Empty:
+            verdict = _deadline_verdict(job, deadline)
+            proc.terminate()
+            proc.join(5)
+            if verdict is not None:
+                raise NoAnswerError(
+                    f"no answer: the model was still generating when the {deadline} s request deadline expired "
+                    f"(T'Ra job {verdict['job_id']} running {verdict['run_seconds']:.0f} s)",
+                    "deadline", verdict,
+                )
+            raise ProviderTimeoutError(f"provider request exceeded {deadline} seconds")
+        if status == "job":
+            job = payload
+            continue
+        break
     proc.join(5)
     if proc.is_alive():
         proc.terminate()
         proc.join(5)
     if status == "ok":
         return payload
+    if status == "no_answer":
+        message, kind, detail = payload
+        raise NoAnswerError(message, kind, detail)
     raise RuntimeError(payload)
 
 
@@ -3337,6 +3450,8 @@ def derive_failure_summary(
     expected_stdout: str | None = None,
 ) -> str:
     if not generated_ok:
+        if generation_error and generation_error.startswith("no_answer:"):
+            return generation_error.split(" [", 1)[0]
         if generation_error:
             first_line = strip_run_dirs(generation_error.strip().splitlines()[0])
             return f"generation_error: {first_line}"
@@ -3465,6 +3580,18 @@ def evaluate_attempt(
             # The baseline sandbox could not start: nothing was measured.
             attempt["infra_failed"] = True
             attempt["infra_kind"] = "sandbox"
+    elif attempt["finish_reason"] == "length":
+        # Cut off at the output cap with no program: the model was still
+        # reasoning. A verdict on the model (no_answer), repaired like any failure.
+        attempt["no_answer"] = "length"
+        attempt["generation_error"] = NO_ANSWER_FEEDBACK
+        attempt["run"] = {
+            "returncode": -1,
+            "stdout": "",
+            "stderr": "no answer: output budget exhausted before any program",
+            "elapsed_seconds": 0.0,
+            "exact_stdout_match": False,
+        }
     else:
         attempt["run"] = {
             "returncode": -1,
@@ -3473,8 +3600,8 @@ def evaluate_attempt(
             "elapsed_seconds": 0.0,
             "exact_stdout_match": False,
         }
-        # An empty reply is a serving problem (stop marker, output budget,
-        # template), not a verdict on the guide: measured nothing, re-run it.
+        # An empty reply is a serving problem (stop marker, template), not a
+        # verdict on the guide: measured nothing, re-run it.
         attempt["infra_failed"] = True
         attempt["infra_kind"] = "empty_output"
     return attempt
@@ -3547,7 +3674,17 @@ def classify_infra_failure(message: str | None) -> str | None:
 
 
 _CODE_RE = re.compile(r"\b[A-Z]+-\d{3}\b")
-FAILURE_CLASSES = ("pass", "silent_wrong", "crash_hang", "uncoded_error", "coded_error", "infra_failed", "not_sent")
+FAILURE_CLASSES = ("pass", "silent_wrong", "crash_hang", "no_answer", "uncoded_error", "coded_error",
+                   "infra_failed", "not_sent")
+
+
+def attempt_is_no_answer(attempt: dict[str, Any]) -> bool:
+    """The model generated for its whole budget and gave no program (tagged, or an
+    older record: empty output cut off at the cap)."""
+    if attempt.get("no_answer"):
+        return True
+    return (not attempt.get("generated_ok", True) and attempt.get("finish_reason") == "length"
+            and not (attempt.get("source_code") or "").strip())
 
 
 def classify_attempt(attempt: dict[str, Any]) -> str:
@@ -3559,6 +3696,8 @@ def classify_attempt(attempt: dict[str, Any]) -> str:
     infra_failed and not_sent (context overflow)."""
     if attempt.get("not_sent") or "prompt_too_large" in str(attempt.get("generation_error") or ""):
         return "not_sent"
+    if attempt_is_no_answer(attempt):
+        return "no_answer"
     run = attempt.get("run") or {}
     if attempt.get("infra_failed") or not attempt.get("generated_ok", bool(attempt.get("source_code"))):
         return "infra_failed"
@@ -3585,10 +3724,13 @@ def first_attempt_of(case: dict[str, Any]) -> dict[str, Any]:
 
 
 def case_is_infra_failed(case: dict[str, Any]) -> bool:
+    attempts = case.get("attempts") or []
+    if any(a.get("infra_failed") and not attempt_is_no_answer(a) for a in attempts):
+        return True
     if case.get("infra_failed"):
-        return True
-    if any(a.get("infra_failed") for a in case.get("attempts") or []):
-        return True
+        # A no_answer attempt is a verdict even where an older record tagged the
+        # case infra because of it.
+        return not any(attempt_is_no_answer(a) for a in attempts)
     # Records written before infra tagging: a generation error that classifies.
     if not case.get("generated_ok", True) and not (case.get("attempts") or []):
         return classify_attempt(case) == "infra_failed"
@@ -3970,7 +4112,7 @@ def finalize_case_record(attempts: list[dict[str, Any]], task_id: str | None = N
     case_record["failure_fingerprint"] = (
         "" if case_record["run"]["exact_stdout_match"] else derive_failure_fingerprint(case_record, task_id)
     )
-    infra = [a for a in attempts if a.get("infra_failed")]
+    infra = [a for a in attempts if a.get("infra_failed") and not attempt_is_no_answer(a)]
     case_record["infra_failed"] = bool(infra)
     if infra:
         case_record["infra_kind"] = infra[0].get("infra_kind")
@@ -3994,6 +4136,12 @@ def failed_generation_attempt(
     if isinstance(exc, ContextOverflowError):
         # Deterministic, not a provider event: the request was never sent.
         extra["not_sent"] = "context_overflow"
+    elif isinstance(exc, NoAnswerError):
+        # The model generated for its whole budget without an answer: a verdict.
+        extra["no_answer"] = exc.kind
+        if exc.detail:
+            extra["no_answer_detail"] = exc.detail
+        message = NO_ANSWER_FEEDBACK + " [" + message + "]"
     else:
         extra["infra_failed"] = True
         extra["infra_kind"] = classify_infra_failure(message) or "provider_error"
@@ -4069,6 +4217,11 @@ def apply_repairs(
                     runner=runner,
                     options=options,
                 )
+            except NoAnswerError as exc:  # a measured round: the next one may answer
+                attempt = failed_generation_attempt("repair", runner, exc, options)
+                _record_feedback(attempt, feedback["meta"])
+                attempts.append(attempt)
+                continue
             except Exception as exc:  # keep the rounds already measured
                 attempt = failed_generation_attempt("repair", runner, exc, options)
                 _record_feedback(attempt, feedback["meta"])
@@ -4102,6 +4255,8 @@ def execute_case(
             runner=runner,
             options=options,
         )
+    except NoAnswerError as exc:
+        attempt = failed_generation_attempt("initial", runner, exc, options)
     except Exception as exc:
         return finalize_case_record([failed_generation_attempt("initial", runner, exc, options)], task.task_id)
     attempts = apply_repairs(

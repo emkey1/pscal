@@ -1001,7 +1001,7 @@ def test_summary_classifies_first_attempt_failures():
     ]
     summary = adb.summarize(results)
     assert summary["first_attempt_classes"] == {
-        "pass": 1, "silent_wrong": 2, "crash_hang": 2, "uncoded_error": 1, "coded_error": 2,
+        "pass": 1, "silent_wrong": 2, "crash_hang": 2, "no_answer": 0, "uncoded_error": 1, "coded_error": 2,
         "infra_failed": 0, "not_sent": 0,
     }, summary["first_attempt_classes"]
     assert summary["first_attempt_exact"] == 1 and summary["final_exact"] == 3
@@ -1765,6 +1765,99 @@ def test_each_destination_records_its_release_unless_kept_loaded():
         proc, report = fake_run(tmp, ["--task", "hello_fx", "--keep-loaded"])
         assert proc.returncode == 0, proc.stderr
         assert "model_release" not in report["destinations"][0]
+
+
+def _no_answer_attempt(**extra):
+    attempt = {"generated_ok": False, "source_code": "", "finish_reason": "length",
+               "run": {"returncode": -1, "stdout": "", "stderr": "", "exact_stdout_match": False}}
+    attempt.update(extra)
+    return attempt
+
+
+def test_cap_hit_without_a_program_is_no_answer_not_infra():
+    # An older record tagged the cap hit as infra (empty_output); it is still a verdict.
+    attempt = _no_answer_attempt(infra_failed=True, infra_kind="empty_output")
+    assert adb.classify_attempt(attempt) == "no_answer"
+    case = {"task_id": "t", "generated_ok": False, "infra_failed": True, "attempts": [attempt],
+            "run": attempt["run"]}
+    assert not adb.case_is_infra_failed(case)
+    summary = adb.summarize([case])
+    assert summary["first_attempt_classes"]["no_answer"] == 1, summary["first_attempt_classes"]
+    assert summary["first_attempt_classes"]["infra_failed"] == 0
+    assert summary["headline_ok"] and summary["first_attempt_exact"] == 0
+    # An empty reply that did NOT hit the cap is still infra.
+    plain = _no_answer_attempt(finish_reason="stop", infra_failed=True, infra_kind="empty_output")
+    assert adb.classify_attempt(plain) == "infra_failed"
+
+
+def test_no_answer_error_makes_a_no_answer_attempt_with_repair_feedback():
+    exc = adb.NoAnswerError("no answer: still generating", "deadline", {"run_seconds": 8800.0})
+    attempt = adb.failed_generation_attempt("initial", "aether", exc, None)
+    assert attempt["no_answer"] == "deadline" and not attempt.get("infra_failed"), attempt
+    assert attempt["no_answer_detail"]["run_seconds"] == 8800.0
+    assert adb.classify_attempt(attempt) == "no_answer"
+    summary = adb.derive_failure_summary(False, attempt["run"], generation_error=attempt["generation_error"])
+    assert summary.startswith("no_answer:") and "[" not in summary, summary
+
+
+def test_no_answer_first_attempt_goes_to_repair():
+    task = adb.Task(task_id="t", title="t", prompt="p", expected_stdout="ok\n")
+    args = adb.argparse.Namespace(repair_attempts=2, repair_feedback_limit=1200, repair_source_limit=8000)
+    calls, summaries = [], []
+    passing = {"generated_ok": True, "source_code": "print ok", "finish_reason": "stop",
+               "run": {"returncode": 0, "stdout": "ok\n", "stderr": "", "exact_stdout_match": True}}
+
+    def fake_evaluate(prompt, prompt_kind, destination, task, args, runner="aether", options=None):
+        calls.append(prompt_kind)
+        if len(calls) == 1:
+            raise adb.NoAnswerError("no answer: cap", "length")
+        return dict(passing)
+
+    def builder(**kwargs):
+        summaries.append(kwargs["failure_summary"])
+        return "repair prompt"
+
+    saved = adb.evaluate_attempt
+    adb.evaluate_attempt = fake_evaluate
+    try:
+        case = adb.execute_case(initial_prompt="p", destination=None, task=task, args=args,
+                                runner="aether", repair_prompt_builder=builder)
+    finally:
+        adb.evaluate_attempt = saved
+    assert calls == ["initial", "repair"], calls
+    assert case["attempts"][0]["no_answer"] == "length"
+    assert case["resolved_after_repair"] and not case["infra_failed"], case
+    assert summaries and summaries[0].startswith("no_answer:"), summaries
+
+
+def test_deadline_verdict_needs_a_running_job_for_most_of_the_deadline():
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    replies = {}
+    saved = adb.http_json_get
+    adb.http_json_get = lambda url, key: replies["status"]
+    try:
+        replies["status"] = {"status": "running", "started_at": (now - timedelta(seconds=9000)).isoformat()}
+        verdict = adb._deadline_verdict(("http://q", "job1"), 8900)
+        assert verdict and verdict["job_id"] == "job1" and verdict["run_seconds"] >= 8999, verdict
+        replies["status"] = {"status": "pending", "started_at": None}        # queued: infra
+        assert adb._deadline_verdict(("http://q", "job1"), 8900) is None
+        replies["status"] = {"status": "running", "started_at": (now - timedelta(seconds=600)).isoformat()}
+        assert adb._deadline_verdict(("http://q", "job1"), 8900) is None     # started late: infra
+        assert adb._deadline_verdict(None, 8900) is None                     # no job reported
+    finally:
+        adb.http_json_get = saved
+
+
+def test_rerun_nogen_never_reruns_no_answer():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("rerun_nogen_cases_t", BENCH_DIR / "rerun_nogen_cases.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    no_answer = _no_answer_attempt(no_answer="deadline")
+    assert not mod.needs_rerun({"generated_ok": False, "attempts": [no_answer], "run": no_answer["run"]})
+    infra = _no_answer_attempt(finish_reason=None, infra_failed=True, infra_kind="provider_timeout")
+    assert mod.needs_rerun({"generated_ok": False, "attempts": [infra], "run": infra["run"]})
 
 
 def _main() -> int:
