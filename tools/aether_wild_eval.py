@@ -13,7 +13,12 @@ modes:
   score     (--endpoint URL --model NAME) -- query a served model with each
             task prompt (no-guide style), sanitize + compile its Aether, and
             compare to the oracle. Reports a "wild" generalization rate on
-            never-before-seen tasks.
+            never-before-seen tasks. --paraphrases N asks each task in N
+            wordings (every template carries five) and reports, per task and
+            per template, whether the verdict holds across them: at
+            temperature 0 a verdict that changes with the wording was caused
+            by the wording. N=1 is the original prompt alone. Costs
+            tasks x N model calls.
 
   negatives (CPU-only) -- break each generated reference in the ways the
             compiler must refuse (MUTATORS: println outside fx, fx inside
@@ -81,7 +86,9 @@ def sanitize(raw: str) -> str:
     return "\n".join(lines).strip()
 
 
-# ---- templates: each returns dict(template, prompt, expected_stdout, reference, mechanisms) ----
+# ---- templates: each returns dict(template, prompt, paraphrases, expected_stdout, reference,
+# mechanisms). `paraphrases` rewords `prompt` and asks for the same output, so one reference
+# answer checks every wording; building them draws nothing from rng. ----
 def _nest(fn: str, terms: list[str]) -> str:
     acc = terms[0]
     for t in terms[1:]:
@@ -96,9 +103,19 @@ def t_mean(rng: random.Random) -> dict:
     ref = (f"fn main() -> Void {{\n    let total: Int = {' + '.join(map(str, vals))};\n"
            f"    let avg: Real = total * 1.0 / {k};\n"
            f"    fx {{ println(\"mean = \", avg:0:2); }}\n    ret;\n}}\n")
+    xs = ', '.join(map(str, vals))
     prompt = (f"Print the arithmetic mean of these {k} integers, rounded to exactly two "
-              f"decimal places, as `mean = <value>`: {', '.join(map(str, vals))}.")
-    return dict(template="mean", prompt=prompt, expected_stdout=expected,
+              f"decimal places, as `mean = <value>`: {xs}.")
+    paraphrases = [
+        f"Compute the average of {xs} and print it as `mean = <value>`, with exactly two digits "
+        f"after the decimal point.",
+        f"Given the integers {xs}, output a single line `mean = <value>` where <value> is their "
+        f"mean rounded to two decimal places.",
+        f"Write a program that prints `mean = <value>`, the mean of the {k} numbers {xs}, "
+        f"formatted with exactly 2 decimal places.",
+        f"What is the arithmetic mean of {xs}? Print it as `mean = <value>`, rounded to two decimals.",
+    ]
+    return dict(template="mean", prompt=prompt, paraphrases=paraphrases, expected_stdout=expected,
                 reference=ref, mechanisms=["real", "arithmetic"])
 
 
@@ -108,8 +125,15 @@ def t_sum(rng: random.Random) -> dict:
     expected = f"sum = {sum(vals)}\n"
     ref = (f"fn main() -> Void {{\n    let s: Int = {' + '.join(map(str, vals))};\n"
            f"    fx {{ println(\"sum = \", s); }}\n    ret;\n}}\n")
-    prompt = f"Print the sum of these integers as `sum = <value>`: {', '.join(map(str, vals))}."
-    return dict(template="sum", prompt=prompt, expected_stdout=expected,
+    xs = ', '.join(map(str, vals))
+    prompt = f"Print the sum of these integers as `sum = <value>`: {xs}."
+    paraphrases = [
+        f"Add up {xs} and print the total as `sum = <value>`.",
+        f"Output one line, `sum = <value>`, where <value> is the total of these integers: {xs}.",
+        f"Write a program that prints the sum of {xs} in the form `sum = <value>`.",
+        f"What do the integers {xs} add up to? Print it as `sum = <value>`.",
+    ]
+    return dict(template="sum", prompt=prompt, paraphrases=paraphrases, expected_stdout=expected,
                 reference=ref, mechanisms=["arithmetic"])
 
 
@@ -120,7 +144,14 @@ def t_clamp(rng: random.Random) -> dict:
     expected = f"{max(lo, min(hi, val))}\n"
     ref = f"fn main() -> Void {{\n    fx {{ println(clamp({val}, {lo}, {hi})); }}\n    ret;\n}}\n"
     prompt = f"Print {val} clamped to the inclusive range {lo} to {hi}."
-    return dict(template="clamp", prompt=prompt, expected_stdout=expected,
+    paraphrases = [
+        f"Clamp the value {val} so it lies between {lo} and {hi} inclusive, and print the result.",
+        f"Print {val} limited to the closed interval [{lo}, {hi}].",
+        f"Write a program that prints the result of clamping {val} to the inclusive bounds {lo} and {hi}.",
+        f"If {val} is outside the range {lo} to {hi} (both ends included), print the nearest bound; "
+        f"otherwise print {val}.",
+    ]
+    return dict(template="clamp", prompt=prompt, paraphrases=paraphrases, expected_stdout=expected,
                 reference=ref, mechanisms=["clamp", "builtin"])
 
 
@@ -132,8 +163,15 @@ def t_max(rng: random.Random) -> dict:
     ref = ("@pure\nfn mx(a: Int, b: Int) -> Int {\n    if a > b { ret a; }\n    ret b;\n}\n"
            f"fn main() -> Void {{\n    let m: Int = {nested};\n"
            f"    fx {{ println(\"max = \", m); }}\n    ret;\n}}\n")
-    prompt = f"Print the largest of these integers as `max = <value>`: {', '.join(map(str, vals))}."
-    return dict(template="max", prompt=prompt, expected_stdout=expected,
+    xs = ', '.join(map(str, vals))
+    prompt = f"Print the largest of these integers as `max = <value>`: {xs}."
+    paraphrases = [
+        f"Find the maximum of {xs} and print it as `max = <value>`.",
+        f"Output one line, `max = <value>`, where <value> is the greatest of these integers: {xs}.",
+        f"Write a program that prints the biggest number among {xs} in the form `max = <value>`.",
+        f"Which of {xs} is largest? Print it as `max = <value>`.",
+    ]
+    return dict(template="max", prompt=prompt, paraphrases=paraphrases, expected_stdout=expected,
                 reference=ref, mechanisms=["branching", "pure"])
 
 
@@ -146,9 +184,17 @@ def t_count_above(rng: random.Random) -> dict:
     ref = ("@pure\nfn ge(v: Int, t: Int) -> Int {\n    if v >= t { ret 1; }\n    ret 0;\n}\n"
            f"fn main() -> Void {{\n    let c: Int = {terms};\n"
            f"    fx {{ println(c); }}\n    ret;\n}}\n")
+    xs = ', '.join(map(str, vals))
     prompt = (f"Count how many of these integers are greater than or equal to {thr}, and print "
-              f"just that count: {', '.join(map(str, vals))}.")
-    return dict(template="count_above", prompt=prompt, expected_stdout=expected,
+              f"just that count: {xs}.")
+    paraphrases = [
+        f"Print the number of values in {xs} that are at least {thr}.",
+        f"How many of the integers {xs} are {thr} or more? Print only that number.",
+        f"Write a program that counts the entries of {xs} that are >= {thr} and prints the count alone.",
+        f"Given the threshold {thr} and the integers {xs}, print just the count of integers not "
+        f"below the threshold.",
+    ]
+    return dict(template="count_above", prompt=prompt, paraphrases=paraphrases, expected_stdout=expected,
                 reference=ref, mechanisms=["pure", "branching"])
 
 
@@ -261,6 +307,58 @@ def check_negative(item: dict, run=run_aether_full) -> tuple[bool, str]:
     return True, f"rc={rc}"
 
 
+def wordings(task: dict) -> list[str]:
+    return [task["prompt"], *task.get("paraphrases", [])]
+
+
+def score(tasks: list[dict], n: int, ask, run=run_aether) -> list[dict]:
+    """Ask each task in its first n wordings; one verdict per wording, all
+    against the task's one expected_stdout."""
+    results = []
+    for t in tasks:
+        verdicts, rcs = [], []
+        for prompt in wordings(t)[:n]:
+            try:
+                code = sanitize(ask(prompt))
+                rc, out = (run(code) if code.strip() else (-1, ""))
+            except Exception as exc:  # noqa: BLE001
+                rc, out = -2, f"<{type(exc).__name__}>"
+            verdicts.append(rc == 0 and out == t["expected_stdout"])
+            rcs.append(rc)
+        results.append({"id": t["id"], "template": t["template"], "verdicts": verdicts, "rcs": rcs})
+    return results
+
+
+def report_score(results: list[dict], n: int) -> list[str]:
+    lines: list[str] = []
+    if n == 1:
+        for r in results:
+            lines.append(f"[{'PASS' if r['verdicts'][0] else 'fail'}] {r['id']:<16} rc={r['rcs'][0]}")
+    else:
+        for r in results:
+            v = r["verdicts"]
+            flips = sum(1 for x in v[1:] if x != v[0])
+            lines.append(f"[{''.join('P' if x else '.' for x in v)}] {r['id']:<16} pass {sum(v)}/{n}  "
+                         + ("consistent" if flips == 0 else f"{flips}/{n - 1} wording(s) flip the verdict"))
+    passed = sum(1 for r in results if r["verdicts"][0])
+    lines.append(f"\nwild score: {passed}/{len(results)} ({passed / len(results):.0%}) on novel tasks")
+    by_t: dict[str, list[dict]] = {}
+    for r in results:
+        by_t.setdefault(r["template"], []).append(r)
+    for k, rs in sorted(by_t.items()):
+        line = f"  {k:<14} {sum(1 for r in rs if r['verdicts'][0])}/{len(rs)}"
+        if n > 1:
+            all_v = [x for r in rs for x in r["verdicts"]]
+            same = sum(1 for r in rs if len(set(r["verdicts"])) == 1)
+            line += f"  all wordings {sum(all_v)}/{len(all_v)}  same verdict in every wording {same}/{len(rs)}"
+        lines.append(line)
+    if n > 1:
+        same = sum(1 for r in results if len(set(r["verdicts"])) == 1)
+        lines.append(f"rewording: {same}/{len(results)} tasks keep one verdict across {n} wordings")
+    lines.append(f"model calls: {len(results)} tasks x {n} wording(s) = {len(results) * n}")
+    return lines
+
+
 def query_model(prompt: str, endpoint: str, model: str) -> str:
     full = (f"You are writing Aether code. Write exactly one complete Aether program for the "
             f"task below. Return only raw Aether source code, no Markdown fences, no explanation. "
@@ -279,6 +377,8 @@ def main() -> None:
     ap.add_argument("--mode", choices=["validate", "score", "negatives"], default="validate")
     ap.add_argument("--endpoint", default="http://localhost:8019/v1/chat/completions")
     ap.add_argument("--model", default=None, help="served model name (required for --mode score)")
+    ap.add_argument("--paraphrases", type=int, default=1, metavar="N",
+                    help="--mode score: ask each task in its first N wordings (1-5; 1 = the original only)")
     ap.add_argument("--dump", default=None, help="write generated tasks (+oracles) to this JSON path; "
                     "with --mode negatives, the kept should_fail entries")
     args = ap.parse_args()
@@ -323,21 +423,12 @@ def main() -> None:
 
     if not args.model:
         ap.error("--mode score requires --model")
-    passed = 0
-    by_t: dict[str, list[int]] = {}
-    for t in tasks:
-        try:
-            code = sanitize(query_model(t["prompt"], args.endpoint, args.model))
-            rc, out = (run_aether(code) if code.strip() else (-1, ""))
-        except Exception as exc:  # noqa: BLE001
-            rc, out = -2, f"<{type(exc).__name__}>"
-        good = rc == 0 and out == t["expected_stdout"]
-        passed += good
-        by_t.setdefault(t["template"], []).append(int(good))
-        print(f"[{'PASS' if good else 'fail'}] {t['id']:<16} rc={rc}")
-    print(f"\nwild score: {passed}/{len(tasks)} ({passed / len(tasks):.0%}) on novel tasks")
-    for k, v in sorted(by_t.items()):
-        print(f"  {k:<14} {sum(v)}/{len(v)}")
+    most = min(len(wordings(t)) for t in tasks)
+    if not 1 <= args.paraphrases <= most:
+        ap.error(f"--paraphrases must be 1..{most}")
+    results = score(tasks, args.paraphrases, lambda prompt: query_model(prompt, args.endpoint, args.model))
+    for line in report_score(results, args.paraphrases):
+        print(line)
 
 
 if __name__ == "__main__":

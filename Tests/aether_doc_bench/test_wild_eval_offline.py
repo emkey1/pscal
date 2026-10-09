@@ -126,6 +126,67 @@ def test_real_aether_keeps_every_mutant_and_the_oracle_check_agrees():
     assert len(results) == len(kept) and all(r["ok"] for r in results), [r for r in results if not r["ok"]]
 
 
+# --------------------------------------------------------------------------- #
+# J3: rewording consistency
+# --------------------------------------------------------------------------- #
+
+def test_wordings_do_not_change_the_generated_tasks():
+    tasks = we.generate(20, seed=7)
+    # The original prompt and the rng stream are what they were before
+    # paraphrases existed (seed 7's first task, recorded from that version).
+    assert tasks[0]["prompt"] == ("Print the arithmetic mean of these 4 integers, rounded to exactly two "
+                                  "decimal places, as `mean = <value>`: 19, 50, 83, 6.")
+    assert tasks[0]["expected_stdout"] == "mean = 39.50\n"
+    assert tasks[19]["id"] == "count_above_019"
+    for t in tasks:
+        ws = we.wordings(t)
+        assert len(ws) == 5 and len(set(ws)) == 5 and ws[0] == t["prompt"], t["id"]
+
+
+def _stub_run(reference_marker="REF"):
+    return lambda code: (0, "ok\n") if code == reference_marker else (1, "")
+
+
+def _tasks(n=3):
+    return [{"id": f"t{i}", "template": "a" if i < 2 else "b", "prompt": f"p{i}",
+             "paraphrases": [f"p{i}-1", f"p{i}-2"], "expected_stdout": "ok\n"} for i in range(n)]
+
+
+def test_one_wording_asks_once_per_task_in_the_original_words():
+    asked: list[str] = []
+
+    def ask(prompt):
+        asked.append(prompt)
+        return "REF" if prompt != "p1" else "nope"
+
+    results = we.score(_tasks(), 1, ask, _stub_run())
+    assert asked == ["p0", "p1", "p2"]
+    lines = we.report_score(results, 1)
+    assert lines[:3] == ["[PASS] t0               rc=0", "[fail] t1               rc=1",
+                         "[PASS] t2               rc=0"], lines
+    assert lines[3] == "\nwild score: 2/3 (67%) on novel tasks"
+    assert lines[4:6] == ["  a              1/2", "  b              1/1"]
+    assert lines[-1] == "model calls: 3 tasks x 1 wording(s) = 3"
+
+
+def test_rewordings_report_flips_against_one_reference():
+    asked: list[str] = []
+
+    def ask(prompt):
+        asked.append(prompt)
+        return "nope" if prompt == "p0-2" or prompt.startswith("p1") else "REF"
+
+    results = we.score(_tasks(), 3, ask, _stub_run())
+    assert len(asked) == 9
+    assert [r["verdicts"] for r in results] == [[True, True, False], [False, False, False], [True, True, True]]
+    lines = we.report_score(results, 3)
+    assert lines[0] == "[PP.] t0               pass 2/3  1/2 wording(s) flip the verdict"
+    assert lines[1].endswith("pass 0/3  consistent") and lines[2].endswith("pass 3/3  consistent")
+    assert "  a              1/2  all wordings 2/6  same verdict in every wording 1/2" in lines
+    assert "rewording: 2/3 tasks keep one verdict across 3 wordings" in lines
+    assert lines[-1] == "model calls: 3 tasks x 3 wording(s) = 9"
+
+
 def _main() -> int:
     failures = 0
     skipped = 0
