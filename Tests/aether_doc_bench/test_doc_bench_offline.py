@@ -682,6 +682,23 @@ def test_python_baseline_fails_closed_without_a_sandbox():
         adb.shutil.which = real_which
 
 
+def test_baseline_board_runs_the_sandbox_preflight_and_refuses_without_it():
+    if sys.platform != "darwin":
+        raise Skipped("the baseline sandbox is sandbox-exec, macOS only")
+    with workdir() as tmp:
+        proc, _ = fake_run(tmp, ["--python-baseline", "--skip-aether", "--task", "hello_fx", "--preflight-only"])
+        assert proc.returncode == 0, proc.stderr
+        assert json.loads(proc.stdout)["baseline_sandbox_preflight"] == "ok", proc.stdout
+        # No sandbox-exec on PATH: the board must refuse before any model call.
+        bindir = tmp / "bin"
+        bindir.mkdir()
+        (bindir / "python3").symlink_to(os.path.realpath(sys.executable))
+        proc, report = fake_run(tmp, ["--python-baseline", "--skip-aether", "--task", "hello_fx"],
+                                env={"PATH": str(bindir)})
+        assert proc.returncode != 0 and "baseline sandbox pre-flight failed" in proc.stderr, proc.stderr
+        assert report is None or not any(True for _ in all_cases(report, "python_baseline_results"))
+
+
 def test_python_prompt_fingerprint_is_unchanged():
     # The sandbox changes how a baseline program runs, never what the model is asked.
     assert adb.prompt_template_fingerprint()["sha256"].startswith("4941abd6"), adb.prompt_template_fingerprint()

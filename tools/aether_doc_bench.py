@@ -5323,6 +5323,17 @@ def _run_benchmark(
         "allowed_broken": bool(args.allow_broken_oracle),
     }
     oracle_status = {tid: result["ok"] for tid, result in oracle_refs.items()}
+
+    # The baseline sandbox must hold on this host before any model writes a
+    # Python or Rust program for it (also under --preflight-only).
+    if args.python_baseline or args.rust_baseline:
+        sandbox_problems = baseline_sandbox_preflight()
+        report["baseline_sandbox_preflight"] = sandbox_problems or "ok"
+        if sandbox_problems:
+            raise SystemExit(
+                "baseline sandbox pre-flight failed; refusing to run model-written Python or Rust:\n  - "
+                + "\n  - ".join(sandbox_problems)
+            )
     oracle_problems = [f"reference {tid}: {oracle_refs[tid]['detail']}" for tid in broken]
     if sandbox_probe and not sandbox_probe["ok"]:
         oracle_problems.append(f"sandbox probe was not rejected under --deny {sandbox_probe['deny']}")
@@ -5355,6 +5366,7 @@ def _run_benchmark(
                        "sandbox_probe_ok": None if sandbox_probe is None else sandbox_probe["ok"]},
             "context_limits": context_limits,
             "preflight": "ok",
+            "baseline_sandbox_preflight": report.get("baseline_sandbox_preflight"),
             "aether_version": toolchain["aether_version"],
             "binary_sha256": toolchain["binary_sha256"],
             "skew_guard": report["skew_guard"],
