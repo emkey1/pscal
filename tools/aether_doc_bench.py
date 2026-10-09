@@ -2801,6 +2801,127 @@ def _run_record(cmd: list[str], run: dict[str, Any], task: Task) -> dict[str, An
     return record
 
 
+# ---- Baseline sandbox (2026-10-09) ------------------------------------------
+# Aether programs run under the compiler's --deny net,proc; the Python and Rust
+# baselines ran model-written code as plain processes on the harness host, which
+# also serves T'Ra and live bots. On macOS each baseline program now runs under
+# sandbox-exec with this profile: no network, no fork, exec of the program's own
+# interpreter or binary only, writes only inside its temp directory, and no reads
+# of home directories or the shared temp areas (so a program cannot print a
+# private config file into a report). It fails closed: with no sandbox, or one
+# that will not start, a baseline case is an infrastructure failure and the
+# board's pre-flight refuses to begin. AETHER_BENCH_UNSANDBOXED_BASELINE=1 is the
+# explicit, recorded opt-out for hosts without sandbox-exec.
+BASELINE_SANDBOX_PROFILE = """(version 1)
+(allow default)
+(deny network*)
+(deny process-fork)
+(deny process-exec)
+(allow process-exec (literal "{exec_path}"))
+(deny file-write*)
+(allow file-write* (subpath "{work_root}") (literal "/dev/null"))
+(deny file-read* (subpath "/Users") (subpath "/Volumes") (subpath "/private/tmp") (subpath "/private/var/folders"))
+(allow file-read* (subpath "{work_root}"))
+"""
+
+
+class BaselineSandboxError(RuntimeError):
+    pass
+
+
+def baseline_sandbox_info() -> dict[str, Any]:
+    """What the report records about the baseline sandbox."""
+    unsandboxed = os.environ.get("AETHER_BENCH_UNSANDBOXED_BASELINE") == "1"
+    return {
+        "mechanism": "none (AETHER_BENCH_UNSANDBOXED_BASELINE=1)" if unsandboxed
+                     else ("sandbox-exec" if sys.platform == "darwin" else "unavailable"),
+        "profile_sha256": hashlib.sha256(BASELINE_SANDBOX_PROFILE.encode("utf-8")).hexdigest(),
+    }
+
+
+_PYTHON_INTERPRETER: str | None = None
+
+
+def baseline_python_interpreter() -> str:
+    """The real python3 binary. A framework build's bin/python3 is a stub that
+    spawns Resources/Python.app/.../Python, which the sandbox forbids, so run
+    the inner binary directly."""
+    global _PYTHON_INTERPRETER
+    if _PYTHON_INTERPRETER is None:
+        probe = subprocess.run(
+            ["python3", "-c",
+             "import os, sys, shutil\n"
+             "inner = os.path.join(sys.base_prefix, 'Resources/Python.app/Contents/MacOS/Python')\n"
+             "print(os.path.realpath(inner if os.path.exists(inner) else sys.executable))"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if probe.returncode != 0 or not probe.stdout.strip():
+            raise BaselineSandboxError(f"cannot resolve the python3 interpreter: {probe.stderr.strip()[:200]}")
+        _PYTHON_INTERPRETER = probe.stdout.strip()
+    return _PYTHON_INTERPRETER
+
+
+def sandboxed_command(argv: list[str], exec_path: str, work_root: pathlib.Path, profile_dir: pathlib.Path) -> list[str]:
+    """argv wrapped in the baseline sandbox, or BaselineSandboxError."""
+    if os.environ.get("AETHER_BENCH_UNSANDBOXED_BASELINE") == "1":
+        return argv
+    sandbox_exec = shutil.which("sandbox-exec") if sys.platform == "darwin" else None
+    if not sandbox_exec:
+        raise BaselineSandboxError(
+            "no baseline sandbox on this host (sandbox-exec is macOS-only); refusing to run model-written "
+            "code unsandboxed. Set AETHER_BENCH_UNSANDBOXED_BASELINE=1 to opt out explicitly (recorded).")
+    for value in (exec_path, str(work_root)):
+        if '"' in value or "\\" in value:
+            raise BaselineSandboxError(f"path cannot be quoted in a sandbox profile: {value!r}")
+    profile = profile_dir / "baseline.sb"
+    profile.write_text(BASELINE_SANDBOX_PROFILE.format(exec_path=exec_path, work_root=os.path.realpath(work_root)),
+                       encoding="utf-8")
+    return [sandbox_exec, "-f", str(profile), *argv]
+
+
+def run_sandboxed(argv: list[str], exec_path: str, work_root: pathlib.Path, **kwargs: Any) -> dict[str, Any]:
+    """run_captured under the baseline sandbox. A sandbox that cannot start is an
+    infrastructure failure, never a silent unsandboxed run."""
+    with tempfile.TemporaryDirectory(prefix="baseline-sandbox-") as profile_dir:
+        try:
+            cmd = sandboxed_command(argv, exec_path, work_root, pathlib.Path(profile_dir))
+        except BaselineSandboxError as exc:
+            return {"returncode": -1, "stdout": "", "stderr": f"sandbox: {exc}", "elapsed_seconds": 0.0,
+                    "timed_out": False, "infra_failed": True}
+        run = run_captured(cmd, **kwargs)
+    if run["returncode"] != 0 and run.get("stderr", "").startswith("sandbox-exec:"):
+        run["infra_failed"] = True  # the sandbox itself failed to start
+    return run
+
+
+def baseline_sandbox_preflight() -> list[str]:
+    """Problems with the Python baseline sandbox on this host (empty: it holds).
+    A trivial program must run; a socket, a subprocess and a home-directory
+    read must each fail."""
+    probes = {
+        "runs": ("print('ok')", True),
+        "network": ("import socket\nsocket.create_connection(('1.1.1.1', 80), timeout=3)\nprint('ok')", False),
+        "subprocess": ("import subprocess\nsubprocess.run(['/bin/echo', 'x'])\nprint('ok')", False),
+        "home read": ("import os\nos.listdir(os.path.expanduser('~'))\nprint('ok')", False),
+    }
+    problems = []
+    try:
+        interp = baseline_python_interpreter()
+    except BaselineSandboxError as exc:
+        return [str(exc)]
+    for name, (code, should_run) in probes.items():
+        with tempfile.TemporaryDirectory(prefix="baseline-probe-") as tmp_name:
+            tmp = pathlib.Path(tmp_name)
+            (tmp / "probe.py").write_text(code, encoding="utf-8")
+            run = run_sandboxed([interp, "probe.py"], interp, tmp, cwd=tmp, timeout=30)
+        ran = run["returncode"] == 0 and run["stdout"].strip() == "ok"
+        if run.get("infra_failed"):
+            problems.append(f"{name}: {run['stderr'].strip()[:200]}")
+        elif ran != should_run:
+            problems.append(f"{name}: {'ran' if ran else 'was refused'} under the sandbox, expected the opposite")
+    return problems
+
+
 def run_python_task(task: Task, source_code: str) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="python-doc-bench-") as tmp_name:
         tmp_dir = pathlib.Path(tmp_name)
@@ -2810,9 +2931,18 @@ def run_python_task(task: Task, source_code: str) -> dict[str, Any]:
         materialize_task_files(task, tmp_dir)
         program_path.write_text(source_code, encoding="utf-8")
 
-        cmd = ["python3", str(program_path)]
-        run = run_captured(cmd, cwd=work_dir, timeout=task.timeout_seconds, input_text=task_stdin_text(task))
-        return _run_record(["python3", program_path.name], run, task)
+        try:
+            interp = baseline_python_interpreter()
+        except BaselineSandboxError as exc:
+            run = {"returncode": -1, "stdout": "", "stderr": f"sandbox: {exc}", "elapsed_seconds": 0.0,
+                   "timed_out": False, "infra_failed": True}
+        else:
+            run = run_sandboxed([interp, str(program_path)], interp, tmp_dir, cwd=work_dir,
+                                timeout=task.timeout_seconds, input_text=task_stdin_text(task))
+        record = _run_record(["python3", program_path.name], run, task)
+        if run.get("infra_failed"):
+            record["infra_failed"] = True
+        return record
 
 
 def run_rust_task(task: Task, source_code: str) -> dict[str, Any]:
@@ -2836,8 +2966,14 @@ def run_rust_task(task: Task, source_code: str) -> dict[str, Any]:
             return record
 
         remaining = max(1.0, task.timeout_seconds - (time.time() - started))
-        run = run_captured([str(binary_path)], cwd=work_dir, timeout=remaining, input_text=task_stdin_text(task))
+        # rustc compiles one file and runs no model code; the binary it builds does,
+        # so only the run is sandboxed.
+        real_binary = os.path.realpath(binary_path)
+        run = run_sandboxed([real_binary], real_binary, tmp_dir, cwd=work_dir, timeout=remaining,
+                            input_text=task_stdin_text(task))
         record = _run_record([binary_path.name], run, task)
+        if run.get("infra_failed"):
+            record["infra_failed"] = True
         record["elapsed_seconds"] = round(time.time() - started, 3)
         return record
 
@@ -2883,6 +3019,10 @@ def build_attempt_from_source(
             attempt["run"] = run_rust_task(task, source_code)
         else:
             attempt["run"] = compile_and_run(task, source_code, args)
+        if attempt["run"].get("infra_failed"):
+            # The baseline sandbox could not start: nothing was measured.
+            attempt["infra_failed"] = True
+            attempt["infra_kind"] = "sandbox"
     else:
         attempt["run"] = {
             "returncode": -1,
@@ -3321,6 +3461,10 @@ def evaluate_attempt(
             attempt["run"] = run_rust_task(task, source_code)
         else:
             attempt["run"] = compile_and_run(task, source_code, args)
+        if attempt["run"].get("infra_failed"):
+            # The baseline sandbox could not start: nothing was measured.
+            attempt["infra_failed"] = True
+            attempt["infra_kind"] = "sandbox"
     else:
         attempt["run"] = {
             "returncode": -1,
@@ -5096,6 +5240,7 @@ def _run_benchmark(
 
     harness = harness_fingerprint()
     harness["prompt_template"] = prompt_template_fingerprint()
+    harness["baseline_sandbox"] = baseline_sandbox_info()
     umbrella_status = _git(REPO_ROOT, "status", "--porcelain", "--untracked-files=no")
     provenance = {
         "umbrella_head": harness["umbrella_head"],

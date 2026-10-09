@@ -638,6 +638,55 @@ def test_python_lane_timeout_is_rc_124():
     assert adb.derive_failure_fingerprint({"generated_ok": True, "run": run}, "loop") == "timeout:loop"
 
 
+def _sandbox_task(task_id: str, expected: str = "") -> "adb.Task":
+    return adb.Task(task_id=task_id, title=task_id, prompt="", expected_stdout=expected, timeout_seconds=20,
+                    files={"data.txt": "42\n"})
+
+
+def test_python_baseline_runs_sandboxed():
+    if sys.platform != "darwin":
+        raise Skipped("the baseline sandbox is sandbox-exec, macOS only")
+    os.environ.pop("AETHER_BENCH_UNSANDBOXED_BASELINE", None)
+    ok = adb.run_python_task(_sandbox_task("ok", "42 hi\n"),
+                             "import math\nopen('note.txt', 'w').write('hi')\n"
+                             "print(open('data.txt').read().strip(), open('note.txt').read())\n")
+    assert ok["returncode"] == 0 and ok["exact_stdout_match"], ok
+    blocked = {
+        "network": "import socket\nsocket.create_connection(('1.1.1.1', 80), timeout=3)\nprint('ESCAPED')\n",
+        "subprocess": "import subprocess\nsubprocess.run(['/bin/echo', 'x'])\nprint('ESCAPED')\n",
+        "os.system": "import os\nrc = os.system('/bin/echo x')\nprint('ESCAPED' if rc == 0 else 'blocked')\n",
+        "home read": "import os\nprint(os.listdir(os.path.expanduser('~'))[:1], 'ESCAPED')\n",
+        "home write": "import os\nopen(os.path.expanduser('~/.aether_sandbox_probe'), 'w').write('x')\nprint('ESCAPED')\n",
+        "tmp read": "import os\nprint(os.listdir('/private/tmp')[:1], 'ESCAPED')\n",
+    }
+    for name, code in blocked.items():
+        run = adb.run_python_task(_sandbox_task(name.replace(' ', '_')), code)
+        assert "ESCAPED" not in run["stdout"], (name, run)
+        assert not run.get("infra_failed"), (name, run)
+    assert not os.path.exists(os.path.expanduser("~/.aether_sandbox_probe"))
+    assert adb.baseline_sandbox_preflight() == []
+    info = adb.baseline_sandbox_info()
+    assert info["mechanism"] == "sandbox-exec" and len(info["profile_sha256"]) == 64
+
+
+def test_python_baseline_fails_closed_without_a_sandbox():
+    real_which = adb.shutil.which
+    adb.shutil.which = lambda name, *a, **k: None if name == "sandbox-exec" else real_which(name, *a, **k)
+    try:
+        os.environ.pop("AETHER_BENCH_UNSANDBOXED_BASELINE", None)
+        run = adb.run_python_task(_sandbox_task("nosandbox", "x\n"), "print('x')\n")
+        assert run.get("infra_failed") and run["returncode"] == -1 and "sandbox" in run["stderr"], run
+        assert run["stdout"] == "", run  # never ran
+        assert adb.baseline_sandbox_preflight(), "pre-flight must report the missing sandbox"
+    finally:
+        adb.shutil.which = real_which
+
+
+def test_python_prompt_fingerprint_is_unchanged():
+    # The sandbox changes how a baseline program runs, never what the model is asked.
+    assert adb.prompt_template_fingerprint()["sha256"].startswith("4941abd6"), adb.prompt_template_fingerprint()
+
+
 def test_infinite_loop_is_a_measured_timeout_with_a_repair_round():
     import importlib.util
 
