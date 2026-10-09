@@ -44,6 +44,8 @@ jobs:
         run: python3 Tests/aether_doc_bench/test_doc_bench_offline.py
       - name: Idea-miner offline tests
         run: python3 Tests/aether_doc_bench/test_miner_offline.py
+      - name: Wild-eval offline tests
+        run: python3 Tests/aether_doc_bench/test_wild_eval_offline.py
       - name: Replay waivers parse
         if: hashFiles('tools/replay_bench.py') != ''
         run: python3 tools/replay_bench.py --check-waivers

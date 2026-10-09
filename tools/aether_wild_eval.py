@@ -15,6 +15,14 @@ modes:
             compare to the oracle. Reports a "wild" generalization rate on
             never-before-seen tasks.
 
+  negatives (CPU-only) -- break each generated reference in the ways the
+            compiler must refuse (MUTATORS: println outside fx, fx inside
+            @pure, `return`, clamp with two arguments, a misspelled type, a
+            failing @pre), run every broken program under --deny net,proc and
+            keep only those that fail with exactly the expected code. With
+            --dump, writes them as `should_fail` entries in the benchmark's
+            task format, for tools/aether_oracle_check.py --tasks FILE.
+
 The generator is deterministic given --seed, so a run is reproducible. Templates
 draw from the §1 mechanism inventory; this is the smoke-scale set, easily
 extended. Tasks are *not* frozen here -- freezing a curated subset is what turns
@@ -25,6 +33,7 @@ import argparse
 import json
 import os
 import random
+import re
 import subprocess
 import tempfile
 import urllib.request
@@ -157,14 +166,99 @@ def generate(n: int, seed: int) -> list[dict]:
     return out
 
 
-def run_aether(source: str) -> tuple[int, str]:
+def run_aether_full(source: str, flags: tuple[str, ...] = ()) -> tuple[int, str, str]:
     with tempfile.TemporaryDirectory(prefix="wild-eval-") as td:
         p = os.path.join(td, "prog.aether")
         with open(p, "w", encoding="utf-8") as fh:
             fh.write(source)
-        proc = subprocess.run([AETHER_BIN, "--no-cache", p], cwd=td,
+        proc = subprocess.run([AETHER_BIN, "--no-cache", *flags, p], cwd=td,
                               capture_output=True, text=True, errors="replace", timeout=30)
-        return proc.returncode, proc.stdout
+        return proc.returncode, proc.stdout, proc.stderr
+
+
+def run_aether(source: str) -> tuple[int, str]:
+    rc, out, _ = run_aether_full(source)
+    return rc, out
+
+
+# ---- should-fail mutants: each breaks one rule in a reference, or returns None ----
+_FX_PRINTLN = re.compile(r"fx \{ (println\(.*\);) \}")
+_PURE_FN = re.compile(r"@pure\nfn (\w+)\((\w+): Int[^\n]*\{\n")
+
+
+def m_println_outside_fx(ref: str) -> str | None:
+    out = _FX_PRINTLN.sub(r"\1", ref, count=1)
+    return out if out != ref else None
+
+
+def m_fx_in_pure(ref: str) -> str | None:
+    m = _PURE_FN.search(ref)
+    if m:
+        return ref[:m.end()] + "    fx { println(\"in pure\"); }\n" + ref[m.end():]
+    # No pure helper of its own: add one that prints.
+    return ("@pure\nfn note(v: Int) -> Int {\n    fx { println(v); }\n    ret v;\n}\n" + ref)
+
+
+def m_return_for_ret(ref: str) -> str | None:
+    i = ref.rfind("ret;")
+    return ref[:i] + "return;" + ref[i + len("ret;"):] if i != -1 else None
+
+
+def m_clamp_two_args(ref: str) -> str | None:
+    out = re.sub(r"clamp\(([^,()]+), ([^,()]+), ([^,()]+)\)", r"clamp(\1, \3)", ref, count=1)
+    return out if out != ref else None
+
+
+def m_misspelled_type(ref: str) -> str | None:
+    out = re.sub(r"(let \w+: )Int\b", r"\1Strng", ref, count=1)
+    return out if out != ref else None
+
+
+def m_failing_contract(ref: str) -> str | None:
+    # Every template draws its values from 0..200, so this @pre never holds.
+    m = _PURE_FN.search(ref)
+    if not m:
+        return None
+    return ref[:m.start()] + f"@pre {m.group(2)} > 1000\n" + ref[m.start():]
+
+
+# (rule, expected code, mutator). NARROW-001 is a warning (exit 0): a trap, not a negative.
+MUTATORS = [
+    ("println_outside_fx", "FX-001", m_println_outside_fx),
+    ("fx_in_pure", "ANN-001", m_fx_in_pure),
+    ("return_for_ret", "SYN-001", m_return_for_ret),
+    ("clamp_two_args", "BUILT-002", m_clamp_two_args),
+    ("misspelled_type", "TYPE-002", m_misspelled_type),
+    ("failing_contract", "CON-001", m_failing_contract),
+]
+NEGATIVE_FLAGS = ("--deny", "net,proc")  # the harness's sandbox, as the oracle check runs it
+_CODE = re.compile(r"\b[A-Z]+-\d{3}\b")
+
+
+def negatives(tasks: list[dict]) -> list[dict]:
+    """Every mutant of every task's reference, as a should_fail entry."""
+    out = []
+    for t in tasks:
+        for rule, code, mutate in MUTATORS:
+            program = mutate(t["reference"])
+            if program is None:
+                continue
+            out.append({"id": f"{t['id']}__{rule}", "title": f"Compiler rejects {rule.replace('_', ' ')}",
+                        "should_fail": True, "program": program, "expected_error_code": code,
+                        "mechanisms": ["negative", "generated", rule], "template": t["template"],
+                        "note": f"aether_wild_eval.py --mode negatives: {t['id']}'s reference with {rule}."})
+    return out
+
+
+def check_negative(item: dict, run=run_aether_full) -> tuple[bool, str]:
+    """(kept, why): a mutant is kept only if it fails with exactly its code."""
+    rc, out, err = run(item["program"], NEGATIVE_FLAGS)
+    codes = sorted(set(_CODE.findall(out + err)))
+    if rc == 0:
+        return False, "exit 0"
+    if codes != [item["expected_error_code"]]:
+        return False, f"codes {codes or 'none'}"
+    return True, f"rc={rc}"
 
 
 def query_model(prompt: str, endpoint: str, model: str) -> str:
@@ -182,13 +276,35 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--seed", type=int, default=7)
-    ap.add_argument("--mode", choices=["validate", "score"], default="validate")
+    ap.add_argument("--mode", choices=["validate", "score", "negatives"], default="validate")
     ap.add_argument("--endpoint", default="http://localhost:8019/v1/chat/completions")
     ap.add_argument("--model", default=None, help="served model name (required for --mode score)")
-    ap.add_argument("--dump", default=None, help="write generated tasks (+oracles) to this JSON path")
+    ap.add_argument("--dump", default=None, help="write generated tasks (+oracles) to this JSON path; "
+                    "with --mode negatives, the kept should_fail entries")
     args = ap.parse_args()
 
     tasks = generate(args.n, args.seed)
+    if args.mode == "negatives":
+        kept: list[dict] = []
+        by_t: dict[str, list[int]] = {}
+        for item in negatives(tasks):
+            ok, why = check_negative(item)
+            by_t.setdefault(item["template"], []).append(int(ok))
+            if ok:
+                kept.append(item)
+            print(f"[{'keep' if ok else 'drop'}] {item['id']:<36} {item['expected_error_code']:<10} {why}")
+        print(f"\nnegatives: kept {len(kept)}/{sum(len(v) for v in by_t.values())} mutants "
+              f"that fail with exactly their code")
+        for k, v in sorted(by_t.items()):
+            print(f"  {k:<14} {sum(v)}/{len(v)}")
+        if args.dump:
+            with open(args.dump, "w", encoding="utf-8") as fh:
+                json.dump({"version": f"wild-negatives-seed{args.seed}-n{args.n}", "seed": args.seed,
+                           "tasks": kept}, fh, indent=2)
+                fh.write("\n")
+        if any(sum(v) < 2 for v in by_t.values()):
+            raise SystemExit("a template yielded fewer than two kept negatives")
+        return
     if args.dump:
         with open(args.dump, "w", encoding="utf-8") as fh:
             json.dump({"seed": args.seed, "tasks": tasks}, fh, indent=2)
