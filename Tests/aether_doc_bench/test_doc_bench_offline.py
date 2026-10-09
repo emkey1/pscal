@@ -932,15 +932,16 @@ def test_summary_classifies_first_attempt_failures():
         _case("f", _r(rc=1, stderr="Aether @post failed in g\n")),       # uncoded
         _case("g", _r(rc=1, stderr="", diagnostics=[{"code": "SCOPE-001"}])),  # coded via diagnostics
         _case("h", _r(rc=3, stdout="x\n", expected_returncode=3)),        # silent_wrong at expected rc
+        _case("i", _r(rc=1, stderr="[CON-001] Aether @pre failed in g\n")),  # contract_violation
     ]
     summary = adb.summarize(results)
     assert summary["first_attempt_classes"] == {
-        "pass": 1, "silent_wrong": 2, "crash_hang": 2, "uncoded_error": 1, "coded_error": 2,
-        "infra_failed": 0, "not_sent": 0,
+        "pass": 1, "silent_wrong": 2, "crash_hang": 2, "uncoded_error": 1, "contract_violation": 1,
+        "coded_error": 2, "infra_failed": 0, "not_sent": 0,
     }, summary["first_attempt_classes"]
     assert summary["first_attempt_exact"] == 1 and summary["final_exact"] == 3
     lo, hi = summary["fa_ci95"]
-    assert 0 < lo < 0.125 < hi < 0.6, summary["fa_ci95"]
+    assert 0 < lo < 1 / 9 < hi < 0.6, summary["fa_ci95"]
     assert summary["headline_ok"] is True
 
 
@@ -1357,6 +1358,33 @@ def test_rc0_on_a_failure_status_task_is_silent_wrong():
     assert adb.classify_attempt(attempt) == "silent_wrong"
     attempt["run"]["returncode"] = 1
     assert adb.classify_attempt(attempt) == "uncoded_error"
+
+
+def test_failed_contract_is_a_contract_violation_not_a_coded_error():
+    # aether 2026-10-09-1: a failed @pre/@post is "[CON-001] ..." on stderr, exit 1.
+    run = {"returncode": 1, "expected_returncode": 0, "exact_stdout_match": False,
+           "stderr": "[CON-001] Aether @post failed in clampTo\n"}
+    attempt = {"generated_ok": True, "source_code": "x", "run": run}
+    assert adb.classify_attempt(attempt) == "contract_violation"
+    # Under --deny proc the guard's own halt is refused after the CON-001.
+    run["stderr"] += ("VM Error: builtin 'halt' denied by --deny/PSCAL_VM_DENY policy "
+                      "(effect mask 0x8 intersects denied 0x8).\n")
+    assert adb.classify_attempt(attempt) == "contract_violation"
+    # Checked before coded_error, so another code on stderr does not hide it.
+    run["stderr"] = "t.aether:3: [NARROW-001] narrowing\n[CON-001] Aether @post failed in clampTo\n"
+    assert adb.classify_attempt(attempt) == "contract_violation"
+    run["stderr"] = ""
+    run["diagnostics"] = [{"code": "CON-001"}]
+    assert adb.classify_attempt(attempt) == "contract_violation"
+    # Pre-J1 compilers printed the line with no code: still uncoded.
+    run["diagnostics"] = []
+    run["stderr"] = "Aether @post failed in clampTo\n"
+    assert adb.classify_attempt(attempt) == "uncoded_error"
+    # A contract failure at the status the task expects is still silent_wrong
+    # when stdout is wrong: worst first.
+    run["stderr"] = "[CON-001] Aether @pre failed in g\n"
+    run["expected_returncode"] = 1
+    assert adb.classify_attempt(attempt) == "silent_wrong"
 
 
 def test_real_aether_trap_programs_match_their_recorded_classes():

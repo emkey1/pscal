@@ -3403,7 +3403,12 @@ def classify_infra_failure(message: str | None) -> str | None:
 
 
 _CODE_RE = re.compile(r"\b[A-Z]+-\d{3}\b")
-FAILURE_CLASSES = ("pass", "silent_wrong", "crash_hang", "uncoded_error", "coded_error", "infra_failed", "not_sent")
+FAILURE_CLASSES = ("pass", "silent_wrong", "crash_hang", "uncoded_error", "contract_violation", "coded_error",
+                   "infra_failed", "not_sent")
+# A failed @pre/@post (aether 2026-10-09-1 on) prints "[CON-001] Aether @KIND
+# failed in FN" and exits 1. Older compilers printed the line without the code,
+# so their runs stay uncoded_error: a replay does not reclassify them.
+CONTRACT_CODE = "CON-001"
 
 
 def classify_attempt(attempt: dict[str, Any]) -> str:
@@ -3411,6 +3416,7 @@ def classify_attempt(attempt: dict[str, Any]) -> str:
     program exited as a success -- its expected status, or 0 -- but printed
     the wrong thing or ended with the wrong status), crash_hang
     (timeout, signal, rc >= 128), uncoded_error (failed with no CODE-NNN),
+    contract_violation (a @pre/@post caught it at run time: CON-001),
     coded_error -- plus pass, and the two that measured nothing:
     infra_failed and not_sent (context overflow)."""
     if attempt.get("not_sent") or "prompt_too_large" in str(attempt.get("generation_error") or ""):
@@ -3430,7 +3436,10 @@ def classify_attempt(attempt: dict[str, Any]) -> str:
     if returncode == expected or returncode == 0:
         return "silent_wrong"
     codes = [d.get("code") for d in (run.get("diagnostics") or []) if isinstance(d, dict) and d.get("code")]
-    if codes or _CODE_RE.search(run.get("stderr") or ""):
+    stderr_codes = _CODE_RE.findall(run.get("stderr") or "")
+    if CONTRACT_CODE in codes or CONTRACT_CODE in stderr_codes:
+        return "contract_violation"
+    if codes or stderr_codes:
         return "coded_error"
     return "uncoded_error"
 
