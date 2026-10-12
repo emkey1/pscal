@@ -178,7 +178,12 @@ Optional pacing / cleanup fields:
 - `after_each_command`: shell command run after every benchmark case
 - `after_each_timeout_seconds`: timeout for that cleanup command
 - `cooldown_seconds`: sleep after each benchmark case
-- `request_timeout_seconds`: timeout for a single provider API request
+- `request_timeout_seconds`: timeout for a single provider API request. For a
+  `tra_queue` destination it bounds the job's run, counted from the moment the
+  queue starts it, not the time it waits for a slot
+- `queue_timeout_seconds` (`tra_queue` only, default 21600): how long a job may
+  wait in the queue before it starts. A job that never starts is withdrawn and
+  recorded as an infra failure (`queue_timeout`), never as a model failure
 - `request_max_retries`: retry transient HTTP/API failures this many times
 - `retry_backoff_seconds`: base delay for exponential backoff between retries
 
@@ -468,7 +473,20 @@ writing the report. Re-run those cases with
 `Tests/aether_doc_bench/rerun_nogen_cases.py --report REPORT --apply`, which
 reads everything it needs (binary and its sha256, guide, seed base, repeat)
 from the report; the drivers do this automatically. Each attempt also stores
-the provider's `finish_reason`. `--resummarize REPORT` recomputes an old
+the provider's `finish_reason`.
+
+On the T'Ra queue path three infra kinds say what happened to the job:
+`queue_timeout` (it never started within `queue_timeout_seconds`),
+`empty_reply_no_finish` (the queue returned an empty reply with no finish
+reason, or with an error: the model server failed under the request) and
+`worker_died` (the harness's request worker exited without a result). When the
+harness gives up on a job it asks the queue to cancel it and records the
+outcome as `cancel` in the attempt's `infra_detail` or `no_answer_detail`; the
+queue cancels only a job that has not started, so for a running job the record
+reads `"cancelled": false`. A `no_answer` attempt keeps the provider's `usage`
+and `finish_reason` where the provider reported them.
+
+`--resummarize REPORT` recomputes an old
 report's summaries; `summarize_full_vs_medium.py` adds a paired bootstrap
 non-inferiority test (`--margin`, default 3 points).
 

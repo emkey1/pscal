@@ -87,7 +87,14 @@ OUTPUT_END_MARKER = "__AETHER_BENCH_END__"
 
 
 class ProviderTimeoutError(RuntimeError):
-    pass
+    """The harness gave up waiting on a provider: nothing was measured. infra_kind
+    names the limit that ran out (None: classify the message, as for any other
+    error); detail is kept on the attempt as infra_detail."""
+
+    def __init__(self, message: str, infra_kind: str | None = None, detail: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.infra_kind = infra_kind
+        self.detail = detail or {}
 
 
 class NoAnswerError(RuntimeError):
@@ -114,9 +121,16 @@ NO_ANSWER_FEEDBACK = (
     "budget or time limit ran out. Write the complete program now and keep any reasoning short."
 )
 
+# A T'Ra job has two limits. request_timeout_seconds bounds its RUN, counted from
+# the job's started_at; this bounds the wait for a free slot before that
+# (queue_timeout_seconds on the destination). One limit from submit did both
+# until 2026-10-12: on a one-slot target a job used up its deadline queued
+# behind another and was recorded as a provider timeout without having run.
+DEFAULT_QUEUE_TIMEOUT_SECONDS = 6 * 3600
+
 # Set inside the request-deadline worker process: invoke_tra_queue calls it with
 # (queue base url, job id) right after a submit, so the parent can ask the queue
-# whether the job was running when the deadline hit.
+# where the job stands against its limits, and withdraw it on giving up.
 _JOB_REPORTER: Any = None
 
 
@@ -162,6 +176,8 @@ class Destination:
     cooldown_seconds: float = 0.0
     prompt_context_limit: int | None = None
     request_timeout_seconds: int = 120
+    # T'Ra queue only: how long a job may wait for a slot before it starts.
+    queue_timeout_seconds: int = DEFAULT_QUEUE_TIMEOUT_SECONDS
     request_max_retries: int = 0
     retry_backoff_seconds: float = 2.0
     extra_body: dict | None = None
@@ -619,7 +635,7 @@ DESTINATION_KEYS = frozenset({
     "id", "type", "model", "base_url", "api_key", "api_key_env", "temperature",
     "max_output_tokens", "command_template", "after_each_command",
     "after_each_timeout_seconds", "cooldown_seconds", "prompt_context_limit",
-    "request_timeout_seconds", "request_max_retries", "retry_backoff_seconds",
+    "request_timeout_seconds", "queue_timeout_seconds", "request_max_retries", "retry_backoff_seconds",
     "extra_body", "extra_headers", "preferred_targets", "priority", "seed",
 })
 # Read from the raw config by tools/aether_idea_miner.py, not by this harness.
@@ -651,6 +667,11 @@ def validate_destination_config(raw: Any, path: pathlib.Path) -> None:
         for required in ("id", "type"):
             if required not in item:
                 raise SystemExit(f"{path}: destination {label!r} is missing {required!r}")
+        if "queue_timeout_seconds" in item and item["type"] not in ("tra_queue", "tra_scheduler"):
+            raise SystemExit(
+                f"{path}: destination {label!r}: queue_timeout_seconds applies to tra_queue destinations "
+                f"only (type {item['type']!r} has no queue); remove the key"
+            )
         seed = item.get("seed")
         if seed is not None:
             if isinstance(seed, bool) or not isinstance(seed, int):
@@ -692,6 +713,7 @@ def load_destinations(path: pathlib.Path) -> list[Destination]:
                     int(item["prompt_context_limit"]) if item.get("prompt_context_limit") is not None else None
                 ),
                 request_timeout_seconds=int(item.get("request_timeout_seconds", 120)),
+                queue_timeout_seconds=int(item.get("queue_timeout_seconds", DEFAULT_QUEUE_TIMEOUT_SECONDS)),
                 request_max_retries=int(item.get("request_max_retries", 0)),
                 retry_backoff_seconds=float(item.get("retry_backoff_seconds", 2.0)),
                 extra_body=item.get("extra_body"),
@@ -1972,11 +1994,22 @@ def invoke_openai_chat_completions(
         ) or flatten_chat_content(message.get("reasoning"))
     if not output_text:
         if finish_reason == "length":
+            # Keep what the provider reported about the reply: with the tokens it
+            # counted and the budget it was given, a full budget can be told from a
+            # provider that stopped the reply early.
+            detail: dict[str, Any] = {
+                "finish_reason": "length",
+                "usage": payload.get("usage"),
+                "max_tokens": body.get("max_tokens", body.get("max_completion_tokens")),
+                "response_id": payload.get("id"),
+                "native_finish_reason": choices[0].get("native_finish_reason"),
+                "provider": payload.get("provider"),
+            }
             raise NoAnswerError(
                 "no answer: chat completions reply hit max_tokens "
                 f"({destination.max_output_tokens}) before emitting any content -- "
                 "the model was still reasoning when the budget ran out",
-                "length", {"finish_reason": "length"},
+                "length", {key: value for key, value in detail.items() if value is not None},
             )
         raise RuntimeError("chat completions reply did not contain message content")
 
@@ -2099,6 +2132,92 @@ def invoke_openai_responses_session(
     }
 
 
+_TRA_DONE_STATES = ("done", "complete", "completed", "succeeded", "success")
+_TRA_CANCELLED_STATES = ("canceled", "cancelled", "archived_canceled")
+_TRA_FAILED_STATES = ("failed", "error", "rejected", *_TRA_CANCELLED_STATES)
+
+
+def _queue_timeout_for(destination: Destination) -> int:
+    """The destination's queue-wait limit. Read with a fallback: a harness started
+    before the field existed pickles a Destination without it, and the request
+    worker that unpickles it runs this (newer) file."""
+    return max(1, int(getattr(destination, "queue_timeout_seconds", None) or DEFAULT_QUEUE_TIMEOUT_SECONDS))
+
+
+_TRA_GIVE_UP_SLACK_SECONDS = 60.0
+
+
+def _tra_give_up_margin(destination: Destination) -> float:
+    """Slack between the two places that enforce a T'Ra job's limits (the request
+    worker's poll loop and its parent), so that one of them reports first: a
+    poll can return a long-poll window late."""
+    return float((destination.extra_body or {}).get("wait_seconds", 30)) + _TRA_GIVE_UP_SLACK_SECONDS
+
+
+def _tra_job_result(status: dict[str, Any]) -> dict[str, Any]:
+    """A job record's result: a JSON string, an object, or absent."""
+    raw = (status or {}).get("result")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _tra_reply_accounting(status: dict[str, Any]) -> dict[str, Any]:
+    """Token usage and finish reason of a job that gave no answer, where the queue
+    reports them: they say whether the model produced its whole budget."""
+    result = _tra_job_result(status)
+    found = {key: result.get(key) or (status or {}).get(key) for key in ("usage", "finish_reason")}
+    return {key: value for key, value in found.items() if value}
+
+
+def cancel_tra_job(base: str, job_id: str) -> dict[str, Any]:
+    """Withdraw a T'Ra job nobody is waiting for any more (POST /jobs/{id}/cancel).
+
+    The queue cancels only a job that has not started; a running job is refused and
+    runs on to the queue's own runtime limit. Never raises. The record says which
+    happened, read back from the job itself rather than from the cancel reply:
+    {"job_id", "cancelled", "job_status", and "note" when the queue refused}."""
+    record: dict[str, Any] = {"job_id": job_id, "cancelled": False}
+    try:
+        http_json_request(f"{base}/jobs/{job_id}/cancel", {"note": "aether bench gave up"}, None,
+                          timeout_seconds=15)
+        accepted = True
+    except Exception as exc:  # noqa: BLE001 -- already running, already finished, or unreachable
+        accepted = False
+        record["note"] = str(exc)[:200]
+    try:
+        state = str((http_json_get(f"{base}/jobs/{job_id}", None) or {}).get("status") or "").lower()
+    except Exception:  # noqa: BLE001
+        state = ""
+    record["job_status"] = state or None
+    record["cancelled"] = state in _TRA_CANCELLED_STATES if state else accepted
+    return record
+
+
+def _cancel_note(cancel: dict[str, Any] | None) -> str:
+    """One phrase for a cancel record, for an error message."""
+    if not cancel:
+        return "job not cancelled"
+    if cancel.get("cancelled"):
+        return "job cancelled"
+    return f"job not cancelled, status {cancel.get('job_status') or 'unknown'}"
+
+
+def _queue_timeout_error(job_id: str, queue_limit: float, waited: float, state: str,
+                         cancel: dict[str, Any] | None) -> ProviderTimeoutError:
+    """A job that never started within the queue-wait limit: the model did not run,
+    so an infra failure (queue_timeout) whatever the queue was busy with."""
+    return ProviderTimeoutError(
+        f"tra_queue job {job_id} did not start within {queue_limit:.0f} s in the queue "
+        f"(last status={state or 'unknown'}; {_cancel_note(cancel)})",
+        "queue_timeout",
+        {"job_id": job_id, "job_status": state or None, "queued_seconds": round(waited, 1), "cancel": cancel},
+    )
+
+
 def invoke_tra_queue(
     prompt: str, destination: Destination, options: RequestOptions | None = None
 ) -> dict[str, Any]:
@@ -2115,6 +2234,11 @@ def invoke_tra_queue(
     ``priority``, ``preferred_targets``, ``submitter``, ``max_runtime_seconds``,
     ``progress_idle_timeout_seconds``, ``wait_seconds``, ``poll_timeout_seconds``. A done
     job's ``result`` is a JSON string ``{"content": ..., optional "reasoning": ...}``.
+
+    Two limits bound the wait, and they are separate: ``queue_timeout_seconds`` for a
+    job that has not started, and from its ``started_at`` the request deadline
+    (``request_timeout_seconds``; ``poll_timeout_seconds`` raises it for a caller with
+    no deadline of its own above this one, as the idea-miner).
     """
     if not destination.base_url:
         raise RuntimeError("destination base_url (the T'Ra queue) is required for tra_queue")
@@ -2268,27 +2392,23 @@ def invoke_tra_queue(
         except Exception:
             pass
 
-    def _cancel() -> None:
-        try:
-            http_json_request(
-                f"{base}/jobs/{job_id}/cancel", {"note": "aether bench gave up"},
-                None, timeout_seconds=15,
-            )
-        except Exception:
-            pass
-
     # 3) Long-poll: GET /jobs/{id}?wait=N blocks server-side up to N seconds. Transient
     # poll errors (refused/dropped/timeout under load) retry the SAME job; on give-up the
     # job is cancelled so it never orphans holding the GPU.
+    #
+    # The run limit counts from the job's started_at, the queue limit from the submit.
+    # Under run_model_with_deadline the parent enforces the same two and withdraws the
+    # job itself: it gives up on a queued job first (only it can put the cancel outcome
+    # on the attempt -- this side's errors reach it as a bare string), hence the margin
+    # here; on a running job this side reports first, and the parent keeps the margin.
     wait_window = int(eb.get("wait_seconds", 30))
-    poll_deadline = time.time() + max(
-        int(destination.request_timeout_seconds), int(eb.get("poll_timeout_seconds", 1800))
-    )
+    run_limit = float(max(int(destination.request_timeout_seconds), int(eb.get("poll_timeout_seconds", 1800))))
+    queue_limit = float(_queue_timeout_for(destination))
+    submitted = time.time()
     consecutive_errors = 0
-    last_status = None
-    last_status_record: dict[str, Any] = {}
+    settled = False  # the job reached an end state, or was already withdrawn: nothing to cancel
     try:
-        while time.time() < poll_deadline:
+        while True:
             try:
                 req = urllib.request.Request(f"{base}/jobs/{job_id}?wait={wait_window}", method="GET")
                 with urllib.request.urlopen(req, timeout=wait_window + 30) as resp:
@@ -2304,17 +2424,29 @@ def invoke_tra_queue(
                 time.sleep(min(30.0, 3.0 * consecutive_errors))
                 continue
             st = (status.get("status") or "").lower()
-            if st in ("done", "complete", "completed", "succeeded", "success"):
-                raw = status.get("result")
-                result = json.loads(raw) if isinstance(raw, str) else (raw or {})
-                return {
-                    "raw_text": (result or {}).get("content", "") or "",
-                    "usage": (result or {}).get("usage") or status.get("usage"),
+            if st in _TRA_DONE_STATES:
+                result = _tra_job_result(status)
+                reply = {
+                    "raw_text": result.get("content", "") or "",
+                    "usage": result.get("usage") or status.get("usage"),
                     "response_id": job_id,
                     "model": status.get("target_name"),
-                    "finish_reason": (result or {}).get("finish_reason") or status.get("finish_reason"),
+                    "finish_reason": result.get("finish_reason") or status.get("finish_reason"),
                 }
-            if st in ("failed", "error", "canceled", "cancelled", "archived_canceled", "rejected"):
+                # The queue marks a job done whatever the model server did: a server that
+                # returned HTTP 500 mid-stream, or unloaded the model under the request,
+                # came back as done with {"content": ""} (2026-10-11). Nothing says the
+                # model finished, so it is the provider's failure and is named as one. An
+                # empty reply that DID finish with "length" is the model's (no_answer).
+                failure = result.get("error") or status.get("error")
+                if not reply["raw_text"].strip() and reply["finish_reason"] != "length" and (
+                        failure or not reply["finish_reason"]):
+                    reply["infra_kind"] = "empty_reply_no_finish"
+                    if failure:
+                        reply["provider_error"] = str(failure)[:500]
+                return reply
+            if st in _TRA_FAILED_STATES:
+                settled = True
                 why = status.get("error") or status.get("display_error") or status.get("scheduler_note") or "unknown"
                 ran = _tra_job_run_seconds(status)
                 limit = float(payload.get("max_runtime_seconds") or destination.request_timeout_seconds)
@@ -2322,24 +2454,31 @@ def invoke_tra_queue(
                     raise NoAnswerError(
                         f"no answer: tra_queue job {job_id} generated for {ran:.0f} s and was stopped at its "
                         f"runtime limit ({why})",
-                        "deadline", {"job_id": job_id, "job_status": st, "run_seconds": round(ran, 1)},
+                        "deadline", {"job_id": job_id, "job_status": st, "run_seconds": round(ran, 1),
+                                     **_tra_reply_accounting(status)},
                     )
                 raise RuntimeError(f"tra_queue job {job_id} {st}: {why}")
-            last_status = st
-            last_status_record = status
-        ran = _tra_job_run_seconds(last_status_record) if last_status == "running" else None
-        if ran is not None and ran >= NO_ANSWER_MIN_RUN_FRACTION * float(destination.request_timeout_seconds):
-            raise NoAnswerError(
-                f"no answer: tra_queue job {job_id} was still generating after {ran:.0f} s",
-                "deadline", {"job_id": job_id, "job_status": last_status, "run_seconds": round(ran, 1)},
-            )
-        raise ProviderTimeoutError(
-            f"tra_queue job {job_id} not done within deadline (last status={last_status})"
-        )
-    except BaseException:
-        # Any non-success exit (deadline, persistent poll failure, interrupt) cancels the
-        # job so it never orphans in the queue holding the GPU.
-        _cancel()
+            ran = _tra_job_run_seconds(status) if st == "running" else None
+            if ran is None:
+                # Not started (or the queue does not say when): the model has not run.
+                waited = time.time() - submitted
+                if waited >= queue_limit + _tra_give_up_margin(destination):
+                    settled = True
+                    raise _queue_timeout_error(job_id, queue_limit, waited, st, cancel_tra_job(base, job_id))
+            elif ran >= run_limit:
+                raise NoAnswerError(
+                    f"no answer: tra_queue job {job_id} was still generating after {ran:.0f} s",
+                    "deadline", {"job_id": job_id, "job_status": st, "run_seconds": round(ran, 1),
+                                 **_tra_reply_accounting(status)},
+                )
+    except BaseException as exc:
+        # Any non-success exit (a limit, persistent poll failure, interrupt) cancels the
+        # job so it never orphans in the queue holding the GPU. A running job is refused
+        # by the queue; the no-answer record says so.
+        if not settled:
+            cancel = cancel_tra_job(base, job_id)
+            if isinstance(exc, NoAnswerError):
+                exc.detail["cancel"] = cancel
         raise
 
 
@@ -2545,7 +2684,8 @@ def preflight_destination(destination: Destination) -> tuple[bool, str]:
         return False, f"{type(exc).__name__}: {str(exc)[:200]}"
     text = (result.get("raw_text") or "").strip()
     if not text:
-        return False, "reply contained no content"
+        kind = result.get("infra_kind")
+        return False, "reply contained no content" + (f" ({kind})" if kind else "")
     return True, text[:40]
 
 
@@ -2596,27 +2736,62 @@ def _tra_job_run_seconds(status: dict[str, Any], now: float | None = None) -> fl
     return max(0.0, ended - started)
 
 
-def _deadline_verdict(job: tuple[str, str] | None, deadline: float) -> dict[str, Any] | None:
+def _deadline_verdict(job: tuple[str, str] | None, deadline: float,
+                      status: dict[str, Any] | None = None, now: float | None = None) -> dict[str, Any] | None:
     """At the request deadline: the no_answer detail when the T'Ra job had been
     running for most of the deadline (the model was generating), else None (it
-    sat queued or the queue is unreachable: an infra failure)."""
+    sat queued or the queue is unreachable: an infra failure). status is the
+    job's record when the caller already has it."""
     if not job:
         return None
     base, job_id = job
-    try:
-        status = http_json_get(f"{base}/jobs/{job_id}", None)
-    except Exception:
-        return None
+    if status is None:
+        try:
+            status = http_json_get(f"{base}/jobs/{job_id}", None)
+        except Exception:
+            return None
     st = str((status or {}).get("status") or "").lower()
-    ran = _tra_job_run_seconds(status)
+    ran = _tra_job_run_seconds(status, now)
     if st == "running" and ran is not None and ran >= NO_ANSWER_MIN_RUN_FRACTION * deadline:
-        return {"job_id": job_id, "job_status": st, "run_seconds": round(ran, 1)}
+        return {"job_id": job_id, "job_status": st, "run_seconds": round(ran, 1), **_tra_reply_accounting(status)}
     return None
+
+
+def _tra_job_clock(job: tuple[str, str] | None, deadline: float, queue_limit: float,
+                   queued_seconds: float, now: float | None = None) -> tuple[str, float, dict[str, Any]]:
+    """Which of its two limits a T'Ra job is under, and how much of it is left:
+
+      ("queued", s, record)   not started: s of the queue-wait limit left
+      ("running", s, record)  started: s of the request deadline left, from started_at
+      ("settled", 0, record)  done, failed or cancelled: the worker has it, or is about to
+      ("unknown", 0, {})      no job was reported, or the queue did not answer"""
+    if not job:
+        return "unknown", 0.0, {}
+    base, job_id = job
+    try:
+        record = http_json_get(f"{base}/jobs/{job_id}", None)
+    except Exception:
+        return "unknown", 0.0, {}
+    if not isinstance(record, dict):
+        return "unknown", 0.0, {}
+    st = str(record.get("status") or "").lower()
+    if st in _TRA_DONE_STATES or st in _TRA_FAILED_STATES:
+        return "settled", 0.0, record
+    ran = _tra_job_run_seconds(record, now) if st == "running" else None
+    if ran is not None:
+        return "running", deadline - ran, record
+    return "queued", queue_limit - queued_seconds, record
 
 
 def _run_model_worker(
     prompt: str, destination: Destination, queue: Any, options: RequestOptions | None = None
 ) -> None:
+    # This runs the file as it is on disk NOW, under a parent that may have
+    # loaded an older one (a deploy while a board runs). Send only what an older
+    # parent reads correctly: ("job", (base, job_id)) once, then exactly one of
+    # "ok" / "no_answer" / "err". A parent before 2026-10-12 takes any other
+    # kind for the error result -- on 2026-10-09 the then-new "job" message did
+    # that to every request of the units already running.
     global _JOB_REPORTER
     _JOB_REPORTER = lambda base, job_id: queue.put(("job", (base, job_id)))
     try:
@@ -2627,38 +2802,124 @@ def _run_model_worker(
         queue.put(("err", str(exc)))
 
 
-def run_model_with_deadline(
-    prompt: str, destination: Destination, options: RequestOptions | None = None
-) -> dict[str, Any]:
+# How often the parent looks up from the worker's pipe to see the worker is alive.
+_WORKER_POLL_SECONDS = 5.0
+# Consecutive status checks the queue may leave unanswered before the parent gives up.
+_JOB_STATUS_RETRIES = 3
+
+
+def _await_worker(queue: Any, proc: Any, destination: Destination, now: Any = time.time) -> tuple[str, Any]:
+    """Wait for the request worker's result: ("ok", reply), ("no_answer", ...) or
+    ("err", message). Raises when the parent gives up instead -- and then the
+    worker is stopped and its T'Ra job withdrawn, so a job nobody waits for does
+    not hold the target (the 2026-10-09 m5 queue spiral: every timed-out request
+    left a job that ran 2.5 h for nobody, and the next request queued behind it).
+
+    For any other destination the deadline is request_timeout_seconds from the
+    call. For a T'Ra job that deadline bounds the RUN, from the job's started_at,
+    and the wait for a slot has its own limit (queue_timeout_seconds); when the
+    time is up the parent asks the queue which of the two the job is under."""
     deadline = max(1, int(destination.request_timeout_seconds))
-    ctx = multiprocessing.get_context("spawn")
-    queue: Any = ctx.Queue()
-    proc = ctx.Process(target=_run_model_worker, args=(prompt, destination, queue, options))
-    proc.start()
-    # queue.get() must happen before proc.join(): a worker payload larger than
-    # the OS pipe buffer (~64KB on macOS) blocks in queue.put() until drained,
-    # so joining first (without reading) can deadlock both sides for up to
-    # the full deadline instead of returning promptly.
-    ends = time.time() + deadline
+    queue_limit = _queue_timeout_for(destination)
+    margin = _tra_give_up_margin(destination)
+    started = now()
+    ends = started + deadline
     job: tuple[str, str] | None = None
+    job_at = started
+    unanswered = 0
+    settled_seen = False
+
+    def give_up() -> dict[str, Any] | None:
+        proc.terminate()
+        proc.join(5)
+        return cancel_tra_job(*job) if job else None
+
+    def timed_out(record: dict[str, Any] | None = None, note: str = "") -> ProviderTimeoutError:
+        cancel = give_up()
+        if not job:
+            return ProviderTimeoutError(f"provider request exceeded {deadline} seconds")
+        detail = {"job_id": job[1], "job_status": (record or {}).get("status"), "cancel": cancel}
+        return ProviderTimeoutError(
+            f"provider request exceeded {deadline} seconds (T'Ra job {job[1]}{note}; {_cancel_note(cancel)})",
+            None, detail)
+
     while True:
+        # queue.get() must happen before proc.join(): a worker payload larger than
+        # the OS pipe buffer (~64KB on macOS) blocks in queue.put() until drained,
+        # so joining first (without reading) can deadlock both sides for up to
+        # the full deadline instead of returning promptly.
+        alive = proc.is_alive()
         try:
-            status, payload = queue.get(timeout=max(0.0, ends - time.time()))
+            status, payload = queue.get(
+                timeout=max(0.0, min(ends - now(), _WORKER_POLL_SECONDS)) if alive else 1.0)
         except queue_module.Empty:
-            verdict = _deadline_verdict(job, deadline)
-            proc.terminate()
-            proc.join(5)
-            if verdict is not None:
+            if not alive:
+                # Killed, or crashed before it could report: nothing more will come.
+                cancel = give_up()
+                raise ProviderTimeoutError(
+                    f"request worker exited (code {getattr(proc, 'exitcode', None)}) without a result"
+                    + (f" (T'Ra job {job[1]}; {_cancel_note(cancel)})" if job else ""),
+                    "worker_died", {"job_id": job[1], "cancel": cancel} if job else None)
+            if now() < ends:
+                continue
+            if not job:
+                raise timed_out()
+            state, left, record = _tra_job_clock(job, deadline, queue_limit, now() - job_at, now())
+            # A job the queue keeps restarting must not hold the case for ever.
+            overdue = now() >= job_at + queue_limit + deadline + 4 * margin
+            if state == "unknown":
+                unanswered += 1
+                if unanswered <= _JOB_STATUS_RETRIES and not overdue:
+                    ends = now() + 30.0
+                    continue
+                raise timed_out(note=", the queue does not answer")
+            unanswered = 0
+            if state == "queued":
+                if left > 0 and not overdue:
+                    # Queued now, so its run cannot end before a whole deadline from now.
+                    ends = now() + min(left, deadline)
+                    continue
+                waited = now() - job_at
+                raise _queue_timeout_error(job[1], queue_limit, waited, str(record.get("status") or ""), give_up())
+            if state == "running":
+                # The worker reports a run that reaches the deadline; the margin lets it.
+                if left + margin > 0 and not overdue:
+                    ends = now() + left + margin
+                    continue
+                verdict = _deadline_verdict(job, deadline, record, now())
+                if verdict is None:
+                    raise timed_out(record, " running")
+                verdict["cancel"] = give_up()
                 raise NoAnswerError(
                     f"no answer: the model was still generating when the {deadline} s request deadline expired "
                     f"(T'Ra job {verdict['job_id']} running {verdict['run_seconds']:.0f} s)",
                     "deadline", verdict,
                 )
-            raise ProviderTimeoutError(f"provider request exceeded {deadline} seconds")
+            # Settled: the worker's long poll returns at once, so its result is on the way.
+            if not settled_seen and not overdue:
+                settled_seen = True
+                ends = now() + margin
+                continue
+            raise timed_out(record, f" is {record.get('status')} but its worker did not report")
         if status == "job":
             job = payload
+            job_at = now()
+            # A queue limit shorter than the deadline is checked when it is due.
+            ends = min(ends, job_at + queue_limit)
             continue
-        break
+        if status in ("ok", "no_answer", "err"):
+            return status, payload
+        # Any other kind is a note from a newer worker, never the result.
+
+
+def run_model_with_deadline(
+    prompt: str, destination: Destination, options: RequestOptions | None = None
+) -> dict[str, Any]:
+    ctx = multiprocessing.get_context("spawn")
+    queue: Any = ctx.Queue()
+    proc = ctx.Process(target=_run_model_worker, args=(prompt, destination, queue, options))
+    proc.start()
+    status, payload = _await_worker(queue, proc, destination)
     proc.join(5)
     if proc.is_alive():
         proc.terminate()
@@ -3601,9 +3862,10 @@ def evaluate_attempt(
             "exact_stdout_match": False,
         }
         # An empty reply is a serving problem (stop marker, template), not a
-        # verdict on the guide: measured nothing, re-run it.
+        # verdict on the guide: measured nothing, re-run it. An adapter that can
+        # tell a provider failure from an ordinary empty reply names the kind.
         attempt["infra_failed"] = True
-        attempt["infra_kind"] = "empty_output"
+        attempt["infra_kind"] = generation.get("infra_kind") or "empty_output"
     return attempt
 
 
@@ -3645,6 +3907,8 @@ _INFRA_PATTERNS: tuple[tuple[str, str], ...] = (
     ("http api error 4", "http_4xx"),
     ("http api error 5", "http_5xx"),
     ("http api request timed out", "provider_timeout"),
+    ("did not start within", "queue_timeout"),
+    ("request worker exited", "worker_died"),
     ("provider request exceeded", "provider_timeout"),
     ("not done within deadline", "provider_timeout"),
     ("http api request failed", "transport"),
@@ -4141,12 +4405,23 @@ def failed_generation_attempt(
     elif isinstance(exc, NoAnswerError):
         # The model generated for its whole budget without an answer: a verdict.
         extra["no_answer"] = exc.kind
-        if exc.detail:
-            extra["no_answer_detail"] = exc.detail
+        detail = dict(exc.detail)
+        # What the provider said the reply cost and how it ended, where it said so:
+        # without these a full budget cannot be told from a reply cut off early.
+        usage = normalize_usage(detail.pop("usage", None))
+        if usage:
+            extra["usage"] = usage
+        if detail.get("finish_reason"):
+            extra["finish_reason"] = detail["finish_reason"]
+        if detail:
+            extra["no_answer_detail"] = detail
         message = NO_ANSWER_FEEDBACK + " [" + message + "]"
     else:
         extra["infra_failed"] = True
-        extra["infra_kind"] = classify_infra_failure(message) or "provider_error"
+        extra["infra_kind"] = (getattr(exc, "infra_kind", None) or classify_infra_failure(message)
+                               or "provider_error")
+        if getattr(exc, "detail", None):
+            extra["infra_detail"] = exc.detail
     return {
         **extra,
         "prompt_kind": prompt_kind,

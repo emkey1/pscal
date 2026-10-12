@@ -2045,6 +2045,530 @@ def test_rerun_nogen_never_reruns_no_answer():
     assert mod.needs_rerun({"generated_ok": False, "attempts": [infra], "run": infra["run"]})
 
 
+# --- the T'Ra queue path: queue wait vs run time, cancel on give-up, failed replies ---
+
+
+def _iso(stamp: float) -> str:
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(stamp, timezone.utc).isoformat()
+
+
+@contextlib.contextmanager
+def fake_tra_queue(job_record):
+    """A local stand-in for the queue server. job_record(state) is the job's record
+    for GET /jobs/{id}; state has "age" (seconds since the submit), "cancelled" and
+    "posts". As on the real queue, a cancel withdraws only a job that has not started."""
+    import http.server
+    import threading
+    import time
+
+    state = {"submitted": None, "cancelled": False, "posts": [], "age": 0.0}
+
+    class Queue(http.server.BaseHTTPRequestHandler):
+        def _reply(self, payload, code=200):
+            data = json.dumps(payload).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _record(self):
+            state["age"] = time.time() - (state["submitted"] or time.time())
+            return {"status": "canceled"} if state["cancelled"] else job_record(state)
+
+        def do_POST(self):  # noqa: N802
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            state["posts"].append(self.path)
+            if self.path == "/jobs/explain":
+                self._reply({"routable": True})
+            elif self.path == "/jobs":
+                state["submitted"] = time.time()
+                self._reply({"id": "job1"})
+            elif self._record().get("status") == "pending":
+                state["cancelled"] = True
+                self._reply({"status": "canceled"})
+            else:
+                self._reply({"detail": "only a pending job can be cancelled"}, 409)
+
+        def do_GET(self):  # noqa: N802
+            if "wait=" in self.path:
+                time.sleep(0.05)  # the long poll, shortened
+            self._reply(self._record())
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Queue)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}", state
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def _queue_destination(base_url: str, **extra) -> "adb.Destination":
+    settings = {"destination_id": "q", "kind": "tra_queue", "model": "m", "base_url": base_url,
+                "prompt_context_limit": 32768, "request_timeout_seconds": 600,
+                "extra_body": {"wait_seconds": 0}}
+    settings.update(extra)
+    return adb.Destination(**settings)
+
+
+@contextlib.contextmanager
+def _no_give_up_slack():
+    saved = adb._TRA_GIVE_UP_SLACK_SECONDS
+    adb._TRA_GIVE_UP_SLACK_SECONDS = 0.0
+    try:
+        yield
+    finally:
+        adb._TRA_GIVE_UP_SLACK_SECONDS = saved
+
+
+def test_queue_timeout_seconds_is_a_destination_key_with_a_long_default():
+    import types
+    queued = {"id": "b", "type": "tra_queue", "model": "m", "base_url": "http://q"}
+    with workdir() as tmp:
+        path = write_json(tmp / "d.json", {"destinations": [
+            dict(queued, id="a"), dict(queued, queue_timeout_seconds=900)]})
+        loaded = adb.load_destinations(path)
+    assert loaded[0].queue_timeout_seconds == adb.DEFAULT_QUEUE_TIMEOUT_SECONDS >= 3 * 3600
+    assert loaded[1].queue_timeout_seconds == 900 and adb._queue_timeout_for(loaded[1]) == 900
+    # Only a queue destination has a queue: anywhere else the key would be read by nothing.
+    _expect_load_failure({"destinations": [mock_destination(queue_timeout_seconds=900)]}, "tra_queue")
+    # A Destination pickled by a harness that predates the field has no such attribute.
+    assert adb._queue_timeout_for(types.SimpleNamespace()) == adb.DEFAULT_QUEUE_TIMEOUT_SECONDS
+
+
+def test_tra_queue_job_that_waits_longer_than_the_deadline_still_runs():
+    """The request deadline bounds the run, not the wait for a slot: this job is queued for
+    longer than its whole deadline and is answered all the same."""
+    import time
+
+    def record(state):
+        if state["age"] < 2.5:
+            return {"status": "pending", "started_at": None}
+        if state["age"] < 2.8:
+            return {"status": "running", "started_at": _iso(time.time())}
+        return {"status": "done", "target_name": "t1",
+                "result": json.dumps({"content": "print ok", "finish_reason": "stop"})}
+
+    with fake_tra_queue(record) as (base, state):
+        dest = _queue_destination(base, request_timeout_seconds=2,
+                                  extra_body={"wait_seconds": 0, "poll_timeout_seconds": 2})
+        reply = adb.invoke_tra_queue("p", dest)
+    assert reply["raw_text"] == "print ok" and reply["model"] == "t1", reply
+    assert state["age"] >= 2.5 and "/jobs/job1/cancel" not in state["posts"], state
+
+
+def test_tra_queue_job_that_never_starts_is_a_queue_timeout_and_is_cancelled():
+    with fake_tra_queue(lambda state: {"status": "pending", "started_at": None}) as (base, state):
+        dest = _queue_destination(base, queue_timeout_seconds=1)
+        with _no_give_up_slack():
+            try:
+                adb.invoke_tra_queue("p", dest)
+            except adb.ProviderTimeoutError as exc:
+                error = exc
+            else:
+                raise AssertionError("a job that never starts must not be waited on for ever")
+    assert error.infra_kind == "queue_timeout" and error.detail["cancel"]["cancelled"] is True, error.detail
+    assert state["cancelled"] and state["posts"].count("/jobs/job1/cancel") == 1, state["posts"]
+    # The worker hands its parent the message alone; that classifies the same way.
+    assert adb.classify_infra_failure(str(error)) == "queue_timeout", str(error)
+    attempt = adb.failed_generation_attempt("initial", "aether", error, None)
+    assert attempt["infra_failed"] and attempt["infra_kind"] == "queue_timeout", attempt
+    assert attempt["infra_detail"]["cancel"]["cancelled"] is True
+    assert adb.classify_attempt(attempt) == "infra_failed" and not adb.attempt_is_no_answer(attempt)
+
+
+def test_tra_queue_run_deadline_is_no_answer_and_records_the_refused_cancel():
+    import time
+    started = time.time() - 9000
+
+    def running(state):
+        return {"status": "running", "started_at": _iso(started)}
+
+    with fake_tra_queue(running) as (base, state):
+        dest = _queue_destination(base, request_timeout_seconds=8900)
+        try:
+            adb.invoke_tra_queue("p", dest)
+        except adb.NoAnswerError as exc:
+            error = exc
+        else:
+            raise AssertionError("a run past the deadline must end as no_answer")
+    assert error.kind == "deadline" and error.detail["run_seconds"] >= 9000, error.detail
+    cancel = error.detail["cancel"]
+    assert cancel["cancelled"] is False and cancel["job_status"] == "running" and "409" in cancel["note"], cancel
+    assert not state["cancelled"]
+    attempt = adb.failed_generation_attempt("initial", "aether", error, None)
+    assert attempt["no_answer"] == "deadline" and attempt["no_answer_detail"]["cancel"] == cancel
+
+
+def test_tra_queue_job_stopped_at_its_runtime_limit_keeps_what_the_queue_reported():
+    import time
+    now = time.time()
+    record = {"status": "failed", "error": "job timed out after max_runtime_seconds",
+              "started_at": _iso(now - 8900), "completed_at": _iso(now),
+              "result": json.dumps({"usage": {"prompt_tokens": 14000, "completion_tokens": 51000}})}
+    with fake_tra_queue(lambda state: record) as (base, state):
+        try:
+            adb.invoke_tra_queue("p", _queue_destination(base, request_timeout_seconds=8900))
+        except adb.NoAnswerError as exc:
+            error = exc
+        else:
+            raise AssertionError("a job stopped at its runtime limit is no_answer")
+    # A job that has ended has nothing to cancel.
+    assert "cancel" not in error.detail and "/jobs/job1/cancel" not in state["posts"], (error.detail, state)
+    attempt = adb.failed_generation_attempt("initial", "aether", error, None)
+    assert attempt["usage"]["completion_tokens"] == 51000 and attempt["usage"]["total_tokens"] == 65000, attempt
+    assert "usage" not in attempt["no_answer_detail"] and attempt["no_answer_detail"]["run_seconds"] >= 8899
+
+
+def _evaluate_reply(reply: dict) -> dict:
+    """The case record the harness writes when the model call returns `reply`."""
+    task = adb.Task(task_id="t", title="t", prompt="p", expected_stdout="ok\n")
+    args = adb.argparse.Namespace(repair_attempts=0, repair_feedback_limit=1200, repair_source_limit=8000)
+    saved = adb.run_model_with_deadline
+    adb.run_model_with_deadline = lambda prompt, destination, options=None: reply
+    try:
+        return adb.execute_case(initial_prompt="p", destination=_queue_destination("http://q"), task=task,
+                                args=args, runner="aether", repair_prompt_builder=lambda **kw: "repair prompt")
+    finally:
+        adb.run_model_with_deadline = saved
+
+
+def test_tra_queue_empty_reply_without_a_finish_reason_is_infra_not_no_answer():
+    """2026-10-11: the model server failed mid-stream and the queue marked the job done with
+    {"content": ""}. That is the provider's failure; only finish_reason "length" is the model's."""
+    result: dict = {}
+
+    def done(state):
+        return {"status": "done", "target_name": "t1", "result": json.dumps(result)}
+
+    with fake_tra_queue(done) as (base, state):
+        dest = _queue_destination(base)
+
+        result.update({"content": ""})
+        reply = adb.invoke_tra_queue("p", dest)
+        assert reply["infra_kind"] == "empty_reply_no_finish" and "provider_error" not in reply, reply
+        case = _evaluate_reply(reply)
+        first = case["attempts"][0]
+        assert case["infra_failed"] and case["infra_kind"] == "empty_reply_no_finish", case
+        assert adb.case_is_infra_failed(case) and adb.classify_attempt(first) == "infra_failed"
+        assert not adb.attempt_is_no_answer(first) and "no_answer" not in first
+        assert first["generation"]["response_id"] == "job1", "the job id stays on the attempt"
+
+        result.update({"content": "", "error": "model server returned HTTP 500", "finish_reason": "stop"})
+        reply = adb.invoke_tra_queue("p", dest)
+        assert reply["infra_kind"] == "empty_reply_no_finish" and "HTTP 500" in reply["provider_error"], reply
+
+        # Cut off at the output cap with nothing written: the model's own failure, as before.
+        usage = {"completion_tokens": 96000, "completion_tokens_details": {"reasoning_tokens": 96000}}
+        result.clear()
+        result.update({"content": "", "finish_reason": "length", "usage": usage})
+        reply = adb.invoke_tra_queue("p", dest)
+        assert "infra_kind" not in reply, reply
+        case = _evaluate_reply(reply)
+        first = case["attempts"][0]
+        assert first["no_answer"] == "length" and not case["infra_failed"], case
+        assert adb.classify_attempt(first) == "no_answer" and first["no_repair_after_no_answer"] is True
+        assert first["usage"]["completion_tokens"] == 96000 and first["usage"]["reasoning_tokens"] == 96000
+
+        # An empty reply that ended normally keeps its old kind; a full one is untouched.
+        result.clear()
+        result.update({"content": "", "finish_reason": "stop"})
+        case = _evaluate_reply(adb.invoke_tra_queue("p", dest))
+        assert case["infra_failed"] and case["infra_kind"] == "empty_output", case
+        result.clear()
+        result.update({"content": "print ok"})  # some targets report no finish reason at all
+        reply = adb.invoke_tra_queue("p", dest)
+        assert reply["raw_text"] == "print ok" and "infra_kind" not in reply, reply
+    assert "/jobs/job1/cancel" not in state["posts"]
+
+
+def test_chat_no_answer_attempt_keeps_usage_and_finish_reason():
+    usage = {"prompt_tokens": 13800, "completion_tokens": 32000, "total_tokens": 45800,
+             "completion_tokens_details": {"reasoning_tokens": 31990}}
+
+    def fake_request(url, body, api_key, **kwargs):
+        return {"id": "gen-1", "provider": "SomeHost", "usage": usage, "choices": [{
+            "message": {"content": "", "reasoning": "still thinking"},
+            "finish_reason": "length", "native_finish_reason": "MAX_TOKENS"}]}
+
+    original = adb.http_json_request
+    adb.http_json_request = fake_request
+    try:
+        dest = adb.Destination(destination_id="c", kind="openai_chat_completions", model="m",
+                               base_url="https://h/v1", max_output_tokens=96000)
+        try:
+            adb.invoke_openai_chat_completions("p", dest)
+        except adb.NoAnswerError as exc:
+            error = exc
+        else:
+            raise AssertionError("an empty reply cut off at the cap is no_answer")
+    finally:
+        adb.http_json_request = original
+    attempt = adb.failed_generation_attempt("initial", "aether", error, None)
+    assert attempt["no_answer"] == "length" and attempt["finish_reason"] == "length", attempt
+    # 32,000 tokens produced against a 96,000 budget: the provider cut this reply off early.
+    assert attempt["usage"]["completion_tokens"] == 32000 and attempt["usage"]["reasoning_tokens"] == 31990
+    detail = attempt["no_answer_detail"]
+    assert detail["max_tokens"] == 96000 and detail["native_finish_reason"] == "MAX_TOKENS", detail
+    assert detail["provider"] == "SomeHost" and detail["response_id"] == "gen-1" and "usage" not in detail
+    assert adb.classify_attempt(attempt) == "no_answer" and not attempt.get("infra_failed")
+    assert adb.summarize_usage([{"attempts": [attempt]}])["attempts_with_usage"] == 1
+    # A provider that reports nothing leaves the record as it was.
+    bare = adb.failed_generation_attempt("initial", "aether", adb.NoAnswerError("no answer: cap", "length"), None)
+    assert "usage" not in bare and "finish_reason" not in bare and "no_answer_detail" not in bare, bare
+
+
+class _FakeClock:
+    def __init__(self):
+        self.t = 1_800_000_000.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
+class _FakeWorker:
+    """The parent's view of a request worker: its pipe, with each message due at a
+    time on the fake clock, and the process."""
+
+    def __init__(self, clock, messages=()):
+        self.clock, self.messages = clock, [(clock.t + at, message) for at, message in messages]
+        self.alive, self.terminated, self.exitcode = True, False, None
+
+    def get(self, timeout=None):
+        if self.messages and self.messages[0][0] <= self.clock.t + timeout:
+            due, message = self.messages.pop(0)
+            self.clock.t = max(self.clock.t, due)
+            return message
+        self.clock.t += timeout
+        raise adb.queue_module.Empty
+
+    def is_alive(self):
+        return self.alive
+
+    def terminate(self):
+        self.terminated, self.alive = True, False
+
+    def join(self, timeout=None):
+        pass
+
+
+class _FakeQueueJob:
+    """The queue's side of one job on the fake clock: pending until starts_at."""
+
+    def __init__(self, clock, starts_at=None):
+        self.clock, self.zero, self.starts_at = clock, clock.t, starts_at
+        self.cancelled, self.cancel_calls, self.unreachable = False, 0, False
+
+    def record(self):
+        if self.cancelled:
+            return {"status": "canceled"}
+        if self.starts_at is None or self.clock.t < self.zero + self.starts_at:
+            return {"status": "pending", "started_at": None}
+        return {"status": "running", "started_at": _iso(self.zero + self.starts_at)}
+
+    def get(self, url, api_key):
+        if self.unreachable:
+            raise RuntimeError("HTTP API request failed: unreachable")
+        return self.record()
+
+    def post(self, url, body, api_key, **kwargs):
+        assert url.endswith("/jobs/job1/cancel"), url
+        self.cancel_calls += 1
+        if self.unreachable or self.record()["status"] != "pending":
+            raise RuntimeError("HTTP API error 409: only a pending job can be cancelled")
+        self.cancelled = True
+        return {"status": "canceled"}
+
+
+def _await(worker, job, clock, **settings):
+    """Run the parent's wait against a fake worker and a fake queue job."""
+    saved = (adb.http_json_get, adb.http_json_request)
+    adb.http_json_get, adb.http_json_request = job.get, job.post
+    try:
+        return adb._await_worker(worker, worker, _queue_destination("http://q", **settings), now=clock)
+    finally:
+        adb.http_json_get, adb.http_json_request = saved
+
+
+_JOB_MESSAGE = (1, ("job", ("http://q", "job1")))
+
+
+def test_parent_deadline_starts_when_the_job_starts_not_when_it_is_submitted():
+    # One slot, another job ahead: 3,000 s in the queue against a 600 s deadline, then a 400 s run.
+    clock = _FakeClock()
+    job = _FakeQueueJob(clock, starts_at=3000)
+    worker = _FakeWorker(clock, [_JOB_MESSAGE, (3400, ("ok", {"raw_text": "print ok"}))])
+    status, payload = _await(worker, job, clock)
+    assert (status, payload) == ("ok", {"raw_text": "print ok"})
+    assert abs(clock.t - job.zero - 3400) < 1 and not worker.terminated and job.cancel_calls == 0
+
+
+def test_parent_gives_up_on_a_job_that_never_starts_and_cancels_it():
+    clock = _FakeClock()
+    job = _FakeQueueJob(clock)
+    worker = _FakeWorker(clock, [_JOB_MESSAGE])
+    try:
+        _await(worker, job, clock, queue_timeout_seconds=7200)
+    except adb.ProviderTimeoutError as exc:
+        error = exc
+    else:
+        raise AssertionError("the queue wait has its own limit")
+    assert error.infra_kind == "queue_timeout" and 7200 <= clock.t - job.zero <= 7210, (error, clock.t - job.zero)
+    assert worker.terminated and job.cancelled and job.cancel_calls == 1
+    assert error.detail["cancel"] == {"job_id": "job1", "cancelled": True, "job_status": "canceled"}, error.detail
+    assert error.detail["queued_seconds"] >= 7199 and adb.classify_infra_failure(str(error)) == "queue_timeout"
+    attempt = adb.failed_generation_attempt("initial", "aether", error, None)
+    assert attempt["infra_kind"] == "queue_timeout" and adb.classify_attempt(attempt) == "infra_failed"
+
+
+def test_parent_gives_up_on_a_run_past_the_deadline_and_records_the_refused_cancel():
+    clock = _FakeClock()
+    job = _FakeQueueJob(clock, starts_at=3000)
+    worker = _FakeWorker(clock, [_JOB_MESSAGE])  # the worker hangs: it never reports
+    try:
+        _await(worker, job, clock)
+    except adb.NoAnswerError as exc:
+        error = exc
+    else:
+        raise AssertionError("a run past the deadline ends as no_answer")
+    # 600 s of run, plus the margin in which the worker would have reported it itself.
+    assert 3600 <= clock.t - job.zero <= 3600 + 2 * adb._tra_give_up_margin(_queue_destination("http://q"))
+    assert error.kind == "deadline" and error.detail["run_seconds"] >= 600, error.detail
+    cancel = error.detail["cancel"]
+    assert cancel["cancelled"] is False and cancel["job_status"] == "running" and "409" in cancel["note"], cancel
+    assert worker.terminated and job.cancel_calls == 1 and not job.cancelled
+
+
+def test_parent_cancels_the_job_of_a_worker_that_died():
+    clock = _FakeClock()
+    job = _FakeQueueJob(clock)
+    worker = _FakeWorker(clock, [_JOB_MESSAGE])
+    worker.alive, worker.exitcode = False, -9
+    try:
+        _await(worker, job, clock)
+    except adb.ProviderTimeoutError as exc:
+        error = exc
+    else:
+        raise AssertionError("a dead worker cannot answer")
+    assert error.infra_kind == "worker_died" and "-9" in str(error), error
+    assert job.cancelled and error.detail["cancel"]["cancelled"] is True and clock.t - job.zero < 60
+
+
+def test_parent_without_a_queue_job_keeps_the_plain_request_deadline():
+    clock = _FakeClock()
+    job = _FakeQueueJob(clock)
+    worker = _FakeWorker(clock)
+    try:
+        _await(worker, job, clock, kind="openai_chat_completions")
+    except adb.ProviderTimeoutError as exc:
+        error = exc
+    else:
+        raise AssertionError("no reply within the deadline")
+    assert str(error) == "provider request exceeded 600 seconds" and abs(clock.t - job.zero - 600) < 1
+    assert worker.terminated and job.cancel_calls == 0 and not error.detail
+    assert adb.failed_generation_attempt("initial", "aether", error, None)["infra_kind"] == "provider_timeout"
+
+
+def test_parent_gives_up_as_infra_when_the_queue_stops_answering():
+    clock = _FakeClock()
+    job = _FakeQueueJob(clock, starts_at=10)
+    job.unreachable = True
+    worker = _FakeWorker(clock, [_JOB_MESSAGE])
+    try:
+        _await(worker, job, clock)
+    except adb.ProviderTimeoutError as exc:
+        error = exc
+    else:
+        raise AssertionError("an unreachable queue cannot say the model was generating")
+    attempt = adb.failed_generation_attempt("initial", "aether", error, None)
+    assert attempt["infra_kind"] == "provider_timeout" and attempt["infra_detail"]["cancel"]["cancelled"] is False
+    assert 600 < clock.t - job.zero < 900 and worker.terminated
+
+
+def _read_as_the_parent_of_20261009(messages):
+    """run_model_with_deadline's read loop as of 20426ef7..d3ec1209, which a harness
+    started before a deploy still runs against the newer worker."""
+    job = None
+    for status, payload in messages:
+        if status == "job":
+            base, job_id = job = payload
+            continue
+        if status == "ok":
+            return "ok", payload, job
+        if status == "no_answer":
+            message, kind, detail = payload
+            return "no_answer", (message, kind, detail), job
+        return "err", str(RuntimeError(payload)), job
+    raise AssertionError("the worker sent no result")
+
+
+def test_worker_messages_stay_readable_by_an_older_parent():
+    class Pipe(list):
+        put = list.append
+
+    def worker_messages(record, **settings):
+        with fake_tra_queue(record) as (base, state):
+            pipe = Pipe()
+            try:
+                adb._run_model_worker("p", _queue_destination(base, **settings), pipe, None)
+            finally:
+                adb._JOB_REPORTER = None
+        assert [m[0] for m in pipe[:-1]] == ["job"] and pipe[0][1] == (base, "job1"), pipe
+        return _read_as_the_parent_of_20261009(pipe)
+
+    import time
+    started = time.time() - 9000
+    done = {"status": "done", "result": json.dumps({"content": ""})}
+    status, reply, job = worker_messages(lambda state: done)
+    assert status == "ok" and reply["raw_text"] == "" and job[1] == "job1", reply
+    status, (message, kind, detail), job = worker_messages(
+        lambda state: {"status": "running", "started_at": _iso(started)}, request_timeout_seconds=8900)
+    assert status == "no_answer" and kind == "deadline" and detail["cancel"]["cancelled"] is False, detail
+    with _no_give_up_slack():
+        status, message, job = worker_messages(lambda state: {"status": "pending"}, queue_timeout_seconds=1)
+    assert status == "err" and isinstance(message, str) and "did not start within" in message, message
+    # And this parent ignores a kind it does not know instead of taking it for the result.
+    clock = _FakeClock()
+    worker = _FakeWorker(clock, [(1, ("progress", {"tokens": 10})), (2, ("ok", {"raw_text": "x"}))])
+    assert _await(worker, _FakeQueueJob(clock), clock) == ("ok", {"raw_text": "x"})
+
+
+def test_request_deadline_end_to_end_through_a_spawned_worker():
+    """The real parent and a real spawned worker against the stand-in queue: a job queued for
+    twice its deadline is answered, and one that never starts is cancelled at the queue limit."""
+    def slow_slot(state):
+        if state["age"] < 4:
+            return {"status": "pending", "started_at": None}
+        return {"status": "done", "result": json.dumps({"content": "print ok", "finish_reason": "stop"})}
+
+    # The worker is pickled by module name, and an earlier test's
+    # rerun_nogen_cases.load_harness() leaves a second copy of the harness under it.
+    saved = sys.modules.get("aether_doc_bench")
+    sys.modules["aether_doc_bench"] = adb
+    try:
+        with fake_tra_queue(slow_slot) as (base, state):
+            reply = adb.run_model_with_deadline("p", _queue_destination(base, request_timeout_seconds=2))
+            assert reply["raw_text"] == "print ok" and "/jobs/job1/cancel" not in state["posts"], (reply, state)
+
+        with fake_tra_queue(lambda state: {"status": "pending", "started_at": None}) as (base, state):
+            try:
+                adb.run_model_with_deadline("p", _queue_destination(base, queue_timeout_seconds=2))
+            except adb.ProviderTimeoutError as exc:
+                error = exc
+            else:
+                raise AssertionError("a job that never starts must be given up on")
+            assert error.infra_kind == "queue_timeout" and error.detail["cancel"]["cancelled"] is True, error.detail
+            assert state["cancelled"] and state["posts"].count("/jobs/job1/cancel") == 1, state["posts"]
+    finally:
+        if saved is not None:
+            sys.modules["aether_doc_bench"] = saved
+
+
 def _main() -> int:
     failures = 0
     skipped = 0
