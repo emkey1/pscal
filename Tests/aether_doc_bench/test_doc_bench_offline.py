@@ -1800,9 +1800,35 @@ def test_no_answer_error_makes_a_no_answer_attempt_with_repair_feedback():
     assert summary.startswith("no_answer:") and "[" not in summary, summary
 
 
-def test_no_answer_first_attempt_goes_to_repair():
+def test_no_answer_first_attempt_ends_the_case_without_repair():
+    """Owner's rule of 2026-10-12: an empty first attempt is the result; no repair round is sent."""
     task = adb.Task(task_id="t", title="t", prompt="p", expected_stdout="ok\n")
     args = adb.argparse.Namespace(repair_attempts=2, repair_feedback_limit=1200, repair_source_limit=8000)
+    calls = []
+
+    def fake_evaluate(prompt, prompt_kind, destination, task, args, runner="aether", options=None):
+        calls.append(prompt_kind)
+        raise adb.NoAnswerError("no answer: cap", "length")
+
+    saved = adb.evaluate_attempt
+    adb.evaluate_attempt = fake_evaluate
+    try:
+        case = adb.execute_case(initial_prompt="p", destination=None, task=task, args=args,
+                                runner="aether", repair_prompt_builder=lambda **kw: "repair prompt")
+    finally:
+        adb.evaluate_attempt = saved
+    assert calls == ["initial"], calls
+    assert len(case["attempts"]) == 1 and case["attempts"][0]["no_answer"] == "length", case
+    assert case["attempts"][0]["no_repair_after_no_answer"] is True
+    assert not case["run"]["exact_stdout_match"] and not case["infra_failed"], case
+    assert adb.classify_attempt(case["attempts"][0]) == "no_answer"
+
+
+def test_no_answer_first_attempt_goes_to_repair_when_asked():
+    """--repair-after-no-answer reproduces the boards before the 2026-10-12 rule."""
+    task = adb.Task(task_id="t", title="t", prompt="p", expected_stdout="ok\n")
+    args = adb.argparse.Namespace(repair_attempts=2, repair_feedback_limit=1200, repair_source_limit=8000,
+                                  repair_after_no_answer=True)
     calls, summaries = [], []
     passing = {"generated_ok": True, "source_code": "print ok", "finish_reason": "stop",
                "run": {"returncode": 0, "stdout": "ok\n", "stderr": "", "exact_stdout_match": True}}

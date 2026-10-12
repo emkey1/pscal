@@ -3989,7 +3989,7 @@ def report_infra_failed(report: dict[str, Any]) -> int:
 # id and model instead.
 RESUME_REPORT_KEYS = ("tasks_sha256", "binary_sha256", "aether_version")
 RESUME_RUN_CONFIG_KEYS = (
-    "docs", "repeats", "start_repeat", "seed_base", "repair_attempts",
+    "docs", "repeats", "start_repeat", "seed_base", "repair_attempts", "repair_after_no_answer",
     "repair_feedback_limit", "repair_source_limit", "context_margin",
     "min_output_tokens", "shared_guide_batch_size", "python_baseline",
     "rust_baseline", "skip_aether", "task_ids",
@@ -4009,7 +4009,9 @@ def resume_mismatches(prior: dict[str, Any], report: dict[str, Any],
         before = (prior_guides.get(name) or {}).get("sha256")
         if before != record.get("sha256"):
             problems.append(f"guide {name}: the report has sha256 {before}, this run {record.get('sha256')}")
-    prior_config = prior.get("run_config") or {}
+    prior_config = dict(prior.get("run_config") or {})
+    # A report written before the 2026-10-12 rule has no such key and repaired empty first attempts.
+    prior_config.setdefault("repair_after_no_answer", True)
     for key in RESUME_RUN_CONFIG_KEYS:
         if prior_config.get(key) != report["run_config"].get(key):
             problems.append(f"run_config.{key}: the report has {prior_config.get(key)!r}, "
@@ -4184,6 +4186,15 @@ def apply_repairs(
 ) -> list[dict[str, Any]]:
     attempts: list[dict[str, Any]] = [initial_attempt]
     attempt = initial_attempt
+
+    # Owner's rule of 2026-10-12: a first attempt with no program in it is the case's
+    # result. It gets no repair round -- a model that reasons to the end of its budget
+    # once tends to do it again, and each round costs the whole budget. Boards before
+    # this rule sent the no-answer feedback and repaired; --repair-after-no-answer
+    # reproduces them.
+    if attempt_is_no_answer(initial_attempt) and not getattr(args, "repair_after_no_answer", False):
+        initial_attempt["no_repair_after_no_answer"] = True
+        return attempts
 
     if args.repair_attempts > 0 and not attempt["run"]["exact_stdout_match"]:
         for repair_index in range(args.repair_attempts):
@@ -4716,6 +4727,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="when > 0, retry failed cases by feeding diagnostics back to the model",
+    )
+    parser.add_argument(
+        "--repair-after-no-answer",
+        action="store_true",
+        help="send a first attempt that held no program to repair, as boards before 2026-10-12 did "
+             "(default: an empty first attempt ends the case as a failure, with no repair round)",
     )
     parser.add_argument(
         "--repair-feedback-limit",
@@ -5441,6 +5458,7 @@ def _run_benchmark(
             "start_repeat": args.start_repeat,
             "seed_base": args.seed_base,
             "repair_attempts": args.repair_attempts,
+            "repair_after_no_answer": bool(getattr(args, "repair_after_no_answer", False)),
             "repair_feedback_limit": args.repair_feedback_limit,
             "repair_source_limit": args.repair_source_limit,
             "context_margin": args.context_margin,
