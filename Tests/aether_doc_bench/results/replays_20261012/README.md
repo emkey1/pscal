@@ -109,3 +109,34 @@ Observations for W8-27 (the targets are the owner's to fix):
 - The fx A/B itself, as a replay on the experiment arm.
 - Re-run of this directory when the hosted twin's remaining boards (traps for
   the other models, card, small guide) are committed.
+
+## 2026-10-12, later: waivers adopted; a wider re-run finds seven more flips
+
+The owner adopted the proposed 2026-10-08-1 block into the tracked
+`Tests/aether_doc_bench/replay_waivers.json` (commit 57393663). `B_L1.json` here
+is still the first run (124 reports); under the adopted waivers its 15
+pass→fail attempts are all waived.
+
+Re-running B_L1 over the wider set that exists now (142 reports: the hosted
+small-guide board and the finished hosted traps units added; 2,904 first
+attempts, pass 1,918 → 1,972) gave 15 waived and **7 unwaived**, not yet
+decided:
+
+- 2 pass→fail, both NAME-001 as in the adopted block: a parameter `s` beside a
+  const `S` (`trap_upcase_word`, a repair attempt), and a local `base` beside
+  an imported const `Base` (`module_const_import`, a first attempt).
+- **5 moves into silent-wrong, all `trap_life_continue`** (5 programs from two
+  hosted models; one first attempt, four repair attempts). On the baseline
+  compiler each stopped with ARR-003, an out-of-range index; on L0 and L1 each
+  runs to the end and prints the wrong grid. The ARR-003 was the baseline's
+  nested-`continue` defect (the one this trap targets, fixed in L0) driving a
+  loop past its bound. With `continue` working, what remains is each program's
+  own mistake: three count neighbours with `loop dr in -1..1` (a half-open
+  range, so one side is never visited), one prints the count row and the board
+  row alternately, one computes a correct step for a grid it transcribed
+  wrongly. L0 and L1 print identical output for all five, so the move belongs
+  to L0, not L1. Nothing here is a miscompile, but the S gate counts it: fixing
+  a spurious crash exposed programs that were never right.
+
+The consolidated re-run of B_L0 and B_L1 over every committed board follows
+when the hosted card, scale and Python boards land.
