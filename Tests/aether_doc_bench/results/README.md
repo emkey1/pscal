@@ -41,6 +41,25 @@ comparable across these harness changes, which landed together before B0:
   to be filed as a generation error with no attempts.
 - **Temp paths (W1-06).** stderr in repair prompts names the program as
   `task.aether:N:` instead of an absolute temp path.
+- **Empty first attempts (2026-10-09 and 2026-10-12).** Two steps. From harness
+  20426ef7 a first attempt that holds no program because the model used up its
+  token or time budget is a measured model failure (`no_answer`) and not an
+  infrastructure failure to re-run. From 6a44b26d (the owner's rule of
+  2026-10-12) such a first attempt also ends the case: it gets no repair round
+  (`--repair-after-no-answer` gives the earlier behaviour, and `run_config`
+  records which applied). First-attempt numbers are unaffected. After-repair
+  numbers are, for models that reason to the cap: summaries carry both the
+  number as run (`FX`) and the number the rule gives (`FX nr`), and a board run
+  after the rule has only the second.
+  Re-scored on 2026-10-12, every report tracked here before the rule (the
+  history boards, local_tiers_20260811, both Apple on-device runs, the local B0
+  boards and the devstral set: 3,197 cases) holds no case in which an empty
+  first attempt was later repaired into a pass, so none of their published
+  numbers change. The same holds for the eight archived runs behind the reports
+  in `Docs/benchmarks/` (cs-aug19 and cs-aug20 boards, the arity-fix and
+  early-stopping runs: 5,487 cases, 21 empty first attempts, none repaired). The hosted twin of B0 is where the rule bites (its
+  qwen3.5-9b after-repair rate on the small guide is 90.3% as run and 71.3%
+  under the rule); it is published with both columns.
 
 ## Replay and the instrument log
 
