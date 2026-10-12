@@ -1,0 +1,114 @@
+{
+  "_note": [
+    "OpenRouter twin of the B0 panel (2026-10-10). Future boards run on OpenRouter; this is their baseline.",
+    "It is NOT the local panel: providers serve fp8/bf16/int4 weights, not the MLX 8-bit / Q8_0 / PQ2_0 files",
+    "the local boards pinned by sha256, so pair later OpenRouter boards with this twin, never with the local B0.",
+    "",
+    "ONE PROVIDER PER MODEL, pinned (provider.order + allow_fallbacks:false), chosen 2026-10-10 from",
+    "/api/v1/models/<id>/endpoints for: known quantisation, prompt caching, seed support, and an output cap",
+    "as near the local 96,000 as that provider allows. A provider change is a new stamp for the board.",
+    "  qwen3.6-35b-a3b  AkashML    fp8   cap 235,929 -> 96,000   cache read $0.05 (in $0.10, out $0.90)",
+    "  qwen3.6-27b      Chutes     fp8   cap  65,536             cache read $0.03 (in $0.30, out $2.00)",
+    "  qwen3.5-9b       Parasail   bf16  cap 235,929 -> 96,000   no caching offered at bf16 (in $0.10, out $0.25)",
+    "  bonsai-2-27b     Darkbloom  int4  cap  32,768 (only provider)  cache read $0.037 (in $0.075, out $0.50)",
+    "devstral-small-2 and prism-coder-7b are not on OpenRouter.",
+    "",
+    "CACHING. The guide is the shared prefix of every prompt, so a pinned provider with prefix caching reads",
+    "it from cache after the first request; usage.include makes the reply report cached tokens, which the",
+    "harness records per attempt. Verify cached_tokens > 0 in a smoke run before a board.",
+    "",
+    "seed 42 is set here because --seed-base applies to self-hosted destinations only; repeat r sends 42+r.",
+    "stop is null: these are reasoning models and the end marker can fire inside the reasoning.",
+    "The key comes from OPENROUTER_API_KEY in the environment; never put it in this file."
+  ],
+  "destinations": [
+    {
+      "id": "or-qwen36-35b-a3b",
+      "_tier": "mid",
+      "_provider": "AkashML fp8",
+      "type": "openai_chat_completions",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "model": "qwen/qwen3.6-35b-a3b",
+      "temperature": 0.2,
+      "seed": 42,
+      "max_output_tokens": 96000,
+      "prompt_context_limit": 262144,
+      "request_timeout_seconds": 3600,
+      "request_max_retries": 3,
+      "retry_backoff_seconds": 10,
+      "cooldown_seconds": 0,
+      "extra_body": {
+        "stop": null,
+        "provider": {"order": ["AkashML"], "allow_fallbacks": false},
+        "usage": {"include": true}
+      }
+    },
+    {
+      "id": "or-qwen36-27b",
+      "_tier": "mid",
+      "_provider": "Chutes fp8",
+      "type": "openai_chat_completions",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "model": "qwen/qwen3.6-27b",
+      "temperature": 0.2,
+      "seed": 42,
+      "max_output_tokens": 65536,
+      "prompt_context_limit": 262144,
+      "request_timeout_seconds": 3600,
+      "request_max_retries": 3,
+      "retry_backoff_seconds": 10,
+      "cooldown_seconds": 0,
+      "extra_body": {
+        "stop": null,
+        "provider": {"order": ["Chutes"], "allow_fallbacks": false},
+        "usage": {"include": true}
+      }
+    },
+    {
+      "id": "or-qwen35-9b",
+      "_tier": "low",
+      "_provider": "Parasail bf16",
+      "type": "openai_chat_completions",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "model": "qwen/qwen3.5-9b",
+      "temperature": 0.2,
+      "seed": 42,
+      "max_output_tokens": 96000,
+      "prompt_context_limit": 262144,
+      "request_timeout_seconds": 3600,
+      "request_max_retries": 3,
+      "retry_backoff_seconds": 10,
+      "cooldown_seconds": 0,
+      "extra_body": {
+        "stop": null,
+        "provider": {"order": ["Parasail"], "allow_fallbacks": false},
+        "usage": {"include": true}
+      }
+    },
+    {
+      "id": "or-bonsai2-27b-ternary",
+      "_tier": "mid",
+      "_provider": "Darkbloom int4",
+      "type": "openai_chat_completions",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "model": "prism-ml/ternary-bonsai-2-27b",
+      "temperature": 0.2,
+      "seed": 42,
+      "max_output_tokens": 32768,
+      "prompt_context_limit": 262144,
+      "request_timeout_seconds": 3600,
+      "request_max_retries": 3,
+      "retry_backoff_seconds": 10,
+      "cooldown_seconds": 0,
+      "extra_body": {
+        "stop": null,
+        "provider": {"order": ["Darkbloom"], "allow_fallbacks": false},
+        "usage": {"include": true}
+      }
+    }
+  ]
+}

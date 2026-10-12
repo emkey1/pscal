@@ -1,0 +1,71 @@
+2026-10-12T07:46:46Z [pass 1] B0-small lane
+2026-10-12T07:46:46Z lane local start, binary addfeb8da341b1b6f344ab9ad13daba6eb6478623b5b35e2a5ec79555acc9b66
+2026-10-12T07:46:47Z [run ] B0-small or-qwen35-9b__tasks_v2_pos__r0
+2026-10-12T07:46:58Z [warm] or-qwen35-9b is answering after 10s; opening 4 slots
+2026-10-12T07:46:58Z [run ] B0-small or-qwen35-9b__tasks_hard_v2__r0
+2026-10-12T07:46:58Z [run ] B0-small or-qwen35-9b__tasks_hard_nontoon__r0
+2026-10-12T07:46:58Z [run ] B0-small or-qwen35-9b__tasks_cs__r0
+2026-10-12T07:48:10Z [FAIL] B0-small or-qwen35-9b__tasks_hard_v2__r0: REJECT zero variants (quarantined in rejected/)
+2026-10-12T07:48:13Z [run ] B0-small or-qwen35-9b__tasks_v2_pos__r1
+2026-10-12T08:25:45Z [infra] B0-small or-qwen35-9b__tasks_cs__r0: rerun_nogen_cases round 1
+2026-10-12T08:26:11Z [infra] B0-small or-qwen35-9b__tasks_v2_pos__r1: rerun_nogen_cases round 1
+2026-10-12T09:05:37Z [infra] B0-small or-qwen35-9b__tasks_hard_nontoon__r0: rerun_nogen_cases round 1
+2026-10-12T09:06:38Z [infra] B0-small or-qwen35-9b__tasks_v2_pos__r0: rerun_nogen_cases round 1
+2026-10-12T09:22:11Z [done] B0-small or-qwen35-9b__tasks_hard_nontoon__r0 5713s small fa=1/5 fx=1/5 gen=4
+2026-10-12T09:22:18Z [run ] B0-small or-qwen35-9b__tasks_hard_v2__r1
+2026-10-12T10:03:05Z [done] B0-small or-qwen35-9b__tasks_v2_pos__r0 8178s small fa=25/35 fx=35/35 gen=35
+2026-10-12T10:03:06Z [run ] B0-small or-qwen35-9b__tasks_hard_nontoon__r1
+2026-10-12T10:44:20Z [done] B0-small or-qwen35-9b__tasks_hard_v2__r1 4922s small fa=9/14 fx=12/14 gen=12
+2026-10-12T10:44:24Z [run ] B0-small or-qwen35-9b__tasks_cs__r1
+2026-10-12T11:10:50Z [done] B0-small or-qwen35-9b__tasks_hard_nontoon__r1 4064s small fa=1/5 fx=2/5 gen=3
+2026-10-12T11:10:55Z [run ] B0-small or-qwen35-9b__tasks_v2_pos__r2
+2026-10-12T11:11:43Z [done] B0-small or-qwen35-9b__tasks_cs__r0 12285s small fa=13/19 fx=16/19 gen=18
+2026-10-12T11:11:55Z [run ] B0-small or-qwen35-9b__tasks_hard_v2__r2
+2026-10-12T11:18:52Z [done] B0-small or-qwen35-9b__tasks_v2_pos__r1 12639s small fa=24/35 fx=35/35 gen=35
+2026-10-12T11:18:56Z [run ] B0-small or-qwen35-9b__tasks_hard_nontoon__r2
+2026-10-12T11:26:24Z [re-plan] hosted Bonsai dropped from the remaining boards (owner); lanes restarted from their checkpoints
+2026-10-12T11:26:24Z [pass 1] small lane without hosted Bonsai
+2026-10-12T11:26:24Z lane local start, binary addfeb8da341b1b6f344ab9ad13daba6eb6478623b5b35e2a5ec79555acc9b66
+2026-10-12T11:26:25Z [skip] B0-small or-qwen35-9b__tasks_v2_pos__r0
+2026-10-12T11:26:25Z [run ] B0-small or-qwen35-9b__tasks_hard_v2__r0
+2026-10-12T11:26:30Z [warm] or-qwen35-9b is answering after 5s; opening 4 slots
+2026-10-12T11:26:30Z [skip] B0-small or-qwen35-9b__tasks_hard_nontoon__r0
+2026-10-12T11:26:30Z [skip] B0-small or-qwen35-9b__tasks_cs__r0
+2026-10-12T11:26:30Z [skip] B0-small or-qwen35-9b__tasks_v2_pos__r1
+2026-10-12T11:26:30Z [skip] B0-small or-qwen35-9b__tasks_hard_v2__r1
+2026-10-12T11:26:30Z [skip] B0-small or-qwen35-9b__tasks_hard_nontoon__r1
+2026-10-12T11:26:30Z [run ] B0-small or-qwen35-9b__tasks_cs__r1
+2026-10-12T11:26:30Z [run ] B0-small or-qwen35-9b__tasks_v2_pos__r2
+2026-10-12T11:26:30Z [run ] B0-small or-qwen35-9b__tasks_hard_v2__r2
+2026-10-12T12:48:35Z [infra] B0-small or-qwen35-9b__tasks_hard_v2__r2: rerun_nogen_cases round 1
+2026-10-12T13:09:47Z [infra] B0-small or-qwen35-9b__tasks_hard_v2__r0: rerun_nogen_cases round 1
+2026-10-12T13:27:24Z [infra] B0-small or-qwen35-9b__tasks_cs__r1: rerun_nogen_cases round 1
+2026-10-12T13:29:18Z [infra] B0-small or-qwen35-9b__tasks_v2_pos__r2: rerun_nogen_cases round 1
+2026-10-12T13:46:31Z [done] B0-small or-qwen35-9b__tasks_hard_v2__r2 8401s small fa=10/14 fx=14/14 gen=14
+2026-10-12T13:46:39Z [run ] B0-small or-qwen35-9b__tasks_hard_nontoon__r2
+2026-10-12T13:47:14Z [done] B0-small or-qwen35-9b__tasks_hard_v2__r0 8449s small fa=9/14 fx=14/14 gen=14
+2026-10-12T13:47:24Z [run ] B0-small or-qwen35-9b__tasks_cs__r2
+2026-10-12T13:51:40Z [done] B0-small or-qwen35-9b__tasks_hard_nontoon__r2 301s small fa=1/3 fx=2/3 gen=3
+2026-10-12T14:08:16Z [done] B0-small or-qwen35-9b__tasks_cs__r1 9706s small fa=11/19 fx=14/19 gen=15
+2026-10-12T14:27:14Z [done] B0-small or-qwen35-9b__tasks_v2_pos__r2 10844s small fa=24/35 fx=33/35 gen=33
+2026-10-12T14:29:17Z [fix] B0-small or-qwen35-9b__tasks_hard_nontoon__r2 was accepted with 3 of 5 cases (resume + failed model check); turned back into a checkpoint for the second pass
+2026-10-12T15:16:31Z [done] B0-small or-qwen35-9b__tasks_cs__r2 5347s small fa=7/19 fx=14/19 gen=17
+2026-10-12T15:16:44Z lane local COMPLETE
+2026-10-12T15:16:44Z [pass 2] small lane without hosted Bonsai
+2026-10-12T15:16:44Z lane local start, binary addfeb8da341b1b6f344ab9ad13daba6eb6478623b5b35e2a5ec79555acc9b66
+2026-10-12T15:16:45Z [skip] B0-small or-qwen35-9b__tasks_v2_pos__r0
+2026-10-12T15:16:45Z [skip] B0-small or-qwen35-9b__tasks_hard_v2__r0
+2026-10-12T15:16:45Z [skip] B0-small or-qwen35-9b__tasks_hard_nontoon__r0
+2026-10-12T15:16:45Z [skip] B0-small or-qwen35-9b__tasks_cs__r0
+2026-10-12T15:16:45Z [skip] B0-small or-qwen35-9b__tasks_v2_pos__r1
+2026-10-12T15:16:45Z [skip] B0-small or-qwen35-9b__tasks_hard_v2__r1
+2026-10-12T15:16:45Z [skip] B0-small or-qwen35-9b__tasks_hard_nontoon__r1
+2026-10-12T15:16:45Z [skip] B0-small or-qwen35-9b__tasks_cs__r1
+2026-10-12T15:16:45Z [skip] B0-small or-qwen35-9b__tasks_v2_pos__r2
+2026-10-12T15:16:45Z [skip] B0-small or-qwen35-9b__tasks_hard_v2__r2
+2026-10-12T15:16:45Z [warm] or-qwen35-9b is answering after 0s; opening 4 slots
+2026-10-12T15:16:45Z [run ] B0-small or-qwen35-9b__tasks_hard_nontoon__r2
+2026-10-12T15:16:45Z [skip] B0-small or-qwen35-9b__tasks_cs__r2
+2026-10-12T15:53:24Z [done] B0-small or-qwen35-9b__tasks_hard_nontoon__r2 2199s small fa=1/5 fx=2/5 gen=3
+2026-10-12T15:53:32Z lane local COMPLETE
+2026-10-12T15:53:32Z [small lane finished]

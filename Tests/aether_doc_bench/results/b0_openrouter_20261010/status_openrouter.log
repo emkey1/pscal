@@ -1,0 +1,215 @@
+2026-10-10T15:51:00Z lane local start, binary addfeb8da341b1b6f344ab9ad13daba6eb6478623b5b35e2a5ec79555acc9b66
+2026-10-10T15:51:39Z [run ] B0 or-qwen36-35b-a3b__tasks_v2_pos__r0
+2026-10-10T15:51:39Z [run ] B0 or-qwen36-35b-a3b__tasks_hard_v2__r0
+2026-10-10T15:51:39Z [run ] B0 or-qwen36-35b-a3b__tasks_hard_nontoon__r0
+2026-10-10T15:51:40Z [run ] B0 or-qwen36-35b-a3b__tasks_cs__r0
+2026-10-10T15:54:46Z [done] B0 or-qwen36-35b-a3b__tasks_hard_nontoon__r0 187s medium fa=3/5 fx=5/5 gen=5
+2026-10-10T15:54:55Z [run ] B0 or-qwen36-35b-a3b__tasks_v2_pos__r1
+2026-10-10T15:55:52Z [done] B0 or-qwen36-35b-a3b__tasks_hard_v2__r0 253s medium fa=14/14 fx=14/14 gen=14
+2026-10-10T15:55:55Z [run ] B0 or-qwen36-35b-a3b__tasks_hard_v2__r1
+2026-10-10T15:56:55Z [done] B0 or-qwen36-35b-a3b__tasks_v2_pos__r0 316s medium fa=34/35 fx=35/35 gen=35
+2026-10-10T15:56:55Z [run ] B0 or-qwen36-35b-a3b__tasks_hard_nontoon__r1
+2026-10-10T15:57:16Z [done] B0 or-qwen36-35b-a3b__tasks_cs__r0 336s medium fa=17/19 fx=19/19 gen=19
+2026-10-10T15:57:25Z [run ] B0 or-qwen36-35b-a3b__tasks_cs__r1
+2026-10-10T16:00:11Z [done] B0 or-qwen36-35b-a3b__tasks_v2_pos__r1 316s medium fa=35/35 fx=35/35 gen=35
+2026-10-10T16:00:25Z [run ] B0 or-qwen36-35b-a3b__tasks_v2_pos__r2
+2026-10-10T16:00:37Z [done] B0 or-qwen36-35b-a3b__tasks_hard_nontoon__r1 222s medium fa=4/5 fx=5/5 gen=5
+2026-10-10T16:00:40Z [run ] B0 or-qwen36-35b-a3b__tasks_hard_v2__r2
+2026-10-10T16:02:16Z [done] B0 or-qwen36-35b-a3b__tasks_hard_v2__r1 381s medium fa=14/14 fx=14/14 gen=14
+2026-10-10T16:02:25Z [run ] B0 or-qwen36-35b-a3b__tasks_hard_nontoon__r2
+2026-10-10T16:03:24Z [done] B0 or-qwen36-35b-a3b__tasks_cs__r1 359s medium fa=19/19 fx=19/19 gen=19
+2026-10-10T16:03:26Z [drain] waiting for or-qwen36-35b-a3b units before or-qwen36-27b
+2026-10-10T16:03:26Z [run ] B0 or-qwen36-35b-a3b__tasks_cs__r2
+2026-10-10T16:07:23Z [done] B0 or-qwen36-35b-a3b__tasks_hard_nontoon__r2 298s medium fa=3/5 fx=4/5 gen=5
+2026-10-10T16:08:01Z [done] B0 or-qwen36-35b-a3b__tasks_v2_pos__r2 456s medium fa=33/35 fx=35/35 gen=35
+2026-10-10T16:09:08Z [done] B0 or-qwen36-35b-a3b__tasks_hard_v2__r2 508s medium fa=14/14 fx=14/14 gen=14
+2026-10-10T16:11:18Z [done] B0 or-qwen36-35b-a3b__tasks_cs__r2 472s medium fa=19/19 fx=19/19 gen=19
+2026-10-10T16:11:26Z [run ] B0 or-qwen36-27b__tasks_v2_pos__r0
+2026-10-10T16:11:26Z [run ] B0 or-qwen36-27b__tasks_hard_v2__r0
+2026-10-10T16:11:26Z [run ] B0 or-qwen36-27b__tasks_hard_nontoon__r0
+2026-10-10T16:11:26Z [run ] B0 or-qwen36-27b__tasks_cs__r0
+2026-10-10T16:20:15Z [done] B0 or-qwen36-27b__tasks_hard_nontoon__r0 529s medium fa=4/5 fx=5/5 gen=5
+2026-10-10T16:20:27Z [run ] B0 or-qwen36-27b__tasks_v2_pos__r1
+2026-10-10T16:27:31Z [infra] B0 or-qwen36-27b__tasks_hard_v2__r0: rerun_nogen_cases round 1
+2026-10-10T16:28:25Z [done] B0 or-qwen36-27b__tasks_v2_pos__r0 1019s medium fa=35/35 fx=35/35 gen=35
+2026-10-10T16:28:27Z [run ] B0 or-qwen36-27b__tasks_hard_v2__r1
+2026-10-10T16:31:21Z [done] B0 or-qwen36-27b__tasks_hard_v2__r0 1195s medium fa=14/14 fx=14/14 gen=14
+2026-10-10T16:31:27Z [run ] B0 or-qwen36-27b__tasks_hard_nontoon__r1
+2026-10-10T16:34:37Z [done] B0 or-qwen36-27b__tasks_cs__r0 1391s medium fa=17/19 fx=19/19 gen=19
+2026-10-10T16:34:43Z [run ] B0 or-qwen36-27b__tasks_cs__r1
+2026-10-10T16:38:11Z [done] B0 or-qwen36-27b__tasks_v2_pos__r1 1064s medium fa=35/35 fx=35/35 gen=35
+2026-10-10T16:38:13Z [run ] B0 or-qwen36-27b__tasks_v2_pos__r2
+2026-10-10T16:45:05Z [done] B0 or-qwen36-27b__tasks_hard_nontoon__r1 818s medium fa=4/5 fx=5/5 gen=5
+2026-10-10T16:45:13Z [run ] B0 or-qwen36-27b__tasks_hard_v2__r2
+2026-10-10T16:47:07Z [done] B0 or-qwen36-27b__tasks_hard_v2__r1 1120s medium fa=14/14 fx=14/14 gen=14
+2026-10-10T16:47:14Z [run ] B0 or-qwen36-27b__tasks_hard_nontoon__r2
+2026-10-10T16:49:29Z [done] B0 or-qwen36-27b__tasks_cs__r1 886s medium fa=19/19 fx=19/19 gen=19
+2026-10-10T16:49:44Z [drain] waiting for or-qwen36-27b units before or-qwen35-9b
+2026-10-10T16:49:44Z [run ] B0 or-qwen36-27b__tasks_cs__r2
+2026-10-10T16:54:33Z [done] B0 or-qwen36-27b__tasks_v2_pos__r2 980s medium fa=35/35 fx=35/35 gen=35
+2026-10-10T16:56:39Z [done] B0 or-qwen36-27b__tasks_hard_nontoon__r2 565s medium fa=5/5 fx=5/5 gen=5
+2026-10-10T17:03:49Z [done] B0 or-qwen36-27b__tasks_cs__r2 845s medium fa=19/19 fx=19/19 gen=19
+2026-10-10T17:36:23Z [done] B0 or-qwen36-27b__tasks_hard_v2__r2 3070s medium fa=13/14 fx=14/14 gen=14
+2026-10-10T17:36:32Z [run ] B0 or-qwen35-9b__tasks_v2_pos__r0
+2026-10-10T17:36:32Z [run ] B0 or-qwen35-9b__tasks_hard_v2__r0
+2026-10-10T17:36:32Z [run ] B0 or-qwen35-9b__tasks_hard_nontoon__r0
+2026-10-10T17:36:32Z [run ] B0 or-qwen35-9b__tasks_cs__r0
+2026-10-10T18:26:25Z [done] B0 or-qwen35-9b__tasks_hard_nontoon__r0 2993s medium fa=2/5 fx=2/5 gen=3
+2026-10-10T18:26:35Z [run ] B0 or-qwen35-9b__tasks_v2_pos__r1
+2026-10-10T18:28:36Z [done] B0 or-qwen35-9b__tasks_v2_pos__r0 3124s medium fa=26/35 fx=34/35 gen=35
+2026-10-10T18:28:50Z [run ] B0 or-qwen35-9b__tasks_hard_v2__r1
+2026-10-10T18:49:08Z [done] B0 or-qwen35-9b__tasks_v2_pos__r1 1353s medium fa=32/35 fx=34/35 gen=35
+2026-10-10T18:49:21Z [run ] B0 or-qwen35-9b__tasks_hard_nontoon__r1
+2026-10-10T19:02:47Z [done] B0 or-qwen35-9b__tasks_cs__r0 5175s medium fa=15/19 fx=17/19 gen=17
+2026-10-10T19:02:52Z [run ] B0 or-qwen35-9b__tasks_cs__r1
+2026-10-10T19:07:43Z [done] B0 or-qwen35-9b__tasks_hard_v2__r0 5471s medium fa=4/14 fx=10/14 gen=11
+2026-10-10T19:07:52Z [run ] B0 or-qwen35-9b__tasks_v2_pos__r2
+2026-10-10T19:36:00Z [done] B0 or-qwen35-9b__tasks_hard_v2__r1 4030s medium fa=6/14 fx=10/14 gen=12
+2026-10-10T19:36:09Z [run ] B0 or-qwen35-9b__tasks_hard_v2__r2
+2026-10-10T20:28:34Z [done] B0 or-qwen35-9b__tasks_hard_nontoon__r1 5953s medium fa=1/5 fx=3/5 gen=4
+2026-10-10T20:28:42Z [run ] B0 or-qwen35-9b__tasks_hard_nontoon__r2
+2026-10-10T20:36:01Z [infra] B0 or-qwen35-9b__tasks_v2_pos__r2: rerun_nogen_cases round 1
+2026-10-10T21:20:07Z [infra] B0 or-qwen35-9b__tasks_cs__r1: rerun_nogen_cases round 1
+2026-10-10T22:12:49Z [done] B0 or-qwen35-9b__tasks_v2_pos__r2 11097s medium fa=27/35 fx=34/35 gen=35
+2026-10-10T22:13:04Z [drain] waiting for or-qwen35-9b units before or-bonsai2-27b-ternary
+2026-10-10T22:13:04Z [run ] B0 or-qwen35-9b__tasks_cs__r2
+2026-10-10T22:13:14Z [infra] B0 or-qwen35-9b__tasks_hard_v2__r2: rerun_nogen_cases round 1
+2026-10-10T22:43:29Z [infra] B0 or-qwen35-9b__tasks_hard_nontoon__r2: rerun_nogen_cases round 1
+2026-10-10T23:23:03Z [done] B0 or-qwen35-9b__tasks_hard_v2__r2 13614s medium fa=3/14 fx=11/14 gen=12
+2026-10-11T00:20:49Z [done] B0 or-qwen35-9b__tasks_hard_nontoon__r2 13927s medium fa=2/5 fx=2/5 gen=3
+2026-10-11T00:40:45Z [done] B0 or-qwen35-9b__tasks_cs__r1 20273s medium fa=10/19 fx=14/19 gen=16
+2026-10-11T01:08:49Z [infra] B0 or-qwen35-9b__tasks_cs__r2: rerun_nogen_cases round 1
+2026-10-11T01:09:40Z [done] B0 or-qwen35-9b__tasks_cs__r2 10596s medium fa=8/19 fx=15/19 gen=15
+2026-10-11T01:09:44Z [run ] B0 or-bonsai2-27b-ternary__tasks_v2_pos__r0
+2026-10-11T01:09:44Z [run ] B0 or-bonsai2-27b-ternary__tasks_hard_v2__r0
+2026-10-11T01:09:44Z [run ] B0 or-bonsai2-27b-ternary__tasks_hard_nontoon__r0
+2026-10-11T01:09:44Z [run ] B0 or-bonsai2-27b-ternary__tasks_cs__r0
+2026-10-11T01:55:52Z [done] B0 or-bonsai2-27b-ternary__tasks_v2_pos__r0 2768s medium fa=34/35 fx=35/35 gen=35
+2026-10-11T01:56:02Z [run ] B0 or-bonsai2-27b-ternary__tasks_v2_pos__r1
+2026-10-11T02:35:23Z [done] B0 or-bonsai2-27b-ternary__tasks_v2_pos__r1 2361s medium fa=35/35 fx=35/35 gen=35
+2026-10-11T02:35:35Z [run ] B0 or-bonsai2-27b-ternary__tasks_hard_v2__r1
+2026-10-11T03:18:38Z [done] B0 or-bonsai2-27b-ternary__tasks_hard_nontoon__r0 7734s medium fa=1/5 fx=3/5 gen=3
+2026-10-11T03:18:52Z [run ] B0 or-bonsai2-27b-ternary__tasks_hard_nontoon__r1
+2026-10-11T03:39:07Z [done] B0 or-bonsai2-27b-ternary__tasks_cs__r0 8963s medium fa=15/19 fx=18/19 gen=18
+2026-10-11T03:39:08Z [run ] B0 or-bonsai2-27b-ternary__tasks_cs__r1
+2026-10-11T05:08:18Z [done] B0 or-bonsai2-27b-ternary__tasks_hard_v2__r0 14314s medium fa=7/14 fx=12/14 gen=12
+2026-10-11T05:08:29Z [run ] B0 or-bonsai2-27b-ternary__tasks_v2_pos__r2
+2026-10-11T05:08:29Z [done] B0 or-bonsai2-27b-ternary__tasks_hard_nontoon__r1 6577s medium fa=1/5 fx=3/5 gen=4
+2026-10-11T05:08:44Z [run ] B0 or-bonsai2-27b-ternary__tasks_hard_v2__r2
+2026-10-11T05:38:37Z [done] B0 or-bonsai2-27b-ternary__tasks_v2_pos__r2 1808s medium fa=35/35 fx=35/35 gen=35
+2026-10-11T05:38:46Z [run ] B0 or-bonsai2-27b-ternary__tasks_hard_nontoon__r2
+2026-10-11T05:58:08Z [done] B0 or-bonsai2-27b-ternary__tasks_cs__r1 8340s medium fa=16/19 fx=18/19 gen=19
+2026-10-11T05:58:17Z [drain] waiting for or-bonsai2-27b-ternary units before or-qwen36-35b-a3b
+2026-10-11T05:58:17Z [run ] B0 or-bonsai2-27b-ternary__tasks_cs__r2
+2026-10-11T06:40:07Z [done] B0 or-bonsai2-27b-ternary__tasks_hard_v2__r1 14672s medium fa=7/14 fx=10/14 gen=10
+2026-10-11T06:55:27Z [done] B0 or-bonsai2-27b-ternary__tasks_cs__r2 3430s medium fa=15/19 fx=19/19 gen=19
+2026-10-11T07:36:10Z [infra] B0 or-bonsai2-27b-ternary__tasks_hard_nontoon__r2: rerun_nogen_cases round 1
+2026-10-11T08:40:29Z [done] B0 or-bonsai2-27b-ternary__tasks_hard_nontoon__r2 10903s medium fa=3/5 fx=4/5 gen=4
+2026-10-11T08:47:47Z [infra] B0 or-bonsai2-27b-ternary__tasks_hard_v2__r2: rerun_nogen_cases round 1
+2026-10-11T10:01:22Z [infra] B0 or-bonsai2-27b-ternary__tasks_hard_v2__r2: rerun_nogen_cases round 2
+2026-10-11T12:05:47Z [done] B0 or-bonsai2-27b-ternary__tasks_hard_v2__r2 25023s medium fa=7/14 fx=12/14 gen=12
+2026-10-11T12:05:53Z [run ] B1 or-qwen36-35b-a3b__tasks_traps__r0
+2026-10-11T12:05:53Z [run ] B1 or-qwen36-35b-a3b__tasks_traps__r1
+2026-10-11T12:05:53Z [drain] waiting for or-qwen36-35b-a3b units before or-qwen36-27b
+2026-10-11T12:05:53Z [run ] B1 or-qwen36-35b-a3b__tasks_traps__r2
+2026-10-11T12:05:59Z [FAIL] B1 or-qwen36-35b-a3b__tasks_traps__r1: REJECT zero variants (quarantined in rejected/)
+2026-10-11T12:05:59Z [FAIL] B1 or-qwen36-35b-a3b__tasks_traps__r0: REJECT zero variants (quarantined in rejected/)
+2026-10-11T12:05:59Z [FAIL] B1 or-qwen36-35b-a3b__tasks_traps__r2: REJECT zero variants (quarantined in rejected/)
+2026-10-11T12:06:08Z [run ] B1 or-qwen36-27b__tasks_traps__r0
+2026-10-11T12:06:08Z [run ] B1 or-qwen36-27b__tasks_traps__r1
+2026-10-11T12:06:08Z [drain] waiting for or-qwen36-27b units before or-qwen35-9b
+2026-10-11T12:06:08Z [run ] B1 or-qwen36-27b__tasks_traps__r2
+2026-10-11T14:14:33Z [done] B1 or-qwen36-27b__tasks_traps__r1 7705s medium fa=14/24 fx=20/24 gen=24; card fa=9/24 fx=20/24 gen=24
+2026-10-11T14:32:57Z [done] B1 or-qwen36-27b__tasks_traps__r2 8809s medium fa=12/24 fx=18/24 gen=23; card fa=11/24 fx=19/24 gen=24
+2026-10-11T14:36:20Z [done] B1 or-qwen36-27b__tasks_traps__r0 9012s medium fa=12/24 fx=18/24 gen=23; card fa=11/24 fx=18/24 gen=24
+2026-10-11T14:36:32Z [run ] B1 or-qwen35-9b__tasks_traps__r0
+2026-10-11T14:36:32Z [run ] B1 or-qwen35-9b__tasks_traps__r1
+2026-10-11T14:36:32Z [drain] waiting for or-qwen35-9b units before or-bonsai2-27b-ternary
+2026-10-11T14:36:32Z [run ] B1 or-qwen35-9b__tasks_traps__r2
+2026-10-11T23:47:46Z [infra] B1 or-qwen35-9b__tasks_traps__r1: rerun_nogen_cases round 1
+2026-10-12T00:05:36Z [infra] B1 or-qwen35-9b__tasks_traps__r0: rerun_nogen_cases round 1
+2026-10-12T00:45:27Z [infra] B1 or-qwen35-9b__tasks_traps__r2: rerun_nogen_cases round 1
+2026-10-12T08:20:54Z [infra] B1 or-qwen35-9b__tasks_traps__r1: rerun_nogen_cases round 2
+2026-10-12T08:23:20Z [infra] B1 or-qwen35-9b__tasks_traps__r1: rerun_nogen_cases round 3
+2026-10-12T08:25:45Z [FAIL] B1 or-qwen35-9b__tasks_traps__r1: infra-failed cases remain, parked in infra_pending/
+2026-10-12T09:39:38Z [done] B1 or-qwen35-9b__tasks_traps__r0 68586s medium fa=10/24 fx=13/24 gen=20; card fa=3/24 fx=7/24 gen=7
+2026-10-12T11:26:24Z [re-plan] hosted Bonsai dropped from the remaining boards (owner); lanes restarted from their checkpoints
+2026-10-12T11:26:24Z [pass 1] main lane without hosted Bonsai
+2026-10-12T11:26:24Z lane local start, binary addfeb8da341b1b6f344ab9ad13daba6eb6478623b5b35e2a5ec79555acc9b66
+2026-10-12T11:27:00Z [run ] B1 or-qwen36-35b-a3b__tasks_traps__r0
+2026-10-12T11:27:05Z [warm] or-qwen36-35b-a3b is answering after 5s; opening 4 slots
+2026-10-12T11:27:05Z [run ] B1 or-qwen36-35b-a3b__tasks_traps__r1
+2026-10-12T11:27:05Z [skip] B1 or-qwen36-27b__tasks_traps__r0
+2026-10-12T11:27:05Z [run ] B1 or-qwen36-35b-a3b__tasks_traps__r2
+2026-10-12T11:27:05Z [skip] B1 or-qwen36-27b__tasks_traps__r1
+2026-10-12T11:27:05Z [skip] B1 or-qwen36-27b__tasks_traps__r2
+2026-10-12T11:27:05Z [skip] B1 or-qwen35-9b__tasks_traps__r0
+2026-10-12T11:27:05Z [drain] waiting for or-qwen36-35b-a3b units before or-qwen35-9b
+2026-10-12T12:57:00Z [infra] B1 or-qwen36-35b-a3b__tasks_traps__r1: rerun_nogen_cases round 1
+2026-10-12T13:01:22Z [infra] B1 or-qwen36-35b-a3b__tasks_traps__r0: rerun_nogen_cases round 1
+2026-10-12T13:05:04Z [infra] B1 or-qwen36-35b-a3b__tasks_traps__r2: rerun_nogen_cases round 1
+2026-10-12T13:10:04Z [done] B1 or-qwen36-35b-a3b__tasks_traps__r1 6179s medium fa=14/24 fx=16/24 gen=24; card fa=9/24 fx=15/24 gen=24
+2026-10-12T13:22:57Z [done] B1 or-qwen36-35b-a3b__tasks_traps__r0 6957s medium fa=12/24 fx=16/24 gen=24; card fa=11/24 fx=15/24 gen=24
+2026-10-12T13:40:22Z [done] B1 or-qwen36-35b-a3b__tasks_traps__r2 7997s medium fa=12/24 fx=15/24 gen=24; card fa=10/24 fx=16/24 gen=22
+2026-10-12T13:40:28Z [warm] or-qwen35-9b is answering after 0s; opening 4 slots
+2026-10-12T13:40:28Z [run ] B1 or-qwen35-9b__tasks_traps__r1
+2026-10-12T13:40:28Z [drain] waiting for or-qwen35-9b units before or-qwen36-35b-a3b
+2026-10-12T13:40:28Z [run ] B1 or-qwen35-9b__tasks_traps__r2
+2026-10-12T14:38:47Z [done] B1 or-qwen35-9b__tasks_traps__r1 3499s medium fa=10/24 fx=12/24 gen=19; card fa=4/24 fx=7/24 gen=10
+2026-10-12T14:38:48Z [done] B1 or-qwen35-9b__tasks_traps__r2 3500s medium fa=11/24 fx=11/24 gen=15; card fa=1/24 fx=1/24 gen=3
+2026-10-12T14:39:02Z [run ] P0 or-qwen36-35b-a3b__tasks_v2_pos__r0
+2026-10-12T14:39:08Z [FAIL] P0 or-qwen36-35b-a3b__tasks_v2_pos__r0: REJECT zero variants (quarantined in rejected/)
+2026-10-12T14:39:12Z [warm] or-qwen36-35b-a3b__tasks_v2_pos__r0 gave no case in 10s; the next or-qwen36-35b-a3b unit warms again
+2026-10-12T14:39:12Z [run ] P0 or-qwen36-35b-a3b__tasks_cs__r0
+2026-10-12T14:39:18Z [FAIL] P0 or-qwen36-35b-a3b__tasks_cs__r0: REJECT zero variants (quarantined in rejected/)
+2026-10-12T14:39:22Z [warm] or-qwen36-35b-a3b__tasks_cs__r0 gave no case in 10s; the next or-qwen36-35b-a3b unit warms again
+2026-10-12T14:39:22Z [run ] P0 or-qwen36-35b-a3b__tasks_v2_pos__r1
+2026-10-12T14:39:28Z [FAIL] P0 or-qwen36-35b-a3b__tasks_v2_pos__r1: REJECT zero variants (quarantined in rejected/)
+2026-10-12T14:39:32Z [warm] or-qwen36-35b-a3b__tasks_v2_pos__r1 gave no case in 10s; the next or-qwen36-35b-a3b unit warms again
+2026-10-12T14:39:32Z [run ] P0 or-qwen36-35b-a3b__tasks_cs__r1
+2026-10-12T14:39:37Z [FAIL] P0 or-qwen36-35b-a3b__tasks_cs__r1: REJECT zero variants (quarantined in rejected/)
+2026-10-12T14:39:42Z [warm] or-qwen36-35b-a3b__tasks_cs__r1 gave no case in 10s; the next or-qwen36-35b-a3b unit warms again
+2026-10-12T14:39:42Z [run ] P0 or-qwen36-35b-a3b__tasks_v2_pos__r2
+2026-10-12T14:39:47Z [FAIL] P0 or-qwen36-35b-a3b__tasks_v2_pos__r2: REJECT zero variants (quarantined in rejected/)
+2026-10-12T14:39:52Z [warm] or-qwen36-35b-a3b__tasks_v2_pos__r2 gave no case in 10s; the next or-qwen36-35b-a3b unit warms again
+2026-10-12T14:39:52Z [run ] P0 or-qwen36-35b-a3b__tasks_cs__r2
+2026-10-12T14:39:57Z [FAIL] P0 or-qwen36-35b-a3b__tasks_cs__r2: REJECT zero variants (quarantined in rejected/)
+2026-10-12T14:40:02Z [warm] or-qwen36-35b-a3b__tasks_cs__r2 gave no case in 10s; the next or-qwen36-35b-a3b unit warms again
+2026-10-12T14:40:02Z [run ] P0 or-qwen36-27b__tasks_v2_pos__r0
+2026-10-12T14:40:12Z [warm] or-qwen36-27b is answering after 10s; opening 4 slots
+2026-10-12T14:40:12Z [run ] P0 or-qwen36-27b__tasks_cs__r0
+2026-10-12T14:40:12Z [run ] P0 or-qwen36-27b__tasks_v2_pos__r1
+2026-10-12T14:40:12Z [run ] P0 or-qwen36-27b__tasks_cs__r1
+2026-10-12T14:45:03Z [rule switch] main lane stopped at the B1/P0 boundary; P0, S0 and BP wait for the new harness
+2026-10-12T15:54:05Z [rule switch] B1 leftovers, pass 1, old harness 20426ef7
+2026-10-12T15:54:05Z lane local start, binary addfeb8da341b1b6f344ab9ad13daba6eb6478623b5b35e2a5ec79555acc9b66
+2026-10-12T15:54:07Z [skip] B1 or-qwen36-35b-a3b__tasks_traps__r0
+2026-10-12T15:54:07Z [skip] B1 or-qwen36-35b-a3b__tasks_traps__r1
+2026-10-12T15:54:07Z [skip] B1 or-qwen36-35b-a3b__tasks_traps__r2
+2026-10-12T15:54:07Z [skip] B1 or-qwen36-27b__tasks_traps__r0
+2026-10-12T15:54:07Z [skip] B1 or-qwen36-27b__tasks_traps__r1
+2026-10-12T15:54:07Z [skip] B1 or-qwen36-27b__tasks_traps__r2
+2026-10-12T15:54:07Z [skip] B1 or-qwen35-9b__tasks_traps__r0
+2026-10-12T15:54:07Z [skip] B1 or-qwen35-9b__tasks_traps__r1
+2026-10-12T15:54:07Z [skip] B1 or-qwen35-9b__tasks_traps__r2
+2026-10-12T15:54:07Z lane local COMPLETE
+2026-10-12T15:54:07Z [rule switch] B1 leftovers, pass 2, old harness 20426ef7
+2026-10-12T15:54:07Z lane local start, binary addfeb8da341b1b6f344ab9ad13daba6eb6478623b5b35e2a5ec79555acc9b66
+2026-10-12T15:54:10Z [skip] B1 or-qwen36-35b-a3b__tasks_traps__r0
+2026-10-12T15:54:10Z [skip] B1 or-qwen36-35b-a3b__tasks_traps__r1
+2026-10-12T15:54:10Z [skip] B1 or-qwen36-35b-a3b__tasks_traps__r2
+2026-10-12T15:54:10Z [skip] B1 or-qwen36-27b__tasks_traps__r0
+2026-10-12T15:54:10Z [skip] B1 or-qwen36-27b__tasks_traps__r1
+2026-10-12T15:54:10Z [skip] B1 or-qwen36-27b__tasks_traps__r2
+2026-10-12T15:54:10Z [skip] B1 or-qwen35-9b__tasks_traps__r0
+2026-10-12T15:54:10Z [skip] B1 or-qwen35-9b__tasks_traps__r1
+2026-10-12T15:54:10Z [skip] B1 or-qwen35-9b__tasks_traps__r2
+2026-10-12T15:54:10Z lane local COMPLETE
+2026-10-12T15:54:12Z [rule switch] harness now origin/main a9a457f5 (sha256 60002d812c6c): P0, S0, BP run under the no-retry rule
+2026-10-12T15:54:12Z [pass 1] P0 S0 BP under the no-retry rule
+2026-10-12T15:54:12Z lane local start, binary addfeb8da341b1b6f344ab9ad13daba6eb6478623b5b35e2a5ec79555acc9b66
+2026-10-12T15:54:44Z [run ] P0 or-qwen36-35b-a3b__tasks_v2_pos__r0
+2026-10-12T15:54:49Z [warm] or-qwen36-35b-a3b is answering after 5s; opening 4 slots
+2026-10-12T15:54:49Z [run ] P0 or-qwen36-35b-a3b__tasks_cs__r0
+2026-10-12T15:54:49Z [run ] P0 or-qwen36-35b-a3b__tasks_v2_pos__r1
+2026-10-12T15:54:49Z [run ] P0 or-qwen36-35b-a3b__tasks_cs__r1
