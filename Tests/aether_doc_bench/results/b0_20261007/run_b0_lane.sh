@@ -144,12 +144,15 @@ run_unit() {
     fi
     # A run that generated nothing is a serving failure, not a score.
     local verdict
-    verdict=$("$PYTHON" - "$out.tmp" <<'PYEOF'
+    verdict=$("$PYTHON" - "$out.tmp" "$(tasks_for "$board" "$suite")" <<'PYEOF'
 import json, sys
 d = json.load(open(sys.argv[1]))
+want = len(json.load(open(sys.argv[2]))["tasks"])  # a unit is one repeat: one case per task
 vs = (d.get("destinations") or [{}])[0].get("variants") or []
 if not vs:
     print("REJECT zero variants"); raise SystemExit
+if d.get("resume_incomplete"):
+    print("SHORT the model check failed on a resume; only checkpointed cases are present"); raise SystemExit
 parts = []
 for v in vs:
     s = v["summary"]
@@ -158,12 +161,16 @@ for v in vs:
     tot, gen = s.get("total_cases", 0), s.get("generated_ok", 0)
     if tot == 0 or gen == 0:
         print(f"REJECT {v.get('doc_name')} generated {gen}/{tot}"); raise SystemExit
+    if tot != want:
+        # 2026-10-12: a resumed unit was accepted with 3 of its 5 cases.
+        print(f"SHORT {v.get('doc_name')} has {tot} of {want} cases"); raise SystemExit
     parts.append(f"{v.get('doc_name')} fa={s.get('first_attempt_exact')}/{tot} fx={s.get('final_exact')}/{tot} gen={gen}")
 print("ACCEPT " + "; ".join(parts))
 PYEOF
 )
     case "$verdict" in
         ACCEPT*) mv "$out.tmp" "$out"; note "[done] $board $name $((SECONDS - started))s ${verdict#ACCEPT }" ;;
+        SHORT*) note "[short] $board $name: ${verdict#SHORT } -- kept as a checkpoint; a later pass resumes it"; return 1 ;;
         *) mkdir -p "$dir/rejected"; mv "$out.tmp" "$dir/rejected/$name.json"
            note "[FAIL] $board $name: $verdict (quarantined in rejected/)"; return 1 ;;
     esac

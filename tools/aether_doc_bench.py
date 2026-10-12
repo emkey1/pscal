@@ -5603,8 +5603,11 @@ def _run_benchmark(
                 "detail": detail,
             })
             if destination.destination_id in prior_destination_reports:
-                # Never lose checkpointed cases because a host is down today.
+                # Never lose checkpointed cases because a host is down today -- but the
+                # report is then only what the checkpoint held. On 2026-10-12 a unit
+                # resumed this way was accepted as finished with 3 of its 5 cases.
                 report["destinations"].append(prior_destination_reports[destination.destination_id])
+                report.setdefault("resume_incomplete", []).append(destination.destination_id)
             continue
 
         destination_report = {
@@ -5773,6 +5776,14 @@ def _run_benchmark(
     report["infra_failed"] = infra
     if args.output_json:
         persist_report_checkpoint()
+    if report.get("resume_incomplete"):
+        print(
+            "[resume] INCOMPLETE: " + ", ".join(report["resume_incomplete"]) + " failed the model check on this "
+            "resume. The checkpointed cases are kept and the missing ones were not run; this report is not a "
+            "finished unit. Run the same command again with --resume.",
+            file=sys.stderr,
+        )
+        return 3
     if infra:
         # No headline while any case measured nothing (D37d): re-run them.
         print(
