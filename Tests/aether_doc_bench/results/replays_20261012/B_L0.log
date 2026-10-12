@@ -1,0 +1,12 @@
+replay on aether 2026-10-07-1 (sha256 8317d26d4866a8dc): 124 report(s), 4009 attempts, 2723 distinct programs in 705.19s
+  first  attempts 2523: pass 1676 -> 1703  fail->pass 27  pass->fail 0  into silent_wrong 0
+           silent_wrong->pass: 12
+           uncoded_error->pass: 9
+           coded_error->pass: 6
+  repair attempts 1486: pass 330 -> 362  fail->pass 32  pass->fail 0  into silent_wrong 0
+           silent_wrong->pass: 21
+           coded_error->pass: 10
+           uncoded_error->coded_error: 1
+           uncoded_error->pass: 1
+  gated (all): 0 waived, 0 unwaived
+rc=0

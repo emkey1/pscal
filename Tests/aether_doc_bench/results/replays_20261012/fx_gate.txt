@@ -1,0 +1,14 @@
+set        model                      attempts  fail  FX-001  share of failures  share of attempts
+local      low-prism-coder-7b              219   206       5     2.4%     2.3%   (file-read programs 5)
+local      low-qwen35-9b                    35     2       2   100.0%     5.7%   (file-read programs 2)
+local      mid-bonsai2-27b-ternary         219    18       0     0.0%     0.0%   (file-read programs 0)
+local      mid-devstral-small-2            184    78      27    34.6%    14.7%   (file-read programs 27)
+local      mid-qwen36-27b                   73     3       1    33.3%     1.4%   (file-read programs 1)
+local      mid-qwen36-35b-a3b               73     5       0     0.0%     0.0%   (file-read programs 0)
+local-4bit mid-devstral-small-2            219    81      32    39.5%    14.6%   (file-read programs 32)
+hosted     or-bonsai2-27b-ternary          219    43       0     0.0%     0.0%   (file-read programs 0)
+hosted     or-qwen35-9b                    219    83      23    27.7%    10.5%   (file-read programs 22)
+hosted     or-qwen36-27b                   219     5       0     0.0%     0.0%   (file-read programs 0)
+hosted     or-qwen36-35b-a3b               219    10       0     0.0%     0.0%   (file-read programs 0)
+POOLED     all                            1898   534      90    16.9%     4.7%
+POOLED     all but prism-coder            1679   328      85    25.9%     5.1%

@@ -1,0 +1,708 @@
+{
+  "files": [
+    "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_cs__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_cs__r1.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_cs__r2.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_hard_nontoon__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_hard_nontoon__r1.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_hard_nontoon__r2.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_hard_v2__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_hard_v2__r1.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_hard_v2__r2.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_v2_pos__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_v2_pos__r1.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_v2_pos__r2.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/low-qwen35-9b__tasks_v2_pos__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_cs__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_cs__r1.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_cs__r2.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_hard_nontoon__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_hard_nontoon__r1.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_hard_nontoon__r2.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_hard_v2__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_hard_v2__r1.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_hard_v2__r2.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_v2_pos__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_v2_pos__r1.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_v2_pos__r2.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_cs__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_cs__r1.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_cs__r2.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_hard_nontoon__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_hard_nontoon__r1.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_hard_nontoon__r2.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_hard_v2__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_hard_v2__r1.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_hard_v2__r2.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_v2_pos__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_v2_pos__r2.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-qwen36-27b__tasks_cs__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-qwen36-27b__tasks_hard_nontoon__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-qwen36-27b__tasks_hard_v2__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-qwen36-27b__tasks_v2_pos__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-qwen36-35b-a3b__tasks_cs__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-qwen36-35b-a3b__tasks_hard_nontoon__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-qwen36-35b-a3b__tasks_hard_v2__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/mid-qwen36-35b-a3b__tasks_v2_pos__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/rejected/mid-devstral-small-2__tasks_cs__r1.json",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/rejected/mid-devstral-small-2__tasks_hard_nontoon__r1.json",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/rejected/mid-devstral-small-2__tasks_hard_nontoon__r2.json",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/rejected/mid-devstral-small-2__tasks_hard_v2__r1.json",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/rejected/mid-devstral-small-2__tasks_hard_v2__r2.json",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/rejected/mid-devstral-small-2__tasks_v2_pos__r1.json",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/rejected/mid-devstral-small-2__tasks_v2_pos__r2.json",
+    "Tests/aether_doc_bench/results/b0_20261007/B0/superseded_cap24k/low-qwen35-9b__tasks_v2_pos__r0.json",
+    "Tests/aether_doc_bench/results/b0_20261007/B0-full/cloud-gemini-3.5-flash-lite__tasks_hard_v2__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0-full/cloud-gemini-3.5-flash-lite__tasks_v2_pos__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0-full/cloud-gemini-3.6-flash__tasks_hard_v2__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B0-full/cloud-gemini-3.6-flash__tasks_v2_pos__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B1/infra_pending/mid-bonsai2-27b-ternary__tasks_traps__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/B1/low-prism-coder-7b__tasks_traps__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/P0/low-prism-coder-7b__tasks_cs__r0.json.gz",
+    "Tests/aether_doc_bench/results/b0_20261007/P0/low-prism-coder-7b__tasks_v2_pos__r0.json.gz"
+  ],
+  "by_construct": false,
+  "groups": [
+    {
+      "variant": "card",
+      "guide_stamp": "2026-10-07-1",
+      "aether_version": "2026-10-06-1",
+      "attempts": 102,
+      "destinations": [
+        "low-prism-coder-7b",
+        "mid-bonsai2-27b-ternary"
+      ],
+      "reports": [
+        "Tests/aether_doc_bench/results/b0_20261007/B1/infra_pending/mid-bonsai2-27b-ternary__tasks_traps__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B1/low-prism-coder-7b__tasks_traps__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/P0/low-prism-coder-7b__tasks_cs__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/P0/low-prism-coder-7b__tasks_v2_pos__r0.json.gz"
+      ],
+      "classes": {
+        "pass": 12,
+        "silent_wrong": 12,
+        "uncoded_error": 5,
+        "coded_error": 73
+      },
+      "buckets": [
+        {
+          "class": "coded_error",
+          "bucket": "SYN-001",
+          "count": 47,
+          "tasks": [
+            "array_minmax",
+            "cs_bfs",
+            "cs_binary_search",
+            "cs_bubble_sort",
+            "cs_coin_change",
+            "cs_edit_distance",
+            "cs_factorial",
+            "cs_fibonacci",
+            "cs_gcd",
+            "cs_merge_sort",
+            "cs_substring",
+            "hello_fx",
+            "inventory_status",
+            "module_const_import",
+            "module_function_import",
+            "module_pure_export",
+            "mstream_roundtrip",
+            "nested_multiply_grid",
+            "percentage_format",
+            "range_loop_squares",
+            "real_format_circle",
+            "real_mean_format",
+            "recursion_factorial",
+            "string_checks",
+            "toon_deep_nested",
+            "toon_inline_extract",
+            "toon_parse_file_simple",
+            "toon_safe_nested_codes",
+            "trap_base_convert",
+            "trap_const_case_alias",
+            "trap_div_round_down",
+            "trap_exit_status",
+            "trap_infer_real_product",
+            "trap_parse_int_big",
+            "trap_range_half",
+            "trap_record_eq_bfs",
+            "trap_shift_wide",
+            "trap_tail_expr_clamp",
+            "trap_text_width",
+            "trap_toon_absent_count",
+            "trap_toplevel_init",
+            "tuple_order_post",
+            "tuple_recursive_digits",
+            "two_type_methods",
+            "type_init_point"
+          ],
+          "examples": []
+        },
+        {
+          "class": "coded_error",
+          "bucket": "SCOPE-001",
+          "count": 23,
+          "tasks": [
+            "clamp_scores",
+            "classify_scores",
+            "contract_normalize",
+            "count_by_category",
+            "cs_fizzbuzz",
+            "cs_lcs",
+            "cs_lis",
+            "cs_nqueens",
+            "cs_quick_sort",
+            "cs_sieve_primes",
+            "digit_separators_sum",
+            "dynamic_array_rollup",
+            "eligibility_bool_logic",
+            "field_defaults_gauge",
+            "hello_const_name",
+            "loop_until_threshold",
+            "toon_type_probe",
+            "trap_grid_clone",
+            "trap_literal_product",
+            "trap_stdin_filter",
+            "trap_tail_if_grade",
+            "trap_toon_absent_count",
+            "trap_upcase_word"
+          ],
+          "examples": []
+        },
+        {
+          "class": "silent_wrong",
+          "bucket": "stdout:value",
+          "count": 7,
+          "tasks": [
+            "cs_collatz",
+            "cs_hanoi",
+            "trap_const_case_alias",
+            "trap_digit_places",
+            "trap_div_print_duration",
+            "trap_factorial_literal",
+            "trap_pop_bound"
+          ],
+          "examples": []
+        },
+        {
+          "class": "silent_wrong",
+          "bucket": "stdout:numeric_value",
+          "count": 3,
+          "tasks": [
+            "trap_div_round_down",
+            "trap_literal_product",
+            "trap_parse_int_big"
+          ],
+          "examples": []
+        },
+        {
+          "class": "coded_error",
+          "bucket": "ARR-002",
+          "count": 2,
+          "tasks": [
+            "trap_life_continue"
+          ],
+          "examples": []
+        },
+        {
+          "class": "uncoded_error",
+          "bucket": "uncoded: IntToStr requires an integer-compatible argument.",
+          "count": 2,
+          "tasks": [
+            "trap_div_print_duration",
+            "trap_factorial_literal"
+          ],
+          "examples": []
+        },
+        {
+          "class": "coded_error",
+          "bucket": "TYPE-001",
+          "count": 1,
+          "tasks": [
+            "trap_stdin_filter"
+          ],
+          "examples": []
+        },
+        {
+          "class": "silent_wrong",
+          "bucket": "stdout:no_output",
+          "count": 1,
+          "tasks": [
+            "cs_dijkstra"
+          ],
+          "examples": []
+        },
+        {
+          "class": "silent_wrong",
+          "bucket": "stdout:whitespace",
+          "count": 1,
+          "tasks": [
+            "trap_div_middle_mark"
+          ],
+          "examples": []
+        },
+        {
+          "class": "uncoded_error",
+          "bucket": "uncoded: Exit(value) is only valid inside functions that return a value.",
+          "count": 1,
+          "tasks": [
+            "trap_exit_status"
+          ],
+          "examples": []
+        },
+        {
+          "class": "uncoded_error",
+          "bucket": "uncoded: Runtime Error: Operand for boolean conversion must be boolean or numeric.",
+          "count": 1,
+          "tasks": [
+            "inline_if_average"
+          ],
+          "examples": []
+        },
+        {
+          "class": "uncoded_error",
+          "bucket": "uncoded: Runtime Error: Operands for 'mod' must be integers. Got REAL and INTEGER.",
+          "count": 1,
+          "tasks": [
+            "trap_digit_places"
+          ],
+          "examples": []
+        }
+      ]
+    },
+    {
+      "variant": "full",
+      "guide_stamp": "2026-10-06-1",
+      "aether_version": "2026-10-06-1",
+      "attempts": 98,
+      "destinations": [
+        "cloud-gemini-3.5-flash-lite",
+        "cloud-gemini-3.6-flash"
+      ],
+      "reports": [
+        "Tests/aether_doc_bench/results/b0_20261007/B0-full/cloud-gemini-3.5-flash-lite__tasks_hard_v2__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0-full/cloud-gemini-3.5-flash-lite__tasks_v2_pos__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0-full/cloud-gemini-3.6-flash__tasks_hard_v2__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0-full/cloud-gemini-3.6-flash__tasks_v2_pos__r0.json.gz"
+      ],
+      "classes": {
+        "pass": 97,
+        "coded_error": 1
+      },
+      "buckets": [
+        {
+          "class": "coded_error",
+          "bucket": "SYN-001",
+          "count": 1,
+          "tasks": [
+            "tuple_recursive_digits"
+          ],
+          "examples": []
+        }
+      ]
+    },
+    {
+      "variant": "medium",
+      "guide_stamp": "2026-09-05-1",
+      "aether_version": "2026-10-06-1",
+      "attempts": 886,
+      "destinations": [
+        "low-prism-coder-7b",
+        "low-qwen35-9b",
+        "mid-bonsai2-27b-ternary",
+        "mid-devstral-small-2",
+        "mid-qwen36-27b",
+        "mid-qwen36-35b-a3b"
+      ],
+      "reports": [
+        "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_cs__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_cs__r1.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_cs__r2.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_hard_nontoon__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_hard_nontoon__r1.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_hard_nontoon__r2.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_hard_v2__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_hard_v2__r1.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_hard_v2__r2.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_v2_pos__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_v2_pos__r1.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/low-prism-coder-7b__tasks_v2_pos__r2.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/low-qwen35-9b__tasks_v2_pos__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_cs__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_cs__r1.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_cs__r2.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_hard_nontoon__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_hard_nontoon__r1.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_hard_nontoon__r2.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_hard_v2__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_hard_v2__r1.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_hard_v2__r2.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_v2_pos__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_v2_pos__r1.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-bonsai2-27b-ternary__tasks_v2_pos__r2.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_cs__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_cs__r1.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_cs__r2.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_hard_nontoon__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_hard_nontoon__r1.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_hard_nontoon__r2.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_hard_v2__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_hard_v2__r1.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_hard_v2__r2.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_v2_pos__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_v2_pos__r2.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-qwen36-27b__tasks_cs__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-qwen36-27b__tasks_hard_nontoon__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-qwen36-27b__tasks_hard_v2__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-qwen36-27b__tasks_v2_pos__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-qwen36-35b-a3b__tasks_cs__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-qwen36-35b-a3b__tasks_hard_nontoon__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-qwen36-35b-a3b__tasks_hard_v2__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/mid-qwen36-35b-a3b__tasks_v2_pos__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B0/superseded_cap24k/low-qwen35-9b__tasks_v2_pos__r0.json",
+        "Tests/aether_doc_bench/results/b0_20261007/B1/infra_pending/mid-bonsai2-27b-ternary__tasks_traps__r0.json.gz",
+        "Tests/aether_doc_bench/results/b0_20261007/B1/low-prism-coder-7b__tasks_traps__r0.json.gz"
+      ],
+      "classes": {
+        "silent_wrong": 60,
+        "coded_error": 281,
+        "pass": 536,
+        "uncoded_error": 6,
+        "crash_hang": 2,
+        "no_answer": 1
+      },
+      "buckets": [
+        {
+          "class": "coded_error",
+          "bucket": "SYN-001",
+          "count": 206,
+          "tasks": [
+            "array_minmax",
+            "clamp_scores",
+            "classify_scores",
+            "contract_normalize",
+            "count_by_category",
+            "cs_bfs",
+            "cs_binary_search",
+            "cs_coin_change",
+            "cs_collatz",
+            "cs_dijkstra",
+            "cs_factorial",
+            "cs_fibonacci",
+            "cs_fizzbuzz",
+            "cs_gcd",
+            "cs_lcs",
+            "cs_lis",
+            "cs_merge_sort",
+            "cs_nqueens",
+            "cs_quick_sort",
+            "cs_sieve_primes",
+            "cs_substring",
+            "digit_separators_sum",
+            "dynamic_array_rollup",
+            "eligibility_bool_logic",
+            "field_defaults_gauge",
+            "hard2_config_defaults",
+            "hard2_event_sessionize",
+            "hard2_expr_eval",
+            "hard2_grade_bands",
+            "hard2_heap_sort",
+            "hard2_inventory_rollup",
+            "hard2_matrix_spiral",
+            "hard2_rle_roundtrip",
+            "hard2_route_legs",
+            "hard2_sensor_windows",
+            "hard_account_ledger",
+            "hard_append_growth",
+            "hard_collatz_recursion",
+            "hard_expense_outliers",
+            "hard_log_levels",
+            "hard_payroll_nested",
+            "hard_sensor_streak",
+            "hard_turnstile_fsm",
+            "hard_word_lengths",
+            "hello_const_name",
+            "hello_fx",
+            "inline_if_average",
+            "inventory_status",
+            "loop_until_threshold",
+            "module_const_import",
+            "module_function_import",
+            "module_pure_export",
+            "mstream_roundtrip",
+            "nested_multiply_grid",
+            "percentage_format",
+            "range_loop_squares",
+            "real_format_circle",
+            "real_mean_format",
+            "recursion_factorial",
+            "string_checks",
+            "toon_deep_nested",
+            "toon_inline_extract",
+            "toon_parse_file_simple",
+            "toon_safe_nested_codes",
+            "toon_type_probe",
+            "trap_digit_places",
+            "trap_div_middle_mark",
+            "trap_div_print_duration",
+            "trap_div_round_down",
+            "trap_exit_status",
+            "trap_factorial_literal",
+            "trap_infer_real_product",
+            "trap_life_continue",
+            "trap_literal_product",
+            "trap_parse_int_big",
+            "trap_pop_bound",
+            "trap_record_eq_bfs",
+            "trap_shift_wide",
+            "trap_stdin_filter",
+            "trap_tail_expr_clamp",
+            "trap_tail_if_grade",
+            "trap_text_width",
+            "trap_toon_absent_count",
+            "trap_toplevel_init",
+            "trap_upcase_word",
+            "tuple_destructure",
+            "tuple_order_post",
+            "tuple_recursive_digits",
+            "two_type_methods",
+            "type_init_point"
+          ],
+          "examples": []
+        },
+        {
+          "class": "coded_error",
+          "bucket": "FX-001",
+          "count": 38,
+          "tasks": [
+            "field_defaults_gauge",
+            "hard_account_ledger",
+            "hard_expense_outliers",
+            "hard_log_levels",
+            "hard_payroll_nested",
+            "hard_sensor_streak",
+            "hard_turnstile_fsm",
+            "hard_word_lengths",
+            "toon_deep_nested",
+            "toon_parse_file_simple",
+            "toon_safe_nested_codes"
+          ],
+          "examples": []
+        },
+        {
+          "class": "silent_wrong",
+          "bucket": "stdout:value",
+          "count": 35,
+          "tasks": [
+            "count_by_category",
+            "cs_bubble_sort",
+            "cs_factorial",
+            "cs_fibonacci",
+            "cs_quick_sort",
+            "cs_sieve_primes",
+            "dynamic_array_rollup",
+            "eligibility_bool_logic",
+            "hard2_event_sessionize",
+            "hard2_matrix_spiral",
+            "hard2_rle_roundtrip",
+            "hard2_sensor_windows",
+            "toon_inline_extract",
+            "toon_parse_file_simple",
+            "trap_const_case_alias",
+            "trap_range_half",
+            "trap_stdin_filter"
+          ],
+          "examples": []
+        },
+        {
+          "class": "silent_wrong",
+          "bucket": "stdout:numeric_value",
+          "count": 22,
+          "tasks": [
+            "cs_bubble_sort",
+            "cs_dijkstra",
+            "cs_lis",
+            "cs_quick_sort",
+            "cs_sieve_primes",
+            "hard2_inventory_rollup",
+            "hard2_matrix_spiral",
+            "hard_append_growth",
+            "trap_div_round_down",
+            "trap_literal_product",
+            "trap_parse_int_big"
+          ],
+          "examples": []
+        },
+        {
+          "class": "coded_error",
+          "bucket": "SCOPE-001",
+          "count": 18,
+          "tasks": [
+            "cs_bubble_sort",
+            "eligibility_bool_logic",
+            "hard2_expr_eval",
+            "hard2_heap_sort",
+            "hard2_inventory_rollup",
+            "hard2_route_legs",
+            "hard_collatz_recursion",
+            "module_pure_export",
+            "real_format_circle",
+            "real_mean_format",
+            "trap_base_convert",
+            "type_init_point"
+          ],
+          "examples": []
+        },
+        {
+          "class": "coded_error",
+          "bucket": "ARR-003",
+          "count": 12,
+          "tasks": [
+            "cs_edit_distance",
+            "cs_lcs",
+            "hard2_inventory_rollup",
+            "hard2_matrix_spiral"
+          ],
+          "examples": []
+        },
+        {
+          "class": "coded_error",
+          "bucket": "BUILT-002",
+          "count": 3,
+          "tasks": [
+            "cs_edit_distance"
+          ],
+          "examples": []
+        },
+        {
+          "class": "crash_hang",
+          "bucket": "timeout",
+          "count": 2,
+          "tasks": [
+            "cs_bubble_sort",
+            "hard2_rle_roundtrip"
+          ],
+          "examples": []
+        },
+        {
+          "class": "silent_wrong",
+          "bucket": "stdout:numeric_format",
+          "count": 2,
+          "tasks": [
+            "inline_if_average",
+            "trap_factorial_literal"
+          ],
+          "examples": []
+        },
+        {
+          "class": "coded_error",
+          "bucket": "AETH-RUNTIME-TOON-PARSE",
+          "count": 1,
+          "tasks": [
+            "hard2_route_legs"
+          ],
+          "examples": []
+        },
+        {
+          "class": "coded_error",
+          "bucket": "ANN-001",
+          "count": 1,
+          "tasks": [
+            "cs_hanoi"
+          ],
+          "examples": []
+        },
+        {
+          "class": "coded_error",
+          "bucket": "ARR-002",
+          "count": 1,
+          "tasks": [
+            "trap_record_eq_bfs"
+          ],
+          "examples": []
+        },
+        {
+          "class": "coded_error",
+          "bucket": "IMP-001",
+          "count": 1,
+          "tasks": [
+            "toon_deep_nested"
+          ],
+          "examples": []
+        },
+        {
+          "class": "no_answer",
+          "bucket": "uncoded: no_answer: your previous reply contained no program -- it was still reasoning when the output budget or time limit ran o",
+          "count": 1,
+          "tasks": [
+            "trap_shift_wide"
+          ],
+          "examples": []
+        },
+        {
+          "class": "silent_wrong",
+          "bucket": "stdout:no_output",
+          "count": 1,
+          "tasks": [
+            "cs_substring"
+          ],
+          "examples": []
+        },
+        {
+          "class": "uncoded_error",
+          "bucket": "uncoded: Compiler Error: Function 'p.shiftx' expects N arguments, got N.",
+          "count": 1,
+          "tasks": [
+            "two_type_methods"
+          ],
+          "examples": []
+        },
+        {
+          "class": "uncoded_error",
+          "bucket": "uncoded: Exit(value) is only valid inside functions that return a value.",
+          "count": 1,
+          "tasks": [
+            "trap_exit_status"
+          ],
+          "examples": []
+        },
+        {
+          "class": "uncoded_error",
+          "bucket": "uncoded: Length expects a string or array argument.",
+          "count": 1,
+          "tasks": [
+            "hard2_matrix_spiral"
+          ],
+          "examples": []
+        },
+        {
+          "class": "uncoded_error",
+          "bucket": "uncoded: Runtime Error: Operands for 'mod' must be integers. Got REAL and INTEGER.",
+          "count": 1,
+          "tasks": [
+            "trap_digit_places"
+          ],
+          "examples": []
+        },
+        {
+          "class": "uncoded_error",
+          "bucket": "uncoded: VM Error: Stack overflow.",
+          "count": 1,
+          "tasks": [
+            "cs_quick_sort"
+          ],
+          "examples": []
+        },
+        {
+          "class": "uncoded_error",
+          "bucket": "uncoded: YyjsonGetLength expects a single value handle.",
+          "count": 1,
+          "tasks": [
+            "hard2_sensor_windows"
+          ],
+          "examples": []
+        }
+      ]
+    }
+  ]
+}

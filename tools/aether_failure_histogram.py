@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import gzip
 import json
 import pathlib
 import re
@@ -47,13 +48,20 @@ _NUM_RE = re.compile(r"-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
 _PATH_RE = re.compile(r"(?<![\w.])/(?:[\w.-]+/)*[\w.-]+|\b[\w-]+\.(?:aether|py|json|txt)\b")
 
 
+def read_report(path: pathlib.Path) -> Any:
+    if path.suffix == ".gz":
+        return json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def report_files(paths: Iterable[pathlib.Path]) -> list[pathlib.Path]:
     out: list[pathlib.Path] = []
     for path in paths:
-        candidates = sorted(path.rglob("*.json")) if path.is_dir() else [path]
+        # Committed reports are gzipped (results/pack_reports.py); read both.
+        candidates = sorted([*path.rglob("*.json"), *path.rglob("*.json.gz")]) if path.is_dir() else [path]
         for candidate in candidates:
             try:
-                data = json.loads(candidate.read_text(encoding="utf-8"))
+                data = read_report(candidate)
             except (OSError, ValueError):
                 continue
             if isinstance(data, dict) and isinstance(data.get("destinations"), list):
@@ -185,7 +193,7 @@ def collect(files: list[pathlib.Path], expectations: Expectations, doc: str | No
             by_construct: bool, examples: int = 0) -> dict[str, Any]:
     groups: dict[tuple[str, str, str], dict[str, Any]] = {}
     for path in files:
-        report = json.loads(path.read_text(encoding="utf-8"))
+        report = read_report(path)
         version = str(report.get("aether_version") or "unknown")
         guides = report.get("guides") or {}
         for dest in report["destinations"]:

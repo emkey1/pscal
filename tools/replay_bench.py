@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import glob
+import gzip
 import hashlib
 import json
 import pathlib
@@ -230,8 +231,12 @@ def replay(args: argparse.Namespace) -> dict[str, Any]:
     skipped: dict[str, int] = {}
     for path in paths:
         try:
-            report = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            # A glob may name gzipped reports (results/pack_reports.py); the default does not.
+            if path.suffix == ".gz":
+                report = json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))
+            else:
+                report = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
             skipped["unreadable_report"] = skipped.get("unreadable_report", 0) + 1
             continue
         if not isinstance(report, dict) or "destinations" not in report:
