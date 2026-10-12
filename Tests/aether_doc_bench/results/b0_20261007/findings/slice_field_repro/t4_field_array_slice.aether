@@ -1,0 +1,10 @@
+type Bag {
+    xs: Int[] = [];
+}
+fn main() -> Void {
+    let b: Bag = new Bag();
+    b.xs = [1, 2, 3, 4];
+    let ys: Int[] = b.xs[0..2];
+    fx { println(length(ys)); }
+}
+main();

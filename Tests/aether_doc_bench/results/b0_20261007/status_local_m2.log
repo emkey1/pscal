@@ -1,0 +1,31 @@
+2026-10-08T05:09:30Z lane local start, binary addfeb8da341b1b6f344ab9ad13daba6eb6478623b5b35e2a5ec79555acc9b66
+2026-10-08T05:09:32Z [run ] B0 mid-bonsai2-27b-ternary__tasks_v2_pos__r0
+2026-10-08T06:30:04Z [done] B0 mid-bonsai2-27b-ternary__tasks_v2_pos__r0 4832s medium fa=35/35 fx=35/35 gen=35
+2026-10-08T06:30:04Z [run ] B0 mid-bonsai2-27b-ternary__tasks_hard_v2__r0
+2026-10-08T08:36:54Z [done] B0 mid-bonsai2-27b-ternary__tasks_hard_v2__r0 7610s medium fa=13/14 fx=14/14 gen=14
+2026-10-08T08:36:54Z [run ] B0 mid-bonsai2-27b-ternary__tasks_hard_nontoon__r0
+2026-10-09T06:02:46Z [infra] B0 mid-bonsai2-27b-ternary__tasks_hard_nontoon__r0: rerun_nogen_cases round 1
+2026-10-09T07:17:08Z [done] B0 mid-bonsai2-27b-ternary__tasks_hard_nontoon__r0 81614s medium fa=3/5 fx=5/5 gen=5
+2026-10-09T07:17:08Z [run ] B0 mid-bonsai2-27b-ternary__tasks_cs__r0
+2026-10-09T14:44:22Z [infra] B0 mid-bonsai2-27b-ternary__tasks_cs__r0: rerun_nogen_cases round 1
+2026-10-09T15:12:13Z [done] B0 mid-bonsai2-27b-ternary__tasks_cs__r0 28505s medium fa=16/19 fx=19/19 gen=19
+2026-10-09T15:12:14Z [run ] B0 mid-bonsai2-27b-ternary__tasks_v2_pos__r1
+2026-10-09T16:38:27Z [done] B0 mid-bonsai2-27b-ternary__tasks_v2_pos__r1 5173s medium fa=34/35 fx=35/35 gen=35
+2026-10-09T16:38:27Z [run ] B0 mid-bonsai2-27b-ternary__tasks_hard_v2__r1
+2026-10-09T19:17:02Z [done] B0 mid-bonsai2-27b-ternary__tasks_hard_v2__r1 9515s medium fa=13/14 fx=14/14 gen=14
+2026-10-09T19:17:02Z [run ] B0 mid-bonsai2-27b-ternary__tasks_hard_nontoon__r1
+2026-10-09T20:39:48Z [done] B0 mid-bonsai2-27b-ternary__tasks_hard_nontoon__r1 4966s medium fa=3/5 fx=5/5 gen=5
+2026-10-09T20:39:48Z [run ] B0 mid-bonsai2-27b-ternary__tasks_cs__r1
+2026-10-09T21:31:48Z [infra] B0 mid-bonsai2-27b-ternary__tasks_cs__r1: rerun_nogen_cases round 1
+2026-10-09T22:26:08Z [done] B0 mid-bonsai2-27b-ternary__tasks_cs__r1 6380s medium fa=17/19 fx=19/19 gen=19
+2026-10-09T22:26:08Z [run ] B0 mid-bonsai2-27b-ternary__tasks_v2_pos__r2
+2026-10-09T23:51:14Z [done] B0 mid-bonsai2-27b-ternary__tasks_v2_pos__r2 5106s medium fa=34/35 fx=35/35 gen=35
+2026-10-09T23:51:15Z [run ] B0 mid-bonsai2-27b-ternary__tasks_hard_v2__r2
+2026-10-10T01:37:03Z [done] B0 mid-bonsai2-27b-ternary__tasks_hard_v2__r2 6348s medium fa=14/14 fx=14/14 gen=14
+2026-10-10T01:37:03Z [run ] B0 mid-bonsai2-27b-ternary__tasks_hard_nontoon__r2
+2026-10-10T03:16:30Z [done] B0 mid-bonsai2-27b-ternary__tasks_hard_nontoon__r2 5967s medium fa=3/5 fx=4/5 gen=5
+2026-10-10T03:16:30Z [run ] B0 mid-bonsai2-27b-ternary__tasks_cs__r2
+2026-10-10T07:20:08Z [done] B0 mid-bonsai2-27b-ternary__tasks_cs__r2 14618s medium fa=16/19 fx=19/19 gen=19
+2026-10-10T07:20:09Z [run ] B1 mid-bonsai2-27b-ternary__tasks_traps__r0
+2026-10-11T04:58:14Z [infra] B1 mid-bonsai2-27b-ternary__tasks_traps__r0: rerun_nogen_cases round 1
+2026-10-11T16:39:30Z [stopped] B1 r0 for local Bonsai closed by hand: all 48 first attempts measured; the repair attempts of 2 cases could not be measured (each re-run queued behind its own orphaned request and timed out in the queue). Report kept in B1/infra_pending/. Lane ended by owner decision (one pass).

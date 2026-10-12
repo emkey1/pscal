@@ -1,0 +1,6 @@
+fn main() -> Void {
+    let xs: Int[] = [1, 2, 3, 4];
+    let ys: Int[] = xs[0..2];
+    fx { println(length(ys)); }
+}
+main();

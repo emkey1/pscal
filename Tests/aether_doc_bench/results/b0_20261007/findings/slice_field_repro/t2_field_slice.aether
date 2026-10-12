@@ -1,0 +1,8 @@
+type Box {
+    t: Text = "hello world";
+}
+fn main() -> Void {
+    let b: Box = new Box();
+    fx { println(b.t[0..5]); }
+}
+main();

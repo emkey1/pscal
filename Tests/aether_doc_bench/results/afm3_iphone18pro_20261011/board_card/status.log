@@ -1,0 +1,5 @@
+2026-10-11T09:21:50Z [run ] tasks_v2_pos
+2026-10-11T10:05:17Z [done] tasks_v2_pos rc=0
+2026-10-11T10:05:17Z [run ] tasks_hard_v2
+2026-10-11T10:24:58Z [done] tasks_hard_v2 rc=3
+2026-10-11T10:24:58Z [stop] tasks_hard_v2 rc=3 measured 42 case(s); bridge down or locked? not continuing

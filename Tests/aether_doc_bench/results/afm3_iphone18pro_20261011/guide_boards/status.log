@@ -1,0 +1,12 @@
+2026-10-11T10:24:59Z [run ] v6
+2026-10-11T10:25:24Z [done] v6 rc=0 cases=0
+2026-10-11T10:25:24Z [retry] v6 attempt 1 ended early; resuming in 60s
+2026-10-11T10:39:34Z [run ] v6
+2026-10-11T11:36:56Z [run ] v6
+2026-10-11T11:50:29Z [done] v6 rc=0 cases=105
+2026-10-11T11:50:29Z [run ] g3500
+2026-10-11T12:23:04Z [done] g3500 rc=0 cases=105
+2026-10-11T12:23:04Z [run ] g4000
+2026-10-11T13:00:29Z [done] g4000 rc=0 cases=105
+2026-10-11T13:18:15Z [run ] g3700
+2026-10-11T13:53:02Z [done] g3700 rc=0 cases=105

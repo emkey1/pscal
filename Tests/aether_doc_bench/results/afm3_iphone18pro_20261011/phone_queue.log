@@ -1,0 +1,16 @@
+2026-10-11T10:26:55Z [wait] bridge unreachable or model unavailable
+2026-10-11T10:39:34Z [run ] v6
+2026-10-11T11:36:56Z [run ] v6
+2026-10-11T11:50:29Z [done] v6
+2026-10-11T11:50:29Z [run ] g3500
+2026-10-11T12:23:04Z [done] g3500
+2026-10-11T12:23:04Z [run ] g4000
+2026-10-11T13:00:29Z [done] g4000
+2026-10-11T13:00:29Z [run ] python
+2026-10-11T13:08:59Z [done] python
+2026-10-11T13:08:59Z [run ] card_hard_v2_rerun
+2026-10-11T13:18:03Z [done] card_hard_v2_rerun
+2026-10-11T13:18:03Z QUEUE COMPLETE
+2026-10-11T13:18:15Z [run ] g3700
+2026-10-11T13:53:02Z [done] g3700
+2026-10-11T13:53:02Z QUEUE2 COMPLETE

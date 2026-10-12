@@ -1,0 +1,99 @@
+2026-10-12T04:40:16Z lane local start, binary addfeb8da341b1b6f344ab9ad13daba6eb6478623b5b35e2a5ec79555acc9b66
+2026-10-12T04:40:20Z [run ] B0 mid-devstral-small-2__tasks_v2_pos__r0
+2026-10-12T04:41:20Z [warm] mid-devstral-small-2 is answering after 60s; opening 4 slots
+2026-10-12T04:41:20Z [run ] B0 mid-devstral-small-2__tasks_hard_v2__r0
+2026-10-12T04:41:20Z [run ] B0 mid-devstral-small-2__tasks_hard_nontoon__r0
+2026-10-12T04:41:20Z [skip] B0 mid-devstral-small-2__tasks_v2_pos__r1
+2026-10-12T04:41:20Z [run ] B0 mid-devstral-small-2__tasks_cs__r0
+2026-10-12T05:00:40Z [done] B0 mid-devstral-small-2__tasks_hard_nontoon__r0 1160s medium fa=1/5 fx=1/5 gen=5
+2026-10-12T05:00:51Z [run ] B0 mid-devstral-small-2__tasks_hard_v2__r1
+2026-10-12T05:03:01Z [done] B0 mid-devstral-small-2__tasks_v2_pos__r0 1361s medium fa=28/35 fx=34/35 gen=35
+2026-10-12T05:03:06Z [run ] B0 mid-devstral-small-2__tasks_hard_nontoon__r1
+2026-10-12T05:05:41Z [done] B0 mid-devstral-small-2__tasks_cs__r0 1461s medium fa=13/19 fx=14/19 gen=19
+2026-10-12T05:05:52Z [run ] B0 mid-devstral-small-2__tasks_cs__r1
+2026-10-12T05:11:10Z [done] B0 mid-devstral-small-2__tasks_hard_v2__r0 1790s medium fa=5/14 fx=11/14 gen=14
+2026-10-12T05:11:22Z [run ] B0 mid-devstral-small-2__tasks_v2_pos__r2
+2026-10-12T05:14:38Z [done] B0 mid-devstral-small-2__tasks_hard_nontoon__r1 692s medium fa=1/5 fx=2/5 gen=5
+2026-10-12T05:14:52Z [run ] B0 mid-devstral-small-2__tasks_hard_v2__r2
+2026-10-12T05:22:51Z [done] B0 mid-devstral-small-2__tasks_cs__r1 1019s medium fa=12/19 fx=13/19 gen=19
+2026-10-12T05:22:53Z [run ] B0 mid-devstral-small-2__tasks_hard_nontoon__r2
+2026-10-12T05:25:10Z [done] B0 mid-devstral-small-2__tasks_hard_v2__r1 1459s medium fa=4/14 fx=12/14 gen=14
+2026-10-12T05:25:23Z [skip] B1 mid-devstral-small-2__tasks_traps__r0
+2026-10-12T05:25:23Z [skip] B1 mid-devstral-small-2__tasks_traps__r1
+2026-10-12T05:25:23Z [skip] B1 mid-devstral-small-2__tasks_traps__r2
+2026-10-12T05:25:23Z [skip] P0 mid-devstral-small-2__tasks_v2_pos__r0
+2026-10-12T05:25:23Z [run ] B0 mid-devstral-small-2__tasks_cs__r2
+2026-10-12T05:26:50Z [done] B0 mid-devstral-small-2__tasks_v2_pos__r2 928s medium fa=28/35 fx=34/35 gen=35
+2026-10-12T05:26:53Z [run ] P0 mid-devstral-small-2__tasks_cs__r0
+2026-10-12T05:39:00Z [done] B0 mid-devstral-small-2__tasks_hard_v2__r2 1448s medium fa=5/14 fx=12/14 gen=14
+2026-10-12T05:39:09Z [run ] P0 mid-devstral-small-2__tasks_v2_pos__r1
+2026-10-12T05:43:18Z [done] B0 mid-devstral-small-2__tasks_hard_nontoon__r2 1225s medium fa=0/5 fx=0/5 gen=5
+2026-10-12T05:43:24Z [run ] P0 mid-devstral-small-2__tasks_cs__r1
+2026-10-12T05:44:19Z [done] B0 mid-devstral-small-2__tasks_cs__r2 1136s medium fa=14/19 fx=14/19 gen=19
+2026-10-12T05:44:24Z [run ] P0 mid-devstral-small-2__tasks_v2_pos__r2
+2026-10-12T05:51:52Z [done] P0 mid-devstral-small-2__tasks_cs__r0 1499s card fa=9/19 fx=10/19 gen=19
+2026-10-12T05:51:55Z [run ] P0 mid-devstral-small-2__tasks_cs__r2
+2026-10-12T05:58:03Z [done] P0 mid-devstral-small-2__tasks_v2_pos__r1 1134s card fa=20/35 fx=27/35 gen=35
+2026-10-12T05:58:10Z [run ] BP mid-devstral-small-2__tasks_v2_pos__r0
+2026-10-12T06:01:11Z [done] P0 mid-devstral-small-2__tasks_cs__r1 1067s card fa=7/19 fx=9/19 gen=19
+2026-10-12T06:01:25Z [run ] BP mid-devstral-small-2__tasks_hard_v2__r0
+2026-10-12T06:02:06Z [done] P0 mid-devstral-small-2__tasks_v2_pos__r2 1062s card fa=19/35 fx=23/35 gen=35
+2026-10-12T06:02:10Z [run ] BP mid-devstral-small-2__tasks_hard_nontoon__r0
+2026-10-12T06:07:15Z [done] BP mid-devstral-small-2__tasks_hard_nontoon__r0 305s none fa=2/5 fx=3/5 gen=5
+2026-10-12T06:07:26Z [run ] BP mid-devstral-small-2__tasks_cs__r0
+2026-10-12T06:08:05Z [done] BP mid-devstral-small-2__tasks_v2_pos__r0 595s none fa=22/35 fx=28/35 gen=35
+2026-10-12T06:08:11Z [run ] BP mid-devstral-small-2__tasks_v2_pos__r1
+2026-10-12T06:08:28Z [done] P0 mid-devstral-small-2__tasks_cs__r2 993s card fa=7/19 fx=9/19 gen=19
+2026-10-12T06:08:41Z [run ] BP mid-devstral-small-2__tasks_hard_v2__r1
+2026-10-12T06:11:50Z [done] BP mid-devstral-small-2__tasks_cs__r0 264s none fa=18/19 fx=19/19 gen=19
+2026-10-12T06:11:56Z [run ] BP mid-devstral-small-2__tasks_hard_nontoon__r1
+2026-10-12T06:16:09Z [done] BP mid-devstral-small-2__tasks_hard_nontoon__r1 253s none fa=2/5 fx=4/5 gen=5
+2026-10-12T06:16:11Z [run ] BP mid-devstral-small-2__tasks_cs__r1
+2026-10-12T06:17:39Z [done] BP mid-devstral-small-2__tasks_v2_pos__r1 568s none fa=22/35 fx=28/35 gen=35
+2026-10-12T06:17:42Z [run ] BP mid-devstral-small-2__tasks_v2_pos__r2
+2026-10-12T06:17:58Z [done] BP mid-devstral-small-2__tasks_hard_v2__r0 993s none fa=1/14 fx=2/14 gen=14
+2026-10-12T06:18:12Z [run ] BP mid-devstral-small-2__tasks_hard_v2__r2
+2026-10-12T06:20:34Z [done] BP mid-devstral-small-2__tasks_cs__r1 263s none fa=18/19 fx=19/19 gen=19
+2026-10-12T06:20:42Z [run ] BP mid-devstral-small-2__tasks_hard_nontoon__r2
+2026-10-12T06:24:22Z [done] BP mid-devstral-small-2__tasks_hard_v2__r1 941s none fa=1/14 fx=1/14 gen=14
+2026-10-12T06:24:27Z [run ] BP mid-devstral-small-2__tasks_cs__r2
+2026-10-12T06:25:06Z [done] BP mid-devstral-small-2__tasks_hard_nontoon__r2 264s none fa=1/5 fx=3/5 gen=5
+2026-10-12T06:26:26Z [done] BP mid-devstral-small-2__tasks_v2_pos__r2 524s none fa=22/35 fx=28/35 gen=35
+2026-10-12T06:28:24Z [done] BP mid-devstral-small-2__tasks_cs__r2 237s none fa=19/19 fx=19/19 gen=19
+2026-10-12T06:31:41Z [done] BP mid-devstral-small-2__tasks_hard_v2__r2 809s none fa=1/14 fx=1/14 gen=14
+2026-10-12T06:31:42Z lane local COMPLETE
+2026-10-12T06:31:42Z lane local start, binary addfeb8da341b1b6f344ab9ad13daba6eb6478623b5b35e2a5ec79555acc9b66
+2026-10-12T06:31:46Z [skip] B0 mid-devstral-small-2__tasks_v2_pos__r0
+2026-10-12T06:31:46Z [skip] B0 mid-devstral-small-2__tasks_hard_v2__r0
+2026-10-12T06:31:46Z [skip] B0 mid-devstral-small-2__tasks_hard_nontoon__r0
+2026-10-12T06:31:46Z [skip] B0 mid-devstral-small-2__tasks_cs__r0
+2026-10-12T06:31:46Z [skip] B0 mid-devstral-small-2__tasks_v2_pos__r1
+2026-10-12T06:31:46Z [skip] B0 mid-devstral-small-2__tasks_hard_v2__r1
+2026-10-12T06:31:46Z [skip] B0 mid-devstral-small-2__tasks_hard_nontoon__r1
+2026-10-12T06:31:46Z [skip] B0 mid-devstral-small-2__tasks_cs__r1
+2026-10-12T06:31:46Z [skip] B0 mid-devstral-small-2__tasks_v2_pos__r2
+2026-10-12T06:31:46Z [skip] B0 mid-devstral-small-2__tasks_hard_v2__r2
+2026-10-12T06:31:46Z [skip] B0 mid-devstral-small-2__tasks_hard_nontoon__r2
+2026-10-12T06:31:46Z [skip] B0 mid-devstral-small-2__tasks_cs__r2
+2026-10-12T06:31:46Z [skip] B1 mid-devstral-small-2__tasks_traps__r0
+2026-10-12T06:31:46Z [skip] B1 mid-devstral-small-2__tasks_traps__r1
+2026-10-12T06:31:46Z [skip] B1 mid-devstral-small-2__tasks_traps__r2
+2026-10-12T06:31:46Z [skip] P0 mid-devstral-small-2__tasks_v2_pos__r0
+2026-10-12T06:31:46Z [skip] P0 mid-devstral-small-2__tasks_cs__r0
+2026-10-12T06:31:46Z [skip] P0 mid-devstral-small-2__tasks_v2_pos__r1
+2026-10-12T06:31:46Z [skip] P0 mid-devstral-small-2__tasks_cs__r1
+2026-10-12T06:31:46Z [skip] P0 mid-devstral-small-2__tasks_v2_pos__r2
+2026-10-12T06:31:46Z [skip] P0 mid-devstral-small-2__tasks_cs__r2
+2026-10-12T06:31:46Z [skip] BP mid-devstral-small-2__tasks_v2_pos__r0
+2026-10-12T06:31:46Z [skip] BP mid-devstral-small-2__tasks_hard_v2__r0
+2026-10-12T06:31:46Z [skip] BP mid-devstral-small-2__tasks_hard_nontoon__r0
+2026-10-12T06:31:46Z [skip] BP mid-devstral-small-2__tasks_cs__r0
+2026-10-12T06:31:46Z [skip] BP mid-devstral-small-2__tasks_v2_pos__r1
+2026-10-12T06:31:46Z [skip] BP mid-devstral-small-2__tasks_hard_v2__r1
+2026-10-12T06:31:46Z [skip] BP mid-devstral-small-2__tasks_hard_nontoon__r1
+2026-10-12T06:31:46Z [skip] BP mid-devstral-small-2__tasks_cs__r1
+2026-10-12T06:31:46Z [skip] BP mid-devstral-small-2__tasks_v2_pos__r2
+2026-10-12T06:31:46Z [skip] BP mid-devstral-small-2__tasks_hard_v2__r2
+2026-10-12T06:31:46Z [skip] BP mid-devstral-small-2__tasks_hard_nontoon__r2
+2026-10-12T06:31:46Z [skip] BP mid-devstral-small-2__tasks_cs__r2
+2026-10-12T06:31:46Z lane local COMPLETE

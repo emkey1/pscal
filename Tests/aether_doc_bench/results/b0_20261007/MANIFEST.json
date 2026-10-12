@@ -1,0 +1,1213 @@
+{
+ "board_set": "b0_20261007",
+ "plan_item": "W1-19",
+ "binary_sha256": "addfeb8da341b1b6f344ab9ad13daba6eb6478623b5b35e2a5ec79555acc9b66",
+ "aether_version": "2026-10-06-1",
+ "build_type": "Release",
+ "aether_checkout": {
+  "describe": "pscal-rootfs-2026.09.19.2-39-g6659679",
+  "dirty": false,
+  "head": "66596799a701ceff70f49285872ae695618e8399",
+  "toplevel": "~/aether-6659679"
+ },
+ "harness_sha256": [
+  "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d",
+  "61904b501129b1d77bcea633644a2b4cd741d382d56a769e76393c8d5b0c4c5d",
+  "883dff54e3e81f38c03559e819bc636c72cf34651a43787618a16bcc0182d949",
+  "b1bd95ae3837b331d88da439ee8c7b9faa0fd0267c11996b52664aa225e3a318",
+  "bf07d70d332d20e49df5cc0df951e9bfac04c0f782b3cd48c354dd5e03ceab2b"
+ ],
+ "prompt_template": {
+  "sha256": "4941abd6a6833612eb732ca3dd861a47aee5f4d9b66dad1a3b06084456f273ae",
+  "templates": {
+   "batch": "2945a87ee5162ca28dfc2df40400aa6af1d9cc62bc8ab304657a99634687e7b4",
+   "batch_hidden": "47a2f42df75b97e35ea75559f6b1cbd34a9d8d4b9553a74f1e551bacef2db60b",
+   "initial": "1f58c93c7633929e7f95142dbaa3352d189a1ac8122c6a2b830c3a47e69c06ac",
+   "initial_exit_status": "48e7fcc3a891c35c70f2fa67e6668a7e2a582b30769f6c62f4ae65ecb5efda08",
+   "initial_hidden": "d0d567209d8727577ced2de8f61badfb96cb8a585e541c83d9383a8f9749860f",
+   "initial_none": "401a5a8ad39b6d45054381e256f2a7e0134f4e4998af051594c3d5bb207349e3",
+   "python": "1042bc5417334655e8e3af192402cdd672312fecd6d7bb4a973e701f4e03a336",
+   "python_repair": "11c3d92b2d276611c4f6c751d268af71a13e6f6284bae126f8dca4df9e361711",
+   "repair": "e2694970ad5b12981d8e6234eac4a8b71c56868c801e3d24f34811cc7f766c02",
+   "repair_exit_status": "501371f5f1245da57aa6ac3ea023e8589aa17d8e0b608b6216c68645e9a54ee5",
+   "repair_hidden": "e2694970ad5b12981d8e6234eac4a8b71c56868c801e3d24f34811cc7f766c02",
+   "rust": "eca636ad3b916ebb38c147abec79aca9bde844236451e4b544090e91d6485add",
+   "rust_repair": "b2b9d514f03aea80dcef5b515ebe63170b55a55c729c0fb8ec73268697016204"
+  }
+ },
+ "umbrella_heads": [
+  "20426ef7e7fa11a18a16151dae130e0e5fb782e4",
+  "38a77cf987b0e2497354c13c81373d8b2f8e0438",
+  "478f0bd60982a2626d760ca1565139efcb32f067",
+  "8c9d7ba304a4e21abc086597b784daba70f8460f",
+  "9d685f30715986e6b77d50837f86fba3ee1f987a"
+ ],
+ "umbrella_dirty": [
+  false,
+  true
+ ],
+ "guides": {
+  "medium": {
+   "path": "~/aether-6659679/docs/aether_for_llms_medium_contexts.md",
+   "version": "2026-09-05-1",
+   "sha256": "aebfc0f5271f43d99f0a25f922661f0bf7cdcfdfb9844de7619f01450c596a20",
+   "bytes": 51729,
+   "approx_tokens": 12853,
+   "tokens_o200k": null
+  },
+  "full": {
+   "path": "~/aether-6659679/docs/aether_for_llms_and_others.md",
+   "version": "2026-10-06-1",
+   "sha256": "7f30a1d84be6e399d2daa3b84ad56d3ec39ab124de3cfe58ddc301d3587a9936",
+   "bytes": 100694,
+   "approx_tokens": 25071,
+   "tokens_o200k": null
+  },
+  "card": {
+   "path": "~/aether-6659679/docs/aether_card.md",
+   "version": "2026-10-07-1",
+   "sha256": "d1c5606ca87a93b8de5172f06316d0cfd9c123717368df4e4919752602659feb",
+   "bytes": 5575,
+   "approx_tokens": 1394,
+   "tokens_o200k": null
+  }
+ },
+ "tasks": {
+  "tasks_cs": {
+   "sha256": "c38ff47a526a937cd8473db3de0b9cc553a0446715868dc5f01b53527f76ca23",
+   "version": "2026-06-23-1"
+  },
+  "tasks_hard_nontoon": {
+   "sha256": "388d2a8de80f6c490062fbc7ee141ef8f652e11d02f8624e1c7ae1ed4ba71f18",
+   "version": "2026-07-27-1"
+  },
+  "tasks_hard_v2": {
+   "sha256": "fa092145fe7d10c0e844173f87d24deb38e53d3eb2f5eb1efdf2af143731de54",
+   "version": "2026-07-28-1"
+  },
+  "tasks_v2_pos": {
+   "sha256": "5c9c6d73594d34902696529d0b6594ada48bf15efaa1d749f176662bf923b976",
+   "version": "2026-07-15-1"
+  },
+  "tasks_traps": {
+   "sha256": "e521f8b1c2f49382e6ea08362d4b3b821aaff9d116dd0628d910bcb684d234b1",
+   "version": "2026-10-07-1"
+  }
+ },
+ "destinations_sha256": [
+  "25bbcd12c3728c76e557efa9a98618ae724f8ff42085b299fcd0afec626de26e",
+  "654304ad16cf81935bfc1b0bceb1f9a171aef39e9c4f6801a7957b6bb121e540",
+  "a0a1ed1f2013b37662ebe29ee2bb950770b61d9680691b15e06e12e39b06a39e",
+  "e13d0c6b20b8d1bc883e20b9a552ae4842bc1a571cc7a9c2edae354776844636"
+ ],
+ "skew_guard": {
+  "allowed_by_flag": true,
+  "expected_binary_sha256": "addfeb8da341b1b6f344ab9ad13daba6eb6478623b5b35e2a5ec79555acc9b66",
+  "ok": false,
+  "reasons": [
+   "standalone build: the binary's version carries no +sha, so nothing ties it to a source commit"
+  ]
+ },
+ "units": [
+  {
+   "file": "B0/low-prism-coder-7b__tasks_cs__r0.json.gz",
+   "board": "B0",
+   "destination": "low-prism-coder-7b",
+   "suite": "tasks_cs",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "prism-coder-7b",
+   "pending_infra": false,
+   "cases": 19,
+   "file_sha256": "cfd92584a77f2329b7ccd83c885f2935df8731b3507ba99763337a76ff8af436",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/low-prism-coder-7b__tasks_cs__r1.json.gz",
+   "board": "B0",
+   "destination": "low-prism-coder-7b",
+   "suite": "tasks_cs",
+   "repeat": 1,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "prism-coder-7b",
+   "pending_infra": false,
+   "cases": 19,
+   "file_sha256": "2cbb76350a7226fbd9b33ce9dc423b5d03e8277b2a6eecc67fa2d39067cb5e54",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/low-prism-coder-7b__tasks_cs__r2.json.gz",
+   "board": "B0",
+   "destination": "low-prism-coder-7b",
+   "suite": "tasks_cs",
+   "repeat": 2,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "prism-coder-7b",
+   "pending_infra": false,
+   "cases": 19,
+   "file_sha256": "cd631ec8f5e34b44b40062ca0dafa86b633656c0ecfbe4f5a85b9f980bd146b2",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/low-prism-coder-7b__tasks_hard_nontoon__r0.json.gz",
+   "board": "B0",
+   "destination": "low-prism-coder-7b",
+   "suite": "tasks_hard_nontoon",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "prism-coder-7b",
+   "pending_infra": false,
+   "cases": 5,
+   "file_sha256": "23f5e88d33947671cbbbed54a503e2175602269e5cfc7c409579a9e70c5e3b46",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/low-prism-coder-7b__tasks_hard_nontoon__r1.json.gz",
+   "board": "B0",
+   "destination": "low-prism-coder-7b",
+   "suite": "tasks_hard_nontoon",
+   "repeat": 1,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "prism-coder-7b",
+   "pending_infra": false,
+   "cases": 5,
+   "file_sha256": "0c495e7c17b96ea6cfb668db1a059ec40c39d1a62a48d61d66a5674f899e7c60",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/low-prism-coder-7b__tasks_hard_nontoon__r2.json.gz",
+   "board": "B0",
+   "destination": "low-prism-coder-7b",
+   "suite": "tasks_hard_nontoon",
+   "repeat": 2,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "prism-coder-7b",
+   "pending_infra": false,
+   "cases": 5,
+   "file_sha256": "9d8a998ec905c7241ba773ac268b4e5fa561e786d5e533d5908266c7766ab9b7",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/low-prism-coder-7b__tasks_hard_v2__r0.json.gz",
+   "board": "B0",
+   "destination": "low-prism-coder-7b",
+   "suite": "tasks_hard_v2",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "prism-coder-7b",
+   "pending_infra": false,
+   "cases": 14,
+   "file_sha256": "c65772fdd3e6563ca61fe0ffc30a655a4840882bd0900d790722520810938e87",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/low-prism-coder-7b__tasks_hard_v2__r1.json.gz",
+   "board": "B0",
+   "destination": "low-prism-coder-7b",
+   "suite": "tasks_hard_v2",
+   "repeat": 1,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "prism-coder-7b",
+   "pending_infra": false,
+   "cases": 14,
+   "file_sha256": "cdbba66020bf80071fa120feef66b089dea1a96443261c0986c8a1b4c12001a1",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/low-prism-coder-7b__tasks_hard_v2__r2.json.gz",
+   "board": "B0",
+   "destination": "low-prism-coder-7b",
+   "suite": "tasks_hard_v2",
+   "repeat": 2,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "prism-coder-7b",
+   "pending_infra": false,
+   "cases": 14,
+   "file_sha256": "f58b47702405e3f5f3425637aa92c9dc4755bce3cb611195e4cfc57b9386a46a",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/low-prism-coder-7b__tasks_v2_pos__r0.json.gz",
+   "board": "B0",
+   "destination": "low-prism-coder-7b",
+   "suite": "tasks_v2_pos",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "prism-coder-7b",
+   "pending_infra": false,
+   "cases": 35,
+   "file_sha256": "612ccb2ff001222eb0b51992acec6788b46f828574a27aa2be25d3a14727a2af",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/low-prism-coder-7b__tasks_v2_pos__r1.json.gz",
+   "board": "B0",
+   "destination": "low-prism-coder-7b",
+   "suite": "tasks_v2_pos",
+   "repeat": 1,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "prism-coder-7b",
+   "pending_infra": false,
+   "cases": 35,
+   "file_sha256": "9ddea356354be930964db1710deaf1ae6ab827cbdbfd560b512c18a282d0a2a8",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/low-prism-coder-7b__tasks_v2_pos__r2.json.gz",
+   "board": "B0",
+   "destination": "low-prism-coder-7b",
+   "suite": "tasks_v2_pos",
+   "repeat": 2,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "prism-coder-7b",
+   "pending_infra": false,
+   "cases": 35,
+   "file_sha256": "36d9df2746e862b689f28236ce2f2a5c27c59dc15c789581f730059f357281e6",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/low-qwen35-9b__tasks_v2_pos__r0.json.gz",
+   "board": "B0",
+   "destination": "low-qwen35-9b",
+   "suite": "tasks_v2_pos",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "qwen3.5-9b-mlx",
+   "pending_infra": false,
+   "cases": 35,
+   "file_sha256": "85f075f86b5137676f20ecb473006fe7323345deeaf7ff2e270756559ce48365",
+   "harness_sha256": "bf07d70d332d20e49df5cc0df951e9bfac04c0f782b3cd48c354dd5e03ceab2b"
+  },
+  {
+   "file": "B0/mid-bonsai2-27b-ternary__tasks_cs__r0.json.gz",
+   "board": "B0",
+   "destination": "mid-bonsai2-27b-ternary",
+   "suite": "tasks_cs",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "bonsai-2-27b",
+   "pending_infra": false,
+   "cases": 19,
+   "file_sha256": "60d2dde0f577c2882b83c2bafe872f3c7784f9064496e92a884a15094e57bdb2",
+   "harness_sha256": "bf07d70d332d20e49df5cc0df951e9bfac04c0f782b3cd48c354dd5e03ceab2b"
+  },
+  {
+   "file": "B0/mid-bonsai2-27b-ternary__tasks_cs__r1.json.gz",
+   "board": "B0",
+   "destination": "mid-bonsai2-27b-ternary",
+   "suite": "tasks_cs",
+   "repeat": 1,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "bonsai-2-27b",
+   "pending_infra": false,
+   "cases": 19,
+   "file_sha256": "bca4f03f1a8626e963ba35c3061548e321a31f2e10f8d9737a2c91e97a679fbc",
+   "harness_sha256": "61904b501129b1d77bcea633644a2b4cd741d382d56a769e76393c8d5b0c4c5d"
+  },
+  {
+   "file": "B0/mid-bonsai2-27b-ternary__tasks_cs__r2.json.gz",
+   "board": "B0",
+   "destination": "mid-bonsai2-27b-ternary",
+   "suite": "tasks_cs",
+   "repeat": 2,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "bonsai-2-27b",
+   "pending_infra": false,
+   "cases": 19,
+   "file_sha256": "1752d089999241f68ebc5863073a3f32861efd8fb79e32ad475d8afdaf0a0187",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/mid-bonsai2-27b-ternary__tasks_hard_nontoon__r0.json.gz",
+   "board": "B0",
+   "destination": "mid-bonsai2-27b-ternary",
+   "suite": "tasks_hard_nontoon",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "bonsai-2-27b",
+   "pending_infra": false,
+   "cases": 5,
+   "file_sha256": "222e3510f82717233e92faa7da42bf575df0c6b9ccb92f5a0cd513fceb825247",
+   "harness_sha256": "bf07d70d332d20e49df5cc0df951e9bfac04c0f782b3cd48c354dd5e03ceab2b"
+  },
+  {
+   "file": "B0/mid-bonsai2-27b-ternary__tasks_hard_nontoon__r1.json.gz",
+   "board": "B0",
+   "destination": "mid-bonsai2-27b-ternary",
+   "suite": "tasks_hard_nontoon",
+   "repeat": 1,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "bonsai-2-27b",
+   "pending_infra": false,
+   "cases": 5,
+   "file_sha256": "d80b7958333fa80da8ce3ba8b220e010ea8b27e451580f320d188fc1744b75b6",
+   "harness_sha256": "61904b501129b1d77bcea633644a2b4cd741d382d56a769e76393c8d5b0c4c5d"
+  },
+  {
+   "file": "B0/mid-bonsai2-27b-ternary__tasks_hard_nontoon__r2.json.gz",
+   "board": "B0",
+   "destination": "mid-bonsai2-27b-ternary",
+   "suite": "tasks_hard_nontoon",
+   "repeat": 2,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "bonsai-2-27b",
+   "pending_infra": false,
+   "cases": 5,
+   "file_sha256": "5364670f5a3265a048ed08dc43c18606b150d8d040a2a155a31b630b7f198dc7",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/mid-bonsai2-27b-ternary__tasks_hard_v2__r0.json.gz",
+   "board": "B0",
+   "destination": "mid-bonsai2-27b-ternary",
+   "suite": "tasks_hard_v2",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "bonsai-2-27b",
+   "pending_infra": false,
+   "cases": 14,
+   "file_sha256": "98ba1d9aa53c75a092a2e4941ceb9d2b739fed7d410d2763216f615b1dd4986e",
+   "harness_sha256": "bf07d70d332d20e49df5cc0df951e9bfac04c0f782b3cd48c354dd5e03ceab2b"
+  },
+  {
+   "file": "B0/mid-bonsai2-27b-ternary__tasks_hard_v2__r1.json.gz",
+   "board": "B0",
+   "destination": "mid-bonsai2-27b-ternary",
+   "suite": "tasks_hard_v2",
+   "repeat": 1,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "bonsai-2-27b",
+   "pending_infra": false,
+   "cases": 14,
+   "file_sha256": "82c25edbb87b91a153da84ae2ed287e4d9f6b955acc1692f8a1e0cbe116d4827",
+   "harness_sha256": "61904b501129b1d77bcea633644a2b4cd741d382d56a769e76393c8d5b0c4c5d"
+  },
+  {
+   "file": "B0/mid-bonsai2-27b-ternary__tasks_hard_v2__r2.json.gz",
+   "board": "B0",
+   "destination": "mid-bonsai2-27b-ternary",
+   "suite": "tasks_hard_v2",
+   "repeat": 2,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "bonsai-2-27b",
+   "pending_infra": false,
+   "cases": 14,
+   "file_sha256": "ddc1205181c50c4df2d96de202cdae877b4c8e0ca758d35ea2bc0d4cd0a3cc0b",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/mid-bonsai2-27b-ternary__tasks_v2_pos__r0.json.gz",
+   "board": "B0",
+   "destination": "mid-bonsai2-27b-ternary",
+   "suite": "tasks_v2_pos",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "bonsai-2-27b",
+   "pending_infra": false,
+   "cases": 35,
+   "file_sha256": "88989aa18b06548ede7e5dcb021ccbd456371d9ede9bf6f3d6549e3d930fba74",
+   "harness_sha256": "bf07d70d332d20e49df5cc0df951e9bfac04c0f782b3cd48c354dd5e03ceab2b"
+  },
+  {
+   "file": "B0/mid-bonsai2-27b-ternary__tasks_v2_pos__r1.json.gz",
+   "board": "B0",
+   "destination": "mid-bonsai2-27b-ternary",
+   "suite": "tasks_v2_pos",
+   "repeat": 1,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "bonsai-2-27b",
+   "pending_infra": false,
+   "cases": 35,
+   "file_sha256": "e041c4765da9a2ca418d7f52ff18598682476d717110df1543a592fc4c942a64",
+   "harness_sha256": "bf07d70d332d20e49df5cc0df951e9bfac04c0f782b3cd48c354dd5e03ceab2b"
+  },
+  {
+   "file": "B0/mid-bonsai2-27b-ternary__tasks_v2_pos__r2.json.gz",
+   "board": "B0",
+   "destination": "mid-bonsai2-27b-ternary",
+   "suite": "tasks_v2_pos",
+   "repeat": 2,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "bonsai-2-27b",
+   "pending_infra": false,
+   "cases": 35,
+   "file_sha256": "7ca826cc1c6b999ef0bc7b702dc9804bbb1c29ca2dd50209911e205c2243a5c2",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/mid-devstral-small-2__tasks_cs__r0.json.gz",
+   "board": "B0",
+   "destination": "mid-devstral-small-2",
+   "suite": "tasks_cs",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "mistralai/devstral-small-2-2512",
+   "pending_infra": false,
+   "cases": 19,
+   "file_sha256": "544f4d22d0e80ab50963c5bd32c9cb2f6a0f5465da314b4cf7f392f355e60ae4",
+   "harness_sha256": "bf07d70d332d20e49df5cc0df951e9bfac04c0f782b3cd48c354dd5e03ceab2b"
+  },
+  {
+   "file": "B0/mid-devstral-small-2__tasks_cs__r1.json.gz",
+   "board": "B0",
+   "destination": "mid-devstral-small-2",
+   "suite": "tasks_cs",
+   "repeat": 1,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "mistralai/devstral-small-2-2512",
+   "pending_infra": false,
+   "cases": 19,
+   "file_sha256": "65957934af3d56409bfb8f6cc409d7b5792461f64c2fab4243e380c79052b5f0",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/mid-devstral-small-2__tasks_cs__r2.json.gz",
+   "board": "B0",
+   "destination": "mid-devstral-small-2",
+   "suite": "tasks_cs",
+   "repeat": 2,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "mistralai/devstral-small-2-2512",
+   "pending_infra": false,
+   "cases": 19,
+   "file_sha256": "23dc1128d08502c131ca2bfda657f2ac1f8bc34279043c2a11dd5f71a5a92268",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/mid-devstral-small-2__tasks_hard_nontoon__r0.json.gz",
+   "board": "B0",
+   "destination": "mid-devstral-small-2",
+   "suite": "tasks_hard_nontoon",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "mistralai/devstral-small-2-2512",
+   "pending_infra": false,
+   "cases": 5,
+   "file_sha256": "125401bad0bb5235fb1ba54a2eccbde0add080b0d086e2aff3f91fa21f276a15",
+   "harness_sha256": "bf07d70d332d20e49df5cc0df951e9bfac04c0f782b3cd48c354dd5e03ceab2b"
+  },
+  {
+   "file": "B0/mid-devstral-small-2__tasks_hard_nontoon__r1.json.gz",
+   "board": "B0",
+   "destination": "mid-devstral-small-2",
+   "suite": "tasks_hard_nontoon",
+   "repeat": 1,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "mistralai/devstral-small-2-2512",
+   "pending_infra": false,
+   "cases": 5,
+   "file_sha256": "5ae5929a2d393004e5ca0de19fdb824a9bfe636aa262aca9cb84b40c348e533f",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/mid-devstral-small-2__tasks_hard_nontoon__r2.json.gz",
+   "board": "B0",
+   "destination": "mid-devstral-small-2",
+   "suite": "tasks_hard_nontoon",
+   "repeat": 2,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "mistralai/devstral-small-2-2512",
+   "pending_infra": false,
+   "cases": 5,
+   "file_sha256": "caa68938f9183d9c96e61ad030cce0086530ce0c47388bb1a9f47bf11eaee94e",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/mid-devstral-small-2__tasks_hard_v2__r0.json.gz",
+   "board": "B0",
+   "destination": "mid-devstral-small-2",
+   "suite": "tasks_hard_v2",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "mistralai/devstral-small-2-2512",
+   "pending_infra": false,
+   "cases": 14,
+   "file_sha256": "80c361d2e775d0f6326851f97a4319ec3c2ffbd74ab8c040cda5a800a060df97",
+   "harness_sha256": "bf07d70d332d20e49df5cc0df951e9bfac04c0f782b3cd48c354dd5e03ceab2b"
+  },
+  {
+   "file": "B0/mid-devstral-small-2__tasks_hard_v2__r1.json.gz",
+   "board": "B0",
+   "destination": "mid-devstral-small-2",
+   "suite": "tasks_hard_v2",
+   "repeat": 1,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "mistralai/devstral-small-2-2512",
+   "pending_infra": false,
+   "cases": 14,
+   "file_sha256": "cfd86134dee3d37dd1e39e52def63c0555a3ca4bbd73178705e379f2c0684bea",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/mid-devstral-small-2__tasks_hard_v2__r2.json.gz",
+   "board": "B0",
+   "destination": "mid-devstral-small-2",
+   "suite": "tasks_hard_v2",
+   "repeat": 2,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "mistralai/devstral-small-2-2512",
+   "pending_infra": false,
+   "cases": 14,
+   "file_sha256": "48ae86e3e1f4ba98d97b251774dfbe46c399d0ed48e63a2ce8a8f43dadb4ede2",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/mid-devstral-small-2__tasks_v2_pos__r0.json.gz",
+   "board": "B0",
+   "destination": "mid-devstral-small-2",
+   "suite": "tasks_v2_pos",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "mistralai/devstral-small-2-2512",
+   "pending_infra": false,
+   "cases": 35,
+   "file_sha256": "70a3e5667df45f06899b62edb52475b28c30ea0c1551a1fd63de4724149f8c82",
+   "harness_sha256": "bf07d70d332d20e49df5cc0df951e9bfac04c0f782b3cd48c354dd5e03ceab2b"
+  },
+  {
+   "file": "B0/mid-devstral-small-2__tasks_v2_pos__r2.json.gz",
+   "board": "B0",
+   "destination": "mid-devstral-small-2",
+   "suite": "tasks_v2_pos",
+   "repeat": 2,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "mistralai/devstral-small-2-2512",
+   "pending_infra": false,
+   "cases": 35,
+   "file_sha256": "1fe3a7090b6dfba3772595c36d85a0e28f70eab2e559232eda33ca1d7e9eeac4",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B0/mid-qwen36-27b__tasks_cs__r0.json.gz",
+   "board": "B0",
+   "destination": "mid-qwen36-27b",
+   "suite": "tasks_cs",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "qwen3.6-27b-mlx-oq8",
+   "pending_infra": false,
+   "cases": 19,
+   "file_sha256": "946918b320c43bd76315578ff6e45ba3acb0637543ddb2b5b37598a6dfd0607e",
+   "harness_sha256": "bf07d70d332d20e49df5cc0df951e9bfac04c0f782b3cd48c354dd5e03ceab2b"
+  },
+  {
+   "file": "B0/mid-qwen36-27b__tasks_hard_nontoon__r0.json.gz",
+   "board": "B0",
+   "destination": "mid-qwen36-27b",
+   "suite": "tasks_hard_nontoon",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "qwen3.6-27b-mlx-oq8",
+   "pending_infra": false,
+   "cases": 5,
+   "file_sha256": "0967d4a6657fe86fe7c7e0561e8c921d2e48e3fac0bd13fe19066e367168d602",
+   "harness_sha256": "bf07d70d332d20e49df5cc0df951e9bfac04c0f782b3cd48c354dd5e03ceab2b"
+  },
+  {
+   "file": "B0/mid-qwen36-27b__tasks_hard_v2__r0.json.gz",
+   "board": "B0",
+   "destination": "mid-qwen36-27b",
+   "suite": "tasks_hard_v2",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "qwen3.6-27b-mlx-oq8",
+   "pending_infra": false,
+   "cases": 14,
+   "file_sha256": "a4b50f1d670aecddc5178748cd9586e53ded5b4fa2be62f31b326837715a4330",
+   "harness_sha256": "bf07d70d332d20e49df5cc0df951e9bfac04c0f782b3cd48c354dd5e03ceab2b"
+  },
+  {
+   "file": "B0/mid-qwen36-27b__tasks_v2_pos__r0.json.gz",
+   "board": "B0",
+   "destination": "mid-qwen36-27b",
+   "suite": "tasks_v2_pos",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "qwen3.6-27b-mlx-oq8",
+   "pending_infra": false,
+   "cases": 35,
+   "file_sha256": "714a9d1b5444d3f9f433644a07010fc5ba4bca3129228a71691c56c492affc7a",
+   "harness_sha256": "bf07d70d332d20e49df5cc0df951e9bfac04c0f782b3cd48c354dd5e03ceab2b"
+  },
+  {
+   "file": "B0/mid-qwen36-35b-a3b__tasks_cs__r0.json.gz",
+   "board": "B0",
+   "destination": "mid-qwen36-35b-a3b",
+   "suite": "tasks_cs",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "qwen/qwen3.6-35b-a3b",
+   "pending_infra": false,
+   "cases": 19,
+   "file_sha256": "adee53ef16416e7037034c565cbf693cc0c73915f53adc8e894e145905a6ec8e",
+   "harness_sha256": "bf07d70d332d20e49df5cc0df951e9bfac04c0f782b3cd48c354dd5e03ceab2b"
+  },
+  {
+   "file": "B0/mid-qwen36-35b-a3b__tasks_hard_nontoon__r0.json.gz",
+   "board": "B0",
+   "destination": "mid-qwen36-35b-a3b",
+   "suite": "tasks_hard_nontoon",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "qwen/qwen3.6-35b-a3b",
+   "pending_infra": false,
+   "cases": 5,
+   "file_sha256": "4c9632776d16d8198a13671a7d82739ce0c16a10ce01fa2923118c786bd3706c",
+   "harness_sha256": "bf07d70d332d20e49df5cc0df951e9bfac04c0f782b3cd48c354dd5e03ceab2b"
+  },
+  {
+   "file": "B0/mid-qwen36-35b-a3b__tasks_hard_v2__r0.json.gz",
+   "board": "B0",
+   "destination": "mid-qwen36-35b-a3b",
+   "suite": "tasks_hard_v2",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "qwen/qwen3.6-35b-a3b",
+   "pending_infra": false,
+   "cases": 14,
+   "file_sha256": "721b3658b87303a2628ac23d7be10689a378b5afd6924c8b035ade2e54de36d0",
+   "harness_sha256": "883dff54e3e81f38c03559e819bc636c72cf34651a43787618a16bcc0182d949"
+  },
+  {
+   "file": "B0/mid-qwen36-35b-a3b__tasks_v2_pos__r0.json.gz",
+   "board": "B0",
+   "destination": "mid-qwen36-35b-a3b",
+   "suite": "tasks_v2_pos",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "qwen/qwen3.6-35b-a3b",
+   "pending_infra": false,
+   "cases": 35,
+   "file_sha256": "8a977e9f6cfb9bda1955943c134cd2276c03060df58da620501bc5f691a1628e",
+   "harness_sha256": "b1bd95ae3837b331d88da439ee8c7b9faa0fd0267c11996b52664aa225e3a318"
+  },
+  {
+   "file": "B0-full/cloud-gemini-3.5-flash-lite__tasks_hard_v2__r0.json.gz",
+   "board": "B0-full",
+   "destination": "cloud-gemini-3.5-flash-lite",
+   "suite": "tasks_hard_v2",
+   "repeat": 0,
+   "seed_base": null,
+   "repair_attempts": 2,
+   "doc": "full",
+   "model": "gemini-3.5-flash-lite",
+   "pending_infra": false,
+   "cases": 14,
+   "file_sha256": "1ca4d6ceabafdfef275e34cc98efcc4af8987a56738f62b24a6859fade5f513b",
+   "harness_sha256": "b1bd95ae3837b331d88da439ee8c7b9faa0fd0267c11996b52664aa225e3a318"
+  },
+  {
+   "file": "B0-full/cloud-gemini-3.5-flash-lite__tasks_v2_pos__r0.json.gz",
+   "board": "B0-full",
+   "destination": "cloud-gemini-3.5-flash-lite",
+   "suite": "tasks_v2_pos",
+   "repeat": 0,
+   "seed_base": null,
+   "repair_attempts": 2,
+   "doc": "full",
+   "model": "gemini-3.5-flash-lite",
+   "pending_infra": false,
+   "cases": 35,
+   "file_sha256": "1a7dde6497406148cf3853fe1d15778f8c8e336651535d110517a06f98817485",
+   "harness_sha256": "b1bd95ae3837b331d88da439ee8c7b9faa0fd0267c11996b52664aa225e3a318"
+  },
+  {
+   "file": "B0-full/cloud-gemini-3.6-flash__tasks_hard_v2__r0.json.gz",
+   "board": "B0-full",
+   "destination": "cloud-gemini-3.6-flash",
+   "suite": "tasks_hard_v2",
+   "repeat": 0,
+   "seed_base": null,
+   "repair_attempts": 2,
+   "doc": "full",
+   "model": "gemini-3.6-flash",
+   "pending_infra": false,
+   "cases": 14,
+   "file_sha256": "57613700dffd114c31a078adbeb827054eeb43e7cf6ec67ded738c3e378c700a",
+   "harness_sha256": "b1bd95ae3837b331d88da439ee8c7b9faa0fd0267c11996b52664aa225e3a318"
+  },
+  {
+   "file": "B0-full/cloud-gemini-3.6-flash__tasks_v2_pos__r0.json.gz",
+   "board": "B0-full",
+   "destination": "cloud-gemini-3.6-flash",
+   "suite": "tasks_v2_pos",
+   "repeat": 0,
+   "seed_base": null,
+   "repair_attempts": 2,
+   "doc": "full",
+   "model": "gemini-3.6-flash",
+   "pending_infra": false,
+   "cases": 35,
+   "file_sha256": "41f2480a7dd9f714fd1ff20e6425d95a0f0b4c04f512c6e39a82bd2fb6493190",
+   "harness_sha256": "b1bd95ae3837b331d88da439ee8c7b9faa0fd0267c11996b52664aa225e3a318"
+  },
+  {
+   "file": "B1/low-prism-coder-7b__tasks_traps__r0.json.gz",
+   "board": "B1:medium",
+   "destination": "low-prism-coder-7b",
+   "suite": "tasks_traps",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "prism-coder-7b",
+   "pending_infra": false,
+   "cases": 24,
+   "file_sha256": "b5cecc09e793e71905d218d9b7aa99c8bb5da14a8f7e3dae658b6d7a808e6832",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B1/low-prism-coder-7b__tasks_traps__r0.json.gz",
+   "board": "B1:card",
+   "destination": "low-prism-coder-7b",
+   "suite": "tasks_traps",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "card",
+   "model": "prism-coder-7b",
+   "pending_infra": false,
+   "cases": 24,
+   "file_sha256": "b5cecc09e793e71905d218d9b7aa99c8bb5da14a8f7e3dae658b6d7a808e6832",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B1/infra_pending/mid-bonsai2-27b-ternary__tasks_traps__r0.json.gz",
+   "board": "B1:medium",
+   "destination": "mid-bonsai2-27b-ternary",
+   "suite": "tasks_traps",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "medium",
+   "model": "bonsai-2-27b",
+   "pending_infra": true,
+   "cases": 24,
+   "file_sha256": "e6842e3805ff02728e3ca45309154c01faca9c35aa487899aae9de04bb8de7b8",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "B1/infra_pending/mid-bonsai2-27b-ternary__tasks_traps__r0.json.gz",
+   "board": "B1:card",
+   "destination": "mid-bonsai2-27b-ternary",
+   "suite": "tasks_traps",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "card",
+   "model": "bonsai-2-27b",
+   "pending_infra": true,
+   "cases": 24,
+   "file_sha256": "e6842e3805ff02728e3ca45309154c01faca9c35aa487899aae9de04bb8de7b8",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "P0/low-prism-coder-7b__tasks_cs__r0.json.gz",
+   "board": "P0",
+   "destination": "low-prism-coder-7b",
+   "suite": "tasks_cs",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "card",
+   "model": "prism-coder-7b",
+   "pending_infra": false,
+   "cases": 19,
+   "file_sha256": "82f7524541a1849375550b2422d1ae52af37134db80818978b1c7cd5329cd90a",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  },
+  {
+   "file": "P0/low-prism-coder-7b__tasks_v2_pos__r0.json.gz",
+   "board": "P0",
+   "destination": "low-prism-coder-7b",
+   "suite": "tasks_v2_pos",
+   "repeat": 0,
+   "seed_base": 42,
+   "repair_attempts": 2,
+   "doc": "card",
+   "model": "prism-coder-7b",
+   "pending_infra": false,
+   "cases": 35,
+   "file_sha256": "762b7be5a74f0009197b0c0cf36a8426f7cff03cbca9eed60b11758a2e0a4fca",
+   "harness_sha256": "1bf68630a4f9a6fbe82a2163be68a6c1863454869bf1f5613a968d3d31cd589d"
+  }
+ ],
+ "panel_weights": {
+  "qwen3.5-9b-mlx": {
+   "dir": "lmstudio-community/Qwen3.5-9B-MLX-8bit",
+   "files": {
+    "lmstudio-community/Qwen3.5-9B-MLX-8bit/chat_template.jinja": {
+     "sha256": "a4aee8afcf2e0711942cf848899be66016f8d14a889ff9ede07bca099c28f715",
+     "bytes": 7756
+    },
+    "lmstudio-community/Qwen3.5-9B-MLX-8bit/config.json": {
+     "sha256": "19082a0ef21dee3840a8bab56ee5325ead177085285c63ea47e79a204a566a53",
+     "bytes": 3331
+    },
+    "lmstudio-community/Qwen3.5-9B-MLX-8bit/model-00001-of-00002.safetensors": {
+     "sha256": "301e7f4acda5eb2b7191d91f30d609e5a6997c4824b3312f1036556734341db0",
+     "bytes": 5339522657
+    },
+    "lmstudio-community/Qwen3.5-9B-MLX-8bit/model-00002-of-00002.safetensors": {
+     "sha256": "a8029fb3c4ed67e46d818e96fd70fbe001967476f77658ddfb2b7735382fce4c",
+     "bytes": 5087069736
+    },
+    "lmstudio-community/Qwen3.5-9B-MLX-8bit/model.safetensors.index.json": {
+     "sha256": "87d95b037f57d101448b262059b7d28d65d55f60231100cdb1827d7cd44202cd",
+     "bytes": 123593
+    },
+    "lmstudio-community/Qwen3.5-9B-MLX-8bit/preprocessor_config.json": {
+     "sha256": "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516",
+     "bytes": 390
+    },
+    "lmstudio-community/Qwen3.5-9B-MLX-8bit/processor_config.json": {
+     "sha256": "45fc17c8dd2474af6b493b52483c26c0584b0082d368c480f9fa611e73070040",
+     "bytes": 991
+    },
+    "lmstudio-community/Qwen3.5-9B-MLX-8bit/tokenizer.json": {
+     "sha256": "06b9509352d2af50381ab2247e083b80d32d5c0aba91c272ca9ff729b6a0e523",
+     "bytes": 19989325
+    },
+    "lmstudio-community/Qwen3.5-9B-MLX-8bit/tokenizer_config.json": {
+     "sha256": "fa71760892f5c601d345e626ebd602055825a50beed7ee160709c95fffa475f0",
+     "bytes": 9187
+    },
+    "lmstudio-community/Qwen3.5-9B-MLX-8bit/video_preprocessor_config.json": {
+     "sha256": "7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13",
+     "bytes": 385
+    },
+    "lmstudio-community/Qwen3.5-9B-MLX-8bit/vocab.json": {
+     "sha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003",
+     "bytes": 6722759
+    }
+   }
+  },
+  "qwen/qwen3.6-35b-a3b": {
+   "dir": "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit",
+   "files": {
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/chat_template.jinja": {
+     "sha256": "e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259",
+     "bytes": 7764
+    },
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/config.json": {
+     "sha256": "5da49c3a84c5a4a751b720b62b9f8703bdb8a0796b5fc55df3278f8b9d6ce296",
+     "bytes": 23591
+    },
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/configuration.json": {
+     "sha256": "c1b09db419119513247e9b8b912c4b9897106c9b20c6cada7e107d993c5435eb",
+     "bytes": 58
+    },
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/generation_config.json": {
+     "sha256": "e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e",
+     "bytes": 202
+    },
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/model-00001-of-00008.safetensors": {
+     "sha256": "ae1ced7360792820cfc12f2e0c8e1ca4d95c712c122e08ebb474b197dee3edaf",
+     "bytes": 5329915945
+    },
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/model-00002-of-00008.safetensors": {
+     "sha256": "b8fdc3700f7339dc29d0e8504d15bc61e9beda7dc69eea037084cfa4067f1b26",
+     "bytes": 5365574072
+    },
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/model-00003-of-00008.safetensors": {
+     "sha256": "8a7851d9152dd39369026ab0ac7c369e4e62ce67ea1e3836862ff0c651176675",
+     "bytes": 5358684778
+    },
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/model-00004-of-00008.safetensors": {
+     "sha256": "3ad6623bb7ff4ddf39ee3854d473d66543ea8fdffc48f03ae4a1dc866da34b36",
+     "bytes": 5365574256
+    },
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/model-00005-of-00008.safetensors": {
+     "sha256": "ec9d987a3c499146e6e8edd92afb3943dfd35c908a3de0685346c1ea6901e383",
+     "bytes": 5358684632
+    },
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/model-00006-of-00008.safetensors": {
+     "sha256": "9a843214e1e72bfbae1d2c61283e25ee5930b5ccdbe15dccc7d72fba3a5812c4",
+     "bytes": 5365574102
+    },
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/model-00007-of-00008.safetensors": {
+     "sha256": "0a1ed4b82de64955eefb212b2eda57acfa1c2330a4258448e5c7f0f8aaf3649a",
+     "bytes": 5037050550
+    },
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/model-00008-of-00008.safetensors": {
+     "sha256": "41a1d955de1a9a97de3abebc40b5519b02d542adf266fefbd33b24dc674aef39",
+     "bytes": 540344667
+    },
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/model.safetensors.index.json": {
+     "sha256": "3db12edeebeb65cab9a6eeb63cd74be4e0c74139a75f672701290b98230501cf",
+     "bytes": 215755
+    },
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/preprocessor_config.json": {
+     "sha256": "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516",
+     "bytes": 390
+    },
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/processor_config.json": {
+     "sha256": "d89ef49ce9cd37fbf510158e13c1ef063d9286411c1ec9049932dbe0487143b1",
+     "bytes": 1191
+    },
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/tokenizer.json": {
+     "sha256": "87a7830d63fcf43bf241c3c5242e96e62dd3fdc29224ca26fed8ea333db72de4",
+     "bytes": 19989343
+    },
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/tokenizer_config.json": {
+     "sha256": "672488283cdbf3530ecd2e3f90da54f9998cbae6befb5b32877590f72c7a9b2c",
+     "bytes": 9169
+    },
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/video_preprocessor_config.json": {
+     "sha256": "7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13",
+     "bytes": 385
+    },
+    "lmstudio-community/Qwen3.6-35B-A3B-MLX-8bit/vocab.json": {
+     "sha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003",
+     "bytes": 6722759
+    }
+   }
+  },
+  "prism-coder-7b": {
+   "dir": "dcostenco/prism-coder-7b",
+   "files": {
+    "dcostenco/prism-coder-7b/adapter_config.json": {
+     "sha256": "d410c9dbfa3b2a29080fabb06b0cc1f5172b3fb5ab3af3956c41e5c192c88d8a",
+     "bytes": 1096
+    },
+    "dcostenco/prism-coder-7b/prism-coder-7b.gguf": {
+     "sha256": "234e134a4f518096544b5fe522ef032ee645728f078e6ad4ce809216797bf13f",
+     "bytes": 15238457376
+    }
+   }
+  },
+  "qwen3.6-27b-mlx-oq8": {
+   "dir": "deepsweet/Qwen3.6-27B-MLX-oQ8-FP16",
+   "files": {
+    "deepsweet/Qwen3.6-27B-MLX-oQ8-FP16/chat_template.jinja": {
+     "sha256": "e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259",
+     "bytes": 7764
+    },
+    "deepsweet/Qwen3.6-27B-MLX-oQ8-FP16/config.json": {
+     "sha256": "0d34501959513e7e5321d6d83032455b009993891b61bf3cec51c63dd0950f3f",
+     "bytes": 3300
+    },
+    "deepsweet/Qwen3.6-27B-MLX-oQ8-FP16/generation_config.json": {
+     "sha256": "e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e",
+     "bytes": 202
+    },
+    "deepsweet/Qwen3.6-27B-MLX-oQ8-FP16/model-00001-of-00006.safetensors": {
+     "sha256": "9015de1b7f3ef656244065db9f1dc004da91889d85a917f0329364830bf717a4",
+     "bytes": 5044157340
+    },
+    "deepsweet/Qwen3.6-27B-MLX-oQ8-FP16/model-00002-of-00006.safetensors": {
+     "sha256": "a1fb0ef9e18dab369df225293e253550d6ddc996269ee2cebc1623c9d87ddbec",
+     "bytes": 5019094781
+    },
+    "deepsweet/Qwen3.6-27B-MLX-oQ8-FP16/model-00003-of-00006.safetensors": {
+     "sha256": "6e54bafb20709ac00f28ab93a9193c90a52baaff1fd1f47cb630d08f5ba335c8",
+     "bytes": 5562247784
+    },
+    "deepsweet/Qwen3.6-27B-MLX-oQ8-FP16/model-00004-of-00006.safetensors": {
+     "sha256": "ca5d95ab277ef042d9a67a1b7825d2236d5b0e0d4a4ad00f9aed27cef4b8bd63",
+     "bytes": 5034310504
+    },
+    "deepsweet/Qwen3.6-27B-MLX-oQ8-FP16/model-00005-of-00006.safetensors": {
+     "sha256": "0755c813b6912926ab870ccd222282231e4bb99dc4b99bdf7e196a11b09c23cf",
+     "bytes": 5002390613
+    },
+    "deepsweet/Qwen3.6-27B-MLX-oQ8-FP16/model-00006-of-00006.safetensors": {
+     "sha256": "b3ac11249e59513335014e763bb2724d66797823334bfc1d3b01bb540dbe0552",
+     "bytes": 2917517932
+    },
+    "deepsweet/Qwen3.6-27B-MLX-oQ8-FP16/model.safetensors.index.json": {
+     "sha256": "0f9c78434bc13bb0bdfba50c17332e4f40395cd0944e2fa5533eed065ddf77fa",
+     "bytes": 182348
+    },
+    "deepsweet/Qwen3.6-27B-MLX-oQ8-FP16/preprocessor_config.json": {
+     "sha256": "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516",
+     "bytes": 390
+    },
+    "deepsweet/Qwen3.6-27B-MLX-oQ8-FP16/tokenizer.json": {
+     "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+     "bytes": 12807982
+    },
+    "deepsweet/Qwen3.6-27B-MLX-oQ8-FP16/tokenizer_config.json": {
+     "sha256": "5186f0defcd7f232382c7f0aebcd2252d073bb921ab240e407b7ae8745d2b29b",
+     "bytes": 16718
+    },
+    "deepsweet/Qwen3.6-27B-MLX-oQ8-FP16/vocab.json": {
+     "sha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003",
+     "bytes": 6722759
+    }
+   }
+  },
+  "mistralai/devstral-small-2-2512@q8_0": {
+   "dir": "lmstudio-community/Devstral-Small-2-24B-Instruct-2512-GGUF",
+   "files": {
+    "lmstudio-community/Devstral-Small-2-24B-Instruct-2512-GGUF/Devstral-Small-2-24B-Instruct-2512-Q8_0.gguf": {
+     "sha256": "6bb3b6454b9a2cca295d3089ec7f081ab9a99aa4044090d8342b18cc9194475b",
+     "bytes": 25055307904
+    },
+    "lmstudio-community/Devstral-Small-2-24B-Instruct-2512-GGUF/mmproj-Devstral-Small-2-24B-Instruct-2512-F16.gguf": {
+     "sha256": "9bda8c9a3f90de857eb4a6a1bee03f8c92efbbeb580406ebd433ea068a738886",
+     "bytes": 878053472
+    }
+   }
+  },
+  "mistralai/devstral-small-2-2512@4bit": {
+   "dir": "mlx-community/Devstral-Small-2-24B-Instruct-2512-4bit",
+   "files": {
+    "mlx-community/Devstral-Small-2-24B-Instruct-2512-4bit/chat_template.jinja": {
+     "sha256": "ed825380b678dad25046e0a92ef5c64a57178ccaba7e780b5ed581e91a4fd6ac",
+     "bytes": 5320
+    },
+    "mlx-community/Devstral-Small-2-24B-Instruct-2512-4bit/config.json": {
+     "sha256": "71b4c2218e42a1256bdfed2a4c81f18c5b83d1671d79ea70e07d812ffea29eaa",
+     "bytes": 1987
+    },
+    "mlx-community/Devstral-Small-2-24B-Instruct-2512-4bit/consolidated.safetensors.index.json": {
+     "sha256": "ae098214199fb7fe4948768c0a640f0cea32d1effb827c09b0ae1314b02ef714",
+     "bytes": 101411
+    },
+    "mlx-community/Devstral-Small-2-24B-Instruct-2512-4bit/generation_config.json": {
+     "sha256": "e0923390059f84a9180b00e5501778acc45ea9856cd7f2fd68208b360927c677",
+     "bytes": 131
+    },
+    "mlx-community/Devstral-Small-2-24B-Instruct-2512-4bit/model-00001-of-00003.safetensors": {
+     "sha256": "77bdf8efc6d0a47b208d24c4b997329fdb31c6fed275f98b55b91585e52f3806",
+     "bytes": 5297873128
+    },
+    "mlx-community/Devstral-Small-2-24B-Instruct-2512-4bit/model-00002-of-00003.safetensors": {
+     "sha256": "b942b4213b775875df5f856c5e3cf7a47145b0180af823703cc3e9e872c9e380",
+     "bytes": 5314713080
+    },
+    "mlx-community/Devstral-Small-2-24B-Instruct-2512-4bit/model-00003-of-00003.safetensors": {
+     "sha256": "072f0d02a18b25c4bb79313ac9595e2f2d1dae99c0c60a80323f6c878ec4862a",
+     "bytes": 3474307004
+    },
+    "mlx-community/Devstral-Small-2-24B-Instruct-2512-4bit/model.safetensors.index.json": {
+     "sha256": "f6a3dddc47d001996444ad67e30c5742980fe2c3cff63cc1e28c57c4d24a2c0e",
+     "bytes": 117404
+    },
+    "mlx-community/Devstral-Small-2-24B-Instruct-2512-4bit/params.json": {
+     "sha256": "14c57f0e14675313a340e12ecc85b68d0fd375a07ab0b8bf7d9acf44f42b1f95",
+     "bytes": 1210
+    },
+    "mlx-community/Devstral-Small-2-24B-Instruct-2512-4bit/processor_config.json": {
+     "sha256": "ece2373c2ae391bce18785a1810543bc6173a1f28b6767cffab2c35dbea5f002",
+     "bytes": 976
+    },
+    "mlx-community/Devstral-Small-2-24B-Instruct-2512-4bit/tekken.json": {
+     "sha256": "e29d19ea32eb7e26e6c0572d57cb7f9eca0f4420e0e0fe6ae1cf3be94da1c0d6",
+     "bytes": 16753777
+    },
+    "mlx-community/Devstral-Small-2-24B-Instruct-2512-4bit/tokenizer.json": {
+     "sha256": "286acad9b0e27fce778ac429763536accf618ccb6ed72963b6f94685e531c5c7",
+     "bytes": 17077402
+    },
+    "mlx-community/Devstral-Small-2-24B-Instruct-2512-4bit/tokenizer_config.json": {
+     "sha256": "2dd4c610c43937e20945d96bae1752ecfac51ad106b01fd1fdac78df3be59ee3",
+     "bytes": 21168
+    }
+   }
+  },
+  "bonsai-2-27b": {
+   "host": "m2 (llama-server, prism fork b10743)",
+   "dir": "~/prism-llama/models",
+   "files": {
+    "Ternary-Bonsai-2-27B-PQ2_0.gguf": {
+     "sha256": "3907dc1658db1f78a9826bf8d5bcb8dc65db0d466388937af57f2294fae62ec1",
+     "bytes": 7206168928
+    }
+   }
+  },
+  "_served": {
+   "mistralai/devstral-small-2-2512": "Q8_0 GGUF (lms ps, 2026-10-07)",
+   "bonsai-2-27b": "Ternary-Bonsai-2-27B-PQ2_0.gguf via llama-server -c 262144 -np 1"
+  }
+ }
+}
