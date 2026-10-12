@@ -11,10 +11,13 @@ replay of B0's first attempts), and it is the regression gate.
   python3 tools/replay_bench.py --aether-bin build/bin/aether
   python3 tools/replay_bench.py --aether-bin B 'harness_out/**/*.json' 'cs-aug20/**/*.json'
 
-Inputs are result-JSON globs (default: the tracked results/**, minus
-rejected/). Each case's task is resolved through its report's tasks_file;
-when the manifest's version has moved since the report, the task definition
-of that version is taken from git history if the grading fields differ.
+Inputs are result-JSON globs. With none given, the input set is the plain
+.json reports git tracks under results/** (minus rejected/): a scratch report
+left in the working tree is not part of it, so a dirty checkout replays what a
+fresh clone does. Outside a git checkout the default is the glob itself. Each
+case's task is resolved through its report's tasks_file; when the manifest's
+version has moved since the report, the task definition of that version is
+taken from git history if the grading fields differ.
 
 Old and new are graded against the same task definition: old = the stored
 returncode and stdout, new = a fresh run through the harness's own
@@ -27,6 +30,13 @@ replay_waivers.json waives it: waivers are keyed by the CHANGELOG version
 that declared the break plus (task_id, source sha256), with a reason, and
 apply only when that version lies after the report's binary and at or before
 the replay binary. Any unwaived regression exits 1.
+
+Report (--report-json). `tallies` counts per attempt kind; `flips` lists the
+attempts that cross the pass boundary plus the gated ones; `moves` lists every
+attempt whose class changed (so also silent_wrong->coded_error and the like),
+one record per case attempt; `task_classes` holds the class counts before and
+after per (kind, guide, task), which is what --by-task prints for
+silent_wrong first attempts.
 """
 
 from __future__ import annotations
@@ -193,24 +203,47 @@ def find_waiver(waivers: dict[str, Any], task_id: str, source_sha: str,
 # --------------------------------------------------------------------------- #
 # Replay
 # --------------------------------------------------------------------------- #
-def iter_report_paths(patterns: list[str], excludes: list[str]) -> list[pathlib.Path]:
+def tracked_files(root: pathlib.Path = ROOT) -> set[pathlib.Path] | None:
+    """The files git tracks under `root`, resolved. None when that cannot be
+    known or is empty (no git, not a checkout, an export unpacked inside some
+    other repo): the caller then takes the glob as it is, not an empty set."""
+    try:
+        listed = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, text=True)
+    except OSError:
+        return None
+    if listed.returncode != 0:
+        return None
+    return {(root / name).resolve() for name in listed.stdout.split("\0") if name} or None
+
+
+def iter_report_paths(patterns: list[str], excludes: list[str], root: pathlib.Path = ROOT,
+                      only: set[pathlib.Path] | None = None) -> list[pathlib.Path]:
+    """The files the globs name, minus the excluded ones; with `only`, minus
+    every file outside that set as well."""
     seen: set[pathlib.Path] = set()
     out = []
     excluded: set[pathlib.Path] = set()
     for pattern in excludes:
-        for match in glob.glob(str(ROOT / pattern) if not pathlib.Path(pattern).is_absolute() else pattern, recursive=True):
+        for match in glob.glob(str(root / pattern) if not pathlib.Path(pattern).is_absolute() else pattern, recursive=True):
             excluded.add(pathlib.Path(match).resolve())
     for pattern in patterns:
-        full = pattern if pathlib.Path(pattern).expanduser().is_absolute() else str(ROOT / pattern)
+        full = pattern if pathlib.Path(pattern).expanduser().is_absolute() else str(root / pattern)
         for match in sorted(glob.glob(str(pathlib.Path(full).expanduser()), recursive=True)):
             path = pathlib.Path(match).resolve()
             if path in seen or path in excluded or not path.is_file():
                 continue
             if any(path.match(ex) for ex in excludes):
                 continue
+            if only is not None and path not in only:
+                continue
             seen.add(path)
             out.append(path)
     return out
+
+
+def default_report_paths(excludes: list[str], root: pathlib.Path = ROOT) -> list[pathlib.Path]:
+    """The input set when no glob is given: the default glob, tracked files only."""
+    return iter_report_paths(DEFAULT_RESULTS, excludes, root, only=tracked_files(root))
 
 
 def stored_attempt_view(attempt: dict[str, Any], task: adb.Task) -> dict[str, Any]:
@@ -222,7 +255,8 @@ def stored_attempt_view(attempt: dict[str, Any], task: adb.Task) -> dict[str, An
 
 
 def replay(args: argparse.Namespace) -> dict[str, Any]:
-    paths = iter_report_paths(args.results or DEFAULT_RESULTS, args.exclude if args.exclude else DEFAULT_EXCLUDES)
+    excludes = args.exclude if args.exclude else DEFAULT_EXCLUDES
+    paths = iter_report_paths(args.results, excludes) if args.results else default_report_paths(excludes)
     resolver = TaskResolver()
     waivers = load_waivers(args.waivers)
     new_version = args.toolchain["language_version"]
@@ -282,6 +316,8 @@ def replay(args: argparse.Namespace) -> dict[str, Any]:
     regressions: list[dict[str, Any]] = []
     waived: list[dict[str, Any]] = []
     flips: list[dict[str, Any]] = []
+    moves: list[dict[str, Any]] = []
+    by_task: dict[tuple[str, str, str], dict[str, Any]] = {}
     for job in jobs:
         new_run = cache[job["key"]]
         new_view = {"generated_ok": True, "source_code": job["source"], "run": new_run}
@@ -304,6 +340,17 @@ def replay(args: argparse.Namespace) -> dict[str, Any]:
             "new_returncode": new_run["returncode"],
             "new_stderr_head": (new_run.get("stderr") or "").strip().splitlines()[:1],
         }
+        # Levels per task, so "how many silent_wrong first attempts does this
+        # task have now" has an answer; an attempt that did not move counts too.
+        row = by_task.setdefault((job["kind"], str(job["doc"]), record["task_id"]),
+                                 {"kind": job["kind"], "doc": job["doc"], "task_id": record["task_id"],
+                                  "attempts": 0, "old": {}, "new": {}})
+        row["attempts"] += 1
+        row["old"][old_class] = row["old"].get(old_class, 0) + 1
+        row["new"][new_class] = row["new"].get(new_class, 0) + 1
+        if old_class != new_class:
+            # A copy: the gate annotates the record it puts in flips, not this one.
+            moves.append(dict(record))
         if not old_pass and new_pass:
             tally["fail_to_pass"] += 1
             flips.append(record)
@@ -340,6 +387,8 @@ def replay(args: argparse.Namespace) -> dict[str, Any]:
         "waived": waived,
         "unwaived": regressions,
         "flips": flips,
+        "moves": moves,
+        "task_classes": [by_task[key] for key in sorted(by_task)],
         "gate": args.gate,
     }
 
@@ -367,9 +416,38 @@ def print_summary(result: dict[str, Any]) -> None:
               f"{record['old_class']}->{record['new_class']} {record['new_stderr_head']}")
 
 
+def print_by_task(result: dict[str, Any], kind: str = "first", klass: str = "silent_wrong") -> None:
+    """Per task, one column per guide: `klass` attempts before -> after, of how
+    many. A task is listed when any guide has one; `-` is a guide that never ran it."""
+    rows = [r for r in result["task_classes"] if r["kind"] == kind]
+    docs = sorted({str(r["doc"]) for r in rows})
+    cells: dict[str, dict[str, str]] = {}
+    totals = {doc: [0, 0, 0] for doc in docs}
+    listed: set[str] = set()
+    for r in rows:
+        before, after = r["old"].get(klass, 0), r["new"].get(klass, 0)
+        total = totals[str(r["doc"])]
+        total[0], total[1], total[2] = total[0] + before, total[1] + after, total[2] + r["attempts"]
+        cells.setdefault(r["task_id"], {})[str(r["doc"])] = f"{before} -> {after} of {r['attempts']}"
+        if before or after:
+            listed.add(r["task_id"])
+    print(f"  {klass} {kind} attempts by task and guide (before -> after of attempts):")
+    if not rows:
+        print(f"    no {kind} attempts")
+        return
+    table = [["task", *docs]] + [[task, *(cells[task].get(doc, "-") for doc in docs)] for task in sorted(listed)]
+    table.append(["total", *(f"{totals[doc][0]} -> {totals[doc][1]} of {totals[doc][2]}" for doc in docs)])
+    widths = [max(len(line[i]) for line in table) for i in range(len(docs) + 1)]
+    for line in table:
+        print("    " + "  ".join(cell.ljust(width) for cell, width in zip(line, widths)).rstrip())
+    if len(cells) > len(listed):
+        print(f"    not listed: {len(cells) - len(listed)} task(s) with no {klass} {kind} attempt before or after")
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("results", nargs="*", help=f"result-JSON globs, ** allowed (default: {DEFAULT_RESULTS[0]})")
+    ap.add_argument("results", nargs="*",
+                    help=f"result-JSON globs, ** allowed (default: the tracked files of {DEFAULT_RESULTS[0]})")
     ap.add_argument("--exclude", action="append", default=[], help=f"globs to skip (default: {DEFAULT_EXCLUDES[0]})")
     ap.add_argument("--aether-bin", type=pathlib.Path, default=adb.DEFAULT_AETHER_BIN)
     ap.add_argument("--aether-arg", action="append", default=[], dest="aether_args", metavar="ARG",
@@ -380,6 +458,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="which attempts a regression is gated on (default all; first attempts are the headline)")
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--report-json", type=pathlib.Path)
+    ap.add_argument("--by-task", action="store_true",
+                    help="also print, per task and guide, the silent_wrong first attempts before and after")
     ap.add_argument("--check-waivers", action="store_true", help="validate the waiver file and exit")
     ap.add_argument("--emit-waivers", metavar="VERSION",
                     help="print waiver entries for this run's unwaived regressions under VERSION, to review "
@@ -409,6 +489,8 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         shutil.rmtree(run_dir, ignore_errors=True)
     print_summary(result)
+    if args.by_task:
+        print_by_task(result)
     if args.report_json:
         args.report_json.write_text(json.dumps(result, indent=2))
     if args.emit_waivers:

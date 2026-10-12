@@ -32,6 +32,7 @@ import json
 import math
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1292,24 +1293,55 @@ def test_oracle_lint_only_needs_no_binary():
     assert "14 manifests, 0 problem(s)" in proc.stdout
 
 
-def test_oracle_check_passes_on_the_real_binary_quickly():
-    binary = real_aether_bin()
-    with workdir() as tmp:
-        out = tmp / "oracle.json"
-        proc = run_harness(["--aether-bin", str(binary), "--quiet", "--report-json", str(out)],
-                           script=REPO_ROOT / "tools" / "aether_oracle_check.py")
-        assert proc.returncode == 0, proc.stdout + proc.stderr
-        report = json.loads(out.read_text())
-        assert report["references_passed"] == report["references_total"] == 192
-        assert report["python_references_passed"] == report["python_references_total"] == PY_CHECKED
-        assert report["board_agreement"]["agreeing"] == report["board_agreement"]["tasks"] == 114
-        assert sum(n["ok"] for n in report["negatives"]) == len(report["negatives"]) == 4
-        assert report["sandbox_probe"]["ok"] is True
-        # The target is under 10 s on an idle Release build. A loaded machine or an
-        # -O0 build runs 2-3x slower, so only a runaway fails the test.
-        if report["elapsed_seconds"] >= 10:
-            print(f"note: oracle check took {report['elapsed_seconds']:.1f} s (target < 10 s)")
-        assert report["elapsed_seconds"] < 60, report["elapsed_seconds"]
+_ORACLE_LAP: dict = {}
+
+
+def _oracle_lap() -> dict:
+    """One default oracle lap on the real binary, shared by the two tests below:
+    the process, its report, and the user-mode CPU seconds its process tree used."""
+    if not _ORACLE_LAP:
+        import resource
+
+        binary = real_aether_bin()
+        with workdir() as tmp:
+            out = tmp / "oracle.json"
+            before = resource.getrusage(resource.RUSAGE_CHILDREN).ru_utime
+            # The timeout only ends a hang. It is far above any wall time a busy
+            # machine has shown (121 s), so load cannot fail the lap.
+            proc = run_harness(["--aether-bin", str(binary), "--quiet", "--report-json", str(out)],
+                               script=REPO_ROOT / "tools" / "aether_oracle_check.py", timeout=1800)
+            user = resource.getrusage(resource.RUSAGE_CHILDREN).ru_utime - before
+            _ORACLE_LAP.update(proc=proc, user_cpu_seconds=user,
+                               report=json.loads(out.read_text()) if out.exists() else None)
+    return _ORACLE_LAP
+
+
+def test_oracle_check_passes_on_the_real_binary():
+    lap = _oracle_lap()
+    proc, report = lap["proc"], lap["report"]
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert report["references_passed"] == report["references_total"] == 192
+    assert report["python_references_passed"] == report["python_references_total"] == PY_CHECKED
+    assert report["board_agreement"]["agreeing"] == report["board_agreement"]["tasks"] == 114
+    assert sum(n["ok"] for n in report["negatives"]) == len(report["negatives"]) == 4
+    assert report["sandbox_probe"]["ok"] is True
+
+
+def test_oracle_check_stays_quick_on_the_real_binary():
+    # The target is under 10 s of wall time on an idle Release build, but wall
+    # time measures the machine as much as the lap: on one loaded laptop the same
+    # lap took 48 to 121 s. The user-mode CPU its processes burn does not move
+    # with load (20-22 s across those runs, also beside 20 busy loops), and it is
+    # what a slow reference adds: with the scale suite let into the default lap
+    # it is 276 s. So the limit is on that, with room for a slower machine or an
+    # -O0 build; the wall time is reported, not judged.
+    lap = _oracle_lap()
+    assert lap["report"] is not None, lap["proc"].stdout + lap["proc"].stderr
+    elapsed = lap["report"]["elapsed_seconds"]
+    if elapsed >= 10:
+        print(f"note: oracle check took {elapsed:.1f} s of wall time (target < 10 s idle), "
+              f"{lap['user_cpu_seconds']:.1f} s of user CPU")
+    assert lap["user_cpu_seconds"] < 120, (lap["user_cpu_seconds"], elapsed)
 
 
 def test_harness_preflight_aborts_on_a_broken_reference():
@@ -1624,11 +1656,138 @@ def test_replay_gate_fails_on_a_broken_arm_and_honours_waivers():
             assert proc.returncode == expect, (version, proc.stdout)
 
 
+def _replay_moves_fixture(tmp: pathlib.Path) -> pathlib.Path:
+    """A report whose attempts, replayed on the fake compiler, stay put, cross
+    the pass boundary, and move between failure classes, under two guides."""
+    ids = ("t_coded", "t_fix", "t_into", "t_pass", "t_same")
+    manifest = write_json(tmp / "tasks.json", {"version": "m-1", "tasks": [simple_task(i, expected="hello\n") for i in ids]})
+    ok, wrong, coded = "//! print hello\n", "//! print nope\n", "//! stderr prog.aether:1: [SYN-001] boom\n//! exit 1\n"
+
+    def attempt(source: str, rc: int, stdout: str = "", stderr: str = "") -> dict:
+        return {"generated_ok": True, "source_code": source,
+                "run": {"returncode": rc, "stdout": stdout, "stderr": stderr, "exact_stdout_match": stdout == "hello\n"}}
+
+    def case(task_id: str, *attempts: dict, repeat: int = 0) -> dict:
+        return {"task_id": task_id, "repeat_index": repeat, "generated_ok": True, "attempts": list(attempts)}
+
+    silent = (0, "nope\n")
+    medium = [
+        case("t_fix", attempt(ok, *silent)),                                    # silent_wrong -> pass
+        case("t_coded", attempt(coded, *silent),                                # silent_wrong -> coded_error
+             attempt(coded, 1, "", "Runtime Error: boom")),                     # repair: uncoded_error -> coded_error
+        case("t_same", attempt(wrong, *silent)),                                # silent_wrong, as before
+        case("t_into", attempt(wrong, 1, "", "prog.aether:1: [SYN-001] boom")),  # coded_error -> silent_wrong (gated)
+        case("t_pass", attempt(ok, 0, "hello\n")),                              # pass, as before
+    ]
+    card = [case("t_coded", attempt(coded, *silent)), case("t_coded", attempt(wrong, *silent), repeat=1),
+            case("t_same", attempt(ok, 0, "hello\n"))]
+    report = {"tasks_file": str(manifest), "tasks_version": "m-1", "aether_version": "2026-01-01-1+abc1234",
+              "destinations": [{"destination_id": "m", "variants": [
+                  {"doc_name": "medium", "results": medium}, {"doc_name": "card", "results": card}]}]}
+    (tmp / "board").mkdir()
+    return write_json(tmp / "board" / "r.json", report)
+
+
+def test_replay_report_keeps_every_class_move_per_case():
+    with workdir() as tmp:
+        report = _replay_moves_fixture(tmp)
+        out = tmp / "replay.json"
+        proc = run_harness(["--aether-bin", str(FAKE_AETHER), str(report), "--report-json", str(out),
+                            "--waivers", str(tmp / "none.json")], script=REPLAY)
+        result = json.loads(out.read_text())
+        moved = {(m["doc"], m["task_id"], m["repeat_index"], m["attempt"], m["kind"], m["old_class"], m["new_class"])
+                 for m in result["moves"]}
+        assert moved == {
+            ("medium", "t_fix", 0, 0, "first", "silent_wrong", "pass"),
+            ("medium", "t_coded", 0, 0, "first", "silent_wrong", "coded_error"),
+            ("medium", "t_coded", 0, 1, "repair", "uncoded_error", "coded_error"),
+            ("medium", "t_into", 0, 0, "first", "coded_error", "silent_wrong"),
+            ("card", "t_coded", 0, 0, "first", "silent_wrong", "coded_error"),
+        }, result["moves"]
+        assert len(result["moves"]) == len(moved)
+        coded = "//! stderr prog.aether:1: [SYN-001] boom\n//! exit 1\n"
+        for move in result["moves"]:
+            assert move["report"].endswith("r.json") and move["destination"] == "m", move
+            if move["task_id"] == "t_coded":
+                assert move["source_sha256"] == hashlib.sha256(coded.encode()).hexdigest(), move
+        # The older fields mean what they did: flips is the pass boundary plus the
+        # gated moves, each of them also a move, and the tallies count the moves.
+        key = ("doc", "task_id", "repeat_index", "attempt", "old_class", "new_class")
+        flips = [tuple(f[k] for k in key) for f in result["flips"]]
+        assert sorted(flips) == [("medium", "t_fix", 0, 0, "silent_wrong", "pass"),
+                                 ("medium", "t_into", 0, 0, "coded_error", "silent_wrong")], result["flips"]
+        assert set(flips) <= {tuple(m[k] for k in key) for m in result["moves"]}
+        for kind, tally in result["tallies"].items():
+            assert sum(tally["transitions"].values()) == sum(m["kind"] == kind for m in result["moves"]), tally
+        assert result["tallies"]["first"]["transitions"]["silent_wrong->coded_error"] == 2
+        assert proc.returncode == 1 and [r["task_id"] for r in result["unwaived"]] == ["t_into"], proc.stdout
+        assert result["unwaived"][0]["transition"] == "into_silent_wrong"
+        assert all("transition" not in m for m in result["moves"])
+        levels = {(r["kind"], r["doc"], r["task_id"]): r for r in result["task_classes"]}
+        assert levels[("first", "card", "t_coded")] == {
+            "kind": "first", "doc": "card", "task_id": "t_coded", "attempts": 2,
+            "old": {"silent_wrong": 2}, "new": {"coded_error": 1, "silent_wrong": 1}}
+        assert levels[("first", "medium", "t_same")]["new"] == {"silent_wrong": 1}
+        assert levels[("repair", "medium", "t_coded")]["old"] == {"uncoded_error": 1}
+
+
+def test_replay_by_task_prints_silent_wrong_first_attempts_per_guide():
+    with workdir() as tmp:
+        base = ["--aether-bin", str(FAKE_AETHER), str(_replay_moves_fixture(tmp)), "--waivers", str(tmp / "none.json")]
+        plain = run_harness(base, script=REPLAY).stdout.splitlines()
+        table = run_harness(base + ["--by-task"], script=REPLAY).stdout.splitlines()
+        # Without the option the output is what it was (line 0 carries the run time).
+        assert not any("by task" in line for line in plain), plain
+        assert table[1:len(plain)] == plain[1:] and len(plain) > 3, (plain, table)
+        assert [" ".join(line.split()) for line in table[len(plain):]] == [
+            "silent_wrong first attempts by task and guide (before -> after of attempts):",
+            "task card medium",
+            "t_coded 2 -> 1 of 2 1 -> 0 of 1",
+            "t_fix - 1 -> 0 of 1",
+            "t_into - 0 -> 1 of 1",
+            "t_same 0 -> 0 of 1 1 -> 1 of 1",
+            "total 2 -> 1 of 3 3 -> 2 of 5",
+            "not listed: 1 task(s) with no silent_wrong first attempt before or after",
+        ], table[len(plain):]
+
+
+def test_replay_default_input_is_the_tracked_reports_only():
+    sys.path.insert(0, str(REPO_ROOT / "tools"))
+    import replay_bench
+
+    with workdir() as tmp:
+        tmp = tmp.resolve()
+        results = tmp / "repo" / "Tests" / "aether_doc_bench" / "results" / "board"
+        (results / "rejected").mkdir(parents=True)
+        for name in ("tracked.json", "packed.json.gz", "rejected/r.json", "scratch.json"):
+            (results / name).write_text("{}")
+        root = tmp / "repo"
+        subprocess.run(["git", "-C", str(root), "init", "-q"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(root), "add", "--", "Tests/aether_doc_bench/results/board/tracked.json",
+                        "Tests/aether_doc_bench/results/board/packed.json.gz",
+                        "Tests/aether_doc_bench/results/board/rejected/r.json"], check=True, capture_output=True)
+        excludes = replay_bench.DEFAULT_EXCLUDES
+        # Tracked plain .json only: not the scratch file, the packed report or rejected/.
+        assert replay_bench.default_report_paths(excludes, root) == [results / "tracked.json"]
+        # A glob the user gives names what it names, tracked or not.
+        named = replay_bench.iter_report_paths(replay_bench.DEFAULT_RESULTS, excludes, root)
+        assert named == [results / "scratch.json", results / "tracked.json"], named
+        # Outside a git checkout there is no tracked set, so the default is the glob.
+        shutil.rmtree(root / ".git")
+        assert replay_bench.tracked_files(root) is None
+        assert replay_bench.default_report_paths(excludes, root) == named
+    # In this checkout the default set is tracked files, none of them packed.
+    tracked = replay_bench.tracked_files()
+    if tracked is not None:
+        paths = replay_bench.default_report_paths(replay_bench.DEFAULT_EXCLUDES)
+        assert paths and set(paths) <= tracked and all(p.suffix == ".json" for p in paths)
+
+
 def test_tracked_waiver_file_is_valid():
     proc = run_harness(["--check-waivers"], script=REPLAY)
     assert proc.returncode == 0, proc.stdout
     data = json.loads((BENCH_DIR / "replay_waivers.json").read_text())
-    assert set(data["waivers"]) == {"2026-07-26-1", "2026-08-09-1"}
+    assert set(data["waivers"]) == {"2026-07-26-1", "2026-08-09-1", "2026-10-08-1"}
 
 
 def test_instrument_check_lint_only_runs_without_a_binary():

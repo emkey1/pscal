@@ -64,8 +64,12 @@ comparable across these harness changes, which landed together before B0:
 ## Replay and the instrument log
 
 `tools/replay_bench.py --aether-bin BIN [GLOB ...]` re-grades every stored
-program (default: the tracked `results/**`, minus `rejected/`) on another
-binary and reports fail->pass, pass->fail and failure-class transitions. A
+program (default: the tracked plain `.json` reports under `results/**`, minus
+`rejected/`; untracked files there are not read unless a glob names them) on
+another binary and reports fail->pass, pass->fail and failure-class
+transitions. Its `--report-json` lists every attempt whose class moved
+(`moves`) and the class counts per task and guide before and after
+(`task_classes`); `--by-task` prints the silent-wrong first attempts from them. A
 pass->fail, or a move into silent_wrong, must be waived in
 `../replay_waivers.json` (keyed by the CHANGELOG version that declared the
 break, plus task id and source sha256) or the replay exits 1. Untracked sets
