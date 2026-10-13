@@ -163,6 +163,18 @@
           "evidence": "new first diagnostic NAME-001: trap_const_case_alias.aether:4: [NAME-001] Aether redeclaration error: parameter 'name' is the same name as the top-level const 'Name' (line 1): Aether names ignore case, and a parameter must not reuse a const or global name."
         }
       ]
+    },
+    "2026-10-13-1": {
+      "reason": "A slice of a field compiles (CHANGELOG 2026-10-13-1). A stored program that used to stop at `[SCOPE-001] identifier '__aether_slice_0' not in scope` now runs; where its own logic is wrong, the wrong output becomes visible. That is the fix exposing a program that was never right, not a miscompile.",
+      "entries": [
+        {
+          "task_id": "hard2_heap_sort",
+          "source_sha256": "0485cbe5905180b3eca885f2e74ff8ded59b663679a824c90bb66d46144fba9f",
+          "transition": "into_silent_wrong",
+          "note": "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_hard_nontoon__r2.json.gz attempt 2: coded_error->silent_wrong",
+          "evidence": "extractMin shrinks the heap with `self.data = self.data[0..(length(self.data) - 2)] + [];`, a half-open range that drops two elements per call, so 5 of 10 values are printed. 2026-10-08-1 stopped at the SCOPE-001 on that line; 2026-10-13-1 prints `sorted = 3 4 7 8 19`."
+        }
+      ]
     }
   }
 }
