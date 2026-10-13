@@ -29,7 +29,9 @@ count (`audit` in the run log).
 | B0, medium guide, 73 tasks | complete, four models x 3 repeats |
 | B1, traps, medium and card | complete for the three qwen models |
 | **B0-small**, small guide (2026-09-05-1, sha256 `d7d16264…192e49`), 73 tasks | **complete for qwen3.5-9b** x 3 repeats |
-| P0 (card), S0 (scale), Python baseline | running; they follow in a later commit, under the no-retry rule below |
+| P0 (card), v2_pos + cs | complete, three qwen models x 3 repeats, **no-retry rule** |
+| S0 (scale), 8 tasks | complete, qwen3.6-35b-a3b x 3 repeats, no-retry rule |
+| Python baseline (BP), 73 tasks, no guide | complete, three qwen models x 3 repeats, no-retry rule |
 
 Hosted Bonsai was dropped by the owner on 2026-10-12 after B0: one slow
 provider, an int4 build, and about ten tasks of 73 below the local ternary
@@ -81,6 +83,40 @@ Reading it:
   per-repeat rate): 1.6 points for qwen3.6-27b, 2.9 for qwen3.6-35b, 2.1 for
   Bonsai, 6.5 for qwen3.5-9b. Plan 2.2 sizes B_G1's repeats from this.
 
+## P0, S0 and the Python baseline (added 2026-10-13)
+
+These three boards ran on harness 6a44b26d and later: an empty first attempt
+ends the case, so here FX is already the no-retry number.
+
+| board | model | cases | FA | FX | SW | no_answer | crash | uncoded | coded | FA by repeat |
+|---|---|---|---|---|---|---|---|---|---|---|
+| P0 card | qwen3.6-27b | 162 | 80.9 [71, 90] | 87.0 [79, 94] | 0 | 0 | 0 | 0 | 31 | 81.5 / 79.6 / 81.5 |
+| P0 card | qwen3.6-35b-a3b | 162 | 74.7 [64, 84] | 87.6 [81, 94] | 4 | 3 | 0 | 0 | 34 | 77.8 / 70.4 / 75.9 |
+| P0 card | qwen3.5-9b | 162 | 22.8 [15, 31] | 23.5 [15, 31] | 0 | 109 | 0 | 1 | 15 | 22.2 / 22.2 / 24.1 |
+| S0 scale | qwen3.6-35b-a3b | 24 | 50.0 [25, 75] | 83.3 [67, 96] | 2 | 1 | 6 | 1 | 2 | 37.5 / 37.5 / 75.0 |
+| BP Python | qwen3.6-27b | 219 | 92.7 [88, 97] | 96.8 [94, 99] | 2 | 6 | 0 | 8 | 0 | 95.9 / 93.2 / 89.0 |
+| BP Python | qwen3.6-35b-a3b | 219 | 76.3 [69, 83] | 82.7 [76, 89] | 1 | 31 | 0 | 20 | 0 | 79.5 / 72.6 / 76.7 |
+| BP Python | qwen3.5-9b | 219 | 54.8 [47, 62] | 55.7 [48, 63] | 0 | 91 | 0 | 8 | 0 | 53.4 / 54.8 / 56.2 |
+
+- **Card against medium guide** (first attempt on v2_pos + cs; medium from B0):
+  qwen3.6-27b 80.9% against 98.8%, qwen3.6-35b 74.7% against 96.9%, qwen3.5-9b
+  22.8% against 72.8%. The gap is 18, 22 and 50 points; the plan's provisional
+  target is 10. On the card qwen3.6-27b still gets cs 57/57 and loses on the
+  simple suite (70.5%), where a third of the tasks use features the card does
+  not mention.
+- **qwen3.5-9b with the card returns nothing in 109 of 162 first attempts.**
+- **Python, no guide, against Aether with the medium guide** (first attempt, 73
+  tasks): qwen3.6-27b 92.7% against 97.7%, qwen3.6-35b 76.3% against 95.4%,
+  qwen3.5-9b 54.8% against 62.1%. Eleven of the simple tasks and the hard_v2
+  suite ask for Aether-only features, so this is not a clean language
+  comparison; qwen3.6-35b also ends 31 Python first attempts with no program.
+  Per suite, Python first attempt: qwen3.6-27b cs 94.7 / hard_nontoon 100 /
+  hard_v2 90.5 / simple 91.4; qwen3.6-35b 82.5 / 80.0 / 85.7 / 68.6; qwen3.5-9b
+  82.5 / 73.3 / 26.2 / 48.6.
+- **Scale:** 6 of 24 first attempts ran into the time limit, which is what the
+  board is for; repair recovers most (83.3%). The scale manifest as run is kept
+  beside this file (`tasks_scale_as_run.json`, re-timed on the bench host).
+
 ## Incidents
 
 Detail in `RUN_LOG.md`. None left an unmeasured case in the tables.
@@ -95,5 +131,9 @@ Detail in `RUN_LOG.md`. None left an unmeasured case in the tables.
    B1 and B0-small ran on the earlier harness, P0, S0 and the Python baseline
    run on the new one. `FX nr` makes the two comparable.
 
-Cost: $25.77 of key usage when B0-small finished (B0 about $8.6, the traps
-board about $4.6 per model).
+5. Four Python-baseline units were accepted with rate-limited cases in them (19
+   cases): the re-run tool reads only the Aether cases and reported nothing to
+   do. They were resumed on 2026-10-13 and the driver now refuses such a unit.
+
+Cost: $42.85 of key usage for the whole set (B0 about $8.6, the traps board
+about $4.6 per model, the card, scale and Python boards about $17 together).

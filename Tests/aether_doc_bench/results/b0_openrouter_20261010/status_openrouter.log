@@ -213,3 +213,240 @@
 2026-10-12T15:54:49Z [run ] P0 or-qwen36-35b-a3b__tasks_cs__r0
 2026-10-12T15:54:49Z [run ] P0 or-qwen36-35b-a3b__tasks_v2_pos__r1
 2026-10-12T15:54:49Z [run ] P0 or-qwen36-35b-a3b__tasks_cs__r1
+2026-10-12T16:02:16Z [done] P0 or-qwen36-35b-a3b__tasks_cs__r0 447s card fa=19/19 fx=19/19 gen=19
+2026-10-12T16:02:19Z [run ] P0 or-qwen36-35b-a3b__tasks_v2_pos__r2
+2026-10-12T16:09:18Z [done] P0 or-qwen36-35b-a3b__tasks_v2_pos__r0 874s card fa=23/35 fx=30/35 gen=35
+2026-10-12T16:09:20Z [drain] waiting for or-qwen36-35b-a3b units before or-qwen36-27b
+2026-10-12T16:09:20Z [run ] P0 or-qwen36-35b-a3b__tasks_cs__r2
+2026-10-12T16:13:42Z [done] P0 or-qwen36-35b-a3b__tasks_cs__r1 1133s card fa=15/19 fx=17/19 gen=18
+2026-10-12T16:30:02Z [done] P0 or-qwen36-35b-a3b__tasks_cs__r2 1242s card fa=15/19 fx=17/19 gen=18
+2026-10-12T16:30:12Z [done] P0 or-qwen36-35b-a3b__tasks_v2_pos__r2 1673s card fa=26/35 fx=32/35 gen=34
+2026-10-12T16:46:12Z [done] P0 or-qwen36-35b-a3b__tasks_v2_pos__r1 3083s card fa=23/35 fx=27/35 gen=31
+2026-10-12T16:46:22Z [run ] P0 or-qwen36-27b__tasks_v2_pos__r0
+2026-10-12T16:46:37Z [warm] or-qwen36-27b is answering after 15s; opening 4 slots
+2026-10-12T16:46:37Z [run ] P0 or-qwen36-27b__tasks_cs__r0
+2026-10-12T16:46:37Z [run ] P0 or-qwen36-27b__tasks_v2_pos__r1
+2026-10-12T16:46:37Z [run ] P0 or-qwen36-27b__tasks_cs__r1
+2026-10-12T17:05:13Z [done] P0 or-qwen36-27b__tasks_cs__r1 1116s card fa=19/19 fx=19/19 gen=19
+2026-10-12T17:05:23Z [run ] P0 or-qwen36-27b__tasks_v2_pos__r2
+2026-10-12T17:05:28Z [done] P0 or-qwen36-27b__tasks_cs__r0 1131s card fa=19/19 fx=19/19 gen=19
+2026-10-12T17:05:38Z [drain] waiting for or-qwen36-27b units before or-qwen35-9b
+2026-10-12T17:05:38Z [run ] P0 or-qwen36-27b__tasks_cs__r2
+2026-10-12T17:23:32Z [done] P0 or-qwen36-27b__tasks_cs__r2 1074s card fa=19/19 fx=19/19 gen=19
+2026-10-12T17:41:32Z [done] P0 or-qwen36-27b__tasks_v2_pos__r1 3295s card fa=24/35 fx=27/35 gen=34
+2026-10-12T17:46:48Z [done] P0 or-qwen36-27b__tasks_v2_pos__r0 3626s card fa=25/35 fx=27/35 gen=35
+2026-10-12T17:59:03Z [done] P0 or-qwen36-27b__tasks_v2_pos__r2 3220s card fa=25/35 fx=30/35 gen=35
+2026-10-12T17:59:12Z [run ] P0 or-qwen35-9b__tasks_v2_pos__r0
+2026-10-12T17:59:17Z [warm] or-qwen35-9b is answering after 5s; opening 4 slots
+2026-10-12T17:59:17Z [run ] P0 or-qwen35-9b__tasks_cs__r0
+2026-10-12T17:59:17Z [run ] P0 or-qwen35-9b__tasks_v2_pos__r1
+2026-10-12T17:59:17Z [run ] P0 or-qwen35-9b__tasks_cs__r1
+2026-10-12T18:10:22Z [guard] spend guard raised from $32 to $42 (owner showed an available balance of $31.54)
+2026-10-12T20:04:38Z [infra] P0 or-qwen35-9b__tasks_cs__r0: rerun_nogen_cases round 1
+2026-10-12T20:23:05Z [done] P0 or-qwen35-9b__tasks_cs__r0 8628s card fa=2/19 fx=2/19 gen=3
+2026-10-12T20:23:11Z [run ] P0 or-qwen35-9b__tasks_v2_pos__r2
+2026-10-12T20:24:06Z [done] P0 or-qwen35-9b__tasks_cs__r1 8689s card fa=2/19 fx=2/19 gen=3
+2026-10-12T20:24:11Z [drain] waiting for or-qwen35-9b units before or-qwen36-35b-a3b
+2026-10-12T20:24:11Z [run ] P0 or-qwen35-9b__tasks_cs__r2
+2026-10-12T21:06:46Z [done] P0 or-qwen35-9b__tasks_v2_pos__r1 11249s card fa=10/35 fx=10/35 gen=10
+2026-10-12T21:10:21Z [done] P0 or-qwen35-9b__tasks_v2_pos__r0 11469s card fa=10/35 fx=11/35 gen=13
+2026-10-12T22:01:01Z [infra] P0 or-qwen35-9b__tasks_cs__r2: rerun_nogen_cases round 1
+2026-10-12T22:14:20Z [done] P0 or-qwen35-9b__tasks_cs__r2 6609s card fa=4/19 fx=4/19 gen=4
+2026-10-12T22:53:45Z [done] P0 or-qwen35-9b__tasks_v2_pos__r2 9034s card fa=9/35 fx=9/35 gen=9
+2026-10-12T22:53:49Z [run ] S0 or-qwen36-35b-a3b__tasks_scale__r0
+2026-10-12T22:54:20Z [warm] or-qwen36-35b-a3b is answering after 30s; opening 4 slots
+2026-10-12T22:54:20Z [run ] S0 or-qwen36-35b-a3b__tasks_scale__r1
+2026-10-12T22:54:20Z [run ] S0 or-qwen36-35b-a3b__tasks_scale__r2
+2026-10-12T22:54:20Z [run ] BP or-qwen36-35b-a3b__tasks_v2_pos__r0
+2026-10-12T22:59:51Z [done] S0 or-qwen36-35b-a3b__tasks_scale__r2 331s medium fa=6/8 fx=7/8 gen=8
+2026-10-12T23:00:05Z [run ] BP or-qwen36-35b-a3b__tasks_hard_v2__r0
+2026-10-12T23:02:21Z [done] S0 or-qwen36-35b-a3b__tasks_scale__r1 481s medium fa=3/8 fx=6/8 gen=8
+2026-10-12T23:02:35Z [run ] BP or-qwen36-35b-a3b__tasks_hard_nontoon__r0
+2026-10-12T23:04:27Z [done] BP or-qwen36-35b-a3b__tasks_hard_nontoon__r0 112s none fa=3/5 fx=5/5 gen=5
+2026-10-12T23:04:35Z [run ] BP or-qwen36-35b-a3b__tasks_cs__r0
+2026-10-12T23:06:23Z [done] S0 or-qwen36-35b-a3b__tasks_scale__r0 754s medium fa=3/8 fx=7/8 gen=7
+2026-10-12T23:06:35Z [run ] BP or-qwen36-35b-a3b__tasks_v2_pos__r1
+2026-10-12T23:12:14Z [done] BP or-qwen36-35b-a3b__tasks_hard_v2__r0 729s none fa=11/14 fx=13/14 gen=13
+2026-10-12T23:12:21Z [run ] BP or-qwen36-35b-a3b__tasks_hard_v2__r1
+2026-10-12T23:20:15Z [done] BP or-qwen36-35b-a3b__tasks_cs__r0 940s none fa=17/19 fx=17/19 gen=17
+2026-10-12T23:20:21Z [run ] BP or-qwen36-35b-a3b__tasks_hard_nontoon__r1
+2026-10-12T23:25:29Z [done] BP or-qwen36-35b-a3b__tasks_v2_pos__r0 1869s none fa=27/35 fx=28/35 gen=30
+2026-10-12T23:25:37Z [run ] BP or-qwen36-35b-a3b__tasks_cs__r1
+2026-10-12T23:28:18Z [done] BP or-qwen36-35b-a3b__tasks_hard_v2__r1 957s none fa=13/14 fx=13/14 gen=13
+2026-10-12T23:28:22Z [run ] BP or-qwen36-35b-a3b__tasks_v2_pos__r2
+2026-10-12T23:34:35Z [done] BP or-qwen36-35b-a3b__tasks_hard_nontoon__r1 854s none fa=4/5 fx=4/5 gen=4
+2026-10-12T23:34:37Z [run ] BP or-qwen36-35b-a3b__tasks_hard_v2__r2
+2026-10-12T23:49:53Z [done] BP or-qwen36-35b-a3b__tasks_hard_v2__r2 916s none fa=12/14 fx=13/14 gen=13
+2026-10-12T23:50:08Z [run ] BP or-qwen36-35b-a3b__tasks_hard_nontoon__r2
+2026-10-12T23:50:10Z [done] BP or-qwen36-35b-a3b__tasks_cs__r1 1473s none fa=13/19 fx=16/19 gen=16
+2026-10-12T23:50:23Z [drain] waiting for or-qwen36-35b-a3b units before or-qwen36-27b
+2026-10-12T23:50:23Z [run ] BP or-qwen36-35b-a3b__tasks_cs__r2
+2026-10-12T23:51:50Z [infra] BP or-qwen36-35b-a3b__tasks_v2_pos__r1: rerun_nogen_cases round 1
+2026-10-12T23:51:50Z [done] BP or-qwen36-35b-a3b__tasks_v2_pos__r1 2715s none fa=22/35 fx=23/35 gen=24
+2026-10-12T23:52:20Z [infra] BP or-qwen36-35b-a3b__tasks_hard_nontoon__r2: rerun_nogen_cases round 1
+2026-10-12T23:52:20Z [done] BP or-qwen36-35b-a3b__tasks_hard_nontoon__r2 132s none fa=4/5 fx=4/5 gen=4
+2026-10-12T23:56:33Z [infra] BP or-qwen36-35b-a3b__tasks_v2_pos__r2: rerun_nogen_cases round 1
+2026-10-12T23:56:33Z [done] BP or-qwen36-35b-a3b__tasks_v2_pos__r2 1691s none fa=12/35 fx=14/35 gen=14
+2026-10-12T23:59:57Z [done] BP or-qwen36-35b-a3b__tasks_cs__r2 574s none fa=17/19 fx=17/19 gen=17
+2026-10-13T00:00:09Z [run ] BP or-qwen36-27b__tasks_v2_pos__r0
+2026-10-13T00:00:19Z [warm] or-qwen36-27b is answering after 10s; opening 4 slots
+2026-10-13T00:00:19Z [run ] BP or-qwen36-27b__tasks_hard_v2__r0
+2026-10-13T00:00:19Z [run ] BP or-qwen36-27b__tasks_hard_nontoon__r0
+2026-10-13T00:00:19Z [run ] BP or-qwen36-27b__tasks_cs__r0
+2026-10-13T00:05:49Z [done] BP or-qwen36-27b__tasks_hard_nontoon__r0 330s none fa=5/5 fx=5/5 gen=5
+2026-10-13T00:05:49Z [run ] BP or-qwen36-27b__tasks_v2_pos__r1
+2026-10-13T00:15:22Z [done] BP or-qwen36-27b__tasks_hard_v2__r0 903s none fa=13/14 fx=14/14 gen=14
+2026-10-13T00:15:35Z [run ] BP or-qwen36-27b__tasks_hard_v2__r1
+2026-10-13T00:23:23Z [done] BP or-qwen36-27b__tasks_cs__r0 1384s none fa=19/19 fx=19/19 gen=19
+2026-10-13T00:23:35Z [run ] BP or-qwen36-27b__tasks_hard_nontoon__r1
+2026-10-13T00:29:41Z [done] BP or-qwen36-27b__tasks_hard_v2__r1 846s none fa=14/14 fx=14/14 gen=14
+2026-10-13T00:29:51Z [run ] BP or-qwen36-27b__tasks_cs__r1
+2026-10-13T00:31:15Z [done] BP or-qwen36-27b__tasks_hard_nontoon__r1 460s none fa=5/5 fx=5/5 gen=5
+2026-10-13T00:31:21Z [run ] BP or-qwen36-27b__tasks_v2_pos__r2
+2026-10-13T00:52:32Z [done] BP or-qwen36-27b__tasks_v2_pos__r1 2803s none fa=31/35 fx=33/35 gen=33
+2026-10-13T00:52:37Z [run ] BP or-qwen36-27b__tasks_hard_v2__r2
+2026-10-13T01:10:57Z [done] BP or-qwen36-27b__tasks_hard_v2__r2 1100s none fa=11/14 fx=14/14 gen=14
+2026-10-13T01:11:08Z [run ] BP or-qwen36-27b__tasks_hard_nontoon__r2
+2026-10-13T01:18:27Z [done] BP or-qwen36-27b__tasks_cs__r1 2916s none fa=18/19 fx=18/19 gen=18
+2026-10-13T01:18:39Z [drain] waiting for or-qwen36-27b units before or-qwen35-9b
+2026-10-13T01:18:39Z [run ] BP or-qwen36-27b__tasks_cs__r2
+2026-10-13T01:22:40Z [done] BP or-qwen36-27b__tasks_hard_nontoon__r2 692s none fa=5/5 fx=5/5 gen=5
+2026-10-13T01:45:21Z [infra] BP or-qwen36-27b__tasks_v2_pos__r0: rerun_nogen_cases round 1
+2026-10-13T01:45:21Z [done] BP or-qwen36-27b__tasks_v2_pos__r0 6312s none fa=33/35 fx=34/35 gen=34
+2026-10-13T01:57:16Z [done] BP or-qwen36-27b__tasks_v2_pos__r2 5155s none fa=32/35 fx=33/35 gen=33
+2026-10-13T02:00:55Z [done] BP or-qwen36-27b__tasks_cs__r2 2536s none fa=17/19 fx=17/19 gen=17
+2026-10-13T02:00:56Z [run ] BP or-qwen35-9b__tasks_v2_pos__r0
+2026-10-13T02:01:02Z [warm] or-qwen35-9b is answering after 5s; opening 4 slots
+2026-10-13T02:01:02Z [run ] BP or-qwen35-9b__tasks_hard_v2__r0
+2026-10-13T02:01:02Z [run ] BP or-qwen35-9b__tasks_hard_nontoon__r0
+2026-10-13T02:01:02Z [run ] BP or-qwen35-9b__tasks_cs__r0
+2026-10-13T02:20:00Z [done] BP or-qwen35-9b__tasks_hard_nontoon__r0 1138s none fa=4/5 fx=4/5 gen=4
+2026-10-13T02:20:03Z [run ] BP or-qwen35-9b__tasks_v2_pos__r1
+2026-10-13T02:32:07Z [done] BP or-qwen35-9b__tasks_cs__r0 1865s none fa=16/19 fx=16/19 gen=16
+2026-10-13T02:32:19Z [run ] BP or-qwen35-9b__tasks_hard_v2__r1
+2026-10-13T03:14:17Z [done] BP or-qwen35-9b__tasks_hard_v2__r0 4395s none fa=4/14 fx=4/14 gen=4
+2026-10-13T03:14:21Z [run ] BP or-qwen35-9b__tasks_hard_nontoon__r1
+2026-10-13T03:35:11Z [done] BP or-qwen35-9b__tasks_hard_nontoon__r1 1250s none fa=4/5 fx=4/5 gen=5
+2026-10-13T03:35:22Z [run ] BP or-qwen35-9b__tasks_cs__r1
+2026-10-13T03:45:58Z [done] BP or-qwen35-9b__tasks_hard_v2__r1 4419s none fa=3/14 fx=3/14 gen=3
+2026-10-13T03:46:08Z [run ] BP or-qwen35-9b__tasks_v2_pos__r2
+2026-10-13T04:01:25Z [done] BP or-qwen35-9b__tasks_cs__r1 1563s none fa=16/19 fx=16/19 gen=16
+2026-10-13T04:01:39Z [run ] BP or-qwen35-9b__tasks_hard_v2__r2
+2026-10-13T04:16:55Z [done] BP or-qwen35-9b__tasks_v2_pos__r0 8159s none fa=15/35 fx=15/35 gen=16
+2026-10-13T04:17:10Z [run ] BP or-qwen35-9b__tasks_hard_nontoon__r2
+2026-10-13T04:25:51Z [guard] OpenRouter usage $42.024550715 reached the $42 limit; lane drivers paused (SIGSTOP)
+2026-10-13T04:36:46Z [done] BP or-qwen35-9b__tasks_hard_nontoon__r2 1176s none fa=3/5 fx=3/5 gen=3
+2026-10-13T04:36:56Z [run ] BP or-qwen35-9b__tasks_cs__r2
+2026-10-13T04:41:04Z [done] BP or-qwen35-9b__tasks_v2_pos__r1 8461s none fa=17/35 fx=17/35 gen=18
+2026-10-13T05:00:16Z [done] BP or-qwen35-9b__tasks_hard_v2__r2 3517s none fa=4/14 fx=6/14 gen=6
+2026-10-13T05:11:47Z [done] BP or-qwen35-9b__tasks_cs__r2 2091s none fa=15/19 fx=15/19 gen=15
+2026-10-13T05:31:34Z [done] BP or-qwen35-9b__tasks_v2_pos__r2 6326s none fa=19/35 fx=19/35 gen=20
+2026-10-13T05:31:44Z lane local COMPLETE
+2026-10-13T05:31:44Z [pass 2] P0 S0 BP under the no-retry rule
+2026-10-13T05:31:44Z lane local start, binary addfeb8da341b1b6f344ab9ad13daba6eb6478623b5b35e2a5ec79555acc9b66
+2026-10-13T05:32:18Z [skip] P0 or-qwen36-35b-a3b__tasks_v2_pos__r0
+2026-10-13T05:32:18Z [skip] P0 or-qwen36-35b-a3b__tasks_cs__r0
+2026-10-13T05:32:18Z [skip] P0 or-qwen36-35b-a3b__tasks_v2_pos__r1
+2026-10-13T05:32:18Z [skip] P0 or-qwen36-35b-a3b__tasks_cs__r1
+2026-10-13T05:32:18Z [skip] P0 or-qwen36-35b-a3b__tasks_v2_pos__r2
+2026-10-13T05:32:18Z [skip] P0 or-qwen36-35b-a3b__tasks_cs__r2
+2026-10-13T05:32:18Z [skip] P0 or-qwen36-27b__tasks_v2_pos__r0
+2026-10-13T05:32:18Z [skip] P0 or-qwen36-27b__tasks_cs__r0
+2026-10-13T05:32:18Z [skip] P0 or-qwen36-27b__tasks_v2_pos__r1
+2026-10-13T05:32:18Z [skip] P0 or-qwen36-27b__tasks_cs__r1
+2026-10-13T05:32:18Z [skip] P0 or-qwen36-27b__tasks_v2_pos__r2
+2026-10-13T05:32:18Z [skip] P0 or-qwen36-27b__tasks_cs__r2
+2026-10-13T05:32:18Z [skip] P0 or-qwen35-9b__tasks_v2_pos__r0
+2026-10-13T05:32:18Z [skip] P0 or-qwen35-9b__tasks_cs__r0
+2026-10-13T05:32:18Z [skip] P0 or-qwen35-9b__tasks_v2_pos__r1
+2026-10-13T05:32:18Z [skip] P0 or-qwen35-9b__tasks_cs__r1
+2026-10-13T05:32:18Z [skip] P0 or-qwen35-9b__tasks_v2_pos__r2
+2026-10-13T05:32:18Z [skip] P0 or-qwen35-9b__tasks_cs__r2
+2026-10-13T05:32:18Z [skip] S0 or-qwen36-35b-a3b__tasks_scale__r0
+2026-10-13T05:32:18Z [skip] S0 or-qwen36-35b-a3b__tasks_scale__r1
+2026-10-13T05:32:18Z [skip] S0 or-qwen36-35b-a3b__tasks_scale__r2
+2026-10-13T05:32:18Z [skip] BP or-qwen36-35b-a3b__tasks_v2_pos__r0
+2026-10-13T05:32:18Z [skip] BP or-qwen36-35b-a3b__tasks_hard_v2__r0
+2026-10-13T05:32:18Z [skip] BP or-qwen36-35b-a3b__tasks_hard_nontoon__r0
+2026-10-13T05:32:18Z [skip] BP or-qwen36-35b-a3b__tasks_cs__r0
+2026-10-13T05:32:18Z [skip] BP or-qwen36-35b-a3b__tasks_v2_pos__r1
+2026-10-13T05:32:18Z [skip] BP or-qwen36-35b-a3b__tasks_hard_v2__r1
+2026-10-13T05:32:18Z [skip] BP or-qwen36-35b-a3b__tasks_hard_nontoon__r1
+2026-10-13T05:32:18Z [skip] BP or-qwen36-35b-a3b__tasks_cs__r1
+2026-10-13T05:32:18Z [skip] BP or-qwen36-35b-a3b__tasks_v2_pos__r2
+2026-10-13T05:32:18Z [skip] BP or-qwen36-35b-a3b__tasks_hard_v2__r2
+2026-10-13T05:32:18Z [skip] BP or-qwen36-35b-a3b__tasks_hard_nontoon__r2
+2026-10-13T05:32:18Z [skip] BP or-qwen36-35b-a3b__tasks_cs__r2
+2026-10-13T05:32:18Z [skip] BP or-qwen36-27b__tasks_v2_pos__r0
+2026-10-13T05:32:18Z [skip] BP or-qwen36-27b__tasks_hard_v2__r0
+2026-10-13T05:32:18Z [skip] BP or-qwen36-27b__tasks_hard_nontoon__r0
+2026-10-13T05:32:18Z [skip] BP or-qwen36-27b__tasks_cs__r0
+2026-10-13T05:32:18Z [skip] BP or-qwen36-27b__tasks_v2_pos__r1
+2026-10-13T05:32:18Z [skip] BP or-qwen36-27b__tasks_hard_v2__r1
+2026-10-13T05:32:18Z [skip] BP or-qwen36-27b__tasks_hard_nontoon__r1
+2026-10-13T05:32:18Z [skip] BP or-qwen36-27b__tasks_cs__r1
+2026-10-13T05:32:18Z [skip] BP or-qwen36-27b__tasks_v2_pos__r2
+2026-10-13T05:32:18Z [skip] BP or-qwen36-27b__tasks_hard_v2__r2
+2026-10-13T05:32:18Z [skip] BP or-qwen36-27b__tasks_hard_nontoon__r2
+2026-10-13T05:32:18Z [skip] BP or-qwen36-27b__tasks_cs__r2
+2026-10-13T05:32:18Z [skip] BP or-qwen35-9b__tasks_v2_pos__r0
+2026-10-13T05:32:18Z [skip] BP or-qwen35-9b__tasks_hard_v2__r0
+2026-10-13T05:32:18Z [skip] BP or-qwen35-9b__tasks_hard_nontoon__r0
+2026-10-13T05:32:18Z [skip] BP or-qwen35-9b__tasks_cs__r0
+2026-10-13T05:32:18Z [skip] BP or-qwen35-9b__tasks_v2_pos__r1
+2026-10-13T05:32:18Z [skip] BP or-qwen35-9b__tasks_hard_v2__r1
+2026-10-13T05:32:18Z [skip] BP or-qwen35-9b__tasks_hard_nontoon__r1
+2026-10-13T05:32:18Z [skip] BP or-qwen35-9b__tasks_cs__r1
+2026-10-13T05:32:18Z [skip] BP or-qwen35-9b__tasks_v2_pos__r2
+2026-10-13T05:32:18Z [skip] BP or-qwen35-9b__tasks_hard_v2__r2
+2026-10-13T05:32:18Z [skip] BP or-qwen35-9b__tasks_hard_nontoon__r2
+2026-10-13T05:32:18Z [skip] BP or-qwen35-9b__tasks_cs__r2
+2026-10-13T05:32:18Z lane local COMPLETE
+2026-10-13T05:32:18Z [twin finished]
+2026-10-13T10:53:08Z [bp re-run 1] 4 Python-baseline unit(s) hold unmeasured cases; resuming them
+2026-10-13T10:53:08Z lane local start, binary addfeb8da341b1b6f344ab9ad13daba6eb6478623b5b35e2a5ec79555acc9b66
+2026-10-13T10:53:11Z [skip] BP or-qwen36-35b-a3b__tasks_v2_pos__r0
+2026-10-13T10:53:11Z [skip] BP or-qwen36-35b-a3b__tasks_hard_v2__r0
+2026-10-13T10:53:11Z [skip] BP or-qwen36-35b-a3b__tasks_hard_nontoon__r0
+2026-10-13T10:53:11Z [skip] BP or-qwen36-35b-a3b__tasks_cs__r0
+2026-10-13T10:53:11Z [warm] or-qwen36-35b-a3b is answering after 0s; opening 2 slots
+2026-10-13T10:53:11Z [run ] BP or-qwen36-35b-a3b__tasks_v2_pos__r1
+2026-10-13T10:53:11Z [skip] BP or-qwen36-35b-a3b__tasks_hard_v2__r1
+2026-10-13T10:53:11Z [skip] BP or-qwen36-35b-a3b__tasks_hard_nontoon__r1
+2026-10-13T10:53:11Z [skip] BP or-qwen36-35b-a3b__tasks_cs__r1
+2026-10-13T10:53:11Z [skip] BP or-qwen36-35b-a3b__tasks_hard_v2__r2
+2026-10-13T10:53:11Z [run ] BP or-qwen36-35b-a3b__tasks_v2_pos__r2
+2026-10-13T10:54:49Z [done] BP or-qwen36-35b-a3b__tasks_v2_pos__r1 98s none fa=23/35 fx=25/35 gen=26
+2026-10-13T10:54:56Z [skip] BP or-qwen36-35b-a3b__tasks_cs__r2
+2026-10-13T10:54:56Z [run ] BP or-qwen36-35b-a3b__tasks_hard_nontoon__r2
+2026-10-13T10:54:56Z [drain] waiting for or-qwen36-35b-a3b units before or-qwen36-27b
+2026-10-13T10:57:08Z [done] BP or-qwen36-35b-a3b__tasks_hard_nontoon__r2 132s none fa=5/5 fx=5/5 gen=5
+2026-10-13T11:40:26Z [done] BP or-qwen36-35b-a3b__tasks_v2_pos__r2 2835s none fa=22/35 fx=25/35 gen=28
+2026-10-13T11:40:29Z [warm] or-qwen36-27b is answering after 0s; opening 2 slots
+2026-10-13T11:40:29Z [run ] BP or-qwen36-27b__tasks_v2_pos__r0
+2026-10-13T11:40:29Z [skip] BP or-qwen36-27b__tasks_hard_v2__r0
+2026-10-13T11:40:29Z [skip] BP or-qwen36-27b__tasks_hard_nontoon__r0
+2026-10-13T11:40:29Z [skip] BP or-qwen36-27b__tasks_cs__r0
+2026-10-13T11:40:29Z [skip] BP or-qwen36-27b__tasks_v2_pos__r1
+2026-10-13T11:40:29Z [skip] BP or-qwen36-27b__tasks_hard_v2__r1
+2026-10-13T11:40:29Z [skip] BP or-qwen36-27b__tasks_hard_nontoon__r1
+2026-10-13T11:40:29Z [skip] BP or-qwen36-27b__tasks_cs__r1
+2026-10-13T11:40:29Z [skip] BP or-qwen36-27b__tasks_v2_pos__r2
+2026-10-13T11:40:29Z [skip] BP or-qwen36-27b__tasks_hard_v2__r2
+2026-10-13T11:40:29Z [skip] BP or-qwen36-27b__tasks_hard_nontoon__r2
+2026-10-13T11:40:29Z [skip] BP or-qwen36-27b__tasks_cs__r2
+2026-10-13T11:40:29Z [skip] BP or-qwen35-9b__tasks_v2_pos__r0
+2026-10-13T11:40:29Z [skip] BP or-qwen35-9b__tasks_hard_v2__r0
+2026-10-13T11:40:29Z [skip] BP or-qwen35-9b__tasks_hard_nontoon__r0
+2026-10-13T11:40:29Z [skip] BP or-qwen35-9b__tasks_cs__r0
+2026-10-13T11:40:29Z [skip] BP or-qwen35-9b__tasks_v2_pos__r1
+2026-10-13T11:40:29Z [skip] BP or-qwen35-9b__tasks_hard_v2__r1
+2026-10-13T11:40:29Z [skip] BP or-qwen35-9b__tasks_hard_nontoon__r1
+2026-10-13T11:40:29Z [skip] BP or-qwen35-9b__tasks_cs__r1
+2026-10-13T11:40:29Z [skip] BP or-qwen35-9b__tasks_v2_pos__r2
+2026-10-13T11:40:29Z [skip] BP or-qwen35-9b__tasks_hard_v2__r2
+2026-10-13T11:40:29Z [skip] BP or-qwen35-9b__tasks_hard_nontoon__r2
+2026-10-13T11:40:29Z [skip] BP or-qwen35-9b__tasks_cs__r2
+2026-10-13T11:43:00Z [done] BP or-qwen36-27b__tasks_v2_pos__r0 151s none fa=33/35 fx=35/35 gen=35
+2026-10-13T11:43:14Z lane local COMPLETE
+2026-10-13T11:43:14Z [bp re-run finished] units still holding unmeasured cases: 0
