@@ -153,6 +153,13 @@ if not vs:
     print("REJECT zero variants"); raise SystemExit
 if d.get("resume_incomplete"):
     print("SHORT the model check failed on a resume; only checkpointed cases are present"); raise SystemExit
+# 2026-10-13: Python-baseline units were accepted with rate-limited cases in them. The re-run
+# tool reads only the Aether cases and reported nothing to do, so its exit status said "clean".
+unmeasured = sum(1 for v in vs for key in ("results", "python_baseline_results", "rust_baseline_results")
+                 for c in (v.get(key) or [])
+                 if c.get("infra_failed") or ((c.get("attempts") or [c])[0]).get("infra_failed"))
+if unmeasured:
+    print(f"SHORT {unmeasured} case(s) failed in the infrastructure and were not measured"); raise SystemExit
 parts = []
 for v in vs:
     s = v["summary"]
