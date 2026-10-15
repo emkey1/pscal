@@ -19,6 +19,7 @@ import sys
 _SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
+import aether_specialization_build_dataset as build_dataset  # noqa: E402
 import aether_specialization_corpus_policy as policy  # noqa: E402
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -86,35 +87,18 @@ def main() -> int:
     build_report_json = output_dir / "aether_build_report.json"
     recapture_report_json = output_dir / "aether_recapture_report.json"
 
-    run(
-        [
-            sys.executable,
-            str(TOOLS_DIR / "aether_specialization_validate_corpus.py"),
-            "--strict",
-            "--manifest",
-            str(validate_manifest),
-        ]
-    )
-    # Pre-flight: every golden in the manifest, trained or not, against the
-    # binary that is about to build the dataset. Drift here is a compiler
-    # behaviour change; it stops the run until a person has read the diff
-    # (tools/recapture_expected.py --update) and accepted it (--accept).
-    preflight = "skipped"
-    if not args.skip_recapture_check:
-        run(
-            [
-                sys.executable,
-                str(TOOLS_DIR / "recapture_expected.py"),
-                "--check",
-                "--aether-bin",
-                str(args.aether_bin),
-                "--manifest",
-                str(args.corpus_manifest),
-                "--report-json",
-                str(recapture_report_json),
-            ]
-        )
-        preflight = "recapture_expected.py --check passed"
+    # Pre-flight: the strict corpus layout, then every golden in the manifest,
+    # trained or not, against the binary that is about to build the dataset
+    # (the same step list build_dataset.py --check-gates runs).
+    for _step, argv in build_dataset.preflight_commands(
+        aether_bin=args.aether_bin,
+        corpus_manifest=args.corpus_manifest,
+        validate_manifest=validate_manifest,
+        recapture_report=recapture_report_json,
+        skip_recapture=args.skip_recapture_check,
+    ):
+        run(argv)
+    preflight = "skipped" if args.skip_recapture_check else "recapture_expected.py --check passed"
     run(
         [
             sys.executable,

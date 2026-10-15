@@ -45,6 +45,18 @@ with the aether VERSION and binary sha256 it was verified against, and
 `aether_training_mix.json` records the selection counts, including every
 exclusion reason.
 
+To run every gate without writing a dataset (the pre-flight, every record
+built and run, drill polarity and codes, decontamination against every board
+manifest), as `tools/instrument_check.sh` does on every pin bump:
+
+```bash
+python3 tools/aether_specialization_build_dataset.py --check-gates \
+  --aether-bin <aether> [--report-json <out>.json]
+```
+
+It prints one PASS/FAIL line per gate, with the failing items under it, and
+exits 1 if any gate fails.
+
 Typical local flow:
 
 ```bash
@@ -108,7 +120,9 @@ Additional source-of-truth rules:
 - `Tests/aether_specialization/corpus_candidates_manifest.json` is the source
   of truth for repo corpus candidates used in training export
 - a file under `corpus_candidates/` that is not listed in the manifest is a
-  validation failure
+  validation failure, unless git ignores it (a run artefact such as
+  `app_log.txt`, which a corpus program writes into its working directory; it
+  is listed under `ignored_run_artefacts` instead)
 - a manifest entry whose file is missing is a validation failure
 - JSON fixtures belong under `Tests/aether_specialization/fixtures/`, not under
   `corpus_candidates/`

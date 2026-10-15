@@ -12,15 +12,17 @@
 #   2. replay   tools/replay_bench.py over the tracked results/** (plus any
 #               --replay globs, e.g. a local harness_out/**), with waivers
 #   3. corpus   tools/recapture_expected.py --check (expected-stdout drift)
-#   4. gates    the corpus build gates (W1-12/W1-13), dry run, when the
-#               dataset builder offers --check-gates
+#   4. gates    the corpus build gates (W1-12/W1-13), dry run:
+#               aether_specialization_build_dataset.py --check-gates
+#               (pre-flight, every record run, drill polarity, decontamination)
 #   5. contam   tools/check_guide_contamination.py (W1-14), when present
 # With --log, one row is appended to Tests/aether_doc_bench/results/
 # instrument_log.csv: date, umbrella sha, aether sha, VERSION, binary sha256,
 # guide stamps and shas, replay counts, unwaived count, corpus drift, oracle
-# failures, skipped steps. Run it for every merged FE item (locally) and every
-# components/aether pin bump. Exits 1 on an oracle failure or an unwaived
-# replay regression.
+# failures, the gates and contamination exit codes, skipped steps. Run it for
+# every merged FE item (locally) and every components/aether pin bump. Exits 1
+# on an oracle failure or an unwaived replay regression; a failed gates step
+# (gates_rc != 0: no dataset can be built) is printed and logged, not fatal.
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -78,13 +80,22 @@ else
 fi
 
 echo "[4/5] corpus build gates (dry run)"
-if python3 tools/aether_specialization_build_dataset.py --help 2>/dev/null | grep -q -- '--check-gates'; then
-    python3 tools/aether_specialization_build_dataset.py --check-gates --aether-bin "$AETHER_BIN" \
-        >"$WORK/gates.log" 2>&1
-    echo "$?" >"$WORK/gates.rc"
+# Every gate a dataset build runs, no dataset written. Never skipped: a
+# missing flag is an argparse error (rc 2), recorded like any failure. The
+# recapture pre-flight is judged from step 3's report (same binary and
+# manifest) rather than run a second time.
+GATES_ARGS=()
+[ -f "$WORK/recapture.json" ] && GATES_ARGS+=(--recapture-report "$WORK/recapture.json")
+python3 tools/aether_specialization_build_dataset.py --check-gates --aether-bin "$AETHER_BIN" \
+    --report-json "$WORK/gates.json" ${GATES_ARGS[@]+"${GATES_ARGS[@]}"} >"$WORK/gates.log" 2>&1
+GATES_RC=$?
+echo "$GATES_RC" >"$WORK/gates.rc"
+if [ $GATES_RC -eq 0 ]; then
+    echo "      exit 0: every gate passed"
 else
-    echo "      skipped: the dataset builder has no --check-gates yet (W1-12/W1-13)"
-    SKIPPED+=(build_gates)
+    echo "      exit $GATES_RC: a dataset cannot be built from this tree with this binary"
+    grep -E '^  (FAIL|PASS)  |^          ' "$WORK/gates.log" | grep -v '^  PASS' | sed 's/^/      /' | head -40
+    tail -n 3 "$WORK/gates.log" | sed 's/^/      /'
 fi
 
 echo "[5/5] guide contamination"
@@ -162,4 +173,8 @@ if [ $ORACLE_RC -ne 0 ] || [ $REPLAY_RC -ne 0 ]; then
     echo "instrument check FAILED (oracle rc=$ORACLE_RC, replay rc=$REPLAY_RC)"
     exit 1
 fi
-echo "instrument check passed"
+if [ "$GATES_RC" -ne 0 ]; then
+    echo "instrument check passed, but the corpus build gates FAILED (gates_rc=$GATES_RC; see above)"
+else
+    echo "instrument check passed"
+fi

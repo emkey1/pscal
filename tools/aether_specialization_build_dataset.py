@@ -24,6 +24,15 @@ trips:
 Each record is stamped with the aether VERSION and binary sha256 it was
 verified against. `--report-json` writes the selection counts, the overlap
 drops and every gate failure, whether or not the build passes.
+
+`--check-gates` runs every gate a real build runs and writes no dataset: the
+pre-flight that tools/aether_specialization_prepare_assets.py runs first
+(strict corpus layout, recapture_expected.py --check), then every record
+built and run as above, the drill polarity and codes, and decontamination
+against every board manifest (the prepare_assets default). The manifests
+default to the seed files and the JSONL paths are not needed. It prints one
+line per gate and exits 1 if any gate fails. tools/instrument_check.sh runs
+it on every pin bump.
 """
 
 from __future__ import annotations
@@ -54,6 +63,9 @@ DEFAULT_CORPUS_MANIFEST = (
     REPO_ROOT / "Tests" / "aether_specialization" / "corpus_candidates_manifest.json"
 )
 DEFAULT_FIXTURES_DIR = REPO_ROOT / "Tests" / "aether_specialization" / "fixtures"
+DEFAULT_INSTRUCTION_MANIFEST = REPO_ROOT / "Tests" / "aether_specialization" / "seed_instruction_pairs.json"
+DEFAULT_REPAIR_MANIFEST = REPO_ROOT / "Tests" / "aether_specialization" / "seed_repair_pairs.json"
+TOOLS_DIR = REPO_ROOT / "tools"
 CORPUS_DIR = REPO_ROOT / "Tests" / "aether_specialization" / "corpus_candidates"
 EXAMPLE_DIRS = [
     REPO_ROOT / "Examples" / "aether" / "base",
@@ -706,43 +718,172 @@ def write_jsonl(path: pathlib.Path, records: list[dict[str, Any]]) -> None:
             handle.write(json.dumps(record, ensure_ascii=True) + "\n")
 
 
-def main() -> int:
-    global CORPUS_DIR
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--instruction-manifest", type=pathlib.Path, required=True)
-    parser.add_argument("--repair-manifest", type=pathlib.Path, required=True)
-    parser.add_argument("--instruction-jsonl", type=pathlib.Path, required=True)
-    parser.add_argument("--repair-jsonl", type=pathlib.Path, required=True)
-    parser.add_argument("--aether-bin", type=pathlib.Path, default=DEFAULT_AETHER_BIN)
-    parser.add_argument("--corpus-manifest", type=pathlib.Path, default=DEFAULT_CORPUS_MANIFEST)
-    parser.add_argument("--corpus-dir", type=pathlib.Path, default=CORPUS_DIR,
-                        help="directory holding the corpus module sources (default: corpus_candidates). "
-                        "Point at corpus_candidates_oneliner to train on the compact form.")
-    parser.add_argument("--fixtures-dir", type=pathlib.Path, default=DEFAULT_FIXTURES_DIR)
-    parser.add_argument(
-        "--compact-oneliners",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="collapse short multi-line guard/fx blocks to the compact one-liner form "
-        "(verified per-source; falls back to multi-line if a collapse changes output). "
-        "On by default; use --no-compact-oneliners for the verbose form.",
-    )
-    parser.add_argument(
-        "--exclude-benchmark-tasks",
-        action="append",
-        type=pathlib.Path,
-        default=[],
-        help="benchmark task JSON whose expected_stdout values are dropped from training "
-        "(keeps the benchmark an honest held-out test). Repeatable.",
-    )
-    parser.add_argument("--report-json", type=pathlib.Path, default=None,
-                        help="write selection counts, overlap drops and gate failures here")
-    args = parser.parse_args()
+# --------------------------------------------------------------------------
+# Pre-flight (run by prepare_assets before a build, and by --check-gates)
+# --------------------------------------------------------------------------
 
-    CORPUS_DIR = args.corpus_dir
 
-    if not args.aether_bin.exists():
-        raise SystemExit(f"missing aether binary: {args.aether_bin}")
+def preflight_commands(
+    *,
+    aether_bin: pathlib.Path,
+    corpus_manifest: pathlib.Path,
+    validate_manifest: pathlib.Path | None = None,
+    corpus_dir: pathlib.Path | None = None,
+    fixtures_dir: pathlib.Path | None = None,
+    recapture_report: pathlib.Path | None = None,
+    skip_recapture: bool = False,
+) -> list[tuple[str, list[str]]]:
+    """The pre-flight steps every dataset build runs before any record is built.
+
+    The strict corpus-layout check, then every golden in the manifest (trained
+    or not) against the binary about to build the dataset. Drift there is a
+    compiler behaviour change; it stops the build until a person has read the
+    diff (recapture_expected.py --update) and accepted it (--accept).
+    prepare_assets and --check-gates both run this list, so the gate check
+    cannot drift from the real build.
+    """
+    validate = [
+        sys.executable,
+        str(TOOLS_DIR / "aether_specialization_validate_corpus.py"),
+        "--strict",
+        "--manifest",
+        str(validate_manifest if validate_manifest is not None else corpus_manifest),
+    ]
+    if corpus_dir is not None:
+        validate += ["--corpus-dir", str(corpus_dir)]
+    if fixtures_dir is not None:
+        validate += ["--fixtures-dir", str(fixtures_dir)]
+    steps = [("corpus_layout", validate)]
+    if not skip_recapture:
+        recapture = [
+            sys.executable,
+            str(TOOLS_DIR / "recapture_expected.py"),
+            "--check",
+            "--aether-bin",
+            str(aether_bin),
+            "--manifest",
+            str(corpus_manifest),
+        ]
+        if fixtures_dir is not None:
+            recapture += ["--fixtures-dir", str(fixtures_dir)]
+        if recapture_report is not None:
+            recapture += ["--report-json", str(recapture_report)]
+        steps.append(("recapture_check", recapture))
+    return steps
+
+
+_PREFLIGHT_LABELS = {
+    "corpus_layout": "preflight: corpus layout (validate_corpus --strict)",
+    "recapture_check": "preflight: goldens against this binary (recapture_expected --check)",
+}
+_RECAPTURE_PROBLEM_RE = re.compile(r"^\s*(FAIL|DRIFT|SRC-DRIFT)\s")
+
+
+def preflight_problems(step: str, returncode: int, stdout: str, stderr: str) -> list[str]:
+    """What a failed pre-flight step complained about, one line per problem."""
+    if returncode == 0:
+        return []
+    problems: list[str] = []
+    if step == "corpus_layout":
+        try:
+            errors = json.loads(stdout).get("errors", {})
+        except (json.JSONDecodeError, AttributeError):
+            errors = {}
+        for key, values in errors.items():
+            if values:
+                shown = ", ".join(str(value) for value in values[:5])
+                more = f" (+{len(values) - 5} more)" if len(values) > 5 else ""
+                problems.append(f"{key}: {shown}{more}")
+    elif step == "recapture_check":
+        for line in stdout.splitlines():
+            if line.startswith("ok="):
+                problems.append(line.strip())
+            elif _RECAPTURE_PROBLEM_RE.match(line):
+                problems.append(line.strip()[:240])
+    if not problems:
+        tail = (stderr or stdout).strip().splitlines()[-3:]
+        problems.append(f"exit {returncode}" + (": " + " | ".join(tail) if tail else ""))
+    return problems
+
+
+def recapture_report_step(path: pathlib.Path, aether_bin: pathlib.Path) -> dict[str, Any]:
+    """Judge the recapture pre-flight from an existing --check report.
+
+    The report must come from this binary (its --version line is compared);
+    a report with any drift, run failure, source drift or missing file fails
+    the step exactly as running recapture_expected.py --check would.
+    """
+    import recapture_expected  # same tools/ dir
+
+    step = {"step": "recapture_check", "from_report": policy.display_path(path)}
+    if not path.is_file():
+        return {**step, "returncode": 2, "problems": [f"recapture report not found: {policy.display_path(path)}"]}
+    report = json.loads(path.read_text(encoding="utf-8"))
+    problems: list[str] = []
+    live = recapture_expected.aether_version(aether_bin)
+    if report.get("aether_version") != live:
+        problems.append(f"the report is from {report.get('aether_version')!r}, not this binary ({live!r})")
+    for rec in report.get("run_failed", []):
+        problems.append(f"FAIL  {rec.get('repo_path')} rc={rec.get('returncode')} "
+                        f"{str(rec.get('stderr', ''))[:120]!r}")
+    problems += [f"DRIFT {rec.get('repo_path')}" for rec in report.get("drifted", [])]
+    problems += [f"SRC-DRIFT {repo_path}" for repo_path in report.get("source_drift", [])]
+    problems += [f"MISSING {repo_path}" for repo_path in report.get("missing", [])]
+    if problems:
+        problems.insert(0, (
+            f"ok={report.get('ok')} drifted={len(report.get('drifted', []))} "
+            f"run-failed={len(report.get('run_failed', []))} source-drift={len(report.get('source_drift', []))} "
+            f"missing={len(report.get('missing', []))}"
+        ))
+    return {**step, "returncode": 1 if problems else 0, "problems": problems}
+
+
+def run_preflight(steps: list[tuple[str, list[str]]]) -> list[dict[str, Any]]:
+    """Run each pre-flight step to completion, capturing what it reports."""
+    results = []
+    for step, argv in steps:
+        print(f"preflight {step} ...", flush=True)
+        proc = subprocess.run(argv, text=True, capture_output=True)
+        results.append({
+            "step": step,
+            "returncode": proc.returncode,
+            "problems": preflight_problems(step, proc.returncode, proc.stdout, proc.stderr),
+        })
+    return results
+
+
+# --------------------------------------------------------------------------
+# Build every record and evaluate every record gate
+# --------------------------------------------------------------------------
+
+
+def gate_failure_details(gates: dict[str, Any]) -> list[str]:
+    """One readable line per failing record gate (empty: all passed)."""
+    details = []
+    rc_failures = gates["returncode_failures"]["instruction"] + gates["returncode_failures"]["repair"]
+    mismatches = gates["exact_stdout_mismatches"]["instruction"] + gates["exact_stdout_mismatches"]["repair"]
+    backstop = gates["golden_backstop"]["records"]
+    manifest_hits = gates["golden_backstop"]["manifest_host_data"]
+    if rc_failures:
+        details.append("nonzero exit: " + ", ".join(rc_failures))
+    if mismatches:
+        details.append("exact-stdout mismatch: " + ", ".join(mismatches))
+    if backstop:
+        details.append("golden backstop: " + ", ".join(
+            f"{hit['id']} ({hit['field']}: {'/'.join(hit['patterns'])})" for hit in backstop))
+    if manifest_hits:
+        details.append("host data in manifest golden: " + ", ".join(
+            f"{hit['id']} ({'/'.join(hit['patterns'])})" for hit in manifest_hits))
+    if gates["oracle_errors"]:
+        details.append("oracle: " + "; ".join(gates["oracle_errors"]))
+    if gates["drill_polarity"]:
+        details.append("repair drills: " + "; ".join(
+            f"{drill}: {', '.join(problems)}" for drill, problems in sorted(gates["drill_polarity"].items())))
+    return details
+
+
+def build_and_gate(args: argparse.Namespace, benchmark_manifests: list[pathlib.Path]) -> dict[str, Any]:
+    """Build every record, run it, and evaluate every record gate. Writes nothing."""
     stamp = policy.aether_identity(args.aether_bin)
 
     corpus_payload = read_json(args.corpus_manifest)
@@ -759,7 +900,7 @@ def main() -> int:
     instruction_records.extend(corpus_instruction_records)
     repair_records = build_repair_records(read_json(args.repair_manifest), args.aether_bin, stamp)
 
-    exclude_stdout = load_benchmark_stdout(args.exclude_benchmark_tasks)
+    exclude_stdout = load_benchmark_stdout(benchmark_manifests)
     instruction_records, dropped_instruction = drop_benchmark_overlap(instruction_records, exclude_stdout)
     repair_records, dropped_repair = drop_benchmark_overlap(repair_records, exclude_stdout)
     if exclude_stdout:
@@ -772,11 +913,11 @@ def main() -> int:
         r["id"] for r in instruction_records + repair_records
         if isinstance(r.get("expected_stdout"), str) and r["expected_stdout"] in exclude_stdout
     )
-    similarity = reference_similarity(args.exclude_benchmark_tasks, instruction_records + repair_records)
-    if args.exclude_benchmark_tasks:
+    similarity = reference_similarity(benchmark_manifests, instruction_records + repair_records)
+    if benchmark_manifests:
         print(
-            f"checked_benchmark_manifests={len(args.exclude_benchmark_tasks)} "
-            f"({', '.join(path.name for path in args.exclude_benchmark_tasks)}) "
+            f"checked_benchmark_manifests={len(benchmark_manifests)} "
+            f"({', '.join(path.name for path in benchmark_manifests)}) "
             f"remaining_overlap={len(remaining_overlap)}"
         )
         print(
@@ -814,16 +955,17 @@ def main() -> int:
         # re-pins the stored copy)
         "drill_text_drift": text_drift,
     }
-    failed = any([rc_instruction, rc_repair, mismatch_instruction, mismatch_repair,
-                  backstop, manifest_hits, oracle_errors, drill_failures])
+    details = gate_failure_details(gates)
 
     report = {
         **stamp,
-        "status": "failed" if failed else "ok",
+        "status": "failed" if details else "ok",
         "corpus_selection": selection,
         "benchmark_overlap": {
-            "manifests": [policy.display_path(path) for path in args.exclude_benchmark_tasks],
+            "manifests": [policy.display_path(path) for path in benchmark_manifests],
             "dropped": sorted(dropped_instruction + dropped_repair),
+            "dropped_instruction": len(dropped_instruction),
+            "dropped_repair": len(dropped_repair),
             "remaining": remaining_overlap,
         },
         "reference_similarity": similarity,
@@ -834,9 +976,6 @@ def main() -> int:
         },
         "gates": gates,
     }
-    if args.report_json:
-        args.report_json.parent.mkdir(parents=True, exist_ok=True)
-        args.report_json.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
     print(
         f"corpus_selection selected={selection['selected']} "
@@ -851,30 +990,190 @@ def main() -> int:
         f"drill_polarity_failures={len(drill_failures)} "
         f"drill_text_drift={len(text_drift)}"
     )
-    if failed:
-        details = []
-        if rc_instruction or rc_repair:
-            details.append("nonzero exit: " + ", ".join(rc_instruction + rc_repair))
-        if mismatch_instruction or mismatch_repair:
-            details.append("exact-stdout mismatch: " + ", ".join(mismatch_instruction + mismatch_repair))
-        if backstop:
-            details.append("golden backstop: " + ", ".join(
-                f"{hit['id']} ({hit['field']}: {'/'.join(hit['patterns'])})" for hit in backstop))
-        if manifest_hits:
-            details.append("host data in manifest golden: " + ", ".join(
-                f"{hit['id']} ({'/'.join(hit['patterns'])})" for hit in manifest_hits))
-        if oracle_errors:
-            details.append("oracle: " + "; ".join(oracle_errors))
-        if drill_failures:
-            details.append("repair drills: " + "; ".join(
-                f"{drill}: {', '.join(problems)}" for drill, problems in sorted(drill_failures.items())))
+    return {
+        "report": report,
+        "details": details,
+        "instruction_records": instruction_records,
+        "repair_records": repair_records,
+    }
+
+
+def gate_summary_lines(report: dict[str, Any], preflight: list[dict[str, Any]]) -> list[str]:
+    """The --check-gates summary: one PASS/FAIL line per gate, problems indented."""
+    gates = report["gates"]
+    records = report["records"]
+    overlap = report["benchmark_overlap"]
+    rows: list[tuple[str, str, list[str]]] = []
+    for step in preflight:
+        label = _PREFLIGHT_LABELS.get(step["step"], f"preflight: {step['step']}")
+        if step.get("from_report"):
+            label += f", read from {step['from_report']}"
+        rows.append(("FAIL" if step["returncode"] else "PASS", label, step["problems"]))
+
+    rc = gates["returncode_failures"]["instruction"] + gates["returncode_failures"]["repair"]
+    mismatch = gates["exact_stdout_mismatches"]["instruction"] + gates["exact_stdout_mismatches"]["repair"]
+    run_problems = [
+        f"{record_id}: exit {detail['returncode']}: "
+        + " | ".join(detail["stderr_tail"].strip().splitlines()[:2])
+        for record_id, detail in sorted(gates["returncode_details"].items())
+    ] + [f"{record_id}: stdout differs from its expected stdout" for record_id in mismatch]
+    rows.append((
+        "FAIL" if rc or mismatch else "PASS",
+        f"records: {records['instruction']} instruction ({records['corpus_instruction']} from the corpus) "
+        f"+ {records['repair']} repair built and run; {len(rc)} nonzero exits, "
+        f"{len(mismatch)} exact-stdout mismatches",
+        run_problems,
+    ))
+    drills = gates["drill_polarity"]
+    rows.append((
+        "FAIL" if drills else "PASS",
+        f"drill polarity and codes: {records['repair'] + overlap['dropped_repair']} drills, "
+        f"{len(drills)} with problems",
+        [f"{drill}: {', '.join(problems)}" for drill, problems in sorted(drills.items())],
+    ))
+    backstop = gates["golden_backstop"]
+    hits = [f"{hit['id']} ({hit['field']}: {'/'.join(hit['patterns'])})" for hit in backstop["records"]]
+    hits += [f"{hit['id']} (manifest golden: {'/'.join(hit['patterns'])})" for hit in backstop["manifest_host_data"]]
+    rows.append(("FAIL" if hits else "PASS", f"golden backstop: {len(hits)} hits", hits))
+    rows.append((
+        "FAIL" if gates["oracle_errors"] else "PASS",
+        f"oracle metadata: {len(gates['oracle_errors'])} errors",
+        list(gates["oracle_errors"]),
+    ))
+    rows.append((
+        "FAIL" if overlap["remaining"] else "PASS",
+        f"decontamination: {len(overlap['manifests'])} board manifests, dropped "
+        f"{overlap['dropped_instruction']} instruction + {overlap['dropped_repair']} repair records "
+        f"whose stdout is a board task's, {len(overlap['remaining'])} remaining",
+        [f"still overlapping: {record_id}" for record_id in overlap["remaining"]],
+    ))
+
+    lines = [
+        f"gate check against aether {report['aether_version']} "
+        f"(sha256 {report['aether_sha256'][:12]}); no dataset written"
+    ]
+    for status, label, problems in rows:
+        lines.append(f"  {status}  {label}")
+        lines.extend(f"          {problem}" for problem in problems[:20])
+        if len(problems) > 20:
+            lines.append(f"          ... {len(problems) - 20} more (see --report-json)")
+    similarity = report["reference_similarity"]
+    lines.append(f"  note  drill diagnostic text drift (advisory; refresh_drills.py --write): "
+                 f"{len(gates['drill_text_drift'])}")
+    lines.append(f"  note  reference similarity (advisory): {len(similarity['pairs_over_threshold'])} "
+                 f"record/board-reference pairs with 5-gram Jaccard >= {similarity['threshold']}")
+    failed = sum(1 for status, _, _ in rows if status == "FAIL")
+    lines.append(f"gates: {'FAIL' if failed else 'PASS'} ({failed} of {len(rows)} failed)")
+    return lines
+
+
+def main() -> int:
+    global CORPUS_DIR
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--check-gates", action="store_true",
+                        help="run every gate a real build runs (pre-flight, every record built and run, "
+                        "drill polarity and codes, decontamination against every board manifest), "
+                        "write no dataset, and exit 1 if any gate fails")
+    parser.add_argument("--skip-recapture-check", action="store_true",
+                        help="with --check-gates: skip the recapture_expected.py --check pre-flight "
+                        "(iteration only; the summary says it was skipped)")
+    parser.add_argument("--recapture-report", type=pathlib.Path, default=None,
+                        help="with --check-gates: judge the recapture pre-flight from this "
+                        "recapture_expected.py --check --report-json output instead of running it "
+                        "again (it must come from the same binary and manifest; instrument_check.sh "
+                        "passes the one its step 3 just wrote)")
+    parser.add_argument("--instruction-manifest", type=pathlib.Path, default=DEFAULT_INSTRUCTION_MANIFEST)
+    parser.add_argument("--repair-manifest", type=pathlib.Path, default=DEFAULT_REPAIR_MANIFEST)
+    parser.add_argument("--instruction-jsonl", type=pathlib.Path, default=None,
+                        help="output (required unless --check-gates)")
+    parser.add_argument("--repair-jsonl", type=pathlib.Path, default=None,
+                        help="output (required unless --check-gates)")
+    parser.add_argument("--aether-bin", type=pathlib.Path, default=DEFAULT_AETHER_BIN)
+    parser.add_argument("--corpus-manifest", type=pathlib.Path, default=DEFAULT_CORPUS_MANIFEST)
+    parser.add_argument("--corpus-dir", type=pathlib.Path, default=CORPUS_DIR,
+                        help="directory holding the corpus module sources (default: corpus_candidates). "
+                        "Point at corpus_candidates_oneliner to train on the compact form.")
+    parser.add_argument("--fixtures-dir", type=pathlib.Path, default=DEFAULT_FIXTURES_DIR)
+    parser.add_argument(
+        "--compact-oneliners",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="collapse short multi-line guard/fx blocks to the compact one-liner form "
+        "(verified per-source; falls back to multi-line if a collapse changes output). "
+        "On by default; use --no-compact-oneliners for the verbose form.",
+    )
+    parser.add_argument(
+        "--exclude-benchmark-tasks",
+        action="append",
+        type=pathlib.Path,
+        default=[],
+        help="benchmark task JSON whose expected_stdout values are dropped from training "
+        "(keeps the benchmark an honest held-out test). Repeatable. With --check-gates "
+        "the default is every board manifest, as in prepare_assets.",
+    )
+    parser.add_argument("--report-json", type=pathlib.Path, default=None,
+                        help="write selection counts, overlap drops and gate failures here")
+    args = parser.parse_args()
+
+    if not args.check_gates and (args.instruction_jsonl is None or args.repair_jsonl is None):
+        parser.error("--instruction-jsonl and --repair-jsonl are required (or pass --check-gates)")
+    if (args.skip_recapture_check or args.recapture_report) and not args.check_gates:
+        parser.error("--skip-recapture-check and --recapture-report only apply to --check-gates "
+                     "(prepare_assets has its own flag for a real build)")
+    if args.skip_recapture_check and args.recapture_report:
+        parser.error("pass --skip-recapture-check or --recapture-report, not both")
+
+    CORPUS_DIR = args.corpus_dir
+
+    if not args.aether_bin.exists():
+        raise SystemExit(f"missing aether binary: {args.aether_bin}")
+
+    benchmark_manifests = list(args.exclude_benchmark_tasks)
+    preflight: list[dict[str, Any]] = []
+    if args.check_gates:
+        if not benchmark_manifests:
+            benchmark_manifests = policy.default_board_manifests()
+        preflight = run_preflight(preflight_commands(
+            aether_bin=args.aether_bin,
+            corpus_manifest=args.corpus_manifest,
+            corpus_dir=args.corpus_dir,
+            fixtures_dir=args.fixtures_dir,
+            skip_recapture=args.skip_recapture_check or args.recapture_report is not None,
+        ))
+        if args.recapture_report is not None:
+            preflight.append(recapture_report_step(args.recapture_report, args.aether_bin))
+
+    built = build_and_gate(args, benchmark_manifests)
+    report, details = built["report"], built["details"]
+
+    if args.check_gates:
+        preflight_failed = any(step["returncode"] for step in preflight)
+        report["mode"] = "check_gates"
+        report["preflight"] = preflight + (
+            [{"step": "recapture_check", "skipped": True}] if args.skip_recapture_check else []
+        )
+        if preflight_failed:
+            report["status"] = "failed"
+    if args.report_json:
+        args.report_json.parent.mkdir(parents=True, exist_ok=True)
+        args.report_json.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
+    if args.check_gates:
+        print()
+        for line in gate_summary_lines(report, preflight):
+            print(line)
+        if args.skip_recapture_check:
+            print("note: the recapture_expected.py --check pre-flight was skipped (--skip-recapture-check)")
+        return 1 if report["status"] == "failed" else 0
+
+    if details:
         raise SystemExit("verification failed: " + "; ".join(details))
 
-    write_jsonl(args.instruction_jsonl, instruction_records)
-    write_jsonl(args.repair_jsonl, repair_records)
+    write_jsonl(args.instruction_jsonl, built["instruction_records"])
+    write_jsonl(args.repair_jsonl, built["repair_records"])
 
-    print(f"instruction_records={len(instruction_records)} -> {args.instruction_jsonl}")
-    print(f"repair_records={len(repair_records)} -> {args.repair_jsonl}")
+    print(f"instruction_records={len(built['instruction_records'])} -> {args.instruction_jsonl}")
+    print(f"repair_records={len(built['repair_records'])} -> {args.repair_jsonl}")
     return 0
 
 
