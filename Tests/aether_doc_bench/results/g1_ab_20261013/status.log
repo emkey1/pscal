@@ -1,0 +1,27 @@
+2026-10-13T13:28:48Z start: binary 4d7b6cf6d4e1e9d206fc9a6c241b56c645c8da22b114fbe686edaa3d24030f8e current=aebfc0f5271f g1=ddca1a5eebb6 spend limit $65
+2026-10-13T13:28:48Z [run ] or-qwen36-35b-a3b tasks_v2_pos (pass 1, usage $42.855351815)
+2026-10-13T13:50:48Z [done] or-qwen36-35b-a3b tasks_v2_pos rc=0 medium_current approx_tokens=12853 generated=35/35 run=35/35 exact=35/35 repaired=1/35;medium_g1 approx_tokens=11745 generated=35/35 run=35/35 exact=35/35 repaired=1/35;
+2026-10-13T13:50:48Z [run ] or-qwen36-35b-a3b tasks_cs (pass 1, usage $43.113542015)
+2026-10-13T14:18:00Z [short] or-qwen36-35b-a3b tasks_cs rc=3: not whole yet; kept as a checkpoint
+2026-10-13T14:18:00Z [run ] or-qwen36-35b-a3b tasks_hard_v2 (pass 1, usage $43.344302815)
+2026-10-13T15:08:51Z [short] or-qwen36-35b-a3b tasks_hard_v2 rc=3: not whole yet; kept as a checkpoint
+2026-10-13T15:08:51Z [run ] or-qwen36-35b-a3b tasks_hard_nontoon (pass 1, usage $43.541037515)
+2026-10-13T15:19:03Z [done] or-qwen36-35b-a3b tasks_hard_nontoon rc=0 medium_current approx_tokens=12853 generated=5/5 run=5/5 exact=5/5 repaired=0/5;medium_g1 approx_tokens=11745 generated=5/5 run=5/5 exact=5/5 repaired=0/5;
+2026-10-13T15:19:03Z [run ] or-qwen36-35b-a3b tasks_traps (pass 1, usage $43.707055915)
+2026-10-13T16:37:23Z [done] or-qwen36-35b-a3b tasks_traps rc=0 medium_current approx_tokens=12853 generated=24/24 run=22/24 exact=19/24 repaired=4/24;medium_g1 approx_tokens=11745 generated=23/24 run=22/24 exact=23/24 repaired=5/24;
+2026-10-13T16:37:24Z [run ] or-qwen36-27b tasks_v2_pos (pass 1, usage $44.230573915)
+2026-10-13T17:07:43Z [done] or-qwen36-27b tasks_v2_pos rc=0 medium_current approx_tokens=12853 generated=35/35 run=35/35 exact=35/35 repaired=0/35;medium_g1 approx_tokens=11745 generated=35/35 run=35/35 exact=35/35 repaired=0/35;
+2026-10-13T17:07:43Z [run ] or-qwen36-27b tasks_cs (pass 1, usage $44.754358615)
+2026-10-13T17:39:26Z [done] or-qwen36-27b tasks_cs rc=0 medium_current approx_tokens=12853 generated=19/19 run=19/19 exact=19/19 repaired=3/19;medium_g1 approx_tokens=11745 generated=19/19 run=19/19 exact=19/19 repaired=0/19;
+2026-10-13T17:39:26Z [run ] or-qwen36-27b tasks_hard_v2 (pass 1, usage $45.213145015)
+2026-10-13T18:12:57Z [done] or-qwen36-27b tasks_hard_v2 rc=0 medium_current approx_tokens=12853 generated=14/14 run=14/14 exact=14/14 repaired=0/14;medium_g1 approx_tokens=11745 generated=14/14 run=14/14 exact=14/14 repaired=0/14;
+2026-10-13T18:12:58Z [run ] or-qwen36-27b tasks_hard_nontoon (pass 1, usage $45.640892565)
+2026-10-13T18:31:47Z [done] or-qwen36-27b tasks_hard_nontoon rc=0 medium_current approx_tokens=12853 generated=5/5 run=5/5 exact=5/5 repaired=0/5;medium_g1 approx_tokens=11745 generated=5/5 run=5/5 exact=5/5 repaired=0/5;
+2026-10-13T18:31:47Z [run ] or-qwen36-27b tasks_traps (pass 1, usage $45.823936415)
+2026-10-13T20:11:35Z [done] or-qwen36-27b tasks_traps rc=0 medium_current approx_tokens=12853 generated=24/24 run=22/24 exact=21/24 repaired=5/24;medium_g1 approx_tokens=11745 generated=23/24 run=22/24 exact=23/24 repaired=4/24;
+2026-10-13T20:11:35Z [pass 1] 2 unit(s) not whole; next pass in 5 minutes
+2026-10-13T20:16:35Z [run ] or-qwen36-35b-a3b tasks_cs (pass 2, usage $46.916612515)
+2026-10-13T20:17:44Z [done] or-qwen36-35b-a3b tasks_cs rc=0 medium_current approx_tokens=12853 generated=19/19 run=19/19 exact=19/19 repaired=1/19;medium_g1 approx_tokens=11745 generated=19/19 run=19/19 exact=19/19 repaired=1/19;
+2026-10-13T20:17:44Z [run ] or-qwen36-35b-a3b tasks_hard_v2 (pass 2, usage $46.916810415)
+2026-10-13T20:19:19Z [done] or-qwen36-35b-a3b tasks_hard_v2 rc=0 medium_current approx_tokens=12853 generated=14/14 run=14/14 exact=14/14 repaired=1/14;medium_g1 approx_tokens=11745 generated=13/14 run=13/14 exact=13/14 repaired=0/14;
+2026-10-13T20:19:19Z FINISHED: units not whole: 0; usage $46.924543815
