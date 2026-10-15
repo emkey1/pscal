@@ -169,12 +169,10 @@ if log:
     print(f"appended a row to {adb.display_path(path)}")
 PYEOF
 
-if [ $ORACLE_RC -ne 0 ] || [ $REPLAY_RC -ne 0 ]; then
-    echo "instrument check FAILED (oracle rc=$ORACLE_RC, replay rc=$REPLAY_RC)"
+# The corpus build gates are fatal too (owner, 2026-10-15): a pin that leaves the
+# training corpus unbuildable must not pass silently, as L1 did for a week.
+if [ $ORACLE_RC -ne 0 ] || [ $REPLAY_RC -ne 0 ] || [ "$GATES_RC" -ne 0 ]; then
+    echo "instrument check FAILED (oracle rc=$ORACLE_RC, replay rc=$REPLAY_RC, corpus gates rc=$GATES_RC)"
     exit 1
 fi
-if [ "$GATES_RC" -ne 0 ]; then
-    echo "instrument check passed, but the corpus build gates FAILED (gates_rc=$GATES_RC; see above)"
-else
-    echo "instrument check passed"
-fi
+echo "instrument check passed"
