@@ -108,6 +108,9 @@ class ScriptTests(unittest.TestCase):
             self.assertIn(f"{suite}=", score)
         self.assertIn("--aether-bin-sha256", score)
         self.assertIn("*2026-10-15-1*", score)
+        newer = tr.score_script(self.load(score={"grader_version": "2026-10-15-2"}))
+        self.assertIn("*2026-10-15-2*", newer)
+        self.assertNotIn("*2026-10-15-1*", newer)
 
 
 class ModelProbeTests(unittest.TestCase):
