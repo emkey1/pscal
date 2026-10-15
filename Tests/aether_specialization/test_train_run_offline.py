@@ -110,6 +110,38 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("*2026-10-15-1*", score)
 
 
+class ModelProbeTests(unittest.TestCase):
+    def probe(self, files, index=None, incomplete=False):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = pathlib.Path(tmp)
+            for name, size in files.items():
+                (d / name).write_bytes(b"x" * size)
+            if index is not None:
+                (d / "model.safetensors.index.json").write_text(json.dumps({"weight_map": index}))
+            if incomplete:
+                (d / ".cache/huggingface/download").mkdir(parents=True)
+                (d / ".cache/huggingface/download/a.incomplete").write_bytes(b"")
+            out = subprocess.run([sys.executable, "-c", tr.MODEL_PROBE, str(d)], capture_output=True, text=True)
+            return out.stdout.strip()
+
+    def test_states(self):
+        index = {"a": "s1.safetensors", "b": "s2.safetensors"}
+        self.assertEqual(self.probe({}), "model=missing")
+        self.assertEqual(self.probe({"config.json": 2}, index), "model=partial")
+        self.assertEqual(self.probe({"config.json": 2, "s1.safetensors": 4, "s2.safetensors": 0}, index), "model=partial")
+        self.assertEqual(self.probe({"config.json": 2, "s1.safetensors": 4, "s2.safetensors": 4}, index), "model=ok")
+        self.assertEqual(self.probe({"config.json": 2, "s1.safetensors": 4, "s2.safetensors": 4}, index, True),
+                         "model=partial")
+        self.assertEqual(self.probe({"config.json": 2, "m.safetensors": 4}), "model=ok")
+
+    def test_waiter_script_parses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = tr.load_run(write_run(pathlib.Path(tmp)))
+        text = tr.when_ready_script(run)
+        self.assertEqual(subprocess.run(["bash", "-n"], input=text, text=True).returncode, 0)
+        self.assertIn("-ge 60", text)
+
+
 class CheckGenerationsTests(unittest.TestCase):
     def run_check(self, sources, *extra, infra=0):
         report = {"destinations": [{"variants": [{
