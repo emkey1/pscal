@@ -22,6 +22,12 @@ private fleet overlay). Nothing else was changed; backup files and caches were
 left out. No credentials were found in the files (the `api_key` values in them are
 placeholders such as `"x"`).
 
-Not copied here: the built datasets for cs-aug18, cs-aug19 and cs-aug20. They are
-kept locally outside the repository until it is decided whether built datasets
-belong in this public repo (as cs-aug2 to cs-aug4 do) or in the private archive.
+The built datasets of those rounds are in `../out_cs_aug18/`, `../out_cs_aug19/` and
+`../out_cs_aug20/`, beside the older `out_cs_aug*` sets, with one change: three
+environment-dependent records are removed because their expected output contains
+the build machine's environment (`PATH` with home-directory and `~/.claude` paths,
+user and host details). The byte-exact originals are in the private results
+archive. `DATASETS_REDACTED.json` lists, per file, the original and public sha256
+and the records dropped; `aether_raw_corpus.json` was re-serialised after the
+drop, and `aether_training_mix.json` still states the original record counts
+(cs-aug20: 726 instruction records; the public file has 723).

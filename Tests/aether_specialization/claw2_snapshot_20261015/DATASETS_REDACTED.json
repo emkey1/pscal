@@ -1,0 +1,95 @@
+{
+ "source": "training rig, data_cs_aug{18,19,20}, copied read-only 2026-10-15; byte-exact originals in the private results archive (training_datasets/, SHA256SUMS)",
+ "dropped_records": [
+  "06_env_inspector.aether",
+  "07-01b_sched_m5_qwen3_coder_04_A_file_analysis_tool_that_read.aether",
+  "12_host_awareness.aether"
+ ],
+ "why": "environment-dependent programs whose expected output contains the build machine's environment (PATH with home-directory and ~/.claude paths, user and host details); the current corpus policy already excludes environment-dependent programs",
+ "rounds": {
+  "cs-aug18": {
+   "aether_instruction_sft.jsonl": {
+    "original_sha256": "a854d421641b301fc3f6990d43681fb1108b53be324b2ca5554ea5ff11d7edaf",
+    "public_sha256": "750677deb10c727ac12d684d3ad939b208914fb4bc1b799035fad9ce734b2a2c",
+    "dropped": [
+     "06_env_inspector.aether",
+     "12_host_awareness.aether",
+     "07-01b_sched_m5_qwen3_coder_04_A_file_analysis_tool_that_read.aether"
+    ]
+   },
+   "aether_repair_sft.jsonl": {
+    "original_sha256": "88d4b4e44d4fcdadc1b357e2f4475b9d5d5745698f4134d9a61784dd5fbc0d86",
+    "public_sha256": "88d4b4e44d4fcdadc1b357e2f4475b9d5d5745698f4134d9a61784dd5fbc0d86",
+    "dropped": []
+   }
+  },
+  "cs-aug19": {
+   "aether_instruction_sft.jsonl": {
+    "original_sha256": "4f3a579b582710c0992e3e4340eac1839b10cf11f3dc6f11492d620c09194459",
+    "public_sha256": "4f95c6f7b6b276ab11e611e95ee94b01ccadec21f64f9a9d0d57ce569e7f2696",
+    "dropped": [
+     "06_env_inspector.aether",
+     "12_host_awareness.aether",
+     "07-01b_sched_m5_qwen3_coder_04_A_file_analysis_tool_that_read.aether"
+    ]
+   },
+   "aether_raw_corpus.json": {
+    "original_sha256": "dc3261c5fe194dbecd27bfecd5baed42d09811032a3500ba0750e3841c2f31d6",
+    "public_sha256": "71b9996789771420962713fc2a2c29b4e18b8efa005e04f122d49e4b97f33908",
+    "dropped": [
+     "06_env_inspector.aether",
+     "12_host_awareness.aether"
+    ]
+   },
+   "aether_reference_corpus.json": {
+    "original_sha256": "4dbdc7536ff31c8d10680711de5479f20475b5d34e50f2baeb7bf41e697e790d",
+    "public_sha256": "4dbdc7536ff31c8d10680711de5479f20475b5d34e50f2baeb7bf41e697e790d",
+    "dropped": []
+   },
+   "aether_repair_sft.jsonl": {
+    "original_sha256": "88d4b4e44d4fcdadc1b357e2f4475b9d5d5745698f4134d9a61784dd5fbc0d86",
+    "public_sha256": "88d4b4e44d4fcdadc1b357e2f4475b9d5d5745698f4134d9a61784dd5fbc0d86",
+    "dropped": []
+   },
+   "aether_training_mix.json": {
+    "original_sha256": "4b88ef37e3d365bd49fe2f3bc3b26bb22652cbd1d8a8136c7c590ab7e2d00c3b",
+    "public_sha256": "4b88ef37e3d365bd49fe2f3bc3b26bb22652cbd1d8a8136c7c590ab7e2d00c3b",
+    "dropped": []
+   }
+  },
+  "cs-aug20": {
+   "aether_instruction_sft.jsonl": {
+    "original_sha256": "758c390acc36bd491c847d3da302d085abac3abb29f545a66c792c138873aadb",
+    "public_sha256": "2a48a36ae34442f0e41074e64fb303dbc9556aa2403b433308c01aed49738703",
+    "dropped": [
+     "06_env_inspector.aether",
+     "12_host_awareness.aether",
+     "07-01b_sched_m5_qwen3_coder_04_A_file_analysis_tool_that_read.aether"
+    ]
+   },
+   "aether_raw_corpus.json": {
+    "original_sha256": "b56d49f16fbd0211ee334995400b2c1b448545ce4c0f37376ccd69e75ba93ddb",
+    "public_sha256": "4f1f271a92cbc273c8af7a466649c563a94506b0befee7bcc002837f9ba0ae08",
+    "dropped": [
+     "06_env_inspector.aether",
+     "12_host_awareness.aether"
+    ]
+   },
+   "aether_reference_corpus.json": {
+    "original_sha256": "6611b6cc88937c2818162f98c984f1bcab005dd529b34e1be24bc41e9a9c1ce8",
+    "public_sha256": "6611b6cc88937c2818162f98c984f1bcab005dd529b34e1be24bc41e9a9c1ce8",
+    "dropped": []
+   },
+   "aether_repair_sft.jsonl": {
+    "original_sha256": "9e2b3103cf7c29eb6d8a26bb53374d8997c29d9158296668978ed4878e4542b3",
+    "public_sha256": "9e2b3103cf7c29eb6d8a26bb53374d8997c29d9158296668978ed4878e4542b3",
+    "dropped": []
+   },
+   "aether_training_mix.json": {
+    "original_sha256": "c1b6dc086679e33a22458ff8e8562fbab8df9cd56d4ed598872eaa9425e852d3",
+    "public_sha256": "c1b6dc086679e33a22458ff8e8562fbab8df9cd56d4ed598872eaa9425e852d3",
+    "dropped": []
+   }
+  }
+ }
+}
