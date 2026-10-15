@@ -139,6 +139,9 @@ class ModelProbeTests(unittest.TestCase):
             run = tr.load_run(write_run(pathlib.Path(tmp)))
         text = tr.when_ready_script(run)
         self.assertEqual(subprocess.run(["bash", "-n"], input=text, text=True).returncode, 0)
+        score = tr.score_when_ready_script(run)
+        self.assertEqual(subprocess.run(["bash", "-n"], input=score, text=True).returncode, 0)
+        self.assertIn("aether-train-t-run", score)
         self.assertIn("-ge 60", text)
 
 
