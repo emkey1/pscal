@@ -1,0 +1,78 @@
+{
+  "_note": "Model-family registry for tools/aether_train_run.py. Everything that differs between model families and has broken a run before lives here, not in a driver script. Sources: the claw2 snapshot (claw2_snapshot_20261015/), the findings doc sections 'Per-model response-masking markers' and 'Mistral Tekken', training_runs/*.md. A new family is added here after a template probe (claw2_snapshot_20261015/rig_dir/tmpl_probe.py) confirms its markers.",
+  "version": "2026-10-15-1",
+  "families": {
+    "qwen3_5": {
+      "description": "Qwen3.5 / Qwen3.6 / Qwen3.8 (model_type qwen3_5 and qwen3_5_moe): hybrid gated-delta-net attention, needs transformers 5.x and flash-linear-attention",
+      "image": "aether-unsloth-qwen3-coder-30b:base26-fla",
+      "instruction_part": "<|im_start|>user\n",
+      "response_part": "<|im_start|>assistant\n",
+      "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+      "chat_template_kwargs": {"enable_thinking": false},
+      "tokenizer_from_base": false,
+      "serve": {
+        "image": "vllm/vllm-openai:latest",
+        "dtype": "bfloat16",
+        "max_model_len": 32768,
+        "gpu_memory_utilization": 0.85,
+        "extra_args": ["--enforce-eager"]
+      },
+      "leak_prefixes": ["thinking", "<think", "okay, "],
+      "_evidence": "qwen36-27b-cs-aug20 trained on :base26-fla at 4-bit (cs 19/19 no guide); without enable_thinking=false the reasoning trace lands in content and is graded as the program (eval_queue_cs_aug20_large_claw2.sh). The :q3 image (transformers 4.56.2) cannot load qwen3_5. Qwen3.8-27B (2026-10-15 CPU probe on :base26-fla): config identical to Qwen3.6-27B apart from transformers_version, every parameter has a checkpoint tensor (the 15 mtp.* tensors are unused); its template adds a \"Reasoning effort is set to xhigh\" system turn to a rendered conversation unless enable_thinking=false is passed, so the trainer renders with chat_template_kwargs too."
+    },
+    "qwen3": {
+      "description": "Qwen3 dense (Qwen3-8B and similar), thinking switched off",
+      "image": "aether-unsloth-qwen3-coder-30b:q3",
+      "instruction_part": "<|im_start|>user\n",
+      "response_part": "<|im_start|>assistant\n",
+      "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+      "chat_template_kwargs": {"enable_thinking": false},
+      "tokenizer_from_base": false,
+      "serve": {
+        "image": "vllm/vllm-openai:latest",
+        "dtype": "bfloat16",
+        "max_model_len": 32768,
+        "gpu_memory_utilization": 0.3,
+        "extra_args": ["--enforce-eager"]
+      },
+      "leak_prefixes": ["thinking", "<think", "okay, "],
+      "_evidence": "qwen3-8b-nothink rounds (sweep_q3_8b.sh vs sweep_q3_8b_think.sh)."
+    },
+    "chatml": {
+      "description": "Plain ChatML instruct models with no thinking mode (Qwen2.5-Coder, Qwen3-Coder-30B-A3B)",
+      "image": "aether-unsloth-qwen3-coder-30b:q3",
+      "instruction_part": "<|im_start|>user\n",
+      "response_part": "<|im_start|>assistant\n",
+      "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+      "chat_template_kwargs": {},
+      "tokenizer_from_base": false,
+      "serve": {
+        "image": "vllm/vllm-openai:latest",
+        "dtype": "bfloat16",
+        "max_model_len": 32768,
+        "gpu_memory_utilization": 0.85,
+        "extra_args": ["--enforce-eager"]
+      },
+      "leak_prefixes": [],
+      "_evidence": "retrain_queue_cs_aug20_large.sh (qwen25-14b, qwen3-coder30b-a3b on :q3)."
+    },
+    "mistral": {
+      "description": "Mistral-Small-24B / Devstral-Small-2: [INST] markers; the Unsloth merge drops tekken.json",
+      "image": "aether-unsloth-qwen3-coder-30b:q3",
+      "instruction_part": "[INST]",
+      "response_part": "[/INST]",
+      "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+      "chat_template_kwargs": {},
+      "tokenizer_from_base": true,
+      "serve": {
+        "image": "vllm/vllm-openai:latest",
+        "dtype": "bfloat16",
+        "max_model_len": 32768,
+        "gpu_memory_utilization": 0.85,
+        "extra_args": ["--enforce-eager"]
+      },
+      "leak_prefixes": [],
+      "_evidence": "Without tekken.json vLLM decodes through tokenizer.json and drops spaces (16/35 vs 32/35 on identical weights, cs-aug4); serve with the base model's tokenizer (eval_queue_cs_aug20_large_claw2.sh)."
+    }
+  }
+}

@@ -4,9 +4,9 @@ Every recent fine-tuning round (cs-aug3 through cs-aug20, the precision grids, t
 early-stopping test) was driven by scripts that lived only on the training rig, not
 in this repository. This directory is a read-only snapshot of them, taken
 2026-10-15, so that those rounds can be reproduced and the scripts reviewed. It is a
-record, not the maintained pipeline: the next step is one resumable driver in
-`tools/` with a per-model-family registry (training-framework assessment,
-recommendation 3), built from what is here.
+record, not the maintained pipeline. Its replacement, built from what is here,
+is `tools/aether_train_run.py` with the family registry and run configs in
+`../training/` (training-framework assessment, recommendation 3).
 
 | directory | what | source on the rig |
 |---|---|---|

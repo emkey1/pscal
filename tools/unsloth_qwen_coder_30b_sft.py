@@ -93,6 +93,38 @@ def find_resumable_checkpoint(output_dir: Path) -> str | None:
     return candidates[-1][1]
 
 
+def fully_masked_rows(dataset) -> int | None:
+    """Rows whose labels are all -100 (None when the dataset has no labels column)."""
+    try:
+        if "labels" not in dataset.column_names:
+            return None
+        return sum(1 for labels in dataset["labels"] if all(value == -100 for value in labels))
+    except Exception as exc:  # pragma: no cover - depends on the image's datasets
+        print(f"response masking check skipped: {exc}", flush=True)
+        return None
+
+
+def file_sha256(path: Path | None) -> str | None:
+    if path is None or not path.exists():
+        return None
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def library_versions() -> dict[str, str]:
+    import importlib.metadata as metadata
+
+    versions: dict[str, str] = {}
+    for name in ("torch", "transformers", "trl", "peft", "unsloth", "unsloth_zoo", "bitsandbytes",
+                 "accelerate", "datasets", "flash-linear-attention"):
+        try:
+            versions[name] = metadata.version(name)
+        except metadata.PackageNotFoundError:
+            pass
+    return versions
+
+
 def read_jsonl(path: Path) -> list[dict]:
     rows: list[dict] = []
     with path.open("r", encoding="utf-8") as handle:
@@ -113,11 +145,19 @@ def round_up(value: int, multiple: int) -> int:
     return ((value + multiple - 1) // multiple) * multiple
 
 
+# Passed to every apply_chat_template call (--chat-template-kwargs). Training text
+# must render the way the served prompt does: Qwen3.8's template inserts a
+# "Reasoning effort is set to xhigh" system turn unless enable_thinking=False is
+# given, which the benchmark's requests always send (Qwen3.6's never did).
+CHAT_TEMPLATE_KWARGS: dict = {}
+
+
 def materialize_chat_text(tokenizer: AutoTokenizer, messages: list[dict]) -> str:
     rendered = tokenizer.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=False,
+        **CHAT_TEMPLATE_KWARGS,
     )
     if not isinstance(rendered, str):
         raise TypeError("chat template did not return text")
@@ -384,6 +424,8 @@ def main() -> int:
     parser.add_argument("--eval-steps", type=int, default=5)
     parser.add_argument("--save-steps", type=int, default=5)
     parser.add_argument("--early-stopping-patience", type=int, default=2)
+    parser.add_argument("--early-stopping-threshold", type=float, default=0.0,
+                        help="minimum eval_loss improvement to reset patience. 0.0 (default, legacy) means any uptick counts, which fires on noise for small eval sets.")
     parser.add_argument("--load-best-model-at-end", action="store_true", default=True)
     parser.add_argument("--no-load-best-model-at-end", dest="load_best_model_at_end", action="store_false", help="export the final-step checkpoint instead of the best-eval-loss one")
     parser.add_argument("--margin-tokens", type=int, default=64)
@@ -437,6 +479,10 @@ def main() -> int:
                              "Granite uses '<|start_of_role|>user<|end_of_role|>'). Supports \\n escapes.")
     parser.add_argument("--response-part", default="<|im_start|>assistant\n",
                         help="assistant-turn marker for response masking (default: ChatML/Qwen). Supports \\n escapes.")
+    parser.add_argument("--chat-template-kwargs", default="{}",
+                        help='JSON object passed to apply_chat_template when rendering training text, '
+                             'e.g. \'{"enable_thinking": false}\' for the Qwen3.5+ family; use the same '
+                             'kwargs the served requests send.')
     parser.add_argument("--export-merged-16bit", dest="export_merged_16bit",
                         action="store_true", default=True,
                         help="write a merged 16-bit HF checkpoint for vLLM / NVFP4 (default)")
@@ -450,6 +496,7 @@ def main() -> int:
     if args.load_in_8bit and args.load_in_4bit:
         raise SystemExit("--load-in-8bit requires --no-load-in-4bit (both quantizations cannot be active)")
 
+    CHAT_TEMPLATE_KWARGS.update(json.loads(args.chat_template_kwargs))
     random.seed(args.seed)
     torch.manual_seed(args.seed)
 
@@ -609,11 +656,24 @@ def main() -> int:
             instruction_part=args.instruction_part.encode().decode("unicode_escape"),
             response_part=args.response_part.encode().decode("unicode_escape"),
         )
+        # A wrong marker pair masks every label and the run trains on nothing
+        # (twice so far: "Per-model response-masking markers" in the findings).
+        # Fail before the first step rather than after hours of zero loss.
+        masked = fully_masked_rows(trainer.train_dataset)
+        if masked is not None:
+            total = len(trainer.train_dataset)
+            print(f"response masking: {masked} of {total} training rows have no unmasked label", flush=True)
+            if total and masked > total // 10:
+                raise SystemExit(
+                    f"response masking left {masked} of {total} rows with no trainable token: "
+                    f"--instruction-part {args.instruction_part!r} / --response-part {args.response_part!r} "
+                    "do not match this model's chat template"
+                )
 
     trainer.add_callback(
         EarlyStoppingCallback(
             early_stopping_patience=args.early_stopping_patience,
-            early_stopping_threshold=0.0,
+            early_stopping_threshold=args.early_stopping_threshold,
         )
     )
 
@@ -648,6 +708,22 @@ def main() -> int:
         "include_raw_corpus": args.include_raw_corpus,
         "include_reference": args.include_reference,
         "eval_holdout_source": "supervised" if load_supervised_records(args.instruction_jsonl) or load_supervised_records(args.repair_jsonl) else "raw_corpus",
+        "seed": args.seed,
+        "random_state": args.random_state,
+        "early_stopping_patience": args.early_stopping_patience,
+        "early_stopping_threshold": args.early_stopping_threshold,
+        "load_best_model_at_end": args.load_best_model_at_end,
+        "chat_template_kwargs": CHAT_TEMPLATE_KWARGS,
+        "first_train_text_head": train_records[0]["text"][:400] if train_records else None,
+        "instruction_part": args.instruction_part,
+        "response_part": args.response_part,
+        "dataset_sha256": {
+            "instruction_jsonl": file_sha256(args.instruction_jsonl),
+            "repair_jsonl": file_sha256(args.repair_jsonl),
+            "corpus_json": file_sha256(args.corpus_json),
+            "reference_json": file_sha256(args.reference_json),
+        },
+        "libraries": library_versions(),
         "export_merged_16bit": args.export_merged_16bit,
         "merged_output_dir": str(args.merged_output_dir) if args.merged_output_dir is not None else str(args.output_dir / "final" / "merged_16bit"),
     }
