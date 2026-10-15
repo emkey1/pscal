@@ -302,6 +302,8 @@
       "sha256": "9de3b547174054e1576cff353c4292326b39edbd238c49c13d4b5c12b161a099",
       "stdout": "row 0 = A1\nrow 1 = EMPTY\nrow 2 = B7\nmissing = 1\n",
       "metadata": {
+        "include_in_supervised": false,
+        "supervised_exclusion": "2026-10-15: near-clone of board task toon_safe_nested_codes's reference solution (5-gram Jaccard 0.789); kept out of instruction SFT so a fine-tune is not scored on a task it trained on",
         "canonical": true,
         "oracle": "reviewed",
         "fixture_required": false,
@@ -357,6 +359,8 @@
       "sha256": "366969fe45d7a2cfa36bbf0c3d3e883822703249b92365572532e957d254b1f0",
       "stdout": "normalize(150)=100\nnormalize(42)=42\n",
       "metadata": {
+        "include_in_supervised": false,
+        "supervised_exclusion": "2026-10-15: near-clone of board task contract_normalize's reference solution (5-gram Jaccard 0.624); kept out of instruction SFT so a fine-tune is not scored on a task it trained on",
         "canonical": true,
         "oracle": "reviewed",
         "fixture_required": false,
@@ -8241,6 +8245,8 @@
       "sha256": "22dd8641a7650d93e947f3411274f9ae33c842a3c57db424633241f9121becdd",
       "stdout": "slot 0 -> int\nslot 1 -> text\nslot 2 -> bool\nslot 3 -> real\n",
       "metadata": {
+        "include_in_supervised": false,
+        "supervised_exclusion": "2026-10-15: near-clone of board task toon_type_probe's reference solution (5-gram Jaccard 0.618); kept out of instruction SFT so a fine-tune is not scored on a task it trained on",
         "canonical": true,
         "oracle": "reviewed",
         "fixture_required": false,

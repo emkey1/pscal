@@ -151,10 +151,10 @@
     {
       "id": "repair_post_on_signature",
       "kind": "repair",
-      "diagnostic": "[ANN-001] Aether contract parser error: unexpected '{' after the @post expression `result.0 >= result.1`; join clauses with &&.",
-      "broken_source": "fn ordered(a: Int, b: Int) -> (Int, Int) @post result.0 >= result.1 {\n    if a >= b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (hi, lo) = ordered(2, 7);\n    fx {\n        println(\"hi=\", hi);\n        println(\"lo=\", lo);\n    }\n    ret;\n}\n",
-      "fixed_source": "@post result.0 >= result.1\nfn ordered(a: Int, b: Int) -> (Int, Int) {\n    if a >= b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (hi, lo) = ordered(2, 7);\n    fx {\n        println(\"hi=\", hi);\n        println(\"lo=\", lo);\n    }\n    ret;\n}\n",
-      "expected_stdout": "hi=7\nlo=2\n"
+      "diagnostic": "[ANN-001] Aether contract parser error: unexpected '{' after the @post expression `result >= 0`; join clauses with &&.",
+      "broken_source": "fn spread(a: Int, b: Int) -> Int @post result >= 0 {\n    if a > b {\n        ret a - b;\n    }\n    ret b - a;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"spread \", spread(3, 11));\n        println(\"spread \", spread(9, 4));\n    }\n    ret;\n}\n",
+      "fixed_source": "@post result >= 0\nfn spread(a: Int, b: Int) -> Int {\n    if a > b {\n        ret a - b;\n    }\n    ret b - a;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"spread \", spread(3, 11));\n        println(\"spread \", spread(9, 4));\n    }\n    ret;\n}\n",
+      "expected_stdout": "spread 8\nspread 5\n"
     },
     {
       "id": "repair_at_fx_to_block",
@@ -318,6 +318,102 @@
       "broken_source": "fn main() -> Void {\n    let word: Text = \"aether\";\n    fx {\n        println(text_len(word));\n        println(substring(word, 1, 3));\n        println(string_at(word, 1));\n    }\n    ret;\n}\n",
       "fixed_source": "fn main() -> Void {\n    let word: Text = \"aether\";\n    fx {\n        println(length(word));\n        println(copy(word, 0, 3));\n        println(word[0]);\n    }\n    ret;\n}\n",
       "expected_stdout": "6\naet\na\n"
+    },
+    {
+      "id": "repair_chained_comparison",
+      "kind": "repair",
+      "diagnostic": "[PREC-001] Aether precedence parser error: comparison operators do not chain: `a <= b < c` means `(a <= b) < c`, which compares a Bool with c.",
+      "broken_source": "fn inWorkingAge(age: Int) -> Bool {\n    ret 18 <= age < 65;\n}\n\nfn main() -> Void {\n    fx {\n        println(inWorkingAge(30));\n        println(inWorkingAge(70));\n    }\n    ret;\n}\n",
+      "fixed_source": "fn inWorkingAge(age: Int) -> Bool {\n    ret 18 <= age && age < 65;\n}\n\nfn main() -> Void {\n    fx {\n        println(inWorkingAge(30));\n        println(inWorkingAge(70));\n    }\n    ret;\n}\n",
+      "expected_stdout": "true\nfalse\n"
+    },
+    {
+      "id": "repair_slash_slash_division",
+      "kind": "repair",
+      "diagnostic": "[DIV-002] Aether slash-comment parser error: `// 2` is a comment in Aether, not integer division.",
+      "broken_source": "fn main() -> Void {\n    let total: Int = 17;\n    let half: Int = total // 2;\n    fx {\n        println(half);\n    }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let total: Int = 17;\n    let half: Int = total div 2;\n    fx {\n        println(half);\n    }\n    ret;\n}\n",
+      "expected_stdout": "8\n"
+    },
+    {
+      "id": "repair_println_whole_array",
+      "kind": "repair",
+      "diagnostic": "[TYPE-001] Aether type error: println cannot print an array: loop over it and print each element (`loop x in xs { ... }`).",
+      "broken_source": "fn main() -> Void {\n    let readings: Int[] = [3, 1, 2];\n    fx {\n        println(readings);\n    }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let readings: Int[] = [3, 1, 2];\n    fx {\n        loop r in readings {\n            println(r);\n        }\n    }\n    ret;\n}\n",
+      "expected_stdout": "3\n1\n2\n"
+    },
+    {
+      "id": "repair_int_of_text",
+      "kind": "repair",
+      "diagnostic": "[TYPE-001] Aether type error: int() converts numbers, not Text: for the number in a Text use parse_int(t), for a character code use ord(c).",
+      "broken_source": "fn main() -> Void {\n    let raw: Text = \"42\";\n    let n: Int = int(raw);\n    fx {\n        println(n + 1);\n    }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let raw: Text = \"42\";\n    let n: Int = parse_int(raw);\n    fx {\n        println(n + 1);\n    }\n    ret;\n}\n",
+      "expected_stdout": "43\n"
+    },
+    {
+      "id": "repair_real_modulo",
+      "kind": "repair",
+      "diagnostic": "[TYPE-001] Aether type error: this value is Real, and `%` needs an Int: write `a div b` for an integer quotient (`/` is real division), or trunc(x).",
+      "broken_source": "fn main() -> Void {\n    let minutes: Real = 135.0;\n    let rest: Int = minutes % 60;\n    fx {\n        println(rest);\n    }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let minutes: Real = 135.0;\n    let rest: Int = trunc(minutes) % 60;\n    fx {\n        println(rest);\n    }\n    ret;\n}\n",
+      "expected_stdout": "15\n"
+    },
+    {
+      "id": "repair_contract_comma",
+      "kind": "repair",
+      "diagnostic": "[ANN-001] Aether contract parser error: unexpected ',' after the @pre expression `x > 0`; join clauses with &&.",
+      "broken_source": "@pre x > 0, x < 100\nfn half(x: Int) -> Int {\n    ret x div 2;\n}\n\nfn main() -> Void {\n    fx {\n        println(half(40));\n    }\n    ret;\n}\n",
+      "fixed_source": "@pre x > 0 && x < 100\nfn half(x: Int) -> Int {\n    ret x div 2;\n}\n\nfn main() -> Void {\n    fx {\n        println(half(40));\n    }\n    ret;\n}\n",
+      "expected_stdout": "20\n"
+    },
+    {
+      "id": "repair_array_push_method",
+      "kind": "repair",
+      "diagnostic": "[SCOPE-001] Aether method error: Int[] has no method 'push'.",
+      "broken_source": "fn main() -> Void {\n    let picks: Int[] = [];\n    picks.push(4);\n    picks.push(7);\n    fx {\n        println(length(picks), \" picks, last \", picks[1]);\n    }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let picks: Int[] = [];\n    picks = picks + [4];\n    picks = picks + [7];\n    fx {\n        println(length(picks), \" picks, last \", picks[1]);\n    }\n    ret;\n}\n",
+      "expected_stdout": "2 picks, last 7\n"
+    },
+    {
+      "id": "repair_name_case_const",
+      "kind": "repair",
+      "diagnostic": "[NAME-001] Aether redeclaration error: 'limit' is the same name as the top-level const 'LIMIT' (line 1): Aether names ignore case, and a local must not reuse a const or global name.",
+      "broken_source": "const LIMIT: Int = 3;\n\nfn main() -> Void {\n    let limit: Int = 5;\n    fx {\n        println(limit + LIMIT);\n    }\n    ret;\n}\n",
+      "fixed_source": "const LIMIT: Int = 3;\n\nfn main() -> Void {\n    let extra: Int = 5;\n    fx {\n        println(extra + LIMIT);\n    }\n    ret;\n}\n",
+      "expected_stdout": "8\n"
+    },
+    {
+      "id": "repair_method_named_length",
+      "kind": "repair",
+      "diagnostic": "[NAME-001] Aether parser error: the compiler calls `length` itself (arrays, Text, contracts), so a method named 'length' would capture those calls.",
+      "broken_source": "type Bag {\n    items: Int[];\n\n    fn length() -> Int {\n        ret length(self.items);\n    }\n}\n\nfn main() -> Void {\n    let b: Bag = new Bag();\n    b.items = [1, 2, 3];\n    fx {\n        println(b.length());\n    }\n    ret;\n}\n",
+      "fixed_source": "type Bag {\n    items: Int[];\n\n    fn size() -> Int {\n        ret length(self.items);\n    }\n}\n\nfn main() -> Void {\n    let b: Bag = new Bag();\n    b.items = [1, 2, 3];\n    fx {\n        println(b.size());\n    }\n    ret;\n}\n",
+      "expected_stdout": "3\n"
+    },
+    {
+      "id": "repair_loop_variable_shadow",
+      "kind": "repair",
+      "diagnostic": "[NAME-001] Aether redeclaration error: loop variable 'i' reuses the name of 'i' (line 2); the loop gets its own 'i', so the outer one is left unchanged.",
+      "broken_source": "fn main() -> Void {\n    let i: Int = 100;\n    loop i in 0..3 {\n        fx {\n            println(i);\n        }\n    }\n    fx {\n        println(\"after: \", i);\n    }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let i: Int = 100;\n    loop j in 0..3 {\n        fx {\n            println(j);\n        }\n    }\n    fx {\n        println(\"after: \", i);\n    }\n    ret;\n}\n",
+      "expected_stdout": "0\n1\n2\nafter: 100\n"
+    },
+    {
+      "id": "repair_param_shadows_global",
+      "kind": "repair",
+      "diagnostic": "[NAME-001] Aether redeclaration error: parameter 'count' is the same name as the top-level let 'count' (line 1): a parameter must not reuse a const or global name.",
+      "broken_source": "let count: Int = 10;\n\nfn double(count: Int) -> Int {\n    ret count * 2;\n}\n\nfn main() -> Void {\n    fx {\n        println(double(4));\n        println(count);\n    }\n    ret;\n}\n",
+      "fixed_source": "let count: Int = 10;\n\nfn double(n: Int) -> Int {\n    ret n * 2;\n}\n\nfn main() -> Void {\n    fx {\n        println(double(4));\n        println(count);\n    }\n    ret;\n}\n",
+      "expected_stdout": "8\n10\n"
+    },
+    {
+      "id": "repair_top_level_fx_with_main",
+      "kind": "repair",
+      "diagnostic": "[ENTRY-001] Aether parser error: fn main will not run: this file also has top-level statements (this line is the first).",
+      "broken_source": "fx {\n    println(\"start\");\n}\n\nfn main() -> Void {\n    fx {\n        println(\"main\");\n    }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    fx {\n        println(\"start\");\n        println(\"main\");\n    }\n    ret;\n}\n",
+      "expected_stdout": "start\nmain\n"
     }
   ]
 }

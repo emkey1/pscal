@@ -143,6 +143,78 @@
       "prompt": "Write an Aether program with a recursive pure function `split(n: Int) -> (Int, Int)` that returns `(0, 0)` when n <= 0 and otherwise destructures `split(n - 1)` into `(lo, hi)` and returns `(lo + 1, hi + 2)`. Print the two values of `split(3)` on one line, separated by a space.",
       "solution": "@pure\nfn split(n: Int) -> (Int, Int) {\n    if n <= 0 {\n        ret (0, 0);\n    }\n    let (lo, hi) = split(n - 1);\n    ret (lo + 1, hi + 2);\n}\n\nfn main() -> Void {\n    let (a, b) = split(3);\n    fx { println(a, \" \", b); }\n    ret;\n}\n",
       "expected_stdout": "3 6\n"
+    },
+    {
+      "id": "slice_of_record_field",
+      "prompt": "Write an Aether program with a record type `Window` holding a field `samples: Int[]`. Fill it with `[4, 9, 2, 7, 5, 1]`, take the slice of the field from index 1 up to (not including) index 4, and print the slice's length and then the sum of its elements, each on its own line.",
+      "solution": "type Window {\n    samples: Int[];\n}\n\nfn main() -> Void {\n    let w: Window = new Window();\n    w.samples = [4, 9, 2, 7, 5, 1];\n    let mid: Int[] = w.samples[1..4];\n    let total: Int = 0;\n    loop v in mid {\n        total = total + v;\n    }\n    fx {\n        println(length(mid));\n        println(total);\n    }\n    ret;\n}\n",
+      "expected_stdout": "3\n18\n"
+    },
+    {
+      "id": "foreach_over_record_field",
+      "prompt": "Write an Aether program with a type `Playlist` that has a field `minutes: Int[]` and a method `longest() -> Int` that loops directly over `self.minutes` and returns the largest value. Create a playlist with minutes `[3, 8, 5]`, print `longest=` followed by the result, then loop over the field from `main` and print each value on its own line.",
+      "solution": "type Playlist {\n    minutes: Int[];\n\n    fn longest() -> Int {\n        let best: Int = 0;\n        loop m in self.minutes {\n            if m > best {\n                best = m;\n            }\n        }\n        ret best;\n    }\n}\n\nfn main() -> Void {\n    let p: Playlist = new Playlist();\n    p.minutes = [3, 8, 5];\n    fx {\n        println(\"longest=\", p.longest());\n        loop m in p.minutes {\n            println(m);\n        }\n    }\n    ret;\n}\n",
+      "expected_stdout": "longest=8\n3\n8\n5\n"
+    },
+    {
+      "id": "range_in_bounds_and",
+      "prompt": "Write an Aether function `inBand(x: Int) -> Bool` that is true when x is at least 10 and below 20; write the test as two comparisons joined with `and`, not as a chained comparison. Print the result for 5, 10, 19 and 20, one per line.",
+      "solution": "fn inBand(x: Int) -> Bool {\n    ret 10 <= x and x < 20;\n}\n\nfn main() -> Void {\n    fx {\n        println(inBand(5));\n        println(inBand(10));\n        println(inBand(19));\n        println(inBand(20));\n    }\n    ret;\n}\n",
+      "expected_stdout": "false\ntrue\ntrue\nfalse\n"
+    },
+    {
+      "id": "integer_division_div",
+      "prompt": "Write an Aether program that splits 95 minutes into hours and minutes using integer division and remainder, and prints `1h 35m`.",
+      "solution": "fn main() -> Void {\n    let total: Int = 95;\n    let hours: Int = total div 60;\n    let mins: Int = total % 60;\n    fx {\n        println(hours, \"h \", mins, \"m\");\n    }\n    ret;\n}\n",
+      "expected_stdout": "1h 35m\n"
+    },
+    {
+      "id": "parse_int_from_text",
+      "prompt": "Write an Aether program that reads the numbers in the Text values `\"12\"`, `\"30\"` and `\"7\"` with `parse_int`, adds them, and prints `sum=49`.",
+      "solution": "fn main() -> Void {\n    let parts: Text[] = [\"12\", \"30\", \"7\"];\n    let sum: Int = 0;\n    loop p in parts {\n        sum = sum + parse_int(p);\n    }\n    fx {\n        println(\"sum=\", sum);\n    }\n    ret;\n}\n",
+      "expected_stdout": "sum=49\n"
+    },
+    {
+      "id": "print_array_elements_joined",
+      "prompt": "Write an Aether program that prints the array `[5, 3, 8]` on one line as `5, 3, 8`. `println` cannot print a whole array, so build the line yourself.",
+      "solution": "fn main() -> Void {\n    let xs: Int[] = [5, 3, 8];\n    let line: Text = \"\";\n    loop i in 0..length(xs) {\n        if i > 0 {\n            line = line + \", \";\n        }\n        line = line + int_to_text(xs[i]);\n    }\n    fx {\n        println(line);\n    }\n    ret;\n}\n",
+      "expected_stdout": "5, 3, 8\n"
+    },
+    {
+      "id": "real_to_int_trunc",
+      "prompt": "Write an Aether program that converts the Real distance 7.9 to an Int with `trunc`, then prints the Int and whether it is odd (`7 odd=true`).",
+      "solution": "fn main() -> Void {\n    let distance: Real = 7.9;\n    let whole: Int = trunc(distance);\n    fx {\n        println(whole, \" odd=\", whole % 2 == 1);\n    }\n    ret;\n}\n",
+      "expected_stdout": "7 odd=true\n"
+    },
+    {
+      "id": "contract_joined_with_and",
+      "prompt": "Write an Aether function `percent(part: Int, whole: Int) -> Int` whose precondition requires whole > 0 and part between 0 and whole inclusive (one `@pre` line, clauses joined with `&&`), and whose postcondition says the result is between 0 and 100. Print `percent(3, 4)`.",
+      "solution": "@pre whole > 0 && part >= 0 && part <= whole\n@post result >= 0 && result <= 100\nfn percent(part: Int, whole: Int) -> Int {\n    ret part * 100 div whole;\n}\n\nfn main() -> Void {\n    fx {\n        println(percent(3, 4));\n    }\n    ret;\n}\n",
+      "expected_stdout": "75\n"
+    },
+    {
+      "id": "loop_step_countdown",
+      "prompt": "Write an Aether program that counts down from 10 to 1 in steps of 3 with a range loop that uses `step`, printing each value on its own line.",
+      "solution": "fn main() -> Void {\n    loop i in 10..0 step -3 {\n        fx {\n            println(i);\n        }\n    }\n    ret;\n}\n",
+      "expected_stdout": "10\n7\n4\n1\n"
+    },
+    {
+      "id": "method_count_not_length",
+      "prompt": "Write an Aether type `Shelf` with a field `titles: Text[]` and a method that returns how many titles it holds. Do not name the method `length` (the compiler reserves that name); call it `count`. Add two titles and print `2 titles`.",
+      "solution": "type Shelf {\n    titles: Text[];\n\n    fn count() -> Int {\n        ret length(self.titles);\n    }\n}\n\nfn main() -> Void {\n    let s: Shelf = new Shelf();\n    s.titles = [\"Dune\", \"Emma\"];\n    fx {\n        println(s.count(), \" titles\");\n    }\n    ret;\n}\n",
+      "expected_stdout": "2 titles\n"
+    },
+    {
+      "id": "fresh_loop_variable_name",
+      "prompt": "Write an Aether program that keeps a running total in a variable `total`, starting at 0, and adds the numbers 1 to 4 with a range loop whose loop variable has a fresh name that is not already declared. Print `total=10`.",
+      "solution": "fn main() -> Void {\n    let total: Int = 0;\n    loop k in 1..5 {\n        total = total + k;\n    }\n    fx {\n        println(\"total=\", total);\n    }\n    ret;\n}\n",
+      "expected_stdout": "total=10\n"
+    },
+    {
+      "id": "tuple_annotated_binding",
+      "prompt": "Write an Aether function `labelled(n: Int) -> (Int, Text)` that returns n doubled and the Text `\"even\"` or `\"odd\"` for n. Bind its result for n = 7 to a variable annotated `(Int, Text)`, then print its two parts (`t.0` and `t.1`) separated by a space.",
+      "solution": "fn labelled(n: Int) -> (Int, Text) {\n    if n % 2 == 0 {\n        ret (n * 2, \"even\");\n    }\n    ret (n * 2, \"odd\");\n}\n\nfn main() -> Void {\n    let t: (Int, Text) = labelled(7);\n    fx {\n        println(t.0, \" \", t.1);\n    }\n    ret;\n}\n",
+      "expected_stdout": "14 odd\n"
     }
   ]
 }
