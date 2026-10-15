@@ -24,6 +24,13 @@ modes:
             are written as `should_fail` items in the bench manifest format,
             which `tools/aether_oracle_check.py --tasks <out>` checks.
 
+--paraphrases N (validate and score) gives every task N wordings of the same
+request. Validate also checks that each wording carries every value and the
+output format the one reference answer depends on; score asks the model each
+wording at temperature 0 and reports, per template, how many tasks kept one
+pass/fail verdict across all N wordings (a change comes from the wording
+alone). N=1 is the original single prompt, and its output is unchanged.
+
 The generator is deterministic given --seed, so a run is reproducible. Templates
 draw from the §1 mechanism inventory; this is the smoke-scale set, easily
 extended. Tasks are *not* frozen here -- freezing a curated subset is what turns
@@ -97,10 +104,18 @@ def t_mean(rng: random.Random) -> dict:
     ref = (f"fn main() -> Void {{\n    let total: Int = {' + '.join(map(str, vals))};\n"
            f"    let avg: Real = total * 1.0 / {k};\n"
            f"    fx {{ println(\"mean = \", avg:0:2); }}\n    ret;\n}}\n")
-    prompt = (f"Print the arithmetic mean of these {k} integers, rounded to exactly two "
-              f"decimal places, as `mean = <value>`: {', '.join(map(str, vals))}.")
-    return dict(template="mean", prompt=prompt, expected_stdout=expected,
-                reference=ref, mechanisms=["real", "arithmetic"])
+    lst = ", ".join(map(str, vals))
+    wordings = [
+        f"Print the arithmetic mean of these {k} integers, rounded to exactly two "
+        f"decimal places, as `mean = <value>`: {lst}.",
+        f"Given the integers {lst}, compute their average and print it with exactly two digits "
+        f"after the decimal point, in the form `mean = <value>`.",
+        f"Output `mean = <value>`, where <value> is the mean of {lst} shown to two decimal places.",
+        f"There are {k} numbers: {lst}. Print their arithmetic mean to 2 decimal places as `mean = <value>`.",
+    ]
+    return dict(template="mean", prompt=wordings[0], expected_stdout=expected,
+                reference=ref, mechanisms=["real", "arithmetic"],
+                wordings=wordings, facts=[*map(str, vals), "mean = <value>"])
 
 
 def t_sum(rng: random.Random) -> dict:
@@ -109,9 +124,16 @@ def t_sum(rng: random.Random) -> dict:
     expected = f"sum = {sum(vals)}\n"
     ref = (f"fn main() -> Void {{\n    let s: Int = {' + '.join(map(str, vals))};\n"
            f"    fx {{ println(\"sum = \", s); }}\n    ret;\n}}\n")
-    prompt = f"Print the sum of these integers as `sum = <value>`: {', '.join(map(str, vals))}."
-    return dict(template="sum", prompt=prompt, expected_stdout=expected,
-                reference=ref, mechanisms=["arithmetic"])
+    lst = ", ".join(map(str, vals))
+    wordings = [
+        f"Print the sum of these integers as `sum = <value>`: {lst}.",
+        f"Add up {lst} and print the total as `sum = <value>`.",
+        f"Print `sum = <value>`, where <value> is the total of these integers: {lst}.",
+        f"Compute the sum of {lst}. The output line must be `sum = <value>`.",
+    ]
+    return dict(template="sum", prompt=wordings[0], expected_stdout=expected,
+                reference=ref, mechanisms=["arithmetic"],
+                wordings=wordings, facts=[*map(str, vals), "sum = <value>"])
 
 
 def t_clamp(rng: random.Random) -> dict:
@@ -120,9 +142,16 @@ def t_clamp(rng: random.Random) -> dict:
     val = rng.randint(lo - 30, hi + 30)
     expected = f"{max(lo, min(hi, val))}\n"
     ref = f"fn main() -> Void {{\n    fx {{ println(clamp({val}, {lo}, {hi})); }}\n    ret;\n}}\n"
-    prompt = f"Print {val} clamped to the inclusive range {lo} to {hi}."
-    return dict(template="clamp", prompt=prompt, expected_stdout=expected,
-                reference=ref, mechanisms=["clamp", "builtin"])
+    wordings = [
+        f"Print {val} clamped to the inclusive range {lo} to {hi}.",
+        f"Print the value of {val} restricted to the closed interval [{lo}, {hi}].",
+        f"Clamp {val} so it is no less than {lo} and no more than {hi}, then print it.",
+        f"With a lower bound of {lo} and an upper bound of {hi} (both inclusive), print {val} "
+        f"clamped to that range.",
+    ]
+    return dict(template="clamp", prompt=wordings[0], expected_stdout=expected,
+                reference=ref, mechanisms=["clamp", "builtin"],
+                wordings=wordings, facts=[str(val), str(lo), str(hi)])
 
 
 def t_max(rng: random.Random) -> dict:
@@ -133,9 +162,16 @@ def t_max(rng: random.Random) -> dict:
     ref = ("@pure\nfn mx(a: Int, b: Int) -> Int {\n    if a > b { ret a; }\n    ret b;\n}\n"
            f"fn main() -> Void {{\n    let m: Int = {nested};\n"
            f"    fx {{ println(\"max = \", m); }}\n    ret;\n}}\n")
-    prompt = f"Print the largest of these integers as `max = <value>`: {', '.join(map(str, vals))}."
-    return dict(template="max", prompt=prompt, expected_stdout=expected,
-                reference=ref, mechanisms=["branching", "pure"])
+    lst = ", ".join(map(str, vals))
+    wordings = [
+        f"Print the largest of these integers as `max = <value>`: {lst}.",
+        f"Find the maximum of {lst} and print it as `max = <value>`.",
+        f"Print `max = <value>`, where <value> is the biggest number among {lst}.",
+        f"Which of these integers is largest: {lst}? Print it as `max = <value>`.",
+    ]
+    return dict(template="max", prompt=wordings[0], expected_stdout=expected,
+                reference=ref, mechanisms=["branching", "pure"],
+                wordings=wordings, facts=[*map(str, vals), "max = <value>"])
 
 
 def t_count_above(rng: random.Random) -> dict:
@@ -147,24 +183,65 @@ def t_count_above(rng: random.Random) -> dict:
     ref = ("@pure\nfn ge(v: Int, t: Int) -> Int {\n    if v >= t { ret 1; }\n    ret 0;\n}\n"
            f"fn main() -> Void {{\n    let c: Int = {terms};\n"
            f"    fx {{ println(c); }}\n    ret;\n}}\n")
-    prompt = (f"Count how many of these integers are greater than or equal to {thr}, and print "
-              f"just that count: {', '.join(map(str, vals))}.")
-    return dict(template="count_above", prompt=prompt, expected_stdout=expected,
-                reference=ref, mechanisms=["pure", "branching"])
+    lst = ", ".join(map(str, vals))
+    wordings = [
+        f"Count how many of these integers are greater than or equal to {thr}, and print "
+        f"just that count: {lst}.",
+        f"Print only the number of values in {lst} that are at least {thr}.",
+        f"How many of the integers {lst} are {thr} or more? Print just the count.",
+        f"Count the integers in this list that are not below {thr} and print only that number: {lst}.",
+    ]
+    return dict(template="count_above", prompt=wordings[0], expected_stdout=expected,
+                reference=ref, mechanisms=["pure", "branching"],
+                wordings=wordings, facts=[*map(str, vals), str(thr)])
 
 
 TEMPLATES = [t_mean, t_sum, t_clamp, t_max, t_count_above]
+# Every template has this many wordings; --paraphrases may ask for up to it.
+MAX_PARAPHRASES = 4
 
 
-def generate(n: int, seed: int) -> list[dict]:
+def generate(n: int, seed: int, paraphrases: int = 1) -> list[dict]:
+    """Tasks for --seed. Wordings draw nothing from the rng, so the tasks (and,
+    with paraphrases=1, the dicts) are the same for every N; with N > 1 each
+    task also carries `paraphrases` (wording 0 is `prompt`) and the `facts`
+    every wording must state."""
     rng = random.Random(seed)
     out = []
     for i in range(n):
         tmpl = TEMPLATES[i % len(TEMPLATES)]
         task = tmpl(rng)
+        wordings, facts = task.pop("wordings"), task.pop("facts")
+        if paraphrases > 1:
+            task["paraphrases"] = wordings[:paraphrases]
+            task["facts"] = facts
         task["id"] = f"{task['template']}_{i:03d}"
         out.append(task)
     return out
+
+
+def missing_facts(wording: str, facts: list[str]) -> list[str]:
+    """Facts a wording leaves out: a number must appear as a whole number (52
+    is not found in 152), a format string verbatim."""
+    return [f for f in facts
+            if not (re.search(rf"(?<![\d-]){re.escape(f)}(?!\d)", wording) if f.lstrip("-").isdigit()
+                    else f in wording)]
+
+
+def consistency_report(verdicts: dict[str, list[int]], templates: dict[str, str]) -> list[str]:
+    """Lines saying, per template, how many tasks kept one verdict for every
+    wording, and per task how often the verdict changed between wordings."""
+    lines, by_t = [], {}
+    for task_id, v in verdicts.items():
+        flips = sum(a != b for a, b in zip(v, v[1:]))
+        by_t.setdefault(templates[task_id], []).append(len(set(v)) == 1)
+        lines.append(f"  {task_id:<16} {''.join('P' if x else '.' for x in v)}  passes {sum(v)}/{len(v)}, "
+                     f"verdict changes {flips}")
+    stable = sum(sum(x) for x in by_t.values())
+    lines.append(f"\nconsistency: {stable}/{len(verdicts)} tasks kept one verdict for every wording")
+    for k, x in sorted(by_t.items()):
+        lines.append(f"  {k:<14} {sum(x)}/{len(x)} consistent")
+    return lines
 
 
 # ---- should-fail generator: break a reference the way a model breaks Aether ----
@@ -320,11 +397,15 @@ def main() -> None:
     ap.add_argument("--mode", choices=["validate", "score", "negatives"], default="validate")
     ap.add_argument("--endpoint", default="http://localhost:8019/v1/chat/completions")
     ap.add_argument("--model", default=None, help="served model name (required for --mode score)")
+    ap.add_argument("--paraphrases", type=int, default=1, metavar="N",
+                    help=f"ask each task in N wordings (1-{MAX_PARAPHRASES}; validate and score)")
     ap.add_argument("--dump", default=None, help="write generated tasks (+oracles) to this JSON path; with --mode negatives, "
                          "the kept should_fail items as a bench manifest")
     args = ap.parse_args()
 
-    tasks = generate(args.n, args.seed)
+    if not 1 <= args.paraphrases <= MAX_PARAPHRASES:
+        ap.error(f"--paraphrases must be 1-{MAX_PARAPHRASES}")
+    tasks = generate(args.n, args.seed, args.paraphrases)
     if args.mode == "negatives":
         kept, dropped = generate_negatives(tasks, args.seed)
         for item in dropped:
@@ -357,25 +438,47 @@ def main() -> None:
             print(f"[{flag}] {t['id']:<16} oracle={t['expected_stdout']!r}"
                   + ("" if good else f"  got rc={rc} out={out!r}"))
         print(f"\nself-validation: {ok}/{len(tasks)} reference solutions match the Python oracle")
+        if args.paraphrases > 1:
+            bad = 0
+            for t in tasks:
+                for i, wording in enumerate(t["paraphrases"]):
+                    gone = missing_facts(wording, t["facts"])
+                    bad += bool(gone)
+                    if gone:
+                        print(f"[BAD] {t['id']} wording {i} leaves out {gone}")
+            total = len(tasks) * args.paraphrases
+            print(f"wordings: {total - bad}/{total} state every value and the output format "
+                  f"the one reference answer needs")
+            if bad:
+                raise SystemExit(1)
         return
 
     if not args.model:
         ap.error("--mode score requires --model")
     passed = 0
     by_t: dict[str, list[int]] = {}
+    verdicts: dict[str, list[int]] = {}
     for t in tasks:
-        try:
-            code = sanitize(query_model(t["prompt"], args.endpoint, args.model))
-            rc, out = (run_aether(code) if code.strip() else (-1, ""))
-        except Exception as exc:  # noqa: BLE001
-            rc, out = -2, f"<{type(exc).__name__}>"
-        good = rc == 0 and out == t["expected_stdout"]
-        passed += good
-        by_t.setdefault(t["template"], []).append(int(good))
-        print(f"[{'PASS' if good else 'fail'}] {t['id']:<16} rc={rc}")
-    print(f"\nwild score: {passed}/{len(tasks)} ({passed / len(tasks):.0%}) on novel tasks")
+        for i, prompt in enumerate(t.get("paraphrases") or [t["prompt"]]):
+            try:
+                code = sanitize(query_model(prompt, args.endpoint, args.model))
+                rc, out = (run_aether(code) if code.strip() else (-1, ""))
+            except Exception as exc:  # noqa: BLE001
+                rc, out = -2, f"<{type(exc).__name__}>"
+            good = rc == 0 and out == t["expected_stdout"]
+            passed += good
+            by_t.setdefault(t["template"], []).append(int(good))
+            verdicts.setdefault(t["id"], []).append(int(good))
+            label = t["id"] if args.paraphrases == 1 else f"{t['id']}/w{i}"
+            print(f"[{'PASS' if good else 'fail'}] {label:<16} rc={rc}")
+    calls = len(tasks) * args.paraphrases
+    print(f"\nwild score: {passed}/{calls} ({passed / calls:.0%}) on novel tasks")
     for k, v in sorted(by_t.items()):
         print(f"  {k:<14} {sum(v)}/{len(v)}")
+    if args.paraphrases > 1:
+        print(f"\nmodel calls: {calls} ({len(tasks)} tasks x {args.paraphrases} wordings) to {args.model}")
+        for line in consistency_report(verdicts, {t["id"]: t["template"] for t in tasks}):
+            print(line)
 
 
 if __name__ == "__main__":
