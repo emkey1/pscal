@@ -51,7 +51,7 @@
     {
       "id": "repair_benchmark_marker_leak",
       "kind": "repair",
-      "diagnostic": "[SCOPE-001] identifier '__AETHER_BENCH_START__' not in scope.",
+      "diagnostic": "[NAME-001] Aether parser error: '__AETHER_BENCH_START__' starts with `__`, which is reserved for compiler-generated names.",
       "broken_source": "__AETHER_BENCH_START__\nuse \"bench_consts\";\n\nfn main() -> Void {\n    fx {\n        println(Greeting);\n        println(Answer);\n    }\n    ret;\n}\n",
       "fixed_source": "use \"bench_consts\";\n\nfn main() -> Void {\n    fx {\n        println(Greeting);\n        println(Answer);\n    }\n    ret;\n}\n",
       "expected_stdout": "Aether\n42\n",
@@ -135,7 +135,7 @@
     {
       "id": "repair_pure_sigil",
       "kind": "repair",
-      "diagnostic": "[SCOPE-001] identifier 'pure' not in scope.",
+      "diagnostic": "[ENTRY-001] Aether parser error: fn main will not run: this file also has top-level statements (this line is the first).",
       "broken_source": "pure fn isReady(score: Int) -> Bool {\n    ret score >= 70;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"ready: \", isReady(85));\n    }\n    ret;\n}\n",
       "fixed_source": "@pure\nfn isReady(score: Int) -> Bool {\n    ret score >= 70;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"ready: \", isReady(85));\n    }\n    ret;\n}\n",
       "expected_stdout": "ready: true\n"
@@ -151,7 +151,7 @@
     {
       "id": "repair_post_on_signature",
       "kind": "repair",
-      "diagnostic": "[ANN-001] Aether contract error: @post must annotate the next function declaration.",
+      "diagnostic": "[ANN-001] Aether contract parser error: unexpected '{' after the @post expression `result.0 >= result.1`; join clauses with &&.",
       "broken_source": "fn ordered(a: Int, b: Int) -> (Int, Int) @post result.0 >= result.1 {\n    if a >= b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (hi, lo) = ordered(2, 7);\n    fx {\n        println(\"hi=\", hi);\n        println(\"lo=\", lo);\n    }\n    ret;\n}\n",
       "fixed_source": "@post result.0 >= result.1\nfn ordered(a: Int, b: Int) -> (Int, Int) {\n    if a >= b {\n        ret (a, b);\n    }\n    ret (b, a);\n}\n\nfn main() -> Void {\n    let (hi, lo) = ordered(2, 7);\n    fx {\n        println(\"hi=\", hi);\n        println(\"lo=\", lo);\n    }\n    ret;\n}\n",
       "expected_stdout": "hi=7\nlo=2\n"
@@ -167,7 +167,7 @@
     {
       "id": "repair_inclusive_range",
       "kind": "repair",
-      "diagnostic": "[SYN-001] Aether parser error: could not parse loop range bounds.",
+      "diagnostic": "[SYN-001] Aether parser error: expected an expression after '..', found '='.",
       "broken_source": "fn main() -> Void {\n    loop i in 1..=3 {\n        fx { println(\"i=\", i); }\n    }\n    ret;\n}\n",
       "fixed_source": "fn main() -> Void {\n    loop i in 1..4 {\n        fx { println(\"i=\", i); }\n    }\n    ret;\n}\n",
       "expected_stdout": "i=1\ni=2\ni=3\n"
@@ -297,8 +297,8 @@
     },
     {
       "id": "repair_println_placeholders",
-      "kind": "behavioral",
-      "diagnostic": "Behavioral issue: `println` has no format placeholders; this program runs but prints `{} items12` with the braces literal. Pass values as variadic arguments in output order.",
+      "kind": "repair",
+      "diagnostic": "[FMT-001] Aether format parser error: println has no placeholders: \"{}\" prints literally and the values are appended.",
       "broken_source": "fn main() -> Void {\n    let count: Int = 12;\n    fx {\n        println(\"{} items\", count);\n    }\n    ret;\n}\n",
       "fixed_source": "fn main() -> Void {\n    let count: Int = 12;\n    fx {\n        println(count, \" items\");\n    }\n    ret;\n}\n",
       "expected_stdout": "12 items\n"

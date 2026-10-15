@@ -19,6 +19,11 @@
       "id": "pass5gem_gemini_2_5_flash_lit_03_This_program_simulates_a_simpl.aether_9c4ef02385c6",
       "retired": "2026-10-08",
       "reason": "its golden recorded an array pointer dump (ARRAY(dims:1,...)); printing an array is TYPE-001 since aether 2026-10-08-1 (W8-15, D14)"
+    },
+    {
+      "id": "07-01b_sched_ornith_00_unspecified.aether",
+      "retired": "2026-10-15",
+      "reason": "harvested, no golden and used by nothing (no program imports it): a bare type with no fn main and no top-level statements, which is ENTRY-001 'nothing to run' since aether 2026-10-08-1, so it failed the recapture_expected.py --check pre-flight"
     }
   ],
   "items": [
@@ -10553,21 +10558,6 @@
       "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_m5_qwen3_coder_02_Implements_a_simple_state_mach.aether",
       "sha256": "be76e2f031a96a37dd80f55912dca3ed15c65bda7b1559f71dfbdb37d4eb1ddd",
       "stdout": "Traffic Light Simulator\n=======================\n\nState: red (30 ticks)\n..............................",
-      "metadata": {
-        "canonical": false,
-        "oracle": "none",
-        "fixture_required": false,
-        "assumption_bearing": false,
-        "tags": [
-          "harvested_idea_miner_2026-07-19"
-        ]
-      }
-    },
-    {
-      "source_path": "/tmp/aether_harvest/07-01b_sched_ornith_00_unspecified.aether",
-      "repo_path": "Tests/aether_specialization/corpus_candidates/07-01b_sched_ornith_00_unspecified.aether",
-      "sha256": "59c676e0a5413547f89f47bcd197204c94198294cb271a9d24dcb78c17daa272",
-      "stdout": "",
       "metadata": {
         "canonical": false,
         "oracle": "none",

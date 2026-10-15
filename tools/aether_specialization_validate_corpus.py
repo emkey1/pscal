@@ -7,6 +7,7 @@ import argparse
 import json
 import pathlib
 import re
+import subprocess
 import sys
 from collections import Counter
 
@@ -50,6 +51,33 @@ def is_source_candidate(path: pathlib.Path) -> bool:
     return path.is_file() and not path.name.startswith(".")
 
 
+def git_ignored_names(directory: pathlib.Path, names: list[str]) -> set[str]:
+    """The names in `directory` that git ignores and does not track.
+
+    A corpus program that writes a file into its working directory leaves a
+    run artefact beside the sources (app_log.txt, written by
+    07-19a_gemini_2_5_flash_lit_04); .gitignore names such artefacts, so a
+    clean checkout never has them and they are not corpus files. Outside a git
+    work tree (or without git) nothing counts as ignored.
+    """
+    if not names:
+        return set()
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(directory), "check-ignore", "--stdin"],
+            input="\n".join(names) + "\n",
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    # 0: some names ignored, 1: none, anything else: not a work tree / error
+    if proc.returncode not in (0, 1):
+        return set()
+    return {line.strip() for line in proc.stdout.splitlines() if line.strip()} & set(names)
+
+
 def classify_name(name: str) -> str:
     if name.endswith(".json"):
         return "fixture_in_corpus_dir"
@@ -79,7 +107,9 @@ def main() -> int:
     repo_path_counts = Counter(repo_paths)
     duplicate_repo_paths = sorted(path for path, count in repo_path_counts.items() if path and count > 1)
 
-    disk_files = sorted(path for path in args.corpus_dir.iterdir() if is_source_candidate(path))
+    on_disk = sorted(path for path in args.corpus_dir.iterdir() if is_source_candidate(path))
+    ignored_artefacts = sorted(git_ignored_names(args.corpus_dir, [path.name for path in on_disk]))
+    disk_files = [path for path in on_disk if path.name not in ignored_artefacts]
     disk_names = {path.name for path in disk_files}
 
     manifest_paths: list[pathlib.Path] = []
@@ -157,6 +187,7 @@ def main() -> int:
             "oracle_errors": len(oracle_errors),
             "host_data_goldens": len(host_data_goldens),
             "retired_items": len(retired_ids),
+            "ignored_run_artefacts": len(ignored_artefacts),
         },
         "errors": {
             "missing_manifest_files": missing_manifest_files,
@@ -175,6 +206,8 @@ def main() -> int:
             "scratch_like_in_manifest": scratch_like_in_manifest,
             "unmanifested_curated_named_files": unmanifested_curated,
             "unmanifested_support_files": unmanifested_support,
+            # gitignored run artefacts: not corpus files, reported but never an error
+            "ignored_run_artefacts": ignored_artefacts,
         },
     }
 

@@ -28,9 +28,11 @@ Every drill declares `kind`:
   `diagnostic` starts with the code the compiler emits first (`[FX-001] ...`),
   or is the uncoded first line for a runtime error.
 - `behavioral`: `broken_source` compiles and runs but prints the wrong thing
-  (`repair_float_formatting`, `repair_println_placeholders`,
-  `repair_array_inplace_mutation`). If the compiler warns about it, the stored
-  diagnostic cites that warning (`[ARR-001] ...`).
+  (`repair_float_formatting`, `repair_array_inplace_mutation`). If the
+  compiler warns about it, the stored diagnostic cites that warning
+  (`[ARR-001] ...`). When a later release rejects the program outright, the
+  drill becomes a `repair` drill citing the new code
+  (`repair_println_placeholders` is FMT-001 since 2026-10-08-1).
 
 `tools/aether_specialization_build_dataset.py` runs every `broken_source` on
 every build and fails on a drill whose polarity flipped ("drill obsolete": a
