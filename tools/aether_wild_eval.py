@@ -15,6 +15,15 @@ modes:
             compare to the oracle. Reports a "wild" generalization rate on
             never-before-seen tasks.
 
+  negatives (CPU-only) -- break each generated reference in the ways a model
+            gets Aether wrong (the fx block removed, an effect inside @pure,
+            `return` for `ret`, a builtin with the wrong argument count, a
+            misspelled type, a contract that cannot hold), run every broken
+            program and keep only those that fail with exactly the one error
+            code the break is meant to cause. With --dump the kept programs
+            are written as `should_fail` items in the bench manifest format,
+            which `tools/aether_oracle_check.py --tasks <out>` checks.
+
 The generator is deterministic given --seed, so a run is reproducible. Templates
 draw from the §1 mechanism inventory; this is the smoke-scale set, easily
 extended. Tasks are *not* frozen here -- freezing a curated subset is what turns
@@ -25,6 +34,7 @@ import argparse
 import json
 import os
 import random
+import re
 import subprocess
 import tempfile
 import urllib.request
@@ -157,14 +167,139 @@ def generate(n: int, seed: int) -> list[dict]:
     return out
 
 
-def run_aether(source: str) -> tuple[int, str]:
+# ---- should-fail generator: break a reference the way a model breaks Aether ----
+# Each break takes a template's reference and the run's rng and returns
+# (program, note), or None when the reference has nothing that break can touch.
+# The code is the one error the broken program must give and nothing else.
+_TYPO = {"Int": ["Itn", "Integr", "Imt"], "Real": ["Rael", "Reel", "Raal"]}
+_PURE_FN = re.compile(r"@pure\nfn (\w+)\((\w+): \w+")
+_FIRST_LET = re.compile(r"(let \w+: Int = )(.+);")
+_CHECKER = "@pure\nfn chk(v: Int) -> Int {\n    ret v;\n}\n"
+
+
+def b_no_fx(ref: str, rng: random.Random):
+    if "fx { " not in ref:
+        return None
+    return re.sub(r"fx \{ (.*?) \}", r"\1", ref, count=1), "the fx block around println removed"
+
+
+def b_effect_in_pure(ref: str, rng: random.Random):
+    m = _PURE_FN.search(ref)
+    if m:
+        line_end = ref.index("\n", m.end()) + 1
+        return (ref[:line_end] + f"    fx {{ println({m.group(2)}); }}\n" + ref[line_end:],
+                f"println inside @pure fn {m.group(1)}")
+    return ref.replace("fn main()", "@pure\nfn main()", 1), "main marked @pure around its fx block"
+
+
+def b_return_for_ret(ref: str, rng: random.Random):
+    spots = [m.start() for m in re.finditer(r"\bret\b", ref)]
+    if not spots:
+        return None
+    at = rng.choice(spots)
+    return ref[:at] + "return" + ref[at + 3:], "`return` written for `ret`"
+
+
+def b_builtin_arity(ref: str, rng: random.Random):
+    m = re.search(r"clamp\(([^()]+)\)", ref)
+    if m:
+        args = [a.strip() for a in m.group(1).split(",")]
+        bad = args[:-1] if rng.random() < 0.5 else args + [args[-1]]
+        return (ref[:m.start(1)] + ", ".join(bad) + ref[m.end(1):],
+                f"clamp called with {len(bad)} arguments (takes 3)")
+    m = _FIRST_LET.search(ref)
+    if not m:
+        return None
+    fn, bad = rng.choice([("max", m.group(2)), ("min", f"{m.group(2)}, 0, 0")])
+    return (ref[:m.start(2)] + f"{fn}({bad})" + ref[m.end(2):],
+            f"{fn} called with {1 if fn == 'max' else 3} arguments (takes 2)")
+
+
+def b_misspelled_type(ref: str, rng: random.Random):
+    # Not Void: a misspelled `-> Void` reports FLOW-002 (the `ret;` lacks a
+    # value) before the unknown type, so it would never survive the filter.
+    spots = list(re.finditer(r"(?<=: |> )(Int|Real)\b", ref))
+    if not spots:
+        return None
+    m = rng.choice(spots)
+    typo = rng.choice(_TYPO[m.group(1)])
+    return ref[:m.start()] + typo + ref[m.end():], f"type {m.group(1)} misspelled {typo}"
+
+
+def b_failing_contract(ref: str, rng: random.Random):
+    side = rng.choice(["pre", "post"])
+    m = _PURE_FN.search(ref)
+    if m:
+        cond = f"{m.group(2)} < {m.group(2)}" if side == "pre" else "result < result"
+        at = m.start()
+        return ref[:at] + f"@{side}({cond})\n" + ref[at:], f"@{side}({cond}) on {m.group(1)} can never hold"
+    # No function to annotate: route an Int value through a checker (an Int
+    # `let`, else the clamp call; mean's printed value is a formatted Real).
+    cond = "v < v" if side == "pre" else "result < result"
+    m = _FIRST_LET.search(ref) or re.search(r"(println\()(clamp\([^()]*\))\)", ref)
+    if not m:
+        return None
+    prog = ref[:m.start(2)] + f"chk({m.group(2)})" + ref[m.end(2):]
+    return f"@{side}({cond})\n" + _CHECKER + prog, f"@{side}({cond}) on a checker the value passes through"
+
+
+BREAKS = [("no_fx", "FX-001", b_no_fx),
+          ("effect_in_pure", "ANN-001", b_effect_in_pure),
+          ("return_for_ret", "SYN-001", b_return_for_ret),
+          ("builtin_arity", "BUILT-002", b_builtin_arity),
+          ("misspelled_type", "TYPE-002", b_misspelled_type),
+          ("failing_contract", "CON-001", b_failing_contract)]
+_CODE = re.compile(r"\[([A-Z]+-\d{3})\]")
+
+
+def break_candidates(tasks: list[dict], seed: int) -> list[dict]:
+    """Every break of every task, as should_fail items (not yet run). The
+    breaks draw from their own rng, so --seed fixes them as it fixes the tasks."""
+    rng = random.Random(f"negatives:{seed}")
+    out = []
+    for t in tasks:
+        for name, code, fn in BREAKS:
+            got = fn(t["reference"], rng)
+            if got is None:
+                continue
+            program, note = got
+            out.append({"id": f"neg_{t['id']}_{name}", "title": f"{t['template']}: {note}",
+                        "should_fail": True, "program": program, "expected_error_code": code,
+                        "mechanisms": ["negative", name] + t["mechanisms"],
+                        "note": f"Generated by aether_wild_eval.py --mode negatives --seed {seed} "
+                                f"from {t['id']}: {note}.",
+                        "source_task": t["id"], "break": name})
+    return out
+
+
+def exact_failure(rc: int, text: str, code: str) -> bool:
+    """The broken program failed, and the only code it printed is the expected one."""
+    return rc != 0 and set(_CODE.findall(text)) == {code}
+
+
+def generate_negatives(tasks: list[dict], seed: int, run=None) -> tuple[list[dict], list[dict]]:
+    """(kept, dropped): run each candidate, keep those that fail exactly as meant."""
+    run = run or (lambda src: run_aether(src, with_stderr=True))
+    kept, dropped = [], []
+    for item in break_candidates(tasks, seed):
+        rc, text = run(item["program"])
+        if exact_failure(rc, text, item["expected_error_code"]):
+            kept.append(item)
+        else:
+            dropped.append({**item, "observed_rc": rc, "observed_codes": sorted(set(_CODE.findall(text))),
+                            "observed_first_line": re.sub(r"^\S*prog\.aether:", "line ",
+                                                          (text.strip().splitlines() or [""])[0])[:200]})
+    return kept, dropped
+
+
+def run_aether(source: str, with_stderr: bool = False) -> tuple[int, str]:
     with tempfile.TemporaryDirectory(prefix="wild-eval-") as td:
         p = os.path.join(td, "prog.aether")
         with open(p, "w", encoding="utf-8") as fh:
             fh.write(source)
         proc = subprocess.run([AETHER_BIN, "--no-cache", p], cwd=td,
                               capture_output=True, text=True, errors="replace", timeout=30)
-        return proc.returncode, proc.stdout
+        return proc.returncode, proc.stdout + (proc.stderr if with_stderr else "")
 
 
 def query_model(prompt: str, endpoint: str, model: str) -> str:
@@ -182,13 +317,32 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--seed", type=int, default=7)
-    ap.add_argument("--mode", choices=["validate", "score"], default="validate")
+    ap.add_argument("--mode", choices=["validate", "score", "negatives"], default="validate")
     ap.add_argument("--endpoint", default="http://localhost:8019/v1/chat/completions")
     ap.add_argument("--model", default=None, help="served model name (required for --mode score)")
-    ap.add_argument("--dump", default=None, help="write generated tasks (+oracles) to this JSON path")
+    ap.add_argument("--dump", default=None, help="write generated tasks (+oracles) to this JSON path; with --mode negatives, "
+                         "the kept should_fail items as a bench manifest")
     args = ap.parse_args()
 
     tasks = generate(args.n, args.seed)
+    if args.mode == "negatives":
+        kept, dropped = generate_negatives(tasks, args.seed)
+        for item in dropped:
+            print(f"[drop] {item['id']:<36} wanted {item['expected_error_code']}, got rc={item['observed_rc']} "
+                  f"codes={item['observed_codes'] or 'none'}: {item['observed_first_line']}")
+        per: dict[str, int] = {}
+        for item in kept:
+            per[item["source_task"]] = per.get(item["source_task"], 0) + 1
+        for t in tasks:
+            print(f"[{'ok ' if per.get(t['id'], 0) >= 2 else 'LOW'}] {t['id']:<16} {per.get(t['id'], 0)} kept")
+        print(f"\nnegatives: kept {len(kept)}/{len(kept) + len(dropped)} broken programs "
+              f"from {len(tasks)} tasks (seed {args.seed})")
+        if args.dump:
+            with open(args.dump, "w", encoding="utf-8") as fh:
+                json.dump({"seed": args.seed, "generator": "tools/aether_wild_eval.py --mode negatives",
+                           "tasks": kept}, fh, indent=2)
+                fh.write("\n")
+        raise SystemExit(0 if all(per.get(t["id"], 0) >= 2 for t in tasks) else 1)
     if args.dump:
         with open(args.dump, "w", encoding="utf-8") as fh:
             json.dump({"seed": args.seed, "tasks": tasks}, fh, indent=2)

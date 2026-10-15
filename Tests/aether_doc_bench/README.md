@@ -376,6 +376,12 @@ Each task currently defines:
 
 Entries with `should_fail: true` are negative-tier compiler invariants (a fixed
 `program` plus `expected_error_code`), not tasks; the harness skips them.
+Generated ones come from `AETHER_BIN=... python3 tools/aether_wild_eval.py
+--mode negatives --seed N --dump out.json`: each wild-eval reference broken six
+ways (FX-001, ANN-001, SYN-001, BUILT-002, TYPE-002, CON-001), kept only when
+the program fails with exactly that one code; check them with
+`tools/aether_oracle_check.py --tasks out.json`. CON-001 needs a compiler at
+language 2026-10-15-2 or later (older ones print the contract failure uncoded).
 
 - optional `generated_files`: `{NAME: {"generator": ..., args..., "sha256": ...}}`,
   produced by `scale_inputs.py` when the manifest loads and checked against the
