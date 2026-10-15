@@ -461,8 +461,11 @@ Each variant `summary` carries, besides the old counts:
   a task are not independent, so read them as a lower bound on uncertainty);
 - `first_attempt_classes`: the thesis failure classes of each first attempt,
   worst first -- `silent_wrong` (exited as a success, wrong stdout),
-  `crash_hang` (timeout, signal, rc >= 128), `uncoded_error` (no `CODE-NNN`),
-  `coded_error` -- plus `pass`, `infra_failed` and `not_sent`;
+  `crash_hang` (timeout, signal, rc >= 128), `contract_violation` (stopped on
+  a failed `@pre`/`@post`: `[CON-001] Aether @pre failed in f` on stderr, or
+  the uncoded stdout line compilers before language 2026-10-15-2 printed),
+  `uncoded_error` (no `CODE-NNN`), `coded_error` -- plus `pass`, `infra_failed`
+  and `not_sent`;
 - `per_task`, `task_majority_fa/fx` and the `flaky_fa/fx` task sets.
 
 A case whose generation measured nothing (HTTP 4xx/5xx, 402/429/quota,

@@ -3938,8 +3938,19 @@ def classify_infra_failure(message: str | None) -> str | None:
 
 
 _CODE_RE = re.compile(r"\b[A-Z]+-\d{3}\b")
-FAILURE_CLASSES = ("pass", "silent_wrong", "crash_hang", "no_answer", "uncoded_error", "coded_error",
-                   "infra_failed", "not_sent")
+# A broken @pre/@post: `[CON-001] Aether @pre failed in f` on stderr since
+# language 2026-10-15-2; before that the same words, uncoded, on stdout. Both
+# spellings sort as contract_violation, so stored attempts re-sort the same way.
+_CONTRACT_RE = re.compile(r"^(?:\[CON-001\] )?Aether @(?:pre|post) failed in \S+", re.M)
+FAILURE_CLASSES = ("pass", "silent_wrong", "crash_hang", "no_answer", "contract_violation", "uncoded_error",
+                   "coded_error", "infra_failed", "not_sent")
+
+
+def attempt_broke_a_contract(run: dict[str, Any]) -> bool:
+    """The program stopped on a failed @pre or @post (CON-001)."""
+    if any(isinstance(d, dict) and d.get("code") == "CON-001" for d in (run.get("diagnostics") or [])):
+        return True
+    return bool(_CONTRACT_RE.search(run.get("stderr") or "") or _CONTRACT_RE.search(run.get("stdout") or ""))
 
 
 def attempt_is_no_answer(attempt: dict[str, Any]) -> bool:
@@ -3955,8 +3966,10 @@ def classify_attempt(attempt: dict[str, Any]) -> str:
     """The thesis failure class of one attempt, worst first: silent_wrong (the
     program exited as a success -- its expected status, or 0 -- but printed
     the wrong thing or ended with the wrong status), crash_hang
-    (timeout, signal, rc >= 128), uncoded_error (failed with no CODE-NNN),
-    coded_error -- plus pass, and the two that measured nothing:
+    (timeout, signal, rc >= 128), contract_violation (stopped on a failed
+    @pre/@post, CON-001: the program checked itself and said so, even where
+    its exit status is the one the task expects), uncoded_error (failed with
+    no CODE-NNN), coded_error -- plus pass, and the two that measured nothing:
     infra_failed and not_sent (context overflow)."""
     if attempt.get("not_sent") or "prompt_too_large" in str(attempt.get("generation_error") or ""):
         return "not_sent"
@@ -3971,6 +3984,8 @@ def classify_attempt(attempt: dict[str, Any]) -> str:
     expected = run.get("expected_returncode", 0)
     if run.get("timed_out") or (isinstance(returncode, int) and (returncode >= 128 or returncode < 0)):
         return "crash_hang"
+    if returncode != 0 and attempt_broke_a_contract(run):
+        return "contract_violation"
     # Exiting as a success -- the status the task expects, or 0 when the task
     # expects a failure status (the program never stopped) -- with the wrong
     # result leaves the repair loop nothing to act on.

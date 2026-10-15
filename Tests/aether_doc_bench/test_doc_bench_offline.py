@@ -996,14 +996,15 @@ def test_summary_classifies_first_attempt_failures():
         _case("c", _r(rc=124, timed_out=True), _r(exact=True)),           # crash_hang, fixed
         _case("d", _r(rc=139)),                                           # crash_hang (signal)
         _case("e", _r(rc=1, stderr="t.aether:3: [FX-001] needs fx\n"), _r(exact=True)),  # coded
-        _case("f", _r(rc=1, stderr="Aether @post failed in g\n")),       # uncoded
+        _case("f", _r(rc=1, stderr="Runtime Error: boom\n")),            # uncoded
+        _case("i", _r(rc=1, stderr="[CON-001] Aether @post failed in g\n")),  # contract_violation
         _case("g", _r(rc=1, stderr="", diagnostics=[{"code": "SCOPE-001"}])),  # coded via diagnostics
         _case("h", _r(rc=3, stdout="x\n", expected_returncode=3)),        # silent_wrong at expected rc
     ]
     summary = adb.summarize(results)
     assert summary["first_attempt_classes"] == {
-        "pass": 1, "silent_wrong": 2, "crash_hang": 2, "no_answer": 0, "uncoded_error": 1, "coded_error": 2,
-        "infra_failed": 0, "not_sent": 0,
+        "pass": 1, "silent_wrong": 2, "crash_hang": 2, "no_answer": 0, "contract_violation": 1,
+        "uncoded_error": 1, "coded_error": 2, "infra_failed": 0, "not_sent": 0,
     }, summary["first_attempt_classes"]
     assert summary["first_attempt_exact"] == 1 and summary["final_exact"] == 3
     lo, hi = summary["fa_ci95"]
@@ -1455,6 +1456,29 @@ def test_rc0_on_a_failure_status_task_is_silent_wrong():
     assert adb.classify_attempt(attempt) == "silent_wrong"
     attempt["run"]["returncode"] = 1
     assert adb.classify_attempt(attempt) == "uncoded_error"
+
+
+def test_a_broken_contract_is_a_contract_violation():
+    # Language 2026-10-15-2: `[CON-001] Aether @pre failed in f` on stderr, rc 1.
+    run = {"returncode": 1, "expected_returncode": 0, "exact_stdout_match": False,
+           "stdout": "", "stderr": "[CON-001] Aether @pre failed in inc\n"}
+    attempt = {"generated_ok": True, "source_code": "x", "run": run}
+    assert adb.classify_attempt(attempt) == "contract_violation"
+    # Earlier compilers: the same words, uncoded, on stdout after the output so far.
+    run.update(stdout="1\nAether @post failed in inc\n", stderr="")
+    assert adb.classify_attempt(attempt) == "contract_violation"
+    # It said why it stopped, even when its exit status is the one the task expects.
+    run.update(expected_returncode=1)
+    assert adb.classify_attempt(attempt) == "contract_violation"
+    # Via --diagnostics-json.
+    run.update(stdout="", diagnostics=[{"code": "CON-001"}])
+    assert adb.classify_attempt(attempt) == "contract_violation"
+    # A program that printed the words and exited 0 broke nothing.
+    run.update(returncode=0, expected_returncode=0, stdout="Aether @pre failed in inc\n", diagnostics=[])
+    assert adb.classify_attempt(attempt) == "silent_wrong"
+    # Any other coded failure stays coded.
+    run.update(returncode=1, stdout="", stderr="t.aether:3: [FX-001] needs fx\n")
+    assert adb.classify_attempt(attempt) == "coded_error"
 
 
 def test_real_aether_trap_programs_match_their_recorded_classes():

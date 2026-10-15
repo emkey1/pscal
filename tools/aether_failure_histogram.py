@@ -172,6 +172,9 @@ def bucket(attempt: dict[str, Any], expected: str | None) -> tuple[str, str]:
         return cls, "stdout:" + stdout_subclass(expected, run.get("stdout") or "", rc_ok)
     if cls == "crash_hang":
         return cls, "timeout" if run.get("timed_out") else f"signal/rc {run.get('returncode')}"
+    if cls == "contract_violation":
+        found = adb._CONTRACT_RE.search((run.get("stderr") or "") + "\n" + (run.get("stdout") or ""))
+        return cls, "@post" if found and "@post" in found.group(0) else "@pre" if found else "CON-001"
     return cls, first_code(run)
 
 
