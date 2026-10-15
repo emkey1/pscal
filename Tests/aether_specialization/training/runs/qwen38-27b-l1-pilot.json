@@ -13,6 +13,6 @@
   "dataset": {"id": "l1-20261015", "version": "2026-10-15-1", "aether_version": "2026-10-15-1",
               "repair_manifest": "Tests/aether_specialization/seed_repair_pairs.json"},
   "_grader_note": "Trained on data built with 2026-10-15-1; graded with 2026-10-15-2 (aether 8818fa5, CON-001 on stderr), released after training began. Base scoring started on 2026-10-15-1 was stopped after 16 cases and set aside (owner, 2026-10-15).",
-  "score": {"variants": ["base", "tuned"], "docs": "none", "repeats": 1, "repair_attempts": 2, "grader_version": "2026-10-15-2",
+  "score": {"variants": ["tuned", "base"], "docs": "none", "repeats": 1, "repair_attempts": 2, "grader_version": "2026-10-15-2",
             "temperature": 0, "max_output_tokens": 8192}
 }

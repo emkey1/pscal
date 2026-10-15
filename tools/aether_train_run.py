@@ -680,7 +680,10 @@ def stage_fetch(run: dict, args) -> int:
 
 def stage_release(run: dict, args) -> int:
     c = run["containers"]
+    # Killing the tmux session is not enough: a harness mid-request outlives it by
+    # seconds and can rewrite its report after the files were moved (2026-10-15).
     remote(run, f"tmux kill-session -t {run['tmux']} 2>/dev/null; tmux kill-session -t aether-train-wait-{run['tag']} 2>/dev/null; "
+                f"pkill -f {run['paths']['remote']}/bench/tools/aether_doc_bench.py 2>/dev/null; sleep 3; "
                 f"docker rm -f {c['serve']} 2>/dev/null; "
                 + (f"docker rm -f {c['train']} 2>/dev/null; " if args.include_training else "")
                 + "true", check=False, capture=False)
