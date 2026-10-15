@@ -161,6 +161,34 @@
           "transition": "pass->fail",
           "note": "1 stored attempt(s), e.g. Tests/aether_doc_bench/results/b0_openrouter_20261010/B1/or-qwen36-27b__tasks_traps__r0.json attempt 1: pass->coded_error",
           "evidence": "new first diagnostic NAME-001: trap_const_case_alias.aether:4: [NAME-001] Aether redeclaration error: parameter 'name' is the same name as the top-level const 'Name' (line 1): Aether names ignore case, and a parameter must not reuse a const or global name."
+        },
+        {
+          "task_id": "trap_upcase_word",
+          "source_sha256": "d3e2b067524ec7eda1d03717822d48ba3a766a8ea803ae3ff530e4c20bd08d7d",
+          "transition": "pass->fail",
+          "note": "Tests/aether_doc_bench/results/b0_openrouter_20261010/B1/or-qwen36-35b-a3b__tasks_traps__r2.json.gz attempt 1: pass->coded_error",
+          "evidence": "new first diagnostic: trap_upcase_word.aether:2: [NAME-001] Aether redeclaration error: parameter 's' is the same name as the top-level const 'S' (line 36): Aether names ignore case, and a parameter must not reuse a const or global name."
+        },
+        {
+          "task_id": "module_const_import",
+          "source_sha256": "fbfc6d6cf955c063d63b19df6c7b5a955c4118de99d935bcfc4a8dd18582bd04",
+          "transition": "pass->fail",
+          "note": "Tests/aether_doc_bench/results/b0_openrouter_20261010/B0-small/or-qwen35-9b__tasks_v2_pos__r2.json.gz attempt 0: pass->coded_error",
+          "evidence": "new first diagnostic: module_const_import.aether:4: [NAME-001] Aether redeclaration error: 'base' is the same name as the imported const 'Base': Aether names ignore case, and a local must not reuse a const or global name."
+        },
+        {
+          "task_id": "contract_normalize",
+          "source_sha256": "33bfd798fcda28dc222cdd219fe738c6703cef37845d4a7d337d10bae520ce92",
+          "transition": "pass->fail",
+          "note": "Tests/aether_doc_bench/results/b0_openrouter_20261010/P0/or-qwen35-9b__tasks_v2_pos__r0.json.gz attempt 0: pass->coded_error",
+          "evidence": "new first diagnostic: contract_normalize.aether:1: [PREC-001] Aether precedence parser error: comparison operators do not chain: `a <= b <= c` means `(a <= b) <= c`, which compares a Bool with c."
+        },
+        {
+          "task_id": "cs_substring",
+          "source_sha256": "f5d92edfd28d01dfbeaccfd5837cc25816800f82538a38f6c29f874d7212133d",
+          "transition": "pass->fail",
+          "note": "Tests/aether_doc_bench/results/b0_openrouter_20261010/P0/or-qwen36-35b-a3b__tasks_cs__r0.json.gz attempt 0: pass->coded_error",
+          "evidence": "new first diagnostic: cs_substring.aether:10: [NAME-001] Aether redeclaration error: loop variable 'j' reuses the name of 'j' (line 9); the loop gets its own 'j', so the outer one is left unchanged."
         }
       ]
     },
@@ -173,6 +201,53 @@
           "transition": "into_silent_wrong",
           "note": "Tests/aether_doc_bench/results/b0_20261007/B0/mid-devstral-small-2__tasks_hard_nontoon__r2.json.gz attempt 2: coded_error->silent_wrong",
           "evidence": "extractMin shrinks the heap with `self.data = self.data[0..(length(self.data) - 2)] + [];`, a half-open range that drops two elements per call, so 5 of 10 values are printed. 2026-10-08-1 stopped at the SCOPE-001 on that line; 2026-10-13-1 prints `sorted = 3 4 7 8 19`."
+        },
+        {
+          "task_id": "cs_quick_sort",
+          "source_sha256": "e84f71786697e166a7884ca2285c7f8d206c4b648b32354a1bc07ba8941f4b3e",
+          "transition": "into_silent_wrong",
+          "note": "Tests/aether_doc_bench/results/b0_devstral_mlx4bit_20261011/P0/mid-devstral-small-2__tasks_cs__r2.json.gz attempt 2: coded_error->silent_wrong",
+          "evidence": "2026-10-08-1: [SCOPE-001] identifier '__aether_slice_0' not in scope; 2026-10-13-1 and later: compiles and prints `6, 9, 3, 7, 1, 8, 4, 2` (the input order), its own sort being wrong."
+        }
+      ]
+    },
+    "2026-10-07-1": {
+      "reason": "Nested `continue` works (L0, CHANGELOG 2026-10-07-1). On 2026-10-06-1 these trap_life_continue programs stopped with ARR-003, an out-of-range index caused by the baseline's nested-continue defect driving a loop past its bound. With continue working they run to the end and print a wrong grid because of their own logic: three count neighbours with `loop d in -1..1` (a half-open range that never visits one side), one prints the count and board rows alternately, one computes a correct step for a grid it transcribed wrongly. L0, L1 and later builds print identical output for each, so the move into silent-wrong is the fix exposing programs that were never right.",
+      "entries": [
+        {
+          "task_id": "trap_life_continue",
+          "source_sha256": "ce3a2ab528e4a48f4d6747843c242c8c5966e76dc957de07146a15ba673d6a1e",
+          "transition": "into_silent_wrong",
+          "note": "Tests/aether_doc_bench/results/b0_openrouter_20261010/B1/or-qwen35-9b__tasks_traps__r0.json.gz attempt 0: coded_error->silent_wrong",
+          "evidence": "2026-10-06-1: ARR-003 from the nested-continue defect; L0 and later: runs, prints a wrong grid (own range or print-order or transcription error), identical on every later build."
+        },
+        {
+          "task_id": "trap_life_continue",
+          "source_sha256": "6783f730eda3518cb53bb4d0cb1ddeaa715307993244b30e5ccc900bd6830447",
+          "transition": "into_silent_wrong",
+          "note": "Tests/aether_doc_bench/results/b0_openrouter_20261010/B1/or-qwen35-9b__tasks_traps__r0.json.gz attempt 1: coded_error->silent_wrong",
+          "evidence": "2026-10-06-1: ARR-003 from the nested-continue defect; L0 and later: runs, prints a wrong grid (own range or print-order or transcription error), identical on every later build."
+        },
+        {
+          "task_id": "trap_life_continue",
+          "source_sha256": "065b8bdcdfa23039db1bfe5d2588dbc4f7278016fb171848fef6a40302a315dd",
+          "transition": "into_silent_wrong",
+          "note": "Tests/aether_doc_bench/results/b0_openrouter_20261010/B1/or-qwen35-9b__tasks_traps__r1.json.gz attempt 1: coded_error->silent_wrong",
+          "evidence": "2026-10-06-1: ARR-003 from the nested-continue defect; L0 and later: runs, prints a wrong grid (own range or print-order or transcription error), identical on every later build."
+        },
+        {
+          "task_id": "trap_life_continue",
+          "source_sha256": "ad5551feafa181e81053f64751db7f6465df4b89a668c8cb2e8737ad0a97214a",
+          "transition": "into_silent_wrong",
+          "note": "Tests/aether_doc_bench/results/b0_openrouter_20261010/B1/or-qwen36-35b-a3b__tasks_traps__r0.json.gz attempt 2: coded_error->silent_wrong",
+          "evidence": "2026-10-06-1: ARR-003 from the nested-continue defect; L0 and later: runs, prints a wrong grid (own range or print-order or transcription error), identical on every later build."
+        },
+        {
+          "task_id": "trap_life_continue",
+          "source_sha256": "1fb58c9b71d660cc9140b3b6341c35363c485f6f8925815406bd02fe546b4651",
+          "transition": "into_silent_wrong",
+          "note": "Tests/aether_doc_bench/results/b0_openrouter_20261010/B1/or-qwen36-35b-a3b__tasks_traps__r1.json.gz attempt 2: coded_error->silent_wrong",
+          "evidence": "2026-10-06-1: ARR-003 from the nested-continue defect; L0 and later: runs, prints a wrong grid (own range or print-order or transcription error), identical on every later build."
         }
       ]
     }

@@ -1787,7 +1787,7 @@ def test_tracked_waiver_file_is_valid():
     proc = run_harness(["--check-waivers"], script=REPLAY)
     assert proc.returncode == 0, proc.stdout
     data = json.loads((BENCH_DIR / "replay_waivers.json").read_text())
-    assert set(data["waivers"]) == {"2026-07-26-1", "2026-08-09-1", "2026-10-08-1", "2026-10-13-1"}
+    assert set(data["waivers"]) == {"2026-07-26-1", "2026-08-09-1", "2026-10-07-1", "2026-10-08-1", "2026-10-13-1"}
 
 
 def test_instrument_check_lint_only_runs_without_a_binary():
