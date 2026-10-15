@@ -1,0 +1,28 @@
+model_name_or_path: /models/Ministral-3-14B-Reasoning-2512
+output_dir: /workspace/outputs/ministral14b-lora-8k
+train_file: /datasets/openclaw-sft-v0/train.jsonl
+eval_file: /datasets/openclaw-sft-v0/eval.jsonl
+max_seq_length: 8192
+precision: bf16
+load_in_8bit: false
+load_in_4bit: false
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 8
+learning_rate: 0.0001
+num_train_epochs: 1
+max_steps: -1
+logging_steps: 5
+save_steps: 100
+eval_steps: 100
+gradient_checkpointing: true
