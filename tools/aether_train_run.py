@@ -545,7 +545,10 @@ def write_local_scripts(run: dict) -> pathlib.Path:
     for kind in kinds:
         (out / f"destinations.{kind}.json").write_text(json.dumps(destinations(run, kind), indent=2) + "\n",
                                                        encoding="utf-8")
-    resolved = {k: v for k, v in run.items()} | {"resolved_at": datetime.datetime.now(
+    # Local paths are recorded relative to the repo: this file is committed with the run.
+    paths = {k: (str(pathlib.Path(v).relative_to(REPO_ROOT)) if k.endswith("_local") else v)
+             for k, v in run["paths"].items()}
+    resolved = {k: v for k, v in run.items()} | {"paths": paths, "resolved_at": datetime.datetime.now(
         datetime.timezone.utc).isoformat(timespec="seconds"), "umbrella_commit": git_head(REPO_ROOT)}
     (out / "run.resolved.json").write_text(json.dumps(resolved, indent=2) + "\n", encoding="utf-8")
     for name in ("train.sh", "train_when_ready.sh", "score_when_ready.sh", "score.sh", "check_generations.py"):

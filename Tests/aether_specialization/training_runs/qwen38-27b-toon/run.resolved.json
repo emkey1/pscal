@@ -98,8 +98,8 @@
     "bench": "$HOME/aether-train/qwen38-27b-toon/bench",
     "weights": "/storage/aether-train/qwen38-27b-toon",
     "merged": "/storage/aether-train/qwen38-27b-toon/merged_16bit",
-    "dataset_local": "/Users/mke/git/pscal/.claude/worktrees/charming-galileo-80ae55/Tests/aether_specialization/datasets/toon-20261016",
-    "out_local": "/Users/mke/git/pscal/.claude/worktrees/charming-galileo-80ae55/Tests/aether_specialization/training_runs/qwen38-27b-toon"
+    "dataset_local": "Tests/aether_specialization/datasets/toon-20261016",
+    "out_local": "Tests/aether_specialization/training_runs/qwen38-27b-toon"
   },
   "containers": {
     "train": "aether-train-qwen38-27b-toon",
