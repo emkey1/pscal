@@ -664,9 +664,13 @@ include_directories(
     components/pscal-core/lib
 )
 if(PSCAL_PLATFORM_IOS)
-    include_directories(
-        src/smallclue/src
-    )
+    # -idirafter, not -I: searched after the SDK and every -I directory. As an
+    # -I directory, smallclue's src/spawn.h (its fork-less spawn helper)
+    # shadowed the SDK's <spawn.h>, and openssh's scp.c/sftp.c lost
+    # posix_spawn*. (-iquote is no better: it puts smallclue's src/shell/lexer.h
+    # ahead of exsh's for "shell/lexer.h".) smallclue's own files find their
+    # headers beside them.
+    add_compile_options("SHELL:-idirafter ${CMAKE_CURRENT_SOURCE_DIR}/src/smallclue/src")
 endif()
 include_directories(
     src/smallclue
