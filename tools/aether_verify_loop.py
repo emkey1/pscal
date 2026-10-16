@@ -186,9 +186,29 @@ def parse_grade(text: str) -> str:
     return m.group(1).lower() if m else "unclear"
 
 
-def verify_task(task: dict, ask, rounds: int = 3, self_grade: bool = True, run=None) -> dict:
-    """One task through the loop. `ask(messages) -> reply text` is the model."""
-    messages = [{"role": "user", "content": generator_prompt(task)}]
+def default_guide() -> str:
+    """The small-context Aether guide shipped with the compiler in AETHER_BIN (<repo>/docs), or ""."""
+    root = os.path.dirname(os.path.dirname(os.path.realpath(wild.AETHER_BIN)))
+    for rel in ("docs/aether_for_llms_with_small_contexts.md", "../docs/aether_for_llms_with_small_contexts.md"):
+        path = os.path.normpath(os.path.join(root, rel))
+        if os.path.exists(path):
+            return path
+    return ""
+
+
+def guide_message(path: str) -> list[dict]:
+    if not path:
+        return []
+    with open(path, encoding="utf-8") as fh:
+        return [{"role": "system", "content": "The Aether language guide. Write Aether exactly as it describes.\n\n"
+                 + fh.read()}]
+
+
+def verify_task(task: dict, ask, rounds: int = 3, self_grade: bool = True, run=None, guide: list | None = None
+                ) -> dict:
+    """One task through the loop. `ask(messages) -> reply text` is the model; `guide` (system messages) goes
+    in front of the generator's conversation, not the self-grade."""
+    messages = list(guide or []) + [{"role": "user", "content": generator_prompt(task)}]
     tries = []
     for r in range(1, rounds + 1):
         reply = ask(messages)
@@ -291,6 +311,8 @@ def main() -> int:
     ap.add_argument("--api-key-env", default="", help="name of the variable holding the endpoint's key")
     ap.add_argument("--env-file", default="", help="file to read --api-key-env from if it is not in the environment")
     ap.add_argument("--max-tokens", type=int, default=900)
+    ap.add_argument("--guide", default=None, help="Aether guide sent as the system message (default: the "
+                    "compiler's docs/aether_for_llms_with_small_contexts.md; \"\" for none)")
     ap.add_argument("--out", default="", help="write every try and the summary as JSON")
     args = ap.parse_args()
     tasks = generate(args.n, args.seed)
@@ -299,6 +321,9 @@ def main() -> int:
     if not args.model:
         ap.error("--mode score requires --model")
     key = _api_key(args.api_key_env, args.env_file)
+    guide_path = default_guide() if args.guide is None else args.guide
+    guide = guide_message(guide_path)
+    print(f"guide: {guide_path or '(none)'}", flush=True)
 
     def ask(messages):
         return chat(messages, args.endpoint, args.model, key, args.max_tokens)
@@ -307,7 +332,7 @@ def main() -> int:
     started = time.time()
     for t in tasks:
         try:
-            r = verify_task(t, ask, rounds=args.rounds, self_grade=not args.no_self_grade)
+            r = verify_task(t, ask, rounds=args.rounds, self_grade=not args.no_self_grade, guide=guide)
         except Exception as exc:  # noqa: BLE001 - one failed call is one failed task, not a failed run
             r = {"id": t["id"], "template": t["template"], "first": f"infra_failed:{type(exc).__name__}",
                  "final": f"infra_failed:{type(exc).__name__}", "rounds": 0, "tries": [],
@@ -326,6 +351,7 @@ def main() -> int:
     if args.out:
         with open(args.out, "w", encoding="utf-8") as fh:
             json.dump({"model": args.model, "endpoint": args.endpoint, "seed": args.seed, "rounds": args.rounds,
+                       "guide": guide_path,
                        "summary": summary, "results": results}, fh, indent=2)
     return 0
 

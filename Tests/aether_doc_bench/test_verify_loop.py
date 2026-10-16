@@ -85,6 +85,14 @@ def test_a_rejected_candidate_is_repaired_from_the_execution_verdict():
     assert r["self_grade"] == "yes" and r["self_grade_agrees"] is False     # it said YES; the run said no
 
 
+def test_the_guide_leads_the_generator_but_not_the_self_grade():
+    t = _task()
+    guide = [{"role": "system", "content": "GUIDE"}]
+    ask, asked = _script(t["reference"], "NO")
+    v.verify_task(t, ask, rounds=1, run=_runner(t), guide=guide)
+    assert asked[0][0] == guide[0] and all(m["role"] != "system" for m in asked[1])
+
+
 def test_the_loop_stops_at_the_round_limit():
     t = _task()
     broken = "fn abs_val(x: Int) -> Int {\n    ret x;\n}\n"
