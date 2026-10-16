@@ -1343,6 +1343,36 @@ set(SMALLCLUE_SOURCES
     src/smallclue/src/tac_app.c
     src/smallclue/src/tar_app.c
     src/smallclue/src/spawn.c
+    src/smallclue/src/sed_app.c
+    src/smallclue/src/stty_app.c
+    src/smallclue/src/ln_app.c
+    src/smallclue/src/gnu_util.c
+    src/smallclue/src/du_app.c
+    src/smallclue/src/cat_app.c
+    src/smallclue/src/rmdir_app.c
+    src/smallclue/src/sum_app.c
+    src/smallclue/src/env_app.c
+    src/smallclue/src/stat_app.c
+    src/smallclue/src/touch_app.c
+    src/smallclue/src/tr_app.c
+    src/smallclue/src/uniq_app.c
+    src/smallclue/src/ls_app.c
+    src/smallclue/src/chmod_app.c
+    src/smallclue/src/date_app.c
+    src/smallclue/src/cp_app.c
+    src/smallclue/src/grep_app.c
+    src/smallclue/src/find_app.c
+    src/smallclue/src/xargs_app.c
+    src/smallclue/src/sort_app.c
+    src/smallclue/src/tail_app.c
+    src/smallclue/src/head_app.c
+    src/smallclue/src/rm_app.c
+    src/smallclue/src/init_app.c
+    src/smallclue/src/utmp_rec.c
+    src/smallclue/src/who_app.c
+    src/smallclue/src/tput_app.c
+    src/smallclue/src/free_app.c
+    src/smallclue/src/mount_app.c
 )
 
 if(PSCAL_PLATFORM_IOS OR APPLE)
@@ -2010,10 +2040,13 @@ if(PSCAL_HAS_LIBGIT2 AND PSCAL_LIBGIT2_TARGET)
 endif()
 target_compile_definitions(pscal_core_static PRIVATE PSCAL_NO_CLI_ENTRYPOINTS)
 if(APPLE)
-    # smallclue's `version` weakly references copyBuildVersion(), which only
-    # iSH-AOK defines. ELF linkers leave an absent weak symbol NULL; ld64
-    # rejects it unless told it may stay undefined.
-    target_link_options(pscal_core_static INTERFACE "LINKER:-U,_copyBuildVersion")
+    # smallclue weakly references hooks that only iSH-AOK defines: `version`
+    # calls copyBuildVersion(), and `init` calls smallclueHostWasRestored().
+    # ELF linkers leave an absent weak symbol NULL; ld64 rejects it unless
+    # told it may stay undefined.
+    target_link_options(pscal_core_static INTERFACE
+        "LINKER:-U,_copyBuildVersion"
+        "LINKER:-U,_smallclueHostWasRestored")
 endif()
 if(PSCAL_VM_CODE_PROTECT)
     target_compile_definitions(pscal_core_static PRIVATE PSCAL_VM_CODE_PROTECT)
