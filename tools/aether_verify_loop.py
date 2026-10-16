@@ -28,7 +28,7 @@ Templates: the five property templates from aether_wild_eval.py plus floor_div a
 
     # a model through any OpenAI-style endpoint (the m4 proxy, OpenRouter, a local server)
     AETHER_BIN=... python3 tools/aether_verify_loop.py --mode score --n 14 --rounds 3 \\
-        --endpoint http://m4mini.tailfe3968.ts.net:8788/v1/chat/completions --model small --out run.json
+        --endpoint http://m4mini:8788/v1/chat/completions --model small --out run.json
     # OpenRouter: --endpoint https://openrouter.ai/api/v1/chat/completions --model <id> \\
     #             --api-key-env OPENROUTER_API_KEY [--env-file path/to/.env]   (the key is never printed)
 

@@ -1,0 +1,41 @@
+{
+  "version": "smoke-2026-07-15-1",
+  "description": "first 3 tasks of tasks_v2_pos, for the export smoke test",
+  "tasks": [
+    {
+      "id": "hello_fx",
+      "title": "Minimal fx hello world",
+      "mechanisms": [
+        "output"
+      ],
+      "prompt": "Write the smallest valid Aether program that prints exactly `hello from benchmark` followed by a newline.",
+      "expected_stdout": "hello from benchmark\n",
+      "reference_solution": "fn main() -> Void {\n    fx {\n        println(\"hello from benchmark\");\n    }\n    ret;\n}\n",
+      "achievability": "model-verified"
+    },
+    {
+      "id": "hello_const_name",
+      "title": "Constants plus fx output",
+      "mechanisms": [
+        "const",
+        "output"
+      ],
+      "prompt": "Write an Aether program that defines `Greeting` as `hello` and `Target` as `Aether`, then prints exactly `hello, Aether` followed by a newline.",
+      "expected_stdout": "hello, Aether\n",
+      "reference_solution": "const Greeting: Text = \"hello\";\nconst Target: Text = \"Aether\";\n\nfn main() -> Void {\n    fx {\n        println(Greeting, \", \", Target);\n    }\n    ret;\n}\n",
+      "achievability": "model-verified"
+    },
+    {
+      "id": "classify_scores",
+      "title": "Pure helper plus effectful output",
+      "mechanisms": [
+        "branching",
+        "pure_helper"
+      ],
+      "prompt": "Write an Aether program with a pure helper `classify(score: Int) -> Text` that returns `ready` for scores >= 90, `review` for scores >= 70, and `blocked` otherwise. In `main`, print three lines for scores 95, 72, and 10 in the format `95 => ready`.",
+      "expected_stdout": "95 => ready\n72 => review\n10 => blocked\n",
+      "reference_solution": "@pure\nfn classify(score: Int) -> Text {\n    if score >= 90 {\n        ret \"ready\";\n    }\n    if score >= 70 {\n        ret \"review\";\n    }\n    ret \"blocked\";\n}\n\nfn main() -> Void {\n    let scores: Int[] = [95, 72, 10];\n    fx {\n        loop i in 0..length(scores) {\n            println(scores[i], \" => \", classify(scores[i]));\n        }\n    }\n    ret;\n}\n",
+      "achievability": "model-verified"
+    }
+  ]
+}

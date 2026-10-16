@@ -1,0 +1,22 @@
+{
+  "destinations": [
+    {
+      "id": "qwen38-27b-l1-pilot-tuned",
+      "type": "openai_chat_completions",
+      "base_url": "http://localhost:8019/v1",
+      "api_key": "",
+      "model": "qwen38-27b-l1-pilot-tuned",
+      "temperature": 0,
+      "max_output_tokens": 8192,
+      "request_timeout_seconds": 900,
+      "request_max_retries": 2,
+      "retry_backoff_seconds": 5,
+      "cooldown_seconds": 0,
+      "extra_body": {
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        }
+      }
+    }
+  ]
+}
