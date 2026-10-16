@@ -470,6 +470,30 @@
       "broken_source": "fn main() -> Void {\n    let ms: MStream = mstreamfromstring(\"{\\\"jobs\\\":3}\");\n    fx { mstreamsavetofile(ms, \"queue_state.json\"); }\n    mstreamfree(ms);\n    let doc: ToonDoc;\n    fx { doc = yyjson_parse_file(\"queue_state.json\"); }\n    let root: ToonNode = toon_root(doc);\n    fx { println(\"jobs \", toon_get_int(root, \"jobs\")); }\n    toon_close(doc);\n    ret;\n}\n",
       "fixed_source": "fn main() -> Void {\n    let ms: MStream = mstreamfromstring(\"{\\\"jobs\\\":3}\");\n    fx { mstreamsavetofile(ms, \"queue_state.json\"); }\n    mstreamfree(ms);\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"queue_state.json\"); }\n    let root: ToonNode = toon_root(doc);\n    fx { println(\"jobs \", toon_get_int(root, \"jobs\")); }\n    toon_close(doc);\n    ret;\n}\n",
       "expected_stdout": "jobs 3\n"
+    },
+    {
+      "id": "repair_text_to_int_name",
+      "kind": "repair",
+      "diagnostic": "[SCOPE-001] identifier 'text_to_int' not in scope.",
+      "broken_source": "fn main() -> Void {\n    let fields: Text[] = [\"12\", \"7\", \"30\"];\n    let total: Int = 0;\n    loop f in fields {\n        total = total + text_to_int(f);\n    }\n    fx { println(\"total=\", total); }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let fields: Text[] = [\"12\", \"7\", \"30\"];\n    let total: Int = 0;\n    loop f in fields {\n        total = total + parse_int(f);\n    }\n    fx { println(\"total=\", total); }\n    ret;\n}\n",
+      "expected_stdout": "total=49\n"
+    },
+    {
+      "id": "repair_table_row_new_int",
+      "kind": "repair",
+      "diagnostic": "VM Error: Pointer does not point to an array for element access.",
+      "broken_source": "fn main() -> Void {\n    let rows: Int = 3;\n    let cols: Int = 4;\n    let grid: Int[][] = [];\n    loop r in 0..rows {\n        grid = grid + [new Int[cols]];\n    }\n    grid[1][2] = 7;\n    fx { println(length(grid), \"x\", length(grid[0]), \" center=\", grid[1][2]); }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let rows: Int = 3;\n    let cols: Int = 4;\n    let grid: Int[][] = [];\n    loop r in 0..rows {\n        let row: Int[] = [];\n        loop c in 0..cols {\n            row = row + [0];\n        }\n        grid = grid + [row];\n    }\n    grid[1][2] = 7;\n    fx { println(length(grid), \"x\", length(grid[0]), \" center=\", grid[1][2]); }\n    ret;\n}\n",
+      "expected_stdout": "3x4 center=7\n"
+    },
+    {
+      "id": "repair_sort_helper_mutates_param",
+      "kind": "behavioral",
+      "diagnostic": "[ARR-001] Aether array-mutation warning: array parameter 'xs' is mutated here, but arrays are value-copied at the call boundary, so this change is not visible to the caller; return the array explicitly if the caller should see the update.",
+      "broken_source": "fn insertionSort(xs: Int[]) -> Void {\n    loop i in 1..length(xs) {\n        let key: Int = xs[i];\n        let j: Int = i - 1;\n        loop j >= 0 && xs[j] > key {\n            xs[j + 1] = xs[j];\n            j = j - 1;\n        }\n        xs[j + 1] = key;\n    }\n    ret;\n}\n\nfn main() -> Void {\n    let xs: Int[] = [9, 4, 7, 1];\n    insertionSort(xs);\n    fx { println(xs[0], \" \", xs[1], \" \", xs[2], \" \", xs[3]); }\n    ret;\n}\n",
+      "fixed_source": "fn insertionSort(input: Int[]) -> Int[] {\n    let xs: Int[] = input;\n    loop i in 1..length(xs) {\n        let key: Int = xs[i];\n        let j: Int = i - 1;\n        loop j >= 0 && xs[j] > key {\n            xs[j + 1] = xs[j];\n            j = j - 1;\n        }\n        xs[j + 1] = key;\n    }\n    ret xs;\n}\n\nfn main() -> Void {\n    let xs: Int[] = [9, 4, 7, 1];\n    xs = insertionSort(xs);\n    fx { println(xs[0], \" \", xs[1], \" \", xs[2], \" \", xs[3]); }\n    ret;\n}\n",
+      "expected_stdout": "1 4 7 9\n"
     }
   ]
 }

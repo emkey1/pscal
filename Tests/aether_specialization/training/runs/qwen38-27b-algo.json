@@ -1,0 +1,51 @@
+{
+  "_note": "Third run (owner, 2026-10-16): qwen38-27b-toon's recipe and model plus an algorithm-idiom pack (70 pairs: 2-D tables and grid DP, array value semantics and hand-written sorts, stepped loops / div / else-if / parse_int) and 3 drills from the second run's own algorithmic errors (text_to_int, new Int[n] table rows, a sort helper mutating its parameter). Targets tasks_cs and tasks_hard_nontoon; the sealed frontier_algo / frontier_spec suites are the honest check.",
+  "tag": "qwen38-27b-algo",
+  "family": "qwen3_5",
+  "hf_repo": "Qwen/Qwen3.8-27B",
+  "base_model": "/storage/models/Qwen3.8-27B",
+  "host": "claw3",
+  "precision": "4bit",
+  "min_available_gb": 60,
+  "lora": {
+    "r": 32,
+    "alpha": 64,
+    "dropout": 0.0
+  },
+  "train": {
+    "epochs": 3,
+    "learning_rate": 0.0001,
+    "batch_size": 1,
+    "grad_accum": 8,
+    "seed": 3407,
+    "early_stopping_patience": 2,
+    "early_stopping_threshold": 0.0
+  },
+  "dataset": {
+    "id": "algo-20261016",
+    "version": "2026-10-16-2",
+    "aether_version": "2026-10-16-3",
+    "repair_manifest": "Tests/aether_specialization/seed_repair_pairs.json"
+  },
+  "score": {
+    "variants": [
+      "tuned"
+    ],
+    "grader_version": "2026-10-16-3",
+    "docs": "none",
+    "repeats": 1,
+    "repair_attempts": 2,
+    "temperature": 0,
+    "max_output_tokens": 8192,
+    "suites": {
+      "v2_pos": "Tests/aether_doc_bench/tasks_v2_pos.json",
+      "hard_v2": "Tests/aether_doc_bench/tasks_hard_v2.json",
+      "hard_nontoon": "Tests/aether_doc_bench/tasks_hard_nontoon.json",
+      "cs": "Tests/aether_doc_bench/tasks_cs.json",
+      "frontier": "Tests/aether_doc_bench/tasks_frontier.json",
+      "frontier_algo": "Tests/aether_doc_bench/tasks_frontier_algo.json",
+      "frontier_spec": "Tests/aether_doc_bench/tasks_frontier_spec.json",
+      "sealed_toon": "Tests/aether_doc_bench/tasks_sealed_toon.json"
+    }
+  }
+}
