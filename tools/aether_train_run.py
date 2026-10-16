@@ -308,7 +308,9 @@ for VARIANT in {variants}; do
   log "READY $VARIANT"
   DEST="$R/destinations.$KIND.json"
   run_suite() {{  # name tasks repeats repairs
-    python3 -u "$B/tools/aether_doc_bench.py" --destinations-config "$DEST" --tasks "$2" \\
+    EXTRA=""
+    case " {' '.join(s.get('allow_broken_oracle', []))} " in *" $1 "*) EXTRA="--allow-broken-oracle" ;; esac
+    python3 -u "$B/tools/aether_doc_bench.py" --destinations-config "$DEST" --tasks "$2" $EXTRA \\
       --docs "$DOCS" --repeats "$3" --repair-attempts "$4" --seed-base {s['seed_base']} \\
       --aether-bin "$GRADER" --aether-bin-sha256 "$GRADER_SHA" --allow-skew --keep-loaded \\
       --resume --output-json "$OUT/${{TAGV}}__$1.json" --text-summary >> "$LOG" 2>&1
