@@ -3,7 +3,7 @@
     {
       "id": "repair_granite_toon_get_nested_4arg",
       "kind": "repair",
-      "diagnostic": "[SYN-001] Aether parser error: expected ')' to close parenthesized expression (opened at line 8).",
+      "diagnostic": "[BUILT-002] Aether builtin parser error: 'toon_get_text_or' takes 3 arguments (node, key, fallback), but 4 were given.",
       "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no\"); }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"meta\\\":{\\\"code\\\":\\\"A1\\\"}}\");\n    let root: ToonNode = toon_root(doc);\n    let code: Text = toon_get_text_or(root, \"meta\", \"code\", \"EMPTY\");\n    fx { println(\"code=\", code); }\n    toon_close(doc);\n    ret;\n}\n",
       "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"no\"); }\n        ret;\n    }\n    let doc: ToonDoc = toon_parse(\"{\\\"meta\\\":{\\\"code\\\":\\\"A1\\\"}}\");\n    let root: ToonNode = toon_root(doc);\n    let code: Text = \"EMPTY\";\n    if toon_has_key(root, \"meta\") {\n        let meta: ToonNode = toon_key(root, \"meta\");\n        if toon_has_key(meta, \"code\") {\n            code = toon_get_text_or(meta, \"code\", \"EMPTY\");\n        }\n    }\n    fx { println(\"code=\", code); }\n    toon_close(doc);\n    ret;\n}\n",
       "expected_stdout": "code=A1\n"
