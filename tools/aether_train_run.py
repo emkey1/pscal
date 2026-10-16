@@ -438,6 +438,9 @@ def score_when_ready_script(run: dict) -> str:
 set -u
 R={run['paths']['remote']}
 mkdir -p "$R/logs"
+# A run that scores its fine-tune waits for the merged export first (training may
+# not have started yet when this is armed), then for the container to be gone.
+{"until [ -f " + run['paths']['merged'] + "/config.json ]; do sleep 300; done" if any(v.split(':')[0] == 'tuned' for v in run['score']['variants']) else ''}
 while [ "$(docker inspect -f '{{{{.State.Running}}}}' {run['containers']['train']} 2>/dev/null)" = "true" ]; do sleep 300; done
 while docker ps --format '{{{{.Names}}}}' | grep -qE '^aether-(train|serve)-'; do sleep 300; done
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] training container gone; scoring" >> "$R/logs/when_ready.log"
