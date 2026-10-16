@@ -1,3 +1,4 @@
 date,pscal_sha,aether_sha,version,binary_sha256,guides,replay_first_attempts,replay_first_pass,replay_fail_to_pass,replay_pass_to_fail,replay_waived,replay_unwaived,corpus_drift,oracle_failures,oracle_references,gates_rc,contamination_rc,skipped
 2026-10-07,27b934a79eef,standalone,2026-10-06-1,471792d0ae23ea2ab1ededb606a2c60e43395726c6e63ea22a64a2f749c564df,unavailable,274,242->245,11,8,13,0,0,0,140/140,,,build_gates contamination
 2026-10-07,8c9d7ba304a4,66596799a701ceff70f49285872ae695618e8399,2026-10-06-1,addfeb8da341b1b6f344ab9ad13daba6eb6478623b5b35e2a5ec79555acc9b66,full=2026-10-06-1:7f30a1d84be6;medium=2026-09-05-1:aebfc0f5271f;small=2026-09-05-1:d7d16264aa91,274,242->245,11,8,13,0,0,0,140/140,,0,build_gates
+2026-10-16,8a51ed186635-dirty,d4b4d83,2026-10-16-3,369ee457973b00a6d13b583e2cf52b5157b4ceab6b4154bfff24e9372ac30f45,full=2026-10-16-1:90891431efe9;medium=2026-10-16-1:fa4fa203ba99;small=2026-10-16-1:7ace6c956b63,274,242->245,11,8,13,0,0,0,204/204,0,0,
