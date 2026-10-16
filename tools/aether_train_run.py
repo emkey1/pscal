@@ -290,7 +290,10 @@ for VARIANT in {variants}; do
   KIND=${{VARIANT%%:*}}; DOCS={s['docs']}
   case "$VARIANT" in *:*) DOCS=${{VARIANT#*:}} ;; esac
   TAGV=${{VARIANT//:/-}}
-  [ -f "$OUT/$TAGV.done" ] && {{ log "SKIP $VARIANT (done)"; continue; }}
+  # Done when every suite of the current plan is done (suites may be added later).
+  PENDING=0
+  for PAIR in {suites}; do [ -f "$OUT/${{TAGV}}__${{PAIR%%=*}}.done" ] || PENDING=1; done
+  [ $PENDING -eq 0 ] && {{ log "SKIP $VARIANT (every suite done)"; continue; }}
   if [ "$KIND" = tuned ] && [ ! -f {p['merged']}/config.json ]; then log "SKIP $VARIANT: no merged export yet"; continue; fi
   NAME={run['tag']}-$KIND
   log "=== $VARIANT: serving $NAME"

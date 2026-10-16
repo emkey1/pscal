@@ -168,7 +168,18 @@ BOARD_MANIFESTS = (
     "tasks_frontier_spec.json",
     "tasks.json",
 )
-FUTURE_BOARD_MANIFESTS = ("tasks_traps.json", "tasks_scale.json")
+FUTURE_BOARD_MANIFESTS = ("tasks_traps.json", "tasks_scale.json", "tasks_sealed_toon.json")
+
+# Held-out suites (owner, 2026-10-16): never mined for training data, never
+# read when authoring drills or examples; their scores are reported in
+# aggregate only. A fine-tune that gains on the boards but not here has learned
+# the boards, not the language. Decontamination covers them like any board.
+SEALED_MANIFESTS = (
+    "tasks_frontier.json",
+    "tasks_frontier_algo.json",
+    "tasks_frontier_spec.json",
+    "tasks_sealed_toon.json",
+)
 
 
 def default_board_manifests(bench_dir: pathlib.Path = DEFAULT_BENCH_DIR) -> list[pathlib.Path]:

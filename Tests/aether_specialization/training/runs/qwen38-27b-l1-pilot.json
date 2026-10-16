@@ -13,6 +13,14 @@
   "dataset": {"id": "l1-20261015", "version": "2026-10-15-1", "aether_version": "2026-10-15-1",
               "repair_manifest": "Tests/aether_specialization/seed_repair_pairs.json"},
   "_grader_note": "Trained on data built with 2026-10-15-1; graded with 2026-10-15-2 (aether 8818fa5, CON-001 on stderr), released after training began. Base scoring started on 2026-10-15-1 was stopped after 16 cases and set aside (owner, 2026-10-15).",
-  "score": {"variants": ["tuned", "base"], "docs": "none", "repeats": 1, "repair_attempts": 2, "grader_version": "2026-10-15-2",
+  "_order_note": "Owner (2026-10-16): the untrained base runs last, after the next run; its four suites resume from their checkpoints then. Frontier suites are sealed (never mined).",
+  "score": {"variants": ["tuned"],
+            "suites": {"v2_pos": "Tests/aether_doc_bench/tasks_v2_pos.json",
+                       "hard_v2": "Tests/aether_doc_bench/tasks_hard_v2.json",
+                       "hard_nontoon": "Tests/aether_doc_bench/tasks_hard_nontoon.json",
+                       "cs": "Tests/aether_doc_bench/tasks_cs.json",
+                       "frontier": "Tests/aether_doc_bench/tasks_frontier.json",
+                       "frontier_algo": "Tests/aether_doc_bench/tasks_frontier_algo.json",
+                       "frontier_spec": "Tests/aether_doc_bench/tasks_frontier_spec.json"}, "docs": "none", "repeats": 1, "repair_attempts": 2, "grader_version": "2026-10-15-2",
             "temperature": 0, "max_output_tokens": 8192}
 }

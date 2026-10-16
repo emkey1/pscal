@@ -414,6 +414,62 @@
       "broken_source": "fx {\n    println(\"start\");\n}\n\nfn main() -> Void {\n    fx {\n        println(\"main\");\n    }\n    ret;\n}\n",
       "fixed_source": "fn main() -> Void {\n    fx {\n        println(\"start\");\n        println(\"main\");\n    }\n    ret;\n}\n",
       "expected_stdout": "start\nmain\n"
+    },
+    {
+      "id": "repair_toon_get_root_name",
+      "kind": "repair",
+      "diagnostic": "[SCOPE-001] identifier 'toon_get_root' not in scope.",
+      "broken_source": "fn main() -> Void {\n    let doc: ToonDoc = toon_parse(\"{\\\"city\\\":\\\"Oslo\\\",\\\"temp\\\":4}\");\n    let root: ToonNode = toon_get_root(doc);\n    let city: Text = toon_get_text(root, \"city\");\n    fx { println(city, \" \", toon_get_int(root, \"temp\")); }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let doc: ToonDoc = toon_parse(\"{\\\"city\\\":\\\"Oslo\\\",\\\"temp\\\":4}\");\n    let root: ToonNode = toon_root(doc);\n    let city: Text = toon_get_text(root, \"city\");\n    fx { println(city, \" \", toon_get_int(root, \"temp\")); }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "Oslo 4\n"
+    },
+    {
+      "id": "repair_toon_get_key_at_names",
+      "kind": "repair",
+      "diagnostic": "[SCOPE-001] identifier 'toon_get_key' not in scope.",
+      "broken_source": "fn main() -> Void {\n    let doc: ToonDoc = toon_parse(\"{\\\"laps\\\":[61,58,63]}\");\n    let root: ToonNode = toon_root(doc);\n    let laps: ToonNode = toon_get_key(root, \"laps\");\n    let best: Int = 1000;\n    loop i in 0..toon_len(laps) {\n        let t: Int = toon_int_value(toon_get_at(laps, i));\n        if t < best { best = t; }\n    }\n    fx { println(\"best lap \", best); }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let doc: ToonDoc = toon_parse(\"{\\\"laps\\\":[61,58,63]}\");\n    let root: ToonNode = toon_root(doc);\n    let laps: ToonNode = toon_key(root, \"laps\");\n    let best: Int = 1000;\n    loop i in 0..toon_len(laps) {\n        let t: Int = toon_int_value(toon_at(laps, i));\n        if t < best { best = t; }\n    }\n    fx { println(\"best lap \", best); }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "best lap 58\n"
+    },
+    {
+      "id": "repair_toon_get_str_name",
+      "kind": "repair",
+      "diagnostic": "[SCOPE-001] identifier 'toon_get_str' not in scope.",
+      "broken_source": "fn main() -> Void {\n    let doc: ToonDoc = toon_parse(\"{\\\"owner\\\":\\\"rui\\\",\\\"pets\\\":2}\");\n    let root: ToonNode = toon_root(doc);\n    let owner: Text = toon_get_str(root, \"owner\");\n    fx { println(owner, \" has \", toon_get_int(root, \"pets\"), \" pets\"); }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let doc: ToonDoc = toon_parse(\"{\\\"owner\\\":\\\"rui\\\",\\\"pets\\\":2}\");\n    let root: ToonNode = toon_root(doc);\n    let owner: Text = toon_get_text(root, \"owner\");\n    fx { println(owner, \" has \", toon_get_int(root, \"pets\"), \" pets\"); }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "rui has 2 pets\n"
+    },
+    {
+      "id": "repair_toon_field_getter_on_element",
+      "kind": "repair",
+      "diagnostic": "[BUILT-002] Aether builtin parser error: 'toon_get_text' takes 2 arguments (node, key), but 1 was given.",
+      "broken_source": "fn main() -> Void {\n    let doc: ToonDoc = toon_parse(\"{\\\"tags\\\":[\\\"red\\\",\\\"blue\\\"]}\");\n    let root: ToonNode = toon_root(doc);\n    let tags: ToonNode = toon_key(root, \"tags\");\n    loop i in 0..toon_len(tags) {\n        let tag: Text = toon_get_text(toon_at(tags, i));\n        fx { println(i, \": \", tag); }\n    }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let doc: ToonDoc = toon_parse(\"{\\\"tags\\\":[\\\"red\\\",\\\"blue\\\"]}\");\n    let root: ToonNode = toon_root(doc);\n    let tags: ToonNode = toon_key(root, \"tags\");\n    loop i in 0..toon_len(tags) {\n        let tag: Text = toon_text_value(toon_at(tags, i));\n        fx { println(i, \": \", tag); }\n    }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "0: red\n1: blue\n"
+    },
+    {
+      "id": "repair_toon_bare_int_accessor",
+      "kind": "repair",
+      "diagnostic": "[SCOPE-001] identifier 'toon_int' not in scope.",
+      "broken_source": "fn main() -> Void {\n    let doc: ToonDoc = toon_parse(\"[4, 9, 15]\");\n    let root: ToonNode = toon_root(doc);\n    let total: Int = 0;\n    loop i in 0..toon_len(root) {\n        total = total + toon_int(toon_at(root, i));\n    }\n    fx { println(\"total \", total); }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let doc: ToonDoc = toon_parse(\"[4, 9, 15]\");\n    let root: ToonNode = toon_root(doc);\n    let total: Int = 0;\n    loop i in 0..toon_len(root) {\n        total = total + toon_int_value(toon_at(root, i));\n    }\n    fx { println(\"total \", total); }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "total 28\n"
+    },
+    {
+      "id": "repair_mstream_new_name",
+      "kind": "repair",
+      "diagnostic": "[SCOPE-001] identifier 'mstream_new' not in scope.",
+      "broken_source": "fn main() -> Void {\n    let ms: MStream = mstream_new();\n    mstreamappendbyte(ms, 72);\n    mstreamappendbyte(ms, 105);\n    fx { println(mstreambuffer(ms)); }\n    mstreamfree(ms);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let ms: MStream = mstreamcreate();\n    mstreamappendbyte(ms, 72);\n    mstreamappendbyte(ms, 105);\n    fx { println(mstreambuffer(ms)); }\n    mstreamfree(ms);\n    ret;\n}\n",
+      "expected_stdout": "Hi\n"
+    },
+    {
+      "id": "repair_yyjson_parse_file_name",
+      "kind": "repair",
+      "diagnostic": "[SCOPE-001] identifier 'yyjson_parse_file' not in scope.",
+      "broken_source": "fn main() -> Void {\n    let ms: MStream = mstreamfromstring(\"{\\\"jobs\\\":3}\");\n    fx { mstreamsavetofile(ms, \"queue_state.json\"); }\n    mstreamfree(ms);\n    let doc: ToonDoc;\n    fx { doc = yyjson_parse_file(\"queue_state.json\"); }\n    let root: ToonNode = toon_root(doc);\n    fx { println(\"jobs \", toon_get_int(root, \"jobs\")); }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let ms: MStream = mstreamfromstring(\"{\\\"jobs\\\":3}\");\n    fx { mstreamsavetofile(ms, \"queue_state.json\"); }\n    mstreamfree(ms);\n    let doc: ToonDoc;\n    fx { doc = toon_parse_file(\"queue_state.json\"); }\n    let root: ToonNode = toon_root(doc);\n    fx { println(\"jobs \", toon_get_int(root, \"jobs\")); }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "jobs 3\n"
     }
   ]
 }

@@ -107,6 +107,7 @@ class ScriptTests(unittest.TestCase):
         for suite in run["score"]["suites"]:
             self.assertIn(f"{suite}=", score)
         self.assertIn("--aether-bin-sha256", score)
+        self.assertNotIn('"$OUT/$TAGV.done" ] &&', score)  # a variant is skipped per suite, not by one marker
         self.assertIn("*2026-10-15-1*", score)
         newer = tr.score_script(self.load(score={"grader_version": "2026-10-15-2"}))
         self.assertIn("*2026-10-15-2*", newer)
