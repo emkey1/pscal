@@ -482,7 +482,7 @@
     {
       "id": "repair_table_row_new_int",
       "kind": "repair",
-      "diagnostic": "VM Error: Pointer does not point to an array for element access.",
+      "diagnostic": "[SYN-001] Aether parser error: `new Int[...]`: Aether has no sized array constructor.",
       "broken_source": "fn main() -> Void {\n    let rows: Int = 3;\n    let cols: Int = 4;\n    let grid: Int[][] = [];\n    loop r in 0..rows {\n        grid = grid + [new Int[cols]];\n    }\n    grid[1][2] = 7;\n    fx { println(length(grid), \"x\", length(grid[0]), \" center=\", grid[1][2]); }\n    ret;\n}\n",
       "fixed_source": "fn main() -> Void {\n    let rows: Int = 3;\n    let cols: Int = 4;\n    let grid: Int[][] = [];\n    loop r in 0..rows {\n        let row: Int[] = [];\n        loop c in 0..cols {\n            row = row + [0];\n        }\n        grid = grid + [row];\n    }\n    grid[1][2] = 7;\n    fx { println(length(grid), \"x\", length(grid[0]), \" center=\", grid[1][2]); }\n    ret;\n}\n",
       "expected_stdout": "3x4 center=7\n"
