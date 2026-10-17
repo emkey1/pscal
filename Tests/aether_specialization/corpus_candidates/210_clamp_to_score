@@ -1,8 +1,0 @@
-// clamp_to_score
-// expect: score = 100
-fn main() -> Void {
-    let raw: Int = 137;
-    let score: Int = clamp(raw, 0, 100);
-    fx { println("score = ", score); }
-    ret;
-}

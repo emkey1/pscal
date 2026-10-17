@@ -1,5 +1,0 @@
-fn main() -> Void {
-    let s: Text = "hello world";
-    fx { println(s[0..5]); }
-}
-main();

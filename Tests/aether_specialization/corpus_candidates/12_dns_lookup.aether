@@ -1,8 +1,0 @@
-fn main() -> Void {
-    fx {
-        let hostname: Text = "example.com";
-        let ip: Text = dnslookup(hostname);
-        println(hostname, " -> ", ip);
-    }
-    ret;
-}

@@ -42,7 +42,8 @@ chip description). CLAUDE.md carries the environment; do not re-derive it.
   (memory: pscal-test-baseline lists expected failures). New failures = not
   done. `python3 Tests/run_all_suites.py` for wide changes.
 - If compiler output-shape changed, check corpus/fixture drift:
-  `python3 tools/recapture_expected.py --check` (see its --help).
+  `python3 components/aether/tools/recapture_expected.py --check --aether-bin build/bin/aether`
+  (see its --help; the corpus and the tool moved to the aether repo on 2026-10-17).
 
 ## 5. Ship
 

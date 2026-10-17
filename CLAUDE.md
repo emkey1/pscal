@@ -34,6 +34,14 @@ lives in the auto-memory files (this file wins if they disagree).
   fast-forward; that's no longer the case — as of 2026-07-03 `main` is
   current and `AetherLang` should be treated like any other branch, not a
   required landing spot.)
+- **The Aether benchmark and fine-tuning material live in the aether repo**
+  (moved 2026-10-17; their history before that stays here). Harness, replay,
+  oracle, corpus and training tools are in `components/aether/tools/`; suites
+  and archived results in `components/aether/bench/`; corpus, datasets, run
+  configs and run records in `components/aether/training/`; per-run reports
+  and the bench runbook in `components/aether/docs/benchmarks/` and
+  `components/aether/docs/bench_runbook.md`. Work on them in an aether
+  checkout and ship them like any aether change.
 
 ## Build and test
 
@@ -58,7 +66,8 @@ They live in two untracked files, never in this public repo:
 - **`CLAUDE.local.md`**, beside this file. Claude Code loads it automatically;
   it holds the fleet table, the T'Ra scheduler address and the credential table.
 - **`~/.config/pscal/fleet.env`** (or `$PSCAL_FLEET_ENV`), `export NAME=value`
-  lines that the tools read (`tools/fleet_env.py`; shell drivers `source` it).
+  lines that the tools read (aether's `tools/fleet_env.py`; shell drivers here
+  such as `tools/deploy_aether_to_claws.sh` `source` it).
 
 Copy both to every machine that runs sessions or tools. Never put a hostname,
 tailnet address or credential location back into a tracked file. Short MagicDNS
@@ -96,7 +105,7 @@ wraps steps 1–4.
   that can hit the 2-minute timeout.
 - Drivers must be resumable: per-unit output + skip-finished check, `set -u`
   not `-e`, so any death resumes with no lost work. Inside a unit,
-  `tools/aether_doc_bench.py --resume --output-json <same path>` continues a
+  aether's `tools/aether_doc_bench.py --resume --output-json <same path>` continues a
   killed run from its checkpoint: finished cases are kept, missing and
   infra-failed ones run, and a changed configuration is refused. When a run is
   done with a T'Ra destination (or is killed), it asks the queue to unload that

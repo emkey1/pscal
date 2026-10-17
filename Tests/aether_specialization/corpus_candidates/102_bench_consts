@@ -1,4 +1,0 @@
-mod BenchConsts {
-    export const Greeting: Text = "Aether";
-    export const Answer: Int = 42;
-}

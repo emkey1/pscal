@@ -10,7 +10,7 @@ Corpus:
   clike    components/clike/tests/*.cl
   rea      components/rea/tests/rea/*.rea               (honours .args files)
   aether   components/aether/tests/*.aether
-  docbench sampled generated programs out of Tests/aether_doc_bench results
+  docbench sampled generated programs out of components/aether/bench results
            JSONs (opt-in via --docbench-sample N)
 
 Each program is run with the matching frontend binary from --vm-a and
@@ -480,7 +480,7 @@ def main(argv: Sequence[str]) -> int:
     parser.add_argument("--docbench-seed", type=int, default=20260704,
                         help="Sampling seed for the docbench suite.")
     parser.add_argument("--docbench-results",
-                        default=str(REPO_ROOT / "Tests" / "aether_doc_bench" / "results"),
+                        default=str(REPO_ROOT / "components" / "aether" / "bench" / "results"),
                         help="Directory scanned (recursively) for bench result JSONs.")
     args = parser.parse_args(argv)
 

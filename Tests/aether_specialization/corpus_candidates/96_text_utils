@@ -1,6 +1,0 @@
-mod TextUtils {
-    @pure
-    export fn resultLabel() -> Text {
-        ret "Result:";
-    }
-}
