@@ -33,7 +33,7 @@ DEPLOY_TIMEOUT="${AETHER_DEPLOY_TIMEOUT:-1800}"
 FLEET_ENV="${PSCAL_FLEET_ENV:-$HOME/.config/pscal/fleet.env}"
 if [ -z "${AETHER_DEPLOY_HOSTS:-}" ] && [ -r "$FLEET_ENV" ]; then . "$FLEET_ENV"; fi
 # Transitional: an overlay written before 2026-10-17 used the old variable name.
-DEPLOY_HOSTS="${AETHER_DEPLOY_HOSTS:-${AETHER_CLAWS:-}}"
+DEPLOY_HOSTS="${AETHER_DEPLOY_HOSTS:-}"
 if [ -z "$DEPLOY_HOSTS" ]; then
   echo "[deploy] FATAL: set AETHER_DEPLOY_HOSTS in $FLEET_ENV (space-separated name|user@host|fallback specs)" >&2
   exit 1

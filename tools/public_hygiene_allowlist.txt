@@ -24,4 +24,3 @@ tools/lldb-pty-postinit.lldb 4d877cf81460  # home path in pre-existing tooling o
 
 # fleet-hardware (2026-10-17): a transitional read of the old private-overlay variable name; drop it once
 # ~/.config/pscal/fleet.env sets AETHER_DEPLOY_HOSTS.
-tools/deploy_aether_to_hosts.sh 26b4c3c3ed4e  # old overlay variable name, transitional

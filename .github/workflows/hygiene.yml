@@ -18,4 +18,6 @@ jobs:
       - name: Fetch the pinned aether checker
         run: git submodule update --init --depth 1 components/aether
       - name: No host, fleet, credential or session data in tracked files
+        env:
+          AETHER_PRIVATE_TERMS: ${{ secrets.AETHER_PRIVATE_TERMS }}
         run: python3 components/aether/tools/check_public_hygiene.py --root . --allowlist tools/public_hygiene_allowlist.txt
