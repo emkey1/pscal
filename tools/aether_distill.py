@@ -5,7 +5,7 @@ The untrained base model writes correct Aether far more often with the guide in
 its prompt than a fine-tune does without one. This pipeline harvests that: fresh
 tasks, solved twice by independent models, kept only where both agree.
 
-    python3 tools/aether_distill.py BATCH tasks --count 300      # MiMo (T'Ra `large`) writes task statements
+    python3 tools/aether_distill.py BATCH tasks --count 300      # open lane (T'Ra `large-open`) writes task statements
     python3 tools/aether_distill.py BATCH python-cmd               # harness command: MiMo writes Python, output hidden
     python3 tools/aether_distill.py BATCH freeze                   # Python stdout becomes each task's expected stdout
     python3 tools/aether_distill.py BATCH provenance               # every generation request served by an allowed model?
@@ -26,6 +26,17 @@ they can train.
 The python-cmd / aether-cmd stages print the harness command rather than running
 it: the Python stage should run where model-written Python may execute (a claw),
 the Aether stage where the guided model is served.
+
+Provenance: task statements come only from the proxy's open lane (T'Ra model
+`large-open`, target m4_proxy_large_open, proxy route default-large-open), whose
+pool holds only members marked "training_use": "allowed" (MiMo-V2.6-Flash, MIT;
+Bonsai 2 27B, Apache-2.0); it answers 503 rather than fall back to a restricted
+or unknown model. Each tasks.json request records the T'Ra job, model and the
+target that served it. The proxy's X-Training-Use header does not reach this
+tool through T'Ra, so per-request member provenance lives on m4 in
+~/.openclaw/workspace/dashboard/state/proxy_requests.jsonl: records with
+srv=default-large-open carry open_only, training_use, member and model. The
+provenance stage reads them.
 """
 
 from __future__ import annotations
@@ -170,7 +181,9 @@ def stage_tasks(args) -> int:
             log.write(f"request failed: {exc}\n")
             time.sleep(10)
             continue
-        doc.setdefault("requests", []).append({"t0": round(started, 1), "t1": round(time.time(), 1)})
+        doc.setdefault("requests", []).append({"t0": round(started, 1), "t1": round(time.time(), 1),
+                                               "model": args.model, "target": reply.get("model"),
+                                               "job": reply.get("response_id")})
         items = parse_task_array(reply.get("raw_text", ""))
         kept = 0
         for item in items:
@@ -214,7 +227,7 @@ def walk(o):
         for v in o:
             walk(v)
 walk(json.load(open(os.path.expanduser(routes_path))))
-counts = {}
+counts, uses = {}, {}
 for line in open(os.path.expanduser(log_path)):
     try:
         r = json.loads(line)
@@ -223,9 +236,11 @@ for line in open(os.path.expanduser(log_path)):
     if r.get("pool") != pool or not any(a <= r.get("t", 0) <= b for a, b in windows):
         continue
     member = str(r.get("member"))
-    key = models.get(member) or models.get(member.split("/", 1)[0]) or ("unknown member " + member)
+    key = r.get("model") or models.get(member) or models.get(member.split("/", 1)[0]) or ("unknown member " + member)
     counts[key] = counts.get(key, 0) + 1
-print(json.dumps(counts))
+    use = r.get("training_use", "not logged")
+    uses[use] = uses.get(use, 0) + 1
+print(json.dumps({"counts": counts, "training_use": uses}))
 """
 
 
@@ -256,11 +271,15 @@ def stage_provenance(args) -> int:
                            input=PROVENANCE_PROBE, text=True, capture_output=True, timeout=300)
     if probe.returncode != 0:
         raise SystemExit(f"provenance probe failed: {probe.stderr.strip()[:300]}")
-    counts = json.loads(probe.stdout)
+    found = json.loads(probe.stdout)
+    counts, uses = found["counts"], found["training_use"]
     allowed = set(args.allow)
     bad = {model: n for model, n in counts.items() if model not in allowed}
-    verdict = {"ok": not bad and bool(counts), "pool": args.pool, "allowed_models": sorted(allowed),
-               "windows": windows, "requests_by_model": counts, "disallowed": bad,
+    # Records from before the proxy logged training_use (2026-10-17) say "not logged".
+    bad_use = {use: n for use, n in uses.items() if use not in ("allowed", "not logged")}
+    verdict = {"ok": not bad and not bad_use and bool(counts), "pool": args.pool, "allowed_models": sorted(allowed),
+               "windows": windows, "requests_by_model": counts, "requests_by_training_use": uses,
+               "disallowed": bad, "disallowed_training_use": bad_use,
                "checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     save_json(out / "provenance.json", verdict)
     print(json.dumps(verdict, indent=1))
@@ -352,7 +371,8 @@ def stage_harvest(args) -> int:
                                       "solver": report["destinations"][0].get("model"),
                                       "guide": report["destinations"][0]["variants"][0].get("doc_version"),
                                       "grader": report.get("aether_version"),
-                                      "generator_models": sorted((provenance or {}).get("requests_by_model", {}))}})
+                                      "generator_models": sorted((provenance or {}).get("requests_by_model", {})),
+                                      "generator_pool": (provenance or {}).get("pool")}})
     save_json(out / "pairs.json", {"pairs": pairs})
     print(f"harvested {len(pairs)} pairs ({first} first-attempt, {repaired} after repair) of {len(frozen)} frozen "
           f"tasks; next: tools/aether_specialization_check_pairs.py {out / 'pairs.json'}")
@@ -365,14 +385,18 @@ def main() -> int:
     ap.add_argument("stage", choices=["tasks", "python-cmd", "freeze", "provenance", "aether-cmd", "harvest"])
     ap.add_argument("--count", type=int, default=300)
     ap.add_argument("--per-request", type=int, default=8)
-    ap.add_argument("--model", default="large", help="T'Ra model for task writing")
-    ap.add_argument("--target", default="m4_proxy_large", help="T'Ra target for task writing")
+    # Change these two together. T'Ra serves `large-open` only on m4_proxy_large_open, so with that
+    # target missing or disabled the job waits; a `large` job would fall back to m4_proxy_large and
+    # so to restricted models (Claude Haiku: its outputs may not train) even with this target preferred.
+    ap.add_argument("--model", default="large-open", help="T'Ra model for task writing (open lane only)")
+    ap.add_argument("--target", default="m4_proxy_large_open", help="T'Ra target for task writing")
     ap.add_argument("--destinations", default="DESTINATIONS.json", help="harness destinations file (cmd stages)")
     ap.add_argument("--aether-bin", default="build/bin/aether")
     ap.add_argument("--docs", default="medium")
     ap.add_argument("--allow", action="append", default=None,
-                    help="model whose outputs may be training data (repeatable; default mimo-v2.6-flash, MIT)")
-    ap.add_argument("--pool", default="large")
+                    help="model whose outputs may be training data (repeatable; default mimo-v2.6-flash, MIT, "
+                         "and bonsai-2-27b, Apache-2.0)")
+    ap.add_argument("--pool", default="large-open", help="proxy pool to check (batches before 2026-10-17: large)")
     ap.add_argument("--proxy-host", default="m4")
     ap.add_argument("--proxy-log", default="~/.openclaw/workspace/dashboard/state/proxy_requests.jsonl")
     ap.add_argument("--proxy-routes", default="~/.openclaw/workspace/dashboard/ai-routes.json")
@@ -380,7 +404,7 @@ def main() -> int:
     ap.add_argument("--until", type=float, default=None)
     ap.add_argument("--skip-provenance", action="store_true", help="harvest without a passing provenance check")
     args = ap.parse_args()
-    args.allow = args.allow or ["mimo-v2.6-flash"]
+    args.allow = args.allow or ["mimo-v2.6-flash", "bonsai-2-27b"]
     return {"provenance": stage_provenance, "tasks": stage_tasks, "python-cmd": stage_python_cmd, "freeze": stage_freeze,
             "aether-cmd": stage_aether_cmd, "harvest": stage_harvest}[args.stage](args)
 
