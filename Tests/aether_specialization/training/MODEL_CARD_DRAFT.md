@@ -12,8 +12,8 @@ library_name: transformers
 pipeline_tag: text-generation
 ---
 
-<!-- DRAFT 2026-10-17. Numbers marked TBD come from the run chosen for release; see
-Tests/aether_specialization/training_runs/*/RESULTS.md in emkey1/pscal. Not published. -->
+<!-- DRAFT 2026-10-17. Numbers marked TBD come from the run chosen for release (internal notes:
+Tests/aether_specialization/training_runs/*/RESULTS.md). Not published. -->
 
 # Qwen3.8-27B-Aether (no-guide)
 
@@ -108,9 +108,9 @@ is in that form.
   output is dropped; 5-gram similarity to any reference solution must stay below 0.5), and the held-out suites
   are excluded from data authoring.
 
-The datasets, the training and scoring drivers and every benchmark report are public in
-[emkey1/pscal](https://github.com/emkey1/pscal) (`Tests/aether_specialization/`, `tools/aether_train_run.py`,
-`tools/aether_doc_bench.py`).
+The language, its compiler and the guides are at [emkey1/aether](https://github.com/emkey1/aether). The
+training data, the benchmark tasks and the scoring reports are published as a companion dataset (TBD:
+Hugging Face dataset name).
 
 ## Limitations
 
