@@ -64,6 +64,26 @@ DEFAULT_CORPUS_MANIFEST = (
 )
 DEFAULT_FIXTURES_DIR = REPO_ROOT / "Tests" / "aether_specialization" / "fixtures"
 DEFAULT_INSTRUCTION_MANIFEST = REPO_ROOT / "Tests" / "aether_specialization" / "seed_instruction_pairs.json"
+# Approved distilled pairs (tools/aether_distill.py batches that passed provenance and
+# check_pairs) train beside the hand-written ones; each file is one batch.
+DISTILLED_DIR = REPO_ROOT / "Tests" / "aether_specialization" / "distilled"
+
+
+def default_instruction_manifests() -> list[pathlib.Path]:
+    return [DEFAULT_INSTRUCTION_MANIFEST] + sorted(DISTILLED_DIR.glob("*.json"))
+
+
+def read_instruction_manifests(paths: list[pathlib.Path]) -> dict[str, Any]:
+    """The pairs of every instruction manifest, in order; an id may appear only once."""
+    pairs: list[dict[str, Any]] = []
+    seen: dict[str, pathlib.Path] = {}
+    for path in paths:
+        for item in read_json(path).get("pairs", []):
+            if item["id"] in seen:
+                raise SystemExit(f"instruction pair id {item['id']!r} is in both {seen[item['id']]} and {path}")
+            seen[item["id"]] = path
+            pairs.append(item)
+    return {"pairs": pairs}
 DEFAULT_REPAIR_MANIFEST = REPO_ROOT / "Tests" / "aether_specialization" / "seed_repair_pairs.json"
 TOOLS_DIR = REPO_ROOT / "tools"
 CORPUS_DIR = REPO_ROOT / "Tests" / "aether_specialization" / "corpus_candidates"
@@ -888,7 +908,7 @@ def build_and_gate(args: argparse.Namespace, benchmark_manifests: list[pathlib.P
 
     corpus_payload = read_json(args.corpus_manifest)
     instruction_records = build_instruction_records(
-        read_json(args.instruction_manifest), args.aether_bin, stamp
+        read_instruction_manifests(args.instruction_manifest), args.aether_bin, stamp
     )
     corpus_instruction_records = build_corpus_instruction_records(
         corpus_payload,
@@ -1082,7 +1102,9 @@ def main() -> int:
                         "recapture_expected.py --check --report-json output instead of running it "
                         "again (it must come from the same binary and manifest; instrument_check.sh "
                         "passes the one its step 3 just wrote)")
-    parser.add_argument("--instruction-manifest", type=pathlib.Path, default=DEFAULT_INSTRUCTION_MANIFEST)
+    parser.add_argument("--instruction-manifest", type=pathlib.Path, action="append", default=None,
+                        help="instruction pairs file (repeatable; default: seed_instruction_pairs.json plus "
+                        "every approved batch in distilled/)")
     parser.add_argument("--repair-manifest", type=pathlib.Path, default=DEFAULT_REPAIR_MANIFEST)
     parser.add_argument("--instruction-jsonl", type=pathlib.Path, default=None,
                         help="output (required unless --check-gates)")
@@ -1114,6 +1136,7 @@ def main() -> int:
     parser.add_argument("--report-json", type=pathlib.Path, default=None,
                         help="write selection counts, overlap drops and gate failures here")
     args = parser.parse_args()
+    args.instruction_manifest = args.instruction_manifest or default_instruction_manifests()
 
     if not args.check_gates and (args.instruction_jsonl is None or args.repair_jsonl is None):
         parser.error("--instruction-jsonl and --repair-jsonl are required (or pass --check-gates)")

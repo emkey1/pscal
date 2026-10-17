@@ -1,0 +1,18 @@
+{
+ "ok": true,
+ "pool": "large",
+ "allowed_models": [
+  "mimo-v2.6-flash"
+ ],
+ "windows": [
+  [
+   1792159200.0,
+   1792198800.0
+  ]
+ ],
+ "requests_by_model": {
+  "mimo-v2.6-flash": 623
+ },
+ "disallowed": {},
+ "checked_at": "2026-10-17T09:12:08Z"
+}

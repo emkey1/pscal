@@ -38,7 +38,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--output-dir", type=pathlib.Path, required=True)
     parser.add_argument("--aether-bin", type=pathlib.Path, default=DEFAULT_AETHER_BIN)
-    parser.add_argument("--instruction-manifest", type=pathlib.Path, default=DEFAULT_INSTRUCTION_MANIFEST)
+    parser.add_argument("--instruction-manifest", type=pathlib.Path, action="append", default=None,
+                        help="instruction pairs file (repeatable; default: seed_instruction_pairs.json plus "
+                        "every approved batch in distilled/)")
     parser.add_argument("--repair-manifest", type=pathlib.Path, default=DEFAULT_REPAIR_MANIFEST)
     parser.add_argument("--benchmark-tasks", type=pathlib.Path, action="append", default=None,
                         help="benchmark task manifest whose expected stdouts are dropped from training "
@@ -128,8 +130,8 @@ def main() -> int:
     build_dataset_cmd = [
         sys.executable,
         str(TOOLS_DIR / "aether_specialization_build_dataset.py"),
-        "--instruction-manifest",
-        str(args.instruction_manifest),
+        *[arg for path in (args.instruction_manifest or build_dataset.default_instruction_manifests())
+          for arg in ("--instruction-manifest", str(path))],
         "--repair-manifest",
         str(args.repair_manifest),
         "--instruction-jsonl",
