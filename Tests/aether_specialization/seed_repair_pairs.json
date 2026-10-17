@@ -43,7 +43,7 @@
     {
       "id": "repair_global_const_scope",
       "kind": "repair",
-      "diagnostic": "[SYN-001] Aether parser error: expected ')' to close argument list (opened at line 3).",
+      "diagnostic": "[FUNC-001] Aether nested-fn parser error: functions cannot be declared inside another function.",
       "broken_source": "fn main() -> Void {\n    const PI: Real = 3.14159265;\n    fn area(radius: Real) -> Real {\n        ret PI * radius * radius;\n    }\n    fx {\n        println(\"area=\", area(2.5):0:2);\n    }\n    ret;\n}\n",
       "fixed_source": "const PI: Real = 3.14159265;\n\n@pure\nfn area(radius: Real) -> Real {\n    ret PI * radius * radius;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"area=\", area(2.5):0:2);\n    }\n    ret;\n}\n",
       "expected_stdout": "area=19.63\n"
