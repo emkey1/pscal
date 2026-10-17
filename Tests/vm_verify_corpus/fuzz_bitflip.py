@@ -4,7 +4,7 @@
 a time and runs it through pscalvm, asserting zero crashes (a clean nonzero
 exit or a successful run are both fine; a crash signal is not). This is the
 quick local pass; a broader/longer sweep (more seed files, multi-bit flips)
-is a good claw-idle background job -- see CLAUDE.md's fleet rules.
+is a good idle-GPU-host background job -- see CLAUDE.md's fleet rules.
 
 Usage: python3 fuzz_bitflip.py [--pscalvm-bin PATH] [--seed PATH] [--limit N]
 """

@@ -1504,8 +1504,8 @@ the existing enum), not by a second tag layer.
   plan's own author's development machine (macOS/ARM64, which does stay
   under 46 bits) generalized to "every targeted platform" without actually
   checking one. `pscalObjRunPointerWidthCanary()` (wired into `initVM()`)
-  aborted on first real-world run on claw1 (Linux/ARM64, part of the claw
-  fleet CLAUDE.md documents): `heap pointer 0xbead59ec2090 exceeds the
+  aborted on first real-world run on a Linux/ARM64 GPU host (one of the bench
+  hosts): `heap pointer 0xbead59ec2090 exceeds the
   46-bit payload budget` — a real address needing the full 48 bits, from
   glibc on Linux/ARM64, which uses close to the entire 48-bit user address
   space (a follow-up probe found a stack address at `0xfffffcd91b20`, only
@@ -4090,7 +4090,7 @@ Per phase, in order: (1) unit tests for the new mechanism; (2) full
 aether builds; (3) differential harness zero-diff run; (4) benchmark suite
 with results appended to the plan's tracking doc; (5) for format phases, a
 corpus of adversarial/corrupt `.bc` files that must all fail cleanly
-(fuzzing the loader with the verifier on is a good claw-idle job).  Ship
+(fuzzing the loader with the verifier on is a good idle-GPU-host job).  Ship
 flow per phase is the standard multi-repo bump (component push, aether
 `external/` pins, PBuild gitlinks, autodeploy verify).
 

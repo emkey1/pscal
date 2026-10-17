@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Deploy the current Aether compiler to ALL benchmark claws (claw1, claw2, claw3) so
-# every eval box tests the just-committed language. Each host clones emkey1/aether at
+# Deploy the current Aether compiler to every benchmark host so each eval box tests
+# the just-committed language. Each host clones emkey1/aether at
 # the EXACT commit recorded in PBuild's components/aether gitlink and rebuilds
 # $HOME/aether-current/build/aether via tools/refresh_aether.sh (shipped to the host).
 #
@@ -8,14 +8,15 @@
 #  * Builds the gitlink SHA, not "latest main", so the deployed binary provably matches
 #    the code this PBuild commit points at (and an unpushed SHA fails loudly per host).
 #  * Best-effort + PARALLEL: every host deploys in its own background job with a remote
-#    build timeout; an unreachable/slow/broken claw is logged and skipped, and never
+#    build timeout; an unreachable/slow/broken host is logged and skipped, and never
 #    blocks the commit or the other hosts. Invoked (already backgrounded) by the git
-#    post-commit hook; also safe to run by hand:  bash tools/deploy_aether_to_claws.sh
-#  * Replaces the old claw2-only deploy_aether_to_claw2.sh, whose remote full-pscal
-#    configure failed because it never shipped the Pascal sources that configure needs.
+#    post-commit hook; also safe to run by hand:  bash tools/deploy_aether_to_hosts.sh
+#  * Replaces an older single-host deploy script, whose remote full-pscal configure
+#    failed because it never shipped the Pascal sources that configure needs.
 #
 # Env overrides:
-#   AETHER_CLAWS          space-separated "name|user@primary|user@fallback" specs
+#   AETHER_DEPLOY_HOSTS   space-separated "name|user@primary|user@fallback" specs
+#                         (required; normally in the private fleet overlay)
 #   AETHER_DEPLOY_PUSH=0  skip the upstream-push safety step
 #   AETHER_DEPLOY_TIMEOUT per-host remote build cap in seconds (default 1800)
 #   AETHER_TARGET_SHA     override the aether commit to build (default: gitlink SHA)
@@ -26,22 +27,19 @@ AETHER_DIR="$ROOT/components/aether"
 REFRESH_SRC="$ROOT/tools/refresh_aether.sh"
 DEPLOY_TIMEOUT="${AETHER_DEPLOY_TIMEOUT:-1800}"
 
-# name|primary|fallback  (fallback optional). Override wholesale via $AETHER_CLAWS,
-# normally set in the private fleet overlay (~/.config/pscal/fleet.env), which
-# carries the FQDNs and claw3's LAN fallback (MagicDNS occasionally lags). The
-# in-repo default is short MagicDNS names: this repo is public.
+# name|primary|fallback  (fallback optional), from $AETHER_DEPLOY_HOSTS in the private
+# fleet overlay (~/.config/pscal/fleet.env), which carries the host names, FQDNs and
+# LAN fallbacks. There is no in-repo default: this repo is public and names no hosts.
 FLEET_ENV="${PSCAL_FLEET_ENV:-$HOME/.config/pscal/fleet.env}"
-if [ -z "${AETHER_CLAWS:-}" ] && [ -r "$FLEET_ENV" ]; then . "$FLEET_ENV"; fi
-if [ -n "${AETHER_CLAWS:-}" ]; then
-  # shellcheck disable=SC2206
-  HOSTS=( $AETHER_CLAWS )
-else
-  HOSTS=(
-    "claw1|claw@claw1|"
-    "claw2|claw@claw2|"
-    "claw3|claw@claw3|"
-  )
+if [ -z "${AETHER_DEPLOY_HOSTS:-}" ] && [ -r "$FLEET_ENV" ]; then . "$FLEET_ENV"; fi
+# Transitional: an overlay written before 2026-10-17 used the old variable name.
+DEPLOY_HOSTS="${AETHER_DEPLOY_HOSTS:-${AETHER_CLAWS:-}}"
+if [ -z "$DEPLOY_HOSTS" ]; then
+  echo "[deploy] FATAL: set AETHER_DEPLOY_HOSTS in $FLEET_ENV (space-separated name|user@host|fallback specs)" >&2
+  exit 1
 fi
+# shellcheck disable=SC2206
+HOSTS=( $DEPLOY_HOSTS )
 
 SSH="ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4"
 SCP="scp -o BatchMode=yes -o ConnectTimeout=15"
@@ -93,8 +91,8 @@ deploy_host() {
     fi
   fi
 
-  # Ship the canonical build script so every host builds identically (keeps claw1/claw3
-  # in sync with claw2). Best-effort: fall back to the host's existing copy if scp fails.
+  # Ship the canonical build script so every host builds identically. Best-effort: fall
+  # back to the host's existing copy if scp fails.
   if $SCP "$REFRESH_SRC" "$host:refresh_aether.sh" >/dev/null 2>&1; then
     $SSH "$host" 'chmod +x ~/refresh_aether.sh' >/dev/null 2>&1
   else
@@ -127,7 +125,7 @@ deploy_host() {
   return 0
 }
 
-log "=== deploy aether ${SHA} (VERSION ${VER}) -> ${#HOSTS[@]} claws (parallel, ${DEPLOY_TIMEOUT}s/host) ==="
+log "=== deploy aether ${SHA} (VERSION ${VER}) -> ${#HOSTS[@]} host(s) (parallel, ${DEPLOY_TIMEOUT}s/host) ==="
 pids=""
 names=""
 for spec in "${HOSTS[@]}"; do

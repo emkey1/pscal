@@ -16,7 +16,7 @@ lives in the auto-memory files (this file wins if they disagree).
   `build/_deps/`. **Edit `components/<name>/` and rebuild — the recorded
   gitlink SHA has no effect on a local incremental build.** (The SHA matters
   only where sources are re-materialised from git: fresh clones, CI checkout,
-  and `tools/deploy_aether_to_claws.sh`, which builds the pinned SHA.)
+  and `tools/deploy_aether_to_hosts.sh`, which builds the pinned SHA.)
 - aether additionally vendors rea+pscal-core as submodules under
   `components/aether/external/`. When pscal-core or rea change, those pins go
   stale and break the *standalone* aether build while PBuild stays green.
@@ -60,18 +60,26 @@ lives in the auto-memory files (this file wins if they disagree).
 
 ## Fleet
 
-Host names, endpoints, ports, the ssh user and credential locations are private.
-They live in two untracked files, never in this public repo:
+Which machines exist, their host names, counts and hardware, endpoints, ports,
+the ssh user and credential locations are all private. They live in two untracked
+files, never in this public repo:
 
 - **`CLAUDE.local.md`**, beside this file. Claude Code loads it automatically;
-  it holds the fleet table, the T'Ra scheduler address and the credential table.
+  it holds the fleet table (see it for which machine is the "GPU host" or
+  "training host" below, and for each host's memory), the T'Ra scheduler
+  address and the credential table.
 - **`~/.config/pscal/fleet.env`** (or `$PSCAL_FLEET_ENV`), `export NAME=value`
   lines that the tools read (aether's `tools/fleet_env.py`; shell drivers here
-  such as `tools/deploy_aether_to_claws.sh` `source` it).
+  such as `tools/deploy_aether_to_hosts.sh` `source` it): AETHER_DEPLOY_HOSTS
+  (the autodeploy targets), AETHER_HOST_<ALIAS> and AETHER_TRAIN_SSH_USER (the
+  training driver), AETHER_REMOTE_GPU_HOST, TRA_QUEUE_URL and the like.
 
-Copy both to every machine that runs sessions or tools. Never put a hostname,
-tailnet address or credential location back into a tracked file. Short MagicDNS
-names (`claw1`, `claw2`, `claw3`) are fine in tracked commands.
+Copy both to every machine that runs sessions or tools. Never put a host name
+(short MagicDNS names included), a hardware model, a machine count, a tailnet
+address or a credential location into a tracked file: tracked files say "the GPU
+hosts", "the training host", or neutral aliases (`host-a` .. `host-g`, as the
+archived benchmark records in aether do). Aether's public-hygiene check
+(`fleet-hardware` rule) fails on them; pscal's CI runs it.
 
 - **All shared-GPU LLM jobs go through the T'Ra scheduler** (address in
   `CLAUDE.local.md`, `$TRA_QUEUE_URL` for the tools) — never hit Ollama/LM
@@ -87,11 +95,12 @@ names (`claw1`, `claw2`, `claw3`) are fine in tracked commands.
    `components/aether/external/` pins (`git -C components/aether update-index
    --cacheinfo 160000,<sha>,external/<name>` or checkout+add) and push aether.
 3. Bump the `components/` gitlinks in PBuild, commit, push `main`.
-4. Autodeploy (post-commit hook → `tools/deploy_aether_to_claws.sh`) builds the
-   pushed SHA on all three claws. Verify it ran; confirm with
-   `ssh claw@clawN '~/aether-current/build/aether --version'` when in doubt.
-   (No `bin/` on the claws — that path is the local PBuild layout, not the
-   deployed one; `deploy_aether_to_claws.sh` verifies `build/aether`.)
+4. Autodeploy (post-commit hook → `tools/deploy_aether_to_hosts.sh`) builds the
+   pushed SHA on every bench host (AETHER_DEPLOY_HOSTS). Verify it ran; confirm
+   with `ssh <host> '~/aether-current/build/aether --version'` (hosts and user in
+   CLAUDE.local.md) when in doubt. (No `bin/` on the hosts — that path is the
+   local PBuild layout, not the deployed one; `deploy_aether_to_hosts.sh`
+   verifies `build/aether`.)
 5. If the language changed, also confirm the VERSION bump (step 0, really).
 
 Never leave verified work uncommitted at the end of a task. The `/ship` skill
@@ -99,7 +108,7 @@ wraps steps 1–4.
 
 ## Long runs (anything over ~10 minutes)
 
-- Run remote-and-detached (tmux on the claws) or local under
+- Run remote-and-detached (tmux on the GPU hosts) or local under
   `tmux + caffeinate`. Never the harness background Bash for hours-long jobs
   (they die on session interrupt/compaction) and never a foreground Bash call
   that can hit the 2-minute timeout.
@@ -121,7 +130,7 @@ wraps steps 1–4.
 ## Budgets and result triage
 
 - **Never use a serving tool's default context or a stingy output-token cap.**
-  These are 128GB hosts: set context large (20k–32k minimum, 128k where it
+  The GPU hosts have plenty of memory (CLAUDE.local.md): set context large (20k–32k minimum, 128k where it
   fits) and output budgets generous — reasoning models return EMPTY content
   when truncated. Ollama `/v1` silently ignores `options.num_ctx`; use
   `OLLAMA_CONTEXT_LENGTH` or a `PARAMETER num_ctx` model variant. Ollama
@@ -131,7 +140,7 @@ wraps steps 1–4.
   returncodes → stderr histogram → sample generations — then fix and rerun.
   Never flag-and-move-on.
 - Prefer parallel advancement across the fleet (via T'Ra) over serial
-  measurement; idle claws are wasted money.
+  measurement; idle GPU hosts are wasted money.
 
 ## Credentials — a hard rule
 
@@ -151,7 +160,7 @@ Never do unauthenticated HF downloads; we have a token — use it.
 
 ## Environment quirks
 
-- macOS filesystem is case-insensitive; the claws are Linux. Never create
+- macOS filesystem is case-insensitive; the GPU hosts are Linux. Never create
   paths differing only by case (the `Tools/` vs `tools/` split); `git add`
   can silently no-op across case variants.
 - zsh: quote or escape `=`/globs in ad-hoc commands (`echo ===` fails with

@@ -29,26 +29,26 @@ memory recall when it fails:
 - Host identity re-taught repeatedly: 78ab3d17 "Lets start using the tailscale
   DNS for nodes. Please save the following..."; 3b2c0831 "Dude, you need to keep
   better track of this stuff. We've used that label MANY times.
-  macbook-pro-2 is the DNS name."; "No, this is not mint...
-  This laptop is macbook-pro-2"; "Err, m4t is actually a 64GB m4 Mac Mini."
-- Deploy topology re-explained in 2383fc7d ("The claws are also supposed to
+  host-d is the DNS name."; "No, this is not mint...
+  This laptop is host-d"; "Err, host-e is actually a different machine."
+- Deploy topology re-explained in 2383fc7d ("the GPU hosts are also supposed to
   pull the latest changes"), 78ab3d17, a8b9dbc3.
 - Same-day work lost: 78ab3d17 "Dude, check your freaking memory. We did a
   training and a test suite earlier today." → "And in the future, please keep
   better track."
 - The user actively curates memory by hand to compensate: 16a6488e "Please save
-  that instead of an IP or the label m4t"; db9b8391 "Please fully document the
+  that instead of an IP or the label host-e"; db9b8391 "Please fully document the
   care and feeding of this capability and make it available in your memory."
 
 CLAUDE.md loads unconditionally; memory recall does not. **Proposal:** a
-PBuild/CLAUDE.md with: (a) fleet table (claw1/claw2/claw3, m2t/m4t/m5t =
-macbook-pro-2, tailscale FQDNs, RAM, roles); (b) repo layout + the multi-repo
+PBuild/CLAUDE.md with: (a) fleet table (host-a/host-b/host-c, host-f/host-e/host-d =
+host-d, tailscale FQDNs, RAM, roles); (b) repo layout + the multi-repo
 commit→gitlink-bump→push→deploy flow; (c) canonical build/test commands and
 suite baselines; (d) the standing policies that keep slipping (see #2, #4, #5);
 (e) pointers to the memory files for deep detail. This is the same move as the
 iSH exercise's #1 + #6, and it retires the largest [re-explain] class.
 
-## 2. "Please commit and push" (+ deploy to claws) — the most repeated message in the corpus
+## 2. "Please commit and push" (+ deploy to GPU hosts) — the most repeated message in the corpus
 
 **Verdict: CLAUDE.md policy (tiny) + small automation (a `/ship` skill or script wrapping the existing pieces).**
 
@@ -62,14 +62,14 @@ times per session, and the user has already stated the rule explicitly:
   pushed?"; 7850d641 "Push please." / "Has the doc edit happened yet BTW?"
 - The deploy tail keeps getting dropped: ae5e4f5b/8259730e autodeploy escalation
   ("Actually, I need it fixed, and it should auto deploy to all three of the
-  claws"), a8b9dbc3 stale `aether -v` after a fresh pull (main-branch gitlink
+  GPU hosts"), a8b9dbc3 stale `aether -v` after a fresh pull (main-branch gitlink
   lag), 8e8cd35d "We should then set things up so this never ever ever happens
   again, followed by rescoring all the recent benchmark runs."
 
-The machinery exists (tools/deploy_aether_to_claws.sh, bump flow in memory).
+The machinery exists (tools/deploy_aether_to_GPU hosts.sh, bump flow in memory).
 **Proposal:** CLAUDE.md: *"After a verified fix: commit the component, bump the
 gitlink(s), commit+push PBuild, confirm autodeploy (or run
-deploy_aether_to_claws.sh), without being asked. Active branch is AetherLang;
+deploy_aether_to_GPU hosts.sh), without being asked. Active branch is AetherLang;
 keep origin/main's aether gitlink in sync (`git push origin AetherLang:main`)."*
 Optionally wrap the whole chain in one `/ship` skill so it is a single step
 instead of a remembered sequence.
@@ -118,11 +118,11 @@ memorized, both still recurring at the time:
 - Bogus zeros accepted without triage cost days: 78ab3d17 "there is no way a
   model that capable goes 0 for 30"; "0/8 does not make sense"; "We've been
   essentially stuck for a couple of days now." → the triage-immediately rule.
-- Idle hardware: 3b2c0831 "why isn't claw1 in use?", "node 2 seems mostly
+- Idle hardware: 3b2c0831 "why isn't host-a in use?", "node 2 seems mostly
   idle?" — the user pushes large-and-parallel, defaults keep coming back
   small-and-serial.
 
-**Proposal:** three CLAUDE.md lines: big context/output budgets always (128GB
+**Proposal:** three CLAUDE.md lines: big context/output budgets always (large-memory
 hosts, never a serving tool's default); after every eval, sanity-check the
 score and triage bogus results immediately (gen_ok → returncodes → stderr →
 sample gens); prefer parallel across the fleet, via the T'Ra queue.
@@ -172,7 +172,7 @@ was once diagnosed at length: stop-token-in-reasoning empty content, context
 overflow, dead/stale endpoint, unloaded model, direct-hit GPU contention
 (the qwen3.6 "WTF would the model be forced onto CPU?" mystery in ae5e4f5b,
 interrupted twice), scheduler etiquette taught over three messages ("Err, can
-you not hold the m5t queue constantly?" → "please don't submit more than one
+you not hold the host-d queue constantly?" → "please don't submit more than one
 per end point"), expiring GLM proxy JWT, per-host LM Studio tokens hand-fed in
 chat (78ab3d17 ×2). Sessions: 8e8cd35d, 78ab3d17, 3b2c0831, ae5e4f5b, ab32b92a.
 Most fingerprints are already individual memories; the leverage is one runbook
@@ -187,7 +187,7 @@ triage tree. Worth building; this is where the multi-day losses happened.
 - ab32b92a: 4× "claude-opus-4-8 is temporarily unavailable, so auto mode cannot
   determine the safety of Bash" mid-pipeline; 78ab3d17: 5× the same stall.
 - The hot commands are utterly repetitive and safe: `cd /Users/mke/PBuild`
-  (2334×), `ssh -o` to the claws (2148× in one batch alone), `cmake --build`,
+  (2334×), `ssh -o` to the GPU hosts (2148× in one batch alone), `cmake --build`,
   `./build/bin/{aether,rea} --no-cache`, suite scripts, `python3 -c` probes.
 
 The current settings.local.json allowlist is a grab-bag of one-off literals.
@@ -243,9 +243,9 @@ main via `git push origin AetherLang:main`."*
 
 Tokens are hand-fed in chat repeatedly (LM Studio per-host tokens ×3 hosts,
 HF token "Don't forget we have a hugging face token" ×3 verbatim in 78ab3d17,
-z.ai key location, GLM proxy JWT refresh, claw3 sudo password), and the
+z.ai key location, GLM proxy JWT refresh, host-c sudo password), and the
 corruption hot-button: ab32b92a "if I had a dollar for every time I've heard
-something similar to 'the HF token on claw2 is corrupted...', I'd have a
+something similar to 'the HF token on host-b is corrupted...', I'd have a
 lot of dollars." **Proposal:** a CLAUDE.md "Credentials" table of *locations
 only* (never values), now kept in the untracked CLAUDE.local.md rather than
 the public CLAUDE.md, so no session ever asks or
@@ -270,7 +270,7 @@ generative side. The remaining paste-a-spec flow works fine as-is.
   found` (ab32b92a); relative `cd` after cwd reset (0d795c7d ×2).
 - macOS case-insensitive FS vs git (`tools/` vs `Tools/`) bit twice (77042910,
   78ab3d17) — fixed, but the pattern "Mac-authored state silently diverging on
-  the Linux claws" is the axis to watch.
+  the Linux GPU hosts" is the axis to watch.
 - Claude Code app friction reported upstream-worthy: stale flashing-dot session
   indicators (8259730e), lost chips on restart (ae5e4f5b), "safe to relaunch
   during background work?" (ab32b92a).
@@ -282,7 +282,7 @@ generative side. The remaining paste-a-spec flow works fine as-is.
 | # | Cluster | Recurrence | Verdict | Cost |
 |---|---------|-----------|---------|------|
 | 1 | No CLAUDE.md; env preamble re-typed, memory recall slips | ~15+ sessions | write CLAUDE.md | small |
-| 2 | Commit/push/deploy ritual + claw skew | ~30 sessions | CLAUDE.md policy + `/ship` | small |
+| 2 | Commit/push/deploy ritual + bench-host skew | ~30 sessions | CLAUDE.md policy + `/ship` | small |
 | 3 | Long-run fragility + status babysitting | 5 marathon sessions, days lost | CLAUDE.md (promote ⭐ memories) | tiny |
 | 4 | Budget stinginess + bogus-score triage | repeated hot-button corrections | CLAUDE.md (promote ⭐ memories) | tiny |
 | 5 | Stale chip-prompt boilerplate | 5+ identical corrections | CLAUDE.md chip rule | tiny |

@@ -20,7 +20,7 @@ semantics changed and the timing is not comparable.
 | `io_http.p` | text-file write/read rounds + HttpRequest over `file://` (loopback, no network) |
 | `records.p` | fixed-array-of-records value copy + by-value calls, read-mostly then copy-then-mutate: settles whether Phase 4j's win extends to genuinely value-typed data (it doesn't — see plan.md §11) |
 
-Each benchmark targets roughly 1 s on an M4 MacBook Pro so run-to-run noise
+Each benchmark targets roughly 1 s on an Apple-silicon laptop so run-to-run noise
 stays small relative to the signal.
 
 ## Running
@@ -68,7 +68,7 @@ to [verify_overhead_history.jsonl](verify_overhead_history.jsonl).
 python3 Tests/vm_bench/bench_verify_overhead.py --bin build-release/bin/pascal
 ```
 
-Baseline (2026-07-04, Release build, MacBook-Pro-2): ~194ms median
+Baseline (2026-07-04, Release build, host-d): ~194ms median
 process time either way; verifier on/off delta ~1.8ms, smaller than
 run-to-run jitter (~10-20ms) -- not distinguishable from noise, i.e.
 negligible.

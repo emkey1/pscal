@@ -15,18 +15,13 @@ glob Tests/vm_bench/history.jsonl home-path  # archived bench records carry bina
 .claude/skills/ship/SKILL.md bcb880571f73  # home path in pre-existing tooling or notes (line 48 at adoption)
 Docs/ish_guest_stage0.md 514fc49a6ee4  # home path in pre-existing tooling or notes (line 53 at adoption)
 Docs/ish_guest_stage0.md f3f19c9f6f1e  # home path in pre-existing tooling or notes (line 362 at adoption)
-Misc/Benchmarks 0584feb88251  # home path in pre-existing tooling or notes (line 166 at adoption)
-Misc/Benchmarks 0584feb88251  # home path in pre-existing tooling or notes (line 200 at adoption)
-Misc/Benchmarks 252ba23007c2  # home path in pre-existing tooling or notes (line 232 at adoption)
-Misc/Benchmarks 0584feb88251  # home path in pre-existing tooling or notes (line 274 at adoption)
-Misc/Benchmarks 0584feb88251  # home path in pre-existing tooling or notes (line 311 at adoption)
-Misc/Benchmarks 0584feb88251  # home path in pre-existing tooling or notes (line 348 at adoption)
-Misc/Benchmarks 0584feb88251  # home path in pre-existing tooling or notes (line 383 at adoption)
-Tests/vm_bench/verify_overhead_history.jsonl e954bd65391b  # home path in pre-existing tooling or notes (line 2 at adoption)
 build.app 25d7ef3031fe  # home path in pre-existing tooling or notes (line 3 at adoption)
 reflection-notes.md 90ede28e7cc7  # home path in pre-existing tooling or notes (line 189 at adoption)
 tools/build_pscal_pure_glibc_rootfs.sh 86568a4e9766  # a sudoers-syntax parser comment, not a fleet note (line 460 at adoption)
 tools/lldb-pty-launch.lldb 02ef88510855  # home path in pre-existing tooling or notes (line 1 at adoption)
 tools/lldb-pty-postinit.lldb bacb4c1182fd  # home path in pre-existing tooling or notes (line 3 at adoption)
 tools/lldb-pty-postinit.lldb 4d877cf81460  # home path in pre-existing tooling or notes (line 6 at adoption)
-tools/refresh_aether.sh 6681d62a3ad8  # home path in pre-existing tooling or notes (line 5 at adoption)
+
+# fleet-hardware (2026-10-17): a transitional read of the old private-overlay variable name; drop it once
+# ~/.config/pscal/fleet.env sets AETHER_DEPLOY_HOSTS.
+tools/deploy_aether_to_hosts.sh 26b4c3c3ed4e  # old overlay variable name, transitional

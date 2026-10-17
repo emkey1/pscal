@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Commit, push, bump gitlinks, and deploy verified PSCAL/Aether work across the multi-repo layout and the claw fleet. Use after a verified fix, or when the user says "commit and push", "ship it", or asks whether everything is committed/deployed.
+description: Commit, push, bump gitlinks, and deploy verified PSCAL/Aether work across the multi-repo layout and the bench hosts. Use after a verified fix, or when the user says "commit and push", "ship it", or asks whether everything is committed/deployed.
 ---
 
 # /ship — the PSCAL multi-repo ship flow
@@ -58,13 +58,13 @@ it straight to main (fast-forward only; stop and report if it isn't one).
 
 ## 4. Deploy verification
 
-Only aether, rea and pscal-core feed the claw binary. A pascal/clike/exsh-only
+Only aether, rea and pscal-core feed the bench hosts' binary. A pascal/clike/exsh-only
 bump needs no deploy; skip this step and say so in the report.
 
 The post-commit hook (`tools/git-hooks/post-commit`) runs
-`tools/deploy_aether_to_claws.sh` in the background when a PBuild commit
+`tools/deploy_aether_to_hosts.sh` in the background when a PBuild commit
 touches `components/{aether,rea,pscal-core}` (builds the gitlink SHA on
-claw1/claw2/claw3, best-effort; log in `/tmp/aether_autodeploy.log`). It only
+every host in AETHER_DEPLOY_HOSTS, best-effort; log in `/tmp/aether_autodeploy.log`). It only
 fires if `tools/install_aether_autodeploy.sh` installed it, so check first.
 Worktrees share the main clone's hooks:
 
@@ -73,11 +73,11 @@ ls -l "$(git rev-parse --git-common-dir)/hooks/post-commit"
 ```
 
 If the hook is missing (it was on 2026-09-22) or the commit skipped hooks, run
-`bash tools/deploy_aether_to_claws.sh` by hand from the checkout you committed
+`bash tools/deploy_aether_to_hosts.sh` by hand from the checkout you committed
 in. It reads `components/aether/VERSION`, so that submodule must be initialized,
 and it can outlast a foreground Bash call, so run it in the background.
-Confirm the final `=== done: N/3 hosts current` line.
-Spot-check: `ssh claw@claw1 '~/aether-current/build/aether --version'`
+Confirm the final `=== done: N/N hosts current` line.
+Spot-check: `ssh <host> '~/aether-current/build/aether --version'` (hosts in CLAUDE.local.md)
 and compare to `components/aether/VERSION`.
 
 ## 5. Report

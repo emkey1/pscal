@@ -48,7 +48,7 @@ chip description). CLAUDE.md carries the environment; do not re-derive it.
 ## 5. Ship
 
 Invoke the `/ship` flow (component commit → pins → gitlink bump → push →
-claw deploy verify). If the Aether language surface changed, bump VERSION +
+bench-host deploy verify). If the Aether language surface changed, bump VERSION +
 CHANGELOG and update the guide docs (aether_for_llms_and_others.md and the
 concise variant) in the same pass.
 

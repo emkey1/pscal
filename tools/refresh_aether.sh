@@ -2,18 +2,18 @@
 # Rebuild the benchmark `aether` binary on THIS host from the CANONICAL split repo
 # (emkey1/aether), which vendors rea + pscal-core as git submodules under external/.
 # Produces $HOME/aether-current/build/aether -- the path the eval harness points at
-# (run_eval_v2.sh --aether-bin /home/claw/aether-current/build/aether). Run before a
+# (run_eval_v2.sh --aether-bin ~/aether-current/build/aether). Run before a
 # sweep or after any language change so benchmarks always test the live language.
 #
 # This is the single source of truth for "how to build the bench aether on a host"; it
-# is shipped verbatim to every claw by tools/deploy_aether_to_claws.sh, so all three
-# eval boxes build the identical way. It replaces the old, drift-prone full-pscal /
+# is shipped verbatim to every bench host by tools/deploy_aether_to_hosts.sh, so every
+# eval box builds the identical way. It replaces the old, drift-prone full-pscal /
 # monorepo configure (which failed because it needed Pascal sources it never shipped).
 #
 # Usage: refresh_aether.sh [TARGET]
 #   TARGET   git ref/SHA to build. Default: whatever the clone's default branch (main)
 #            points at. The PBuild autodeploy passes the EXACT aether commit recorded in
-#            its components/aether gitlink, so every claw builds the same just-committed
+#            its components/aether gitlink, so every host builds the same just-committed
 #            language -- and a not-yet-pushed SHA fails loudly here (see exit 2) instead
 #            of silently building stale main.
 #

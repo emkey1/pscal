@@ -8,7 +8,7 @@
 # tools/install_aether_canonical_sync.sh) right after a push there; safe to
 # re-run manually / on a schedule too -- it no-ops if already in sync.
 #
-# Best-effort, non-blocking, matches deploy_aether_to_claws.sh's philosophy:
+# Best-effort, non-blocking, matches deploy_aether_to_hosts.sh's philosophy:
 # never force/discard anything, just skip + log loudly on any conflict for a
 # human to resolve. Disable with AETHER_CANONICAL_SYNC=0.
 set -u

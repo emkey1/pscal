@@ -272,8 +272,8 @@ anyway.
   instead — reachable through it, not through `Value` itself.
 - **Pointer tagging.** A pointer payload gets 50 bits (not the plan
   sketch's original 46 — revised the moment a startup canary caught a
-  real violation on first deploy: Linux/ARM64, the claw fleet's GB10
-  Sparks, hands out heap/stack addresses using close to the full 48-bit
+  real violation on first deploy: Linux/ARM64, on the bench's GPU
+  hosts, hands out heap/stack addresses using close to the full 48-bit
   address space, comfortably exceeding a 46-bit budget that had only
   ever been checked against macOS/ARM64). `pscalObjRunPointerWidthCanary()`
   aborts cleanly with a diagnostic on any platform where a real pointer

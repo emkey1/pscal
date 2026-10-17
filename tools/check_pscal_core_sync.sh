@@ -10,7 +10,7 @@
 # tools/bump_pscal_core.sh.
 #
 # Reads both pins straight from git's object db via `git ls-tree` (same
-# pattern tools/deploy_aether_to_claws.sh uses for the aether gitlink) --
+# pattern tools/deploy_aether_to_hosts.sh uses for the aether gitlink) --
 # does not require either submodule to be checked out at HEAD, only that
 # their commits are present locally (i.e. `git submodule update --init`).
 #
