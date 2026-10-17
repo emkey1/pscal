@@ -9,7 +9,7 @@ type Item {
 
 // A procedure whose return type (UNICODESTRING) sorts after TYPE_THREAD.
 fn describe(it: Item) -> Text {
-    ret it.name + " x" + inttostr(it.qty);
+    ret it.name + " x" + int_to_text(it.qty);
 }
 
 fn main() -> Void {
@@ -19,7 +19,7 @@ fn main() -> Void {
     let none: Int[] = [];                           // array with no dimensions
     // Array of nil pointers typed by Item's record AST, Text field and all.
     let items: Item[] = [new Item { name: "bolt", qty: 4 }, new Item { name: "nut", qty: 9 }];
-    let buf: MStream = mstreamcreate();             // MEMORY_STREAM constant
+    let buf: MStream = mstream_new();             // MEMORY_STREAM constant
 
     none = none + [7];
     fx {
@@ -28,8 +28,8 @@ fn main() -> Void {
         println(grid[1][0] + grid[0][1]);
         println(length(none), " ", none[0]);
         println(describe(items[0]), ", ", describe(items[1]));
-        println(length(mstreambuffer(buf)));
+        println(length(mstream_text(buf)));
     }
-    mstreamfree(buf);
+    mstream_free(buf);
     ret;
 }
