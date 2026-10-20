@@ -2670,6 +2670,16 @@ if(NOT PSCAL_PLATFORM_IOS)
         PSCAL_FRONTEND_COMPILER_ID=\"aether\"
         PSCAL_FRONTEND_INSTALL_HOOKS=aetherInstallFrontendHooks)
     pscal_frontend_version(aether aether)
+    # Aether's release label (D75, components/aether/RELEASE) follows the date
+    # version in `aether --version`, as in the standalone build.
+    if(EXISTS "${CMAKE_SOURCE_DIR}/components/aether/RELEASE")
+        file(STRINGS "${CMAKE_SOURCE_DIR}/components/aether/RELEASE" AETHER_RELEASE_LABEL LIMIT_COUNT 1)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+            "${CMAKE_SOURCE_DIR}/components/aether/RELEASE")
+        if(AETHER_RELEASE_LABEL)
+            target_compile_definitions(aether PRIVATE PSCAL_RELEASE_LABEL="${AETHER_RELEASE_LABEL}")
+        endif()
+    endif()
     # Aether installs its parse/semantic/module + diagnostic hooks at startup via
     # reaSetFrontendHooks() (src/aether/state.c); main() calls the installer named
     # here, which also forces that TU to link inside the static library.
