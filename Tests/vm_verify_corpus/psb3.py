@@ -13,7 +13,7 @@ SECTION_ALIGN = 8
 # read_psb3() carries whatever a real file says, so this is only needed when
 # synthesising a header from nothing; it is asserted against a real file by
 # check_format_version() so a bump on the C side can't go unnoticed here.
-FORMAT_VERSION = 5
+FORMAT_VERSION = 6
 
 # Header `flags` bits 0..7 carry the FrontendKind the chunk was compiled
 # under (cache.c's PSB3_FLAG_FRONTEND_MASK, common/frontend_kind.h). This is

@@ -13,9 +13,9 @@
 
 ### 3.0 ISA Conventions
 
-- **105 opcodes** (`0x00`–`0x68`; `OPCODE_COUNT == 0x69`. VM 2.0 Phase 2b
-  took it from 100/`0x63` to 104/`0x67`, and `PUSH_TYPE_DEFAULT` (`0x68`)
-  was appended in 2026-09). Opcode values are pinned explicit
+- **106 opcodes** (`0x00`–`0x69`; `OPCODE_COUNT == 0x6A`. VM 2.0 Phase 2b
+  took it from 100/`0x63` to 104/`0x67`, `PUSH_TYPE_DEFAULT` (`0x68`)
+  was appended in 2026-09 and `FORMAT_VALUE16` (`0x69`) in 2026-10). Opcode values are pinned explicit
   ordinals in `opcodes.def` (not implicit enum-declaration order — that
   changed back in Phase 1a specifically so append-only opcode additions no
   longer renumber the whole page). `PSCAL_VM_VERSION` (Chapter 2) still
@@ -93,6 +93,7 @@
 | 0x1F | `DUP` | `op` | `( a -- a a )` | Duplicate top of stack (deep copy for owned payloads) |
 | 0x54 | `POP` | `op` | `( a -- )` | Discard top of stack, freeing owned payloads; emitted after expression statements |
 | 0x5B | `FORMAT_VALUE` | `op width:u8 prec:u8` | `( v -- v' )` | Replace top with its formatted string per Pascal `:width:prec` syntax; `prec` is read back as signed (`(int8_t)`), −1 meaning "no precision" |
+| 0x69 | `FORMAT_VALUE16` | `op width:u16 prec:u16` | `( v -- v' )` | `FORMAT_VALUE` for a width or precision that does not fit a byte (`s:300`); `prec` 0xFFFF means "no precision". The compiler emits it only then, and rejects a width or precision above 65534 |
 
 `CONST_0`/`CONST_1`/`CONST_TRUE`/`CONST_FALSE` are pure code-size/speed
 specializations: one byte instead of two, no pool indirection. The Chapter 2

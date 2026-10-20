@@ -51,7 +51,7 @@ The header is written by `psb3Write()` (`cache.c`):
 
 ```
 [magic   u32le]  0x50534233 ('PSB3'; little-endian bytes on disk read "3BSP")
-[format_ver u16] container-format version (currently 5, up from 1;
+[format_ver u16] container-format version (currently 6, up from 1;
                  independent of the VM semantic version below —
                  this axis can move without a VM version bump. The 1→2 bump
                  was CODE's cache_count field, §2.2 (the first section-shape
@@ -63,7 +63,10 @@ The header is written by `psb3Write()` (`cache.c`):
                  (their opcodes.def entries are kept for legacy disassembly)
                  but are no longer executable -- see §2.2's CODE entry;
                  3→4 added pointer kind 4 to CONS, see §2.2's CONS entry;
-                 4→5 gave `flags` its frontend field, below)
+                 4→5 gave `flags` its frontend field, below;
+                 5→6 changed CreateThread's call layout to
+                 [addr, arg, 1] and dropped the VM's reader for the old
+                 [addr, arg], which an integer arg made ambiguous)
 [vm_ver  u16]    chunk->version (PSCAL_VM_VERSION at compile time)
 [flags   u32]    bits 0..7: the FrontendKind that compiled this chunk
                  (PSB3_FLAG_FRONTEND_MASK); bits 8..31 reserved, always 0
