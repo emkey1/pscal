@@ -165,8 +165,12 @@ run_rebuilt_check() {
         status="FAIL"
         details+=("exit status differs: $frontend $front_rc, rebuilt chunk $rc")
     fi
+    # As above: stderr without the frontend's "file:line: " prefix.
+    sed -E 's/^[^ ]+:[0-9]+: //' "$WORK_DIR/$test_id.err" > "$WORK_DIR/$test_id.err.cmp"
     for stream in out err; do
-        diff_output="$(diff -u "$WORK_DIR/$1.front.$stream" "$WORK_DIR/$test_id.$stream")"
+        local suffix=""
+        [ "$stream" = err ] && suffix=".cmp"
+        diff_output="$(diff -u "$WORK_DIR/$1.front.$stream$suffix" "$WORK_DIR/$test_id.$stream$suffix")"
         if [ -n "$diff_output" ]; then
             status="FAIL"
             details+=("std$stream differs:" "$diff_output")
