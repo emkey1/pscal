@@ -56,6 +56,11 @@ fi
 BUILT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo '?')"
 BUILT_VER="$(cat VERSION 2>/dev/null || echo '?')"
 log "configure + build (sha ${BUILT_SHA}, VERSION ${BUILT_VER})"
+# Aether's standalone build links SQLite by default (1.0-beta2): say what is
+# missing instead of failing inside CMake's find_package.
+if [ "$(uname -s)" = Linux ] && [ ! -f /usr/include/sqlite3.h ] && grep -q AETHER_ENABLE_SQLITE CMakeLists.txt 2>/dev/null; then
+  log "FAILED: the SQLite development package is missing; install it (sudo apt-get install libsqlite3-dev) and rerun"; exit 4
+fi
 if ! cmake -S . -B build -DCMAKE_BUILD_TYPE=Release >>"$LOG" 2>&1; then
   log "FAILED: cmake configure (see $LOG)"; exit 4
 fi

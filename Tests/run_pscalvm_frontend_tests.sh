@@ -95,9 +95,19 @@ run_case() {
         status="FAIL"
         details+=("exit status differs: $frontend $front_rc, pscalvm $vm_rc")
     fi
+    # A run-time error's "file:line: " prefix names the source path the
+    # frontend was handed; pscalvm has only the .bc, so it prints the message
+    # bare. Compare stderr without that prefix: the parity this checks is the
+    # program's behaviour, not where its source lived. (A cold cached frontend
+    # run used to drop the prefix too, which hid the difference until rea
+    # 879d9e7 fixed it.)
+    sed -E 's/^[^ ]+:[0-9]+: //' "$WORK_DIR/$test_id.front.err" > "$WORK_DIR/$test_id.front.err.cmp"
+    sed -E 's/^[^ ]+:[0-9]+: //' "$WORK_DIR/$test_id.vm.err" > "$WORK_DIR/$test_id.vm.err.cmp"
     local stream diff_output
     for stream in out err; do
-        diff_output="$(diff -u "$WORK_DIR/$test_id.front.$stream" "$WORK_DIR/$test_id.vm.$stream")"
+        local suffix=""
+        [ "$stream" = err ] && suffix=".cmp"
+        diff_output="$(diff -u "$WORK_DIR/$test_id.front.$stream$suffix" "$WORK_DIR/$test_id.vm.$stream$suffix")"
         if [ -n "$diff_output" ]; then
             status="FAIL"
             details+=("std$stream differs:" "$diff_output")
