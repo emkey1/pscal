@@ -398,11 +398,350 @@ def call_method_source(vtable_entry, method_index=0, filler=0, receiver="record"
                       types=[("Obj", VTABLE_RECORD_TYPE)], builtins=[(4, 4)])
 
 
+# --- Loader/verifier operand invariants (VM audit, 2026-10-20) -------------
+
+UPVALUE_SRC = """program Up;
+procedure Outer;
+var x: integer;
+  procedure Inner;
+  begin
+    x := x + 1;
+    writeln(x);
+  end;
+begin
+  x := 41;
+  Inner;
+end;
+begin
+  Outer;
+end.
+"""
+
+RECORD_SRC = """program Rec;
+type T = record a: integer; b: integer; end;
+var r: T;
+begin
+  r.a := 5;
+  writeln(r.a);
+end.
+"""
+
+LOCAL_STRING_SRC = """program LocalString;
+procedure P;
+var s: string[10];
+begin
+  s := 'hi';
+  writeln(s);
+end;
+begin
+  P;
+end.
+"""
+
+ARRAY_SRC = """program Arr;
+var a: array[1..3] of integer;
+    i: integer;
+begin
+  i := 2;
+  a[i] := 1;
+  writeln(a[i]);
+end.
+"""
+
+# Each branch of a par block runs show() on its own thread, started through
+# CALL_HOST CreateThreadAddr with show's code address as an integer.
+PAR_THREADS_SRC = """fn show(k: Int) -> Void {
+    fx { println("branch ", k, " sq=", k * k); }
+}
+fn main() -> Void {
+    par {
+        show(1);
+        show(2);
+    }
+    fx { println("joined"); }
+}
+"""
+
+RECORD_LOCAL_SRC = """program RecLocal;
+type T = record a: integer; end;
+procedure P;
+var r: T;
+begin
+  r.a := 1;
+  writeln(r.a);
+end;
+begin
+  P;
+end.
+"""
+
+OP_PUSH_TYPE_DEFAULT = 0x68
+VARTYPE_RECORD = 6
+VARTYPE_FILE = 7
+OP_CONST_1 = 0x04
+OP_PUSH_IMMEDIATE_INT8 = 0x07
+HOST_FN_CREATE_THREAD_ADDR = 1
+OP_INIT_LOCAL_STRING = 0x33
+OP_GET_ELEMENT_ADDRESS = 0x3F
+OP_LOAD_ELEMENT_VALUE = 0x41
+
+SKIP_VERIFY = {"PSCAL_VM_SKIP_VERIFY": "1"}
+
+
+def parse_procs(data):
+    """[(name, addr_offset, addr, [(index_offset, index, is_local)])] of a
+    PROC section (cache.c's writeProcedureEntriesRecursive layout)."""
+    pos = 0
+    count, pos = psb3.decode_varint(data, pos)
+    procs = []
+    for _ in range(count):
+        n, pos = psb3.decode_varint(data, pos)
+        name = data[pos:pos + n].decode()
+        pos += n
+        addr_off = pos
+        addr, _locals, upvals, _typ, _arity, _cc, _ce, has_enc = struct.unpack_from("<iHBIBBBB", data, pos)
+        pos += struct.calcsize("<iHBIBBBB")
+        if has_enc:
+            n, pos = psb3.decode_varint(data, pos)
+            pos += n
+        uvs = []
+        for _ in range(upvals):
+            uvs.append((pos, data[pos], data[pos + 1]))
+            pos += 3
+        procs.append((name, addr_off, addr, uvs))
+    return procs
+
+
+def find_unique(code, pattern, what):
+    """Offset of the one occurrence of byte pattern `pattern` (None = any
+    byte) in `code`; raises if there is not exactly one."""
+    hits = [i for i in range(len(code) - len(pattern) + 1)
+            if all(b is None or code[i + k] == b for k, b in enumerate(pattern))]
+    if len(hits) != 1:
+        raise RuntimeError(f"expected one {what} in the fixture's code, found {len(hits)}")
+    return hits[0]
+
+
+def with_code(pf, code, cache_count):
+    return pf.with_section(psb3.SEC_CODE, rebuild_code_section(bytes(code), cache_count))
+
+
+def add_loader_audit_cases(args, manifest):
+    def compile_fixture(src):
+        with tempfile.TemporaryDirectory() as home:
+            data = compile_to_bc(args.pascal_bin, src, home)
+        path = os.path.join(args.out, "_fixture.bc")
+        with open(path, "wb") as f:
+            f.write(data)
+        pf = psb3.read_psb3(path)
+        os.remove(path)
+        return data, pf
+
+    # Upvalue descriptors come from the PROC section; the call opcodes turned
+    # their index into a Value* unchecked (a wild read, or a NULL parent
+    # upvalue array). The verifier bounds them by the enclosing routine, and
+    # the VM checks them again when it binds (for a chunk that skipped it).
+    data, pf = compile_fixture(UPVALUE_SRC)
+    manifest.append(write_corpus(args.out, "golden_upvalue.bc", data, True,
+                                  "control: a nested routine updates its parent's local through an upvalue",
+                                  expect_stdout="42"))
+    procs = parse_procs(pf.section(psb3.SEC_PROC))
+    inner_uv = [p for p in procs if p[0] == "inner"][0][3][0]
+
+    def upvalue_case(index, is_local):
+        proc = bytearray(pf.section(psb3.SEC_PROC))
+        proc[inner_uv[0]] = index
+        proc[inner_uv[0] + 1] = is_local
+        return pf.with_section(psb3.SEC_PROC, bytes(proc)).to_bytes()
+
+    manifest.append(write_corpus(args.out, "upvalue_slot_out_of_range.bc", upvalue_case(200, 1), False,
+                                  "inner's upvalue names slot 200 of outer, which has 1",
+                                  expect_stderr="upvalue 0 refers to slot 200"))
+    manifest.append(write_corpus(args.out, "upvalue_parent_upvalue_out_of_range.bc", upvalue_case(5, 0),
+                                  False, "inner's upvalue names upvalue 5 of outer, which has none "
+                                  "(its upvalue array is NULL)",
+                                  expect_stderr="upvalue 0 refers to upvalue 5"))
+    manifest.append(write_corpus(args.out, "upvalue_slot_out_of_range_unverified.bc", upvalue_case(200, 1),
+                                  False, "as upvalue_slot_out_of_range, verifier skipped: the call must "
+                                  "refuse to bind it", expect_stderr="outside its enclosing frame",
+                                  env=SKIP_VERIFY))
+    manifest.append(write_corpus(args.out, "upvalue_parent_upvalue_unverified.bc", upvalue_case(5, 0),
+                                  False, "as upvalue_parent_upvalue_out_of_range, verifier skipped",
+                                  expect_stderr="outside its enclosing frame", env=SKIP_VERIFY))
+
+    # A routine whose address is inside an instruction: the verifier used to
+    # drop it as stale metadata and the VM then entered it there anyway.
+    data, pf = compile_fixture(HELLO_SRC)
+    proc = bytearray(pf.section(psb3.SEC_PROC))
+    name, addr_off, addr, _ = parse_procs(bytes(proc))[0]
+    struct.pack_into("<i", proc, addr_off, addr + 1)
+    manifest.append(write_corpus(args.out, "routine_starts_mid_instruction.bc",
+                                  pf.with_section(psb3.SEC_PROC, bytes(proc)).to_bytes(), False,
+                                  f"routine {name}'s address moved one byte into its first instruction",
+                                  expect_stderr="which is not an instruction boundary"))
+
+    # GET_FIELD_ADDRESS* read the field name with AS_STRING on whatever
+    # constant the operand names. Point it at the program's NIL constant
+    # (the operand of the leading CONSTANT that initialises `myself`).
+    data, pf = compile_fixture(RECORD_SRC)
+    code_bytes, cache_count = code_section_payload(pf.section(psb3.SEC_CODE))
+    code = bytearray(code_bytes)
+    if code[0] != OP_CONSTANT:
+        raise RuntimeError("record fixture no longer starts with CONSTANT <nil>")
+    at = find_unique(code, [OP_GET_GSLOT_ADDRESS, None, None, OP_GET_FIELD_ADDRESS], "r.a field address")
+    code[at + 4] = code[1]
+    bad_field = with_code(pf, code, cache_count).to_bytes()
+    manifest.append(write_corpus(args.out, "get_field_address_non_string_name.bc", bad_field, False,
+                                  "GET_FIELD_ADDRESS names a NIL constant as the field",
+                                  expect_stderr="is not a string"))
+    manifest.append(write_corpus(args.out, "get_field_address_non_string_name_unverified.bc", bad_field,
+                                  False, "as get_field_address_non_string_name, verifier skipped",
+                                  expect_stderr="Field name constant is invalid", env=SKIP_VERIFY))
+    code = bytearray(code_bytes)
+    code[at] = OP_GET_GSLOT  # same operands and stack effect: the record value, not its address
+    manifest.append(write_corpus(args.out, "get_field_address_of_record_value.bc",
+                                  with_code(pf, code, cache_count).to_bytes(), False,
+                                  "GET_FIELD_ADDRESS on the record value instead of its address: popping "
+                                  "the base freed the field the address pointed into",
+                                  expect_stderr="needs a pointer to the record"))
+
+    # PUSH_TYPE_DEFAULT builds one default per chunk and pushes shared copies;
+    # compilers emit it only for records, interfaces and pointers. A file
+    # default shared that way was freed twice.
+    data, pf = compile_fixture(RECORD_LOCAL_SRC)
+    code_bytes, cache_count = code_section_payload(pf.section(psb3.SEC_CODE))
+    at = find_unique(code_bytes, [OP_PUSH_TYPE_DEFAULT, VARTYPE_RECORD], "PUSH_TYPE_DEFAULT RECORD")
+    code = bytearray(code_bytes)
+    code[at + 1] = VARTYPE_FILE
+    file_default = with_code(pf, code, cache_count).to_bytes()
+    manifest.append(write_corpus(args.out, "push_type_default_file.bc", file_default, False,
+                                  "PUSH_TYPE_DEFAULT asks for a FILE default",
+                                  expect_stderr="PUSH_TYPE_DEFAULT of type FILE"))
+    manifest.append(write_corpus(args.out, "push_type_default_file_unverified.bc", file_default, False,
+                                  "as push_type_default_file, verifier skipped",
+                                  expect_stderr="VM Error: PUSH_TYPE_DEFAULT of type FILE", env=SKIP_VERIFY))
+
+    # INIT_LOCAL_* indexed frame->slots[slot] with no window check (the
+    # verifier does not check local slots).
+    data, pf = compile_fixture(LOCAL_STRING_SRC)
+    code_bytes, cache_count = code_section_payload(pf.section(psb3.SEC_CODE))
+    code = bytearray(code_bytes)
+    at = find_unique(code, [OP_INIT_LOCAL_STRING, 0, 10], "INIT_LOCAL_STRING 0 10")
+    code[at + 1] = 200
+    manifest.append(write_corpus(args.out, "init_local_string_slot_out_of_range.bc",
+                                  with_code(pf, code, cache_count).to_bytes(), False,
+                                  "INIT_LOCAL_STRING into slot 200 of a one-slot frame",
+                                  expect_stderr="Local slot index 200 out of range"))
+
+    # GET_ELEMENT_ADDRESS / LOAD_ELEMENT_VALUE operand shapes.
+    data, pf = compile_fixture(ARRAY_SRC)
+    code_bytes, cache_count = code_section_payload(pf.section(psb3.SEC_CODE))
+    at = find_unique(code_bytes, [OP_GET_GSLOT_ADDRESS, None, None, OP_GET_ELEMENT_ADDRESS, 1],
+                     "a[i] element address")
+    code = bytearray(code_bytes)
+    code[at] = OP_GET_GSLOT  # same operands and stack effect: the array value, not its address
+    manifest.append(write_corpus(args.out, "get_element_address_of_array_value.bc",
+                                  with_code(pf, code, cache_count).to_bytes(), False,
+                                  "GET_ELEMENT_ADDRESS on the array value instead of its address "
+                                  "(the copy used to leak, its storage handed out)",
+                                  expect_stderr="needs a pointer to the array"))
+    code = bytearray(code_bytes)
+    code[at + 4] = 2
+    manifest.append(write_corpus(args.out, "get_element_address_extra_index_unverified.bc",
+                                  with_code(pf, code, cache_count).to_bytes(), False,
+                                  "two indices into a one-dimensional array; the second used to be "
+                                  "dropped (verifier skipped: the depth no longer balances)",
+                                  expect_stderr="2 indices for an array of 1 dimension(s)", env=SKIP_VERIFY))
+    at = find_unique(code_bytes, [OP_GET_GSLOT_ADDRESS, None, None, OP_LOAD_ELEMENT_VALUE, 1],
+                     "a[i] element load")
+    code = bytearray(code_bytes)
+    code[at + 4] = 0
+    manifest.append(write_corpus(args.out, "load_element_value_no_indices.bc",
+                                  with_code(pf, code, cache_count).to_bytes(), False,
+                                  "LOAD_ELEMENT_VALUE with a dimension count of 0",
+                                  expect_stderr="LOAD_ELEMENT_VALUE has no indices"))
+
+    # readAst recursed once per nesting level before verification: a deep
+    # enough TYPE section ran the C stack out.
+    data, pf = compile_fixture(TRIVIAL_SRC)
+    depth = 100000
+    node_head = b"\x01" + struct.pack("<IIB", 0, 0, 0) + b"\x00" + struct.pack("<i", 0)
+    node_tail = b"\x00\x00" + struct.pack("<i", 0)
+    deep = psb3.encode_varint(1) + psb3.encode_varint(1) + b"t" + node_head * depth + b"\x00" + node_tail * depth
+    manifest.append(write_corpus(args.out, "type_section_nested_too_deep.bc",
+                                  pf.with_section(psb3.SEC_TYPE, deep).to_bytes(), False,
+                                  f"one type whose AST nests {depth} levels deep",
+                                  expect_stderr="nested more than 1000 levels deep"))
+
+    # A thread started from an integer code address (CreateThreadAddr) was
+    # entered wherever the integer pointed; it now has to be a routine's entry,
+    # the code the verifier walked.
+    if os.path.exists(args.aether_bin):
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as src_dir:
+            src_path = os.path.join(src_dir, "par.aether")
+            with open(src_path, "w") as f:
+                f.write(PAR_THREADS_SRC)
+            env = dict(os.environ)
+            env["HOME"] = home
+            subprocess.run([args.aether_bin, "--no-run", src_path], cwd=src_dir, env=env,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            matches = glob.glob(os.path.join(home, ".pscal", "bc_cache", "*.bc"))
+            if len(matches) != 1:
+                raise RuntimeError(f"expected one cache entry for the par fixture, found {len(matches)}")
+            with open(matches[0], "rb") as f:
+                data = f.read()
+        path = os.path.join(args.out, "_fixture.bc")
+        with open(path, "wb") as f:
+            f.write(data)
+        pf = psb3.read_psb3(path)
+        os.remove(path)
+        manifest.append(write_corpus(args.out, "golden_par_threads.bc", data, True,
+                                      "control: two par branches each run show() on a thread",
+                                      expect_stdout="joined"))
+        show_addr = [p for p in parse_procs(pf.section(psb3.SEC_PROC)) if p[0] == "show"][0][2]
+        code_bytes, cache_count = code_section_payload(pf.section(psb3.SEC_CODE))
+        at = find_unique(code_bytes, [OP_PUSH_IMMEDIATE_INT8, show_addr, OP_CONST_1, OP_CONST_1,
+                                      OP_CALL_HOST, HOST_FN_CREATE_THREAD_ADDR], "first par branch spawn")
+        code = bytearray(code_bytes)
+        code[at + 1] = show_addr + 2  # inside show's code, not its entry
+        manifest.append(write_corpus(args.out, "thread_entry_not_a_routine.bc",
+                                      with_code(pf, code, cache_count).to_bytes(), False,
+                                      "CreateThreadAddr given show's address + 2 instead of show's entry",
+                                      # Refused by the threads fix (thread-entry validation),
+                                      # not by this branch on its own.
+                                      expect_stderr="is not the address of a procedure"))
+    else:
+        print(f"warning: aether binary not found at {args.aether_bin}; skipping the par thread cases",
+              file=sys.stderr)
+
+    # A callee that pops below its own frame (past CALL_HOST, where the
+    # verifier stops tracking depth) used to have returnFromCall raise
+    # stackTop back over the caller's already-freed strings.
+    if os.path.exists(args.pscalasm_bin):
+        source = "\n".join([
+            "PSCALASM2", "version 9", "constants 3",
+            'const 0 4 "abc"', 'const 1 4 "def"', 'const 2 4 "p"',
+            "builtin_map 0", "const_symbols 0", "procedures 1",
+            'proc 0 "p" 5 0 0 1 0 -1',
+            "code 22",
+            "inst 1 JUMP 0 0 0 6",
+            "label p",
+            "inst 1 CALL_HOST 0", "inst 1 POP", "inst 1 ADD", "inst 1 POP", "inst 1 RETURN",
+            "label main",
+            "inst 1 CONSTANT 0", "inst 1 CONSTANT 1", "inst 1 CALL_USER_PROC 0 2 0",
+            "inst 1 POP", "inst 1 POP", "inst 1 HALT",
+            "end", ""])
+        manifest.append(write_corpus(args.out, "callee_pops_into_caller.bc", assemble(args.pscalasm_bin, source),
+                                      False, "after CALL_HOST the callee pops and frees two of its caller's "
+                                      "strings, then returns",
+                                      expect_stderr="Stack underflow into the caller's frame on return"))
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pascal-bin", default=os.path.join(REPO_ROOT, "build", "bin", "pascal"))
     ap.add_argument("--exsh-bin", default=os.path.join(REPO_ROOT, "build", "bin", "exsh"))
     ap.add_argument("--pscalasm-bin", default=os.path.join(REPO_ROOT, "build", "bin", "pscalasm"))
+    ap.add_argument("--aether-bin", default=os.path.join(REPO_ROOT, "build", "bin", "aether"))
     ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "corpus"))
     args = ap.parse_args()
 
@@ -856,6 +1195,23 @@ def main():
                     "used to crash on them",
                     vtable_entry=lambda addr: addr, receiver="alloc",
                     expect_stderr="Object missing V-table")
+
+    # --- Loader/verifier operand invariants (VM audit, 2026-10-20). Each case
+    # starts from a real compile and corrupts one thing the VM used to trust:
+    # see add_loader_audit_cases(). ---
+    add_loader_audit_cases(args, manifest)
+
+    # Fixed reproducers that cannot be regenerated from source (mutation-fuzzer
+    # finds): static/*.bc with their entries in static/manifest.json.
+    static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+    static_manifest = os.path.join(static_dir, "manifest.json")
+    if os.path.exists(static_manifest):
+        with open(static_manifest) as f:
+            for entry in json.load(f):
+                with open(os.path.join(static_dir, entry["file"]), "rb") as src:
+                    data = src.read()
+                manifest.append(write_corpus(args.out, entry["file"], data, entry["expect_ok"],
+                                             entry.get("note", ""), entry.get("expect_stderr")))
 
     manifest_path = os.path.join(args.out, "manifest.json")
     with open(manifest_path, "w") as f:

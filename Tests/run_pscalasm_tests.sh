@@ -108,10 +108,10 @@ const 0 4 "foo"
 builtin_map 0
 const_symbols 0
 procedures 1
-proc 0 "foo" 3 0 0 1 0 -1
+proc 0 "foo" 5 0 0 1 0 -1
 code 12
 inst 1 JUMP @main
-label L0003
+label L0005
 inst 2 CONST_TRUE
 inst 2 RETURN
 label main
@@ -753,7 +753,7 @@ builtin_map 0
 const_symbols 0
 types 0
 procedures 2
-proc 0 "outer" 0 0 0 0 0 -1
+proc 0 "outer" 0 1 0 0 0 -1
 proc 1 "inner" 0 0 1 0 0 0
 upvalue 1 0 0 1 0
 code 1

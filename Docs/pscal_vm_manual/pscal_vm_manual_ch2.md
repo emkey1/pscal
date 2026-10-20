@@ -24,7 +24,14 @@ PSCAL has a single on-disk bytecode container format with two consumers:
 
 1. **The bytecode cache** (`saveBytecodeToCache`) — every frontend
    transparently caches compiled chunks under a per-compiler cache directory,
-   keyed by `<compiler_id>-<basename>-<path_hash>-<source_hash>-<combined_hash>.bc`.
+   keyed by `<compiler_id>-<basename>-<path_hash>.bc`: one entry per compiler
+   and source path, found with a single `open()` (no directory scan) and
+   replaced in place when the source changes, so the directory does not grow
+   with every edit. The source and combined hashes live in the `META` section,
+   and an entry is written to `<entry>.tmp.<pid>` and renamed over the old one,
+   in a 0700 directory. (Before 2026-10-20 the name also carried the source and
+   combined hashes, every lookup scanned the whole directory, and stale
+   versions were never removed; files in that old form are simply ignored.)
    Cache freshness requires the cache file's mtime to be *strictly newer*
    than the source (whole-second resolution, `isCacheFresh()`), plus hash
    verification on load via the `META` section (§2.2).

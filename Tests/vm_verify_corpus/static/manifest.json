@@ -1,0 +1,26 @@
+[
+  {
+    "file": "fuzz_0cfaa4f6f4_routine_mid_instruction.bc",
+    "expect_ok": false,
+    "note": "fuzzer reproducer (seed par_shared_tuple_call_pass.aether): main's PROC address moved inside an instruction",
+    "expect_stderr": "which is not an instruction boundary"
+  },
+  {
+    "file": "fuzz_39f051f742_routine_mid_instruction.bc",
+    "expect_ok": false,
+    "note": "fuzzer reproducer (seed arr_param_record_field_init_pass.aether): routine lineup's PROC address moved inside an instruction",
+    "expect_stderr": "which is not an instruction boundary"
+  },
+  {
+    "file": "fuzz_9412acddde_thread_entry.bc",
+    "expect_ok": false,
+    "note": "fuzzer reproducer (seed par_branch_lines.aether): CreateThreadAddr reached with an integer that is not a routine entry; refused by the threads fix (on this branch alone CONSTANT's bound check stops it instead: 'Constant index 100 out of bounds for CONSTANT')",
+    "expect_stderr": "is not the address of a procedure"
+  },
+  {
+    "file": "fuzz_ef1bd12048_push_type_default_file.bc",
+    "expect_ok": false,
+    "note": "fuzzer reproducer (seed array_literal_tmp_slot_pass.aether): PUSH_TYPE_DEFAULT's type byte changed from POINTER to FILE",
+    "expect_stderr": "PUSH_TYPE_DEFAULT of type FILE"
+  }
+]
