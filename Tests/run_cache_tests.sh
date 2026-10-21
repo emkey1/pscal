@@ -2,7 +2,8 @@
 # Bytecode-cache layout and unit-search checks (Tests/cache): one entry per
 # compiler and source path, written atomically in a 0700 directory; a unit
 # search path longer than PATH_MAX is reported, not overrun; --no-cache
-# neither reads nor writes the cache in any front end.
+# neither reads nor writes the cache in any front end; --prune-cache removes
+# exactly the entries whose source file is gone.
 set -u
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PASCAL_BIN="${PASCAL_BIN:-$ROOT_DIR/build/bin/pascal}"
