@@ -335,8 +335,8 @@ build/bin/exsh --dump-bytecode components/exsh/examples/exsh/functions
 build/bin/exsh components/exsh/examples/exsh/builtins
 ```
 
-Bytecode is cached in `~/.pscal/bc_cache` (`--no-cache` to force
-recompilation). The runtime exports `EXSH_LAST_STATUS` after every builtin
+Bytecode is cached in `~/.pscal/bc_cache` (`--no-cache` compiles fresh
+and neither reads nor writes the cache). The runtime exports `EXSH_LAST_STATUS` after every builtin
 invocation. `export`/`unset` mutate the process environment for subsequent
 commands. Direct parameter interpolation (`$NAME`, `${NAME}`) is parsed but
 not yet expanded. **Known limitation**: control-flow helpers (`if`, loop
