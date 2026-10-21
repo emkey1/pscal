@@ -87,6 +87,50 @@ else
     harness_report PASS "vm_fx_deny_net_thread_pool" "--deny net reaches a builtin queued on the thread pool"
 fi
 
+# --- Case 1d: --deny proc lets halt end the program with its status ------
+# halt/exit are proc-class, and the gate used to deny them: a program that
+# ended with halt(n) under --deny proc printed its output and exited 1. Aether
+# exits `fn main() -> Int` and its failed contracts through halt, and the
+# benchmark and the MCP runner run under --deny net,proc.
+cat > "$WORK_DIR/halt_test.pas" <<'EOF'
+program HaltTest;
+begin
+  writeln('before');
+  halt(3);
+  writeln('after');
+end.
+EOF
+"$PASCAL_BIN" --deny proc --no-cache "$WORK_DIR/halt_test.pas" > "$deny_out" 2>&1
+deny_status=$?
+if [ "$deny_status" -ne 3 ] || grep -q "denied by --deny" "$deny_out" || [ "$(cat "$deny_out")" != "before" ]; then
+    harness_report FAIL "vm_fx_deny_proc_halt" "--deny proc lets halt end the program with its status" \
+        "expected exit 3 and only 'before', got exit $deny_status:\n$(cat "$deny_out")"
+else
+    harness_report PASS "vm_fx_deny_proc_halt" "--deny proc lets halt end the program with its status"
+fi
+
+# --- Case 1e: --deny proc still rejects spawning work on a thread -------
+cat > "$WORK_DIR/proc_pool_test.pas" <<'EOF'
+program ProcPoolTest;
+var t: integer;
+begin
+  t := ThreadPoolSubmit('dnslookup', 'localhost');
+  WaitForThread(t);
+  writeln('pool: ', ThreadGetResult(t, true));
+end.
+EOF
+"$PASCAL_BIN" --deny proc --no-cache "$WORK_DIR/proc_pool_test.pas" > "$deny_out" 2>&1
+deny_status=$?
+if [ "$deny_status" -eq 0 ]; then
+    harness_report FAIL "vm_fx_deny_proc_thread_pool" "--deny proc rejects a thread pool submission" \
+        "expected nonzero exit, got 0:\n$(cat "$deny_out")"
+elif ! grep -q "builtin 'threadpoolsubmit' denied by --deny/PSCAL_VM_DENY policy" "$deny_out"; then
+    harness_report FAIL "vm_fx_deny_proc_thread_pool" "--deny proc rejects a thread pool submission" \
+        "wrong diagnostic:\n$(cat "$deny_out")"
+else
+    harness_report PASS "vm_fx_deny_proc_thread_pool" "--deny proc rejects a thread pool submission"
+fi
+
 # --- Case 2: record -> mutate live state -> replay must match record ------
 export VM_FX_TEST_TMP="$WORK_DIR"
 export VM_FX_HTTP_TARGET="$WORK_DIR/http_target.txt"
