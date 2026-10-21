@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
 BASE_SUITE_KEYS = ["core", "library", "scope"]
-OPTIONAL_SUITE_KEYS = ["ios", "smallclue-git", "smallclue-git-mutation", "smallclue-git-path-truncate", "smallclue-git-remote", "vm-verify-corpus", "vm-fx-policy", "vm-thread-stress", "vm-ext-plugin"]
+OPTIONAL_SUITE_KEYS = ["ios", "smallclue-git", "smallclue-git-mutation", "smallclue-git-path-truncate", "smallclue-git-remote", "vm-verify-corpus", "vm-fx-policy", "vm-thread-stress", "vm-stack-growth", "vm-ext-plugin"]
 SUITE_KEYS = BASE_SUITE_KEYS + OPTIONAL_SUITE_KEYS
 
 
@@ -170,6 +170,12 @@ def main(argv: Sequence[str]) -> int:
         "default; needs build/bin/pascal and build/bin/clike already built).",
     )
     parser.add_argument(
+        "--include-vm-stack-growth",
+        action="store_true",
+        help="Run the stack-growth and copy-on-write race fixtures in "
+        "Tests/vm_stack_growth_stress (opt-in, off by default; needs build/bin/pascal).",
+    )
+    parser.add_argument(
         "--include-vm-ext-plugin",
         action="store_true",
         help="Run the Phase 7 dlopen plugin ABI regression suite (opt-in, off by default; "
@@ -196,6 +202,8 @@ def main(argv: Sequence[str]) -> int:
         selected.append("vm-fx-policy")
     if args.include_vm_thread_stress and "vm-thread-stress" not in skip:
         selected.append("vm-thread-stress")
+    if args.include_vm_stack_growth and "vm-stack-growth" not in skip:
+        selected.append("vm-stack-growth")
     if args.include_vm_ext_plugin and "vm-ext-plugin" not in skip:
         selected.append("vm-ext-plugin")
 
@@ -267,6 +275,10 @@ def main(argv: Sequence[str]) -> int:
     if "vm-thread-stress" in selected:
         vm_thread_stress_script = tests_root / "vm_thread_stress" / "run.sh"
         commands["vm-thread-stress"] = (["bash", str(vm_thread_stress_script)], repo_root, False)
+
+    if "vm-stack-growth" in selected:
+        vm_stack_growth_script = tests_root / "vm_stack_growth_stress" / "run.sh"
+        commands["vm-stack-growth"] = (["bash", str(vm_stack_growth_script)], repo_root, False)
 
     if "vm-ext-plugin" in selected:
         vm_ext_plugin_script = tests_root / "vm_ext_plugin" / "run.sh"
