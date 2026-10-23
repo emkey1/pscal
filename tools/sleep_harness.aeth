@@ -1,0 +1,159 @@
+// sleep_harness.aeth - the Aether timer regression harness: one fixed run of the timing table.
+//
+// Run it with the compiler under test (about 13 s):
+//     aether --no-cache tools/sleep_harness.aeth
+// or paste the whole file into the Aether MCP runner (run_aether_code). Every row prints the
+// measured time against its band and PASS / FAIL / SKIP; the last line is "HARNESS: PASS" or
+// "HARNESS: FAIL".
+//
+// The bands are the ones agreed after the 22 Oct 2026 timer investigation (1.7x overshoot that
+// turned out to be macOS timer coalescing on a low-QoS host process, not the compiler):
+//   - a pause of n ms may run long by up to max(110 ms, 10% of n), and never short;
+//   - realtimeclock (epoch seconds) must agree with clock_ms within one whole-second window.
+// A throttled host shows as proportional overshoot (sleep(500) -> ~900 ms, sleep(3000) -> ~5 s),
+// which fails the 500/2000/3000 rows. Results only mean something when the runner's host process
+// runs at normal priority: a FAIL here is first a question about how the runner was launched.
+
+const FIXED_MS = 110;      // the fixed overhead a pause may add
+const SHARE_PCT = 10;      // or this share of the pause, whichever is greater
+const EARLY_MS = 1;        // clock_ms granularity: a pause may read this much short
+const EPOCH_MS = 1000;     // realtimeclock is whole seconds: one window of disagreement
+
+fn allowance(n: Int) -> Int {
+    ret max(FIXED_MS, (n * SHARE_PCT) div 100);
+}
+
+// One verdict line; returns 1 for a failure, 0 otherwise.
+fn report(label: Text, n: Int, measured: Int, epochDelta: Int) -> Int {
+    let hi: Int = n + allowance(n);
+    let ok: Bool = measured >= n - EARLY_MS && measured <= hi;
+    let clockOk: Bool = abs(epochDelta * 1000 - measured) <= EPOCH_MS;
+    let verdict = "PASS";
+    if !ok || !clockOk {
+        verdict = "FAIL";
+    }
+    fx {
+        println(verdict, "  ", label, ": measured ", measured, " ms, expected ", n, "-", hi,
+                " ms (over by ", measured - n, "); realtimeclock delta ", epochDelta, " s",
+                if clockOk { "" } else { " DISAGREES with clock_ms" });
+    }
+    if verdict == "FAIL" {
+        ret 1;
+    }
+    ret 0;
+}
+
+fn timeSleep(n: Int) -> (Int, Int) {
+    let failed = 0;
+    let took = 0;
+    fx {
+        let e0: Int = realtimeclock();
+        let t0: Int = clock_ms();
+        sleep(n);
+        let t1: Int = clock_ms();
+        let e1: Int = realtimeclock();
+        took = t1 - t0;
+        failed = report("sleep(" + int_to_text(n) + ")", n, took, e1 - e0);
+    }
+    ret (failed, took);
+}
+
+fn timeDelay(n: Int) -> Int {
+    let failed = 0;
+    fx {
+        let e0: Int = realtimeclock();
+        let t0: Int = clock_ms();
+        delay(n);
+        let t1: Int = clock_ms();
+        let e1: Int = realtimeclock();
+        failed = report("delay(" + int_to_text(n) + ")", n, t1 - t0, e1 - e0);
+    }
+    ret failed;
+}
+
+fn timeTask(n: Int) -> Int {
+    let failed = 0;
+    fx {
+        if !has_builtin("task", "task_spawn") {
+            println("SKIP  task_spawn(sleep, ", n, ") + task_wait: tasks are not allowed in this run (--deny proc?)");
+        } else {
+            let e0: Int = realtimeclock();
+            let t0: Int = clock_ms();
+            let h: Int = task_spawn("sleep", "harness_nap", n);
+            let rc: Int = task_wait(h);
+            let t1: Int = clock_ms();
+            let e1: Int = realtimeclock();
+            failed = report("task_spawn(sleep, " + int_to_text(n) + ") + task_wait", n, t1 - t0, e1 - e0);
+            if rc != 0 {
+                println("FAIL  task_wait returned ", rc, ", not 0");
+                failed = 1;
+            }
+        }
+    }
+    ret failed;
+}
+
+// clock_ms and realtimeclock read at the same moment, and across a busy second.
+fn clockAgreement() -> Int {
+    let failed = 0;
+    fx {
+        let ms: Int = clock_ms();
+        let s: Int = realtimeclock();
+        let gap: Int = abs(s * 1000 - ms);
+        let verdict = "PASS";
+        if gap > EPOCH_MS {
+            verdict = "FAIL";
+            failed = 1;
+        }
+        println(verdict, "  clock_ms vs realtimeclock at rest: ", ms, " ms vs ", s, " s (gap ", gap, " ms, at most ", EPOCH_MS, ")");
+    }
+    ret failed;
+}
+
+fn main() -> Int {
+    let failures = 0;
+    let rows = 0;
+    fx {
+        println("Aether sleep harness - compiler ", aether_version(), ", started ", now_text());
+        println("Band: a pause of n ms may run long by max(", FIXED_MS, " ms, ", SHARE_PCT, "% of n), never short; ",
+                "realtimeclock within ", EPOCH_MS, " ms of clock_ms.");
+        println("Only meaningful when the runner's host process runs at normal priority ",
+                "(a throttled, low-QoS host shows as proportional overshoot - check how it was launched before blaming the compiler).");
+        println("");
+    }
+    failures = failures + clockAgreement();
+    rows = rows + 1;
+    loop k in 0..8 {
+        let (f100, t100) = timeSleep(100);
+        failures = failures + f100;
+        rows = rows + 1;
+    }
+    let (f500, t500) = timeSleep(500);
+    let (f2000, t2000) = timeSleep(2000);
+    let (f3000, t3000) = timeSleep(3000);
+    failures = failures + f500 + f2000 + f3000;
+    failures = failures + timeDelay(100) + timeDelay(500) + timeDelay(2000) + timeDelay(3000);
+    failures = failures + timeTask(500);
+    rows = rows + 8;
+    fx {
+        println("");
+        if failures == 0 {
+            println("HARNESS: PASS (", rows, " rows)");
+        } else {
+            println("HARNESS: FAIL (", failures, " of ", rows, " rows failed)");
+            // sleep(3000) as a multiple of what was asked, in hundredths
+            let ratio: Int = (t3000 * 100) div 3000;
+            if ratio >= 130 {
+                println("Hint: sleep(3000) took ", ratio, "% of the time asked - proportional overshoot, the 22 Oct 2026 ",
+                        "signature of a throttled (low-QoS) runner host, not a compiler fault. Check how the runner was launched first.");
+            } else {
+                println("Hint: the overshoot is not proportional (sleep(3000) took ", ratio, "% of the time asked), ",
+                        "so this is not the 22 Oct throttling pattern: look at the compiler and runtime.");
+            }
+        }
+    }
+    if failures == 0 {
+        ret 0;
+    }
+    ret 1;
+}

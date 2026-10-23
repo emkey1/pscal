@@ -95,6 +95,20 @@ Example usage:
 build/bin/aether --no-cache components/aether/examples/showcase/agent_report
 ```
 
+Timer regression check: one fixed program runs the agreed timing table
+(`sleep`/`delay` at 100/500/2000/3000 ms, `task_spawn` + `task_wait`, and
+`clock_ms` against `realtimeclock`). It prints PASS/FAIL for each row and a final
+`HARNESS: PASS` or `HARNESS: FAIL` (exit status 1), in about 13 seconds:
+
+```
+build/bin/aether --no-cache tools/sleep_harness.aeth
+```
+
+You can also paste the file into the Aether MCP runner (`run_aether_code`) as a
+single call. The results only mean something when the process running it is at
+normal priority. A low-QoS host shows proportional overshoot (macOS timer
+coalescing, 22 Oct 2026), and the harness names that pattern when it sees it.
+
 Early internal testing suggests LLMs given only the Aether reference produce
 correct programs at a higher rate than they produce correct Python for the
 same tasks. [VERIFY: link the eval harness / benchmark scripts when
