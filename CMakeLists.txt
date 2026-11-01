@@ -1378,6 +1378,13 @@ set(SMALLCLUE_SOURCES
 if(PSCAL_PLATFORM_IOS OR APPLE)
     list(APPEND PSCAL_CORE_SOURCES ${SMALLCLUE_SOURCES})
 endif()
+if(PSCAL_PLATFORM_IOS)
+    # The applets are plain POSIX programs; app_hooks.h says what differs on iOS.
+    set(SMALLCLUE_APPLET_SOURCES ${SMALLCLUE_SOURCES})
+    list(FILTER SMALLCLUE_APPLET_SOURCES EXCLUDE REGEX "/(core|integration|micro_main_stub|spawn)\\.c$")
+    set_property(SOURCE ${SMALLCLUE_APPLET_SOURCES} APPEND PROPERTY COMPILE_OPTIONS
+        -include ${CMAKE_SOURCE_DIR}/src/smallclue/src/app_hooks.h)
+endif()
 
 set(PSCAL_OPENSSH_ROOT third-party/openssh-10.2p1)
 set(PSCAL_OPENSSH_COMMON_SOURCES
@@ -2776,6 +2783,13 @@ if(PSCAL_BUILD_STATIC_LIBS)
         PSCAL_FRONTEND_COMPILER_ID=\"aether\"
         PSCAL_FRONTEND_INSTALL_HOOKS=aetherInstallFrontendHooks
         PSCAL_PROGRAM_VERSION_OVERRIDE="${AETHER_LANG_VERSION}")
+    # The same release label as the aether executable's, for the iOS app.
+    if(EXISTS "${CMAKE_SOURCE_DIR}/components/aether/RELEASE")
+        file(STRINGS "${CMAKE_SOURCE_DIR}/components/aether/RELEASE" AETHER_RELEASE_LABEL LIMIT_COUNT 1)
+        if(AETHER_RELEASE_LABEL)
+            target_compile_definitions(pscal_aether_static PRIVATE PSCAL_RELEASE_LABEL="${AETHER_RELEASE_LABEL}")
+        endif()
+    endif()
     # Aether installs its parse/semantic/module + diagnostic hooks at startup via
     # reaSetFrontendHooks() (src/aether/state.c); main() calls the installer named
     # here, which also forces that TU to link inside the static library.

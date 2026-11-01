@@ -438,7 +438,7 @@ int vmVersion(str root){
 // writer. An installed runtime carries headers only, so there it falls back
 // to the epoch this writer implements. A file of any other epoch is rejected
 // when the VM loads it, not misread.
-const int PSB3_FORMAT_EPOCH = 5;
+const int PSB3_FORMAT_EPOCH = 6;
 
 int formatVersion(str root){
   str cachePath = coreHeader(root, "core/cache.c");

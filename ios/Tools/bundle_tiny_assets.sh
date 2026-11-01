@@ -42,6 +42,15 @@ if [ "${missing}" -ne 0 ]; then
     exit 1
 fi
 
+# The app carries no core/cache.c, so tiny.clike uses its own PSB3 epoch here, and
+# a stale one makes every program it compiles fail to load.
+epoch="$(/usr/bin/sed -n 's/^const int PSB3_FORMAT_EPOCH = \([0-9]*\);$/\1/p' "${repo_root}/bin/tiny.clike")"
+format="$(/usr/bin/sed -n 's/^#define PSB3_FORMAT_VERSION \([0-9]*\)u$/\1/p' "${core_src}/core/cache.c")"
+if [ -z "${epoch}" ] || [ "${epoch}" != "${format}" ]; then
+    echo "[bundle tiny] error: PSB3_FORMAT_EPOCH in bin/tiny.clike is '${epoch}', core/cache.c writes '${format}'" >&2
+    exit 1
+fi
+
 # Rebuild both directories from scratch so a file dropped from the list does
 # not linger in an incrementally built bundle.
 /bin/rm -rf "${bundle_root}/bin" "${bundle_root}/src"
