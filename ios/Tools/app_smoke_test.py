@@ -369,6 +369,13 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     # Killing a body that is inside a substitution leaves that substitution's reader with no
     # one to join it. The next substitution still has to work.
     ("sub_body_killed", f'( x=$(sleep 30); echo no ) & p=$!; sleep 1; kill $p; wait $p; y=$(echo next); echo "$y" {R}; unset y', "next\n"),
+    # A question to alias or type, and the rest of bash_parity_alias_type_lookup's kind.
+    ("alias_lookup", f"alias sm='ls -l'; alias sm {R}; alias sm-missing 2>/dev/null; echo \"rc $?\" {A}; unalias sm", "alias sm='ls -l'\nrc 1\n"),
+    ("alias_bad_option", f"alias -z 2>/dev/null; echo \"rc $?\" {R}", "rc 2\n"),
+    ("type_missing", f"type sm-missing 2>/dev/null; echo \"rc $?\" {R}", "rc 1\n"),
+    ("type_no_names", f"type; echo \"rc $?\" {R}", "rc 0\n"),
+    ("escaped_pid", f"echo \"\\$\\$\" \\$\\$ {R}", "$$ $$\n"),
+    ("negated_errexit", f"( set -e; ! true; ! true | cat; ! {{ true; }}; echo survived ) {R}", "survived\n"),
 ]
 BY_NAME = {test[0]: test for test in TESTS}
 
