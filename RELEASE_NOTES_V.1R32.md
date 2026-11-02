@@ -26,6 +26,7 @@ Status: Not yet uploaded. Not yet run on a physical device.
 - `find ... -execdir` returns to its directory. It stayed in the first one it visited, so the next path was not found.
 - `fopen` on a `/dev/ttyN` device no longer reads a host descriptor that has nothing to do with it. This is the same mistake as the cache writer's: `wc -c /dev/tty3` said `Is a directory`, and closing the stream closed that descriptor.
 - `md` and the pagers no longer leak two host descriptors and their unlinked temporary files per run, for as long as the app lives.
+- `who`, `users` and `uptime` find the records in a utmp file, and a wtmp record reaches its file. `fcntl`, `pread` and `pwrite` took a slot number for a host descriptor, the cache writer's mistake again: `who file` saw no records, and a record for `/var/log/wtmp` went to whichever host descriptor had that number while the command reported success. `tail -f` and `stty -F` changed `O_NONBLOCK` on an unrelated descriptor the same way: a system directory in one run, the host's fd 0 in others.
 
 ## Fixed in exsh on every platform
 - `{ ...; } > file`, `if ...; fi > file`, `case ... esac > file` and a redirection on a function definition now cover the whole body, including input redirections, and they close when the body leaves early through `return`, `break` or `exit`. They used to be dropped: the output went to the terminal and the file was never created.

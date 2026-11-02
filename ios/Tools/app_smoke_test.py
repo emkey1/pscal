@@ -203,6 +203,23 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     # fopen on a device read whatever host descriptor had the slot's number.
     ("find_execdir", f"find smoke/sub smoke/sub2 -type f -execdir pwd \\; {R}", "/home/smoke/sub\n/home/smoke/sub2\n"),
     ("wc_dev_tty", f"wc -c /dev/tty3 {R}", "0 /dev/tty3\n"),
+    # fcntl, pread and pwrite had no shim: utmp records were read from and written to
+    # whichever host descriptor had the slot's number, or nowhere if none did.
+    ("who_file", f"who -q smoke/utmp.rec {R}", "alice bob\n# users=2\n"),
+    ("users_file", f"users smoke/utmp.rec {R}", "alice bob\n"),
+    ("uptime_users", f"mkdir -p /var/run; cp smoke/utmp.rec /var/run/utmp; uptime | grep -c ' 2 users, ' {R}; rm /var/run/utmp", "1\n"),
+    # xargs, because at the prompt halt and poweroff are the VM's Halt builtin.
+    ("wtmp_append", f"mkdir -p /var/log; rm -f /var/log/wtmp; xargs halt -w < /dev/null {R}; xargs halt -w < /dev/null {A}; wc -c < /var/log/wtmp {A}; who -r /var/log/wtmp | wc -l {A}", "800\n2\n"),
+    ("wtmp_partial", f"printf x > /var/log/wtmp; xargs halt -w < /dev/null {R}; wc -c < /var/log/wtmp {A}", "400\n"),
+    # And F_SETFL reached a host descriptor too: fd 0 from tail, a system directory
+    # from stty. Only a trace shows that, so these say the paths still work; the shims
+    # have their tests in Tests/ios_vproc.
+    ("tail_f_pipe", f"cat smoke/d.txt | tail -f --pid=999999 {R}", "b\na\nc\n"),
+    ("tail_f_stdin", f"tail -f --pid=999999 < /dev/null {R}; echo $? {A}", "0\n"),
+    ("tail_f_device", f"tail -f --pid=999999 /dev/null {R}; echo $? {A}", "0\n"),
+    ("tail_F_appears", f"tail -F -s 0.2 smoke/appear {R} & t=$!; sleep 0.5; ln -s /dev/null smoke/appear; i=0; while [ $i -lt 200 ] && ! grep -q appeared {{o}}; do sleep 0.1; i=$((i+1)); done; kill $t; wait $t 2>/dev/null", "tail: cannot open 'smoke/appear' for reading: No such file or directory\ntail: 'smoke/appear' has appeared;  following new file\n"),
+    ("stty_named", f"stty -F /dev/tty size > /dev/null 2>&1; echo $? {R}", "0\n"),
+    ("stty_not_tty", f"stty -F /dev/null {R}; echo $? {A}", "stty: /dev/null: Inappropriate ioctl for device\n1\n"),
     # A missing directory is an error, as in bash: nothing makes it on the way.
     ("redirect_no_dir", f"echo x > /nonexistent/dir/f; echo $? {R}; ls /nonexistent {A}", "1\nls: cannot access '/nonexistent': No such file or directory\n"),
     ("touch_no_dir", f"touch /nonexistent/dir/f > /dev/null 2>&1; echo $? {R}; ls /nonexistent {A}", "1\nls: cannot access '/nonexistent': No such file or directory\n"),
@@ -333,8 +350,22 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
 ]
 BY_NAME = {test[0]: test for test in TESTS}
 
+
+def utmp_record(user: str, line: str) -> str:
+    """A login in the 400-byte layout utmp_rec.c reads, in ASCII so that write_text keeps it."""
+    record = bytearray(400)
+    record[0] = 7  # USER_PROCESS
+    record[4] = 1  # the pid
+    record[8:8 + len(line)] = line.encode()
+    record[40:44] = line[-4:].encode()
+    record[44:44 + len(user)] = user.encode()
+    record[347] = 0x65  # the time, 0x65000000 at offset 344
+    return record.decode("ascii")
+
+
 # Written from the host, since they are awkward to quote in a shell script.
 FIXTURES = {
+    "utmp.rec": utmp_record("alice", "pts/1") + utmp_record("bob", "pts/2"),
     "hello.pas": "program Hello;\nbegin\n  writeln('pascal ok ', 6*7);\nend.\n",
     "hello.clike": 'int main() {\n    printf("clike ok %d\\n", 6*7);\n    return 0;\n}\n',
     "hello.rea": 'class Main {}\n\nwriteln("rea ok ", 6*7);\n',

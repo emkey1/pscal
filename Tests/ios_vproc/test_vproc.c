@@ -408,6 +408,245 @@ static void assert_host_stdio_untouched_after_vproc_close(void) {
     assert(write(STDOUT_FILENO, "", 0) == 0);
 }
 
+/* A slot number no host descriptor uses until a test puts an unrelated file there.
+ * That is how the raw calls went wrong: they reached whichever host descriptor had
+ * the slot's number, or failed EBADF when none did. */
+enum { SHIM_TEST_SLOT = 40 };
+
+static void assert_fcntl_pread_pwrite_take_slots(void) {
+    char mine[] = "/tmp/vproc_shim_mine_XXXXXX";
+    char other[] = "/tmp/vproc_shim_other_XXXXXX";
+    int mine_host = mkstemp(mine);
+    assert(mine_host >= 0);
+    close(mine_host);
+    int other_host = mkstemp(other);
+    assert(other_host >= 0);
+    assert(write(other_host, "unrelated", 9) == 9);
+
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+    int opened = vprocOpenShim(mine, O_RDWR);
+    assert(opened >= 0);
+    assert(vprocDup2Shim(opened, SHIM_TEST_SLOT) == SHIM_TEST_SLOT);
+    assert(vprocCloseShim(opened) == 0);
+
+    /* No host descriptor has the number: what utmp_rec.c's lock and writes saw. */
+    errno = 0;
+    assert(fcntl(SHIM_TEST_SLOT, F_GETFD) == -1 && errno == EBADF);
+    assert(vprocPwriteShim(SHIM_TEST_SLOT, "abcdef", 6, 0) == 6);
+    char buf[16] = {0};
+    assert(vprocPreadShim(SHIM_TEST_SLOT, buf, 3, 2) == 3);
+    assert(memcmp(buf, "cde", 3) == 0);
+    assert(vprocFcntlShim(SHIM_TEST_SLOT, F_GETFD) >= 0);
+    assert((vprocFcntlShim(SHIM_TEST_SLOT, F_GETFL) & O_ACCMODE) == O_RDWR);
+    struct flock fl;
+    memset(&fl, 0, sizeof(fl));
+    fl.l_type = F_WRLCK;
+    fl.l_whence = SEEK_SET;
+    assert(vprocFcntlShim(SHIM_TEST_SLOT, F_SETLKW, &fl) == 0);
+    fl.l_type = F_UNLCK;
+    assert(vprocFcntlShim(SHIM_TEST_SLOT, F_SETLK, &fl) == 0);
+
+    /* An unrelated file has the number: what could take a utmp record. */
+    assert(dup2(other_host, SHIM_TEST_SLOT) == SHIM_TEST_SLOT);
+    int other_flags = fcntl(SHIM_TEST_SLOT, F_GETFL);
+    assert(vprocPwriteShim(SHIM_TEST_SLOT, "XY", 2, 0) == 2);
+    assert(vprocPreadShim(SHIM_TEST_SLOT, buf, 6, 0) == 6);
+    assert(memcmp(buf, "XYcdef", 6) == 0);
+    int flags = vprocFcntlShim(SHIM_TEST_SLOT, F_GETFL);
+    assert(flags >= 0 && !(flags & O_NONBLOCK));
+    assert(vprocFcntlShim(SHIM_TEST_SLOT, F_SETFL, flags | O_NONBLOCK) == 0);
+    assert(vprocFcntlShim(SHIM_TEST_SLOT, F_GETFL) & O_NONBLOCK);
+    assert(fcntl(SHIM_TEST_SLOT, F_GETFL) == other_flags);
+    assert(vprocFcntlShim(SHIM_TEST_SLOT, F_SETFL, flags) == 0);
+    assert(!(vprocFcntlShim(SHIM_TEST_SLOT, F_GETFL) & O_NONBLOCK));
+    assert(pread(other_host, buf, sizeof(buf), 0) == 9);
+    assert(memcmp(buf, "unrelated", 9) == 0);
+
+    /* F_DUPFD makes slots, from the lowest free one at or above its argument. */
+    assert(vprocFcntlShim(SHIM_TEST_SLOT, F_DUPFD, 50) == 50);
+    assert(vprocFcntlShim(SHIM_TEST_SLOT, F_DUPFD_CLOEXEC, 50) == 51);
+    assert(vprocPreadShim(51, buf, 2, 0) == 2);
+    assert(memcmp(buf, "XY", 2) == 0);
+    assert(vprocCloseShim(50) == 0);
+    assert(vprocCloseShim(51) == 0);
+    errno = 0;
+    assert(vprocFcntlShim(SHIM_TEST_SLOT, F_DUPFD, -1) == -1 && errno == EINVAL);
+
+    /* A closed slot is closed, whatever the host has at that number: the pager
+     * relies on this to tell a dead descriptor from one poll cannot wait on. */
+    assert(vprocCloseShim(SHIM_TEST_SLOT) == 0);
+    errno = 0;
+    assert(vprocFcntlShim(SHIM_TEST_SLOT, F_GETFD) == -1 && errno == EBADF);
+    errno = 0;
+    assert(vprocFcntlShim(SHIM_TEST_SLOT, F_DUPFD, 50) == -1 && errno == EBADF);
+    errno = 0;
+    assert(vprocPreadShim(SHIM_TEST_SLOT, buf, 1, 0) == -1 && errno == EBADF);
+    errno = 0;
+    assert(vprocPwriteShim(SHIM_TEST_SLOT, "z", 1, 0) == -1 && errno == EBADF);
+    assert(pread(other_host, buf, sizeof(buf), 0) == 9);
+    assert(memcmp(buf, "unrelated", 9) == 0);
+    close(SHIM_TEST_SLOT);
+
+    /* What fileno gives an applet: a host descriptor, tagged. */
+    FILE *stream = fopen(mine, "r");
+    assert(stream);
+    int tagged = vprocFilenoShim(stream);
+    assert(tagged != fileno(stream));
+    flags = vprocFcntlShim(tagged, F_GETFL);
+    assert(flags >= 0);
+    assert(vprocFcntlShim(tagged, F_SETFL, flags | O_NONBLOCK) == 0);
+    assert(fcntl(fileno(stream), F_GETFL) & O_NONBLOCK);
+    assert(vprocPreadShim(tagged, buf, 2, 0) == 2);
+    assert(memcmp(buf, "XY", 2) == 0);
+    fclose(stream);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+
+    /* With no vproc, numbers are the host's. */
+    assert(vprocFcntlShim(other_host, F_GETFL) == fcntl(other_host, F_GETFL));
+    assert(vprocPreadShim(other_host, buf, 2, 0) == 2);
+    assert(memcmp(buf, "un", 2) == 0);
+    close(other_host);
+    unlink(mine);
+    unlink(other);
+}
+
+static void assert_fcntl_on_inproc_pipe(void) {
+    struct pscal_fd *read_end = NULL;
+    struct pscal_fd *write_end = NULL;
+    assert(vprocCreateInprocPipe(&read_end, &write_end) == 0);
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+    int r = 10;
+    int w = 11;
+    assert(vprocAdoptPscalFd(vp, r, read_end) == 0);
+    assert(vprocAdoptPscalFd(vp, w, write_end) == 0);
+    pscal_fd_close(read_end);
+    pscal_fd_close(write_end);
+
+    assert(vprocFcntlShim(r, F_GETFL) == O_RDONLY);
+    assert(vprocFcntlShim(w, F_GETFL) == O_WRONLY);
+
+    /* O_NONBLOCK is real: a read of nothing and a write to a full pipe don't wait. */
+    char buf[9000];
+    memset(buf, 'x', sizeof(buf));
+    assert(vprocFcntlShim(r, F_SETFL, O_NONBLOCK) == 0);
+    assert(vprocFcntlShim(r, F_GETFL) == (O_RDONLY | O_NONBLOCK));
+    errno = 0;
+    assert(vprocReadShim(r, buf, 1) == -1 && errno == EAGAIN);
+    assert(vprocFcntlShim(w, F_SETFL, O_NONBLOCK) == 0);
+    ssize_t wrote = vprocWriteShim(w, buf, sizeof(buf));
+    assert(wrote > 0 && wrote < (ssize_t)sizeof(buf));
+    errno = 0;
+    assert(vprocWriteShim(w, buf, 1) == -1 && errno == EAGAIN);
+    assert(vprocReadShim(r, buf, sizeof(buf)) == wrote);
+    errno = 0;
+    assert(vprocReadShim(r, buf, 1) == -1 && errno == EAGAIN);
+
+    /* A dup is the same open file, so it shares the flag. */
+    assert(vprocFcntlShim(r, F_DUPFD, 50) == 50);
+    assert(vprocFcntlShim(50, F_GETFL) == (O_RDONLY | O_NONBLOCK));
+    assert(vprocFcntlShim(50, F_SETFL, 0) == 0);
+    assert(vprocFcntlShim(r, F_GETFL) == O_RDONLY);
+    assert(vprocCloseShim(50) == 0);
+
+    assert(vprocFcntlShim(r, F_GETFD) == 0);
+    assert(vprocFcntlShim(r, F_SETFD, FD_CLOEXEC) == 0);
+    struct flock fl;
+    memset(&fl, 0, sizeof(fl));
+    fl.l_type = F_RDLCK;
+    fl.l_whence = SEEK_SET;
+    errno = 0;
+    assert(vprocFcntlShim(r, F_SETLK, &fl) == -1 && errno == EINVAL);
+    errno = 0;
+    assert(vprocPreadShim(r, buf, 1, 0) == -1 && errno == ESPIPE);
+    errno = 0;
+    assert(vprocPwriteShim(w, "z", 1, 0) == -1 && errno == ESPIPE);
+
+    assert(vprocCloseShim(w) == 0);
+    assert(vprocCloseShim(r) == 0);
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
+static void assert_fcntl_on_pty(void) {
+    struct pscal_fd *master = NULL;
+    struct pscal_fd *slave = NULL;
+    int pty_num = -1;
+    assert(pscalPtyOpenMaster(O_RDWR, &master, &pty_num) == 0);
+    assert(pscalPtyUnlock(master) == 0);
+    assert(pscalPtyOpenSlave(pty_num, O_RDWR, &slave) == 0);
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    assert(vprocSessionStdioInitWithPty(session, slave, master, 4321, 0) == 0);
+    vprocSessionStdioActivate(session);
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+
+    /* The session's own terminal: tail -f on it asks for O_NONBLOCK, and its
+     * reader and every later command would be left with it. */
+    int slot = 10;
+    assert(vprocAdoptPscalFd(vp, slot, slave) == 0);
+    assert(vprocFcntlShim(slot, F_GETFL) == O_RDWR);
+    assert(vprocFcntlShim(slot, F_SETFL, O_RDWR | O_NONBLOCK) == 0);
+    assert(vprocFcntlShim(slot, F_GETFL) == O_RDWR);
+    assert(!(slave->flags & O_NONBLOCK));
+    assert(vprocCloseShim(slot) == 0);
+
+    /* The same terminal opened by name is another open file, as stty -F does:
+     * opened O_NONBLOCK so that it cannot wait for carrier, then made blocking. */
+    struct pscal_fd *named = NULL;
+    assert(pscalPtyOpenSlave(pty_num, O_RDONLY | O_NONBLOCK, &named) == 0);
+    assert(vprocAdoptPscalFd(vp, slot, named) == 0);
+    pscal_fd_close(named);
+    int flags = vprocFcntlShim(slot, F_GETFL);
+    assert(flags == (O_RDONLY | O_NONBLOCK));
+    assert(vprocFcntlShim(slot, F_SETFL, flags & ~O_NONBLOCK) == 0);
+    assert(vprocFcntlShim(slot, F_GETFL) == O_RDONLY);
+    char buf[1];
+    errno = 0;
+    assert(vprocPreadShim(slot, buf, 1, 0) == -1 && errno == ESPIPE);
+    assert(vprocCloseShim(slot) == 0);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+    vprocSessionStdioDestroy(session);
+}
+
+static void assert_fcntl_keeps_session_host_stdin_blocking(void) {
+    int session_pipe[2];
+    assert(pipe(session_pipe) == 0);
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    vprocSessionStdioInitWithFds(session, session_pipe[0], session_pipe[1], session_pipe[1], 0);
+    vprocSessionStdioActivate(session);
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+    int slot = vprocAdoptHostFd(vp, dup(session_pipe[0]));
+    assert(slot >= 0);
+    int flags = vprocFcntlShim(slot, F_GETFL);
+    assert(flags >= 0);
+    assert(vprocFcntlShim(slot, F_SETFL, flags | O_NONBLOCK) == 0);
+    assert(!(vprocFcntlShim(slot, F_GETFL) & O_NONBLOCK));
+    assert(!(fcntl(session_pipe[0], F_GETFL) & O_NONBLOCK));
+    assert(vprocCloseShim(slot) == 0);
+    vprocDeactivate();
+    vprocDestroy(vp);
+    vprocSessionStdioDestroy(session);
+    close(session_pipe[0]);
+    close(session_pipe[1]);
+}
+
 static void assert_winsize_round_trip(void) {
     VProc *vp = vprocCreate(NULL);
     assert(vp);
@@ -3267,6 +3506,31 @@ static void assert_select_rejects_invalid_timeval(void) {
     assert(vprocSelectShim(0, &rfds, NULL, NULL, &bad_usec) == -1);
     assert(errno == EINVAL);
 
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
+static void assert_fcntl_on_location_device(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+
+    int fd = vprocOpenShim("/dev/location", O_RDONLY);
+    assert(fd >= 0);
+    assert(vprocFcntlShim(fd, F_GETFL) == O_RDONLY);
+    assert(vprocFcntlShim(fd, F_SETFL, O_NONBLOCK) == 0);
+    assert(vprocFcntlShim(fd, F_GETFL) == (O_RDONLY | O_NONBLOCK));
+    char buf[16] = {0};
+    errno = 0;
+    assert(vprocReadShim(fd, buf, sizeof(buf)) == -1 && errno == EAGAIN);
+
+    const char *payload = "nonblock\n";
+    assert(vprocLocationDeviceWrite(payload, strlen(payload)) == (ssize_t)strlen(payload));
+    assert(vprocReadShim(fd, buf, sizeof(buf)) == (ssize_t)strlen(payload));
+    assert(strcmp(buf, payload) == 0);
+
+    assert(vprocCloseShim(fd) == 0);
     vprocDeactivate();
     vprocDestroy(vp);
 }
@@ -6923,6 +7187,14 @@ int main(void) {
     assert_stdin_redirected_via_dup2();
     fprintf(stderr, "TEST host_stdio_untouched\n");
     assert_host_stdio_untouched_after_vproc_close();
+    fprintf(stderr, "TEST fcntl_pread_pwrite_take_slots\n");
+    assert_fcntl_pread_pwrite_take_slots();
+    fprintf(stderr, "TEST fcntl_on_inproc_pipe\n");
+    assert_fcntl_on_inproc_pipe();
+    fprintf(stderr, "TEST fcntl_on_pty\n");
+    assert_fcntl_on_pty();
+    fprintf(stderr, "TEST fcntl_keeps_session_host_stdin_blocking\n");
+    assert_fcntl_keeps_session_host_stdin_blocking();
     fprintf(stderr, "TEST winsize_round_trip\n");
     assert_winsize_round_trip();
     fprintf(stderr, "TEST open_and_read\n");
@@ -7085,7 +7357,9 @@ int main(void) {
     assert_location_read_returns_full_line_and_eof();
     fprintf(stderr, "TEST location_poll_wakes_on_payload\n");
     assert_location_poll_wakes_on_payload();
-    fprintf(stderr, "TEST select_sparse_fdset_works\n");
+    fprintf(stderr, "TEST fcntl_on_location_device\n");
+    assert_fcntl_on_location_device();
+    fprintf(stderr, "TESTselect_sparse_fdset_works\n");
     assert_select_sparse_fdset_works();
     fprintf(stderr, "TEST select_empty_set_honors_timeout\n");
     assert_select_empty_set_honors_timeout();

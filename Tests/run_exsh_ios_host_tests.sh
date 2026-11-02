@@ -50,6 +50,7 @@ RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_dup_word_redirect
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_heredoc_escapes
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only fstat_regular_file_ios
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only who_file_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only jobspec
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only jobs_wait_all
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only jobspec_kill
