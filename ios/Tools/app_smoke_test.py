@@ -184,6 +184,29 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("order_seq", f"echo one {R}; pascal smoke/hello.pas {A}; echo two {A}; clike smoke/hello.clike {A}; echo three {A}; aether smoke/hello.aether {A}; echo four {A}", "one\npascal ok 42\ntwo\nclike ok 42\nthree\naether ok 42\nfour\n"),
     ("pascal_rc", f"pascal smoke/hello.pas > /dev/null 2>&1; echo $? {R}", "0\n"),
     ("bad_rc", f"grep -q zzz smoke/d.txt; echo $? {R}", "1\n"),
+    # Each of these runs on a worker thread and hands its status back through wait.
+    ("pascal_fail_rc", f"pascal smoke/nope.pas > /dev/null 2>&1; echo $? {R}", "1\n"),
+    ("clike_fail_rc", f"clike smoke/nope.clike > /dev/null 2>&1; echo $? {R}", "1\n"),
+    ("rea_fail_rc", f"rea smoke/nope.rea > /dev/null 2>&1; echo $? {R}", "1\n"),
+    ("aether_fail_rc", f"aether smoke/nope.aether > /dev/null 2>&1; echo $? {R}", "1\n"),
+    ("pascal_fail_or", f"pascal smoke/nope.pas 2>/dev/null || echo failed {R}", "failed\n"),
+    ("pascal_halt_rc", f"pascal smoke/halt.pas > /dev/null 2>&1; echo $? {R}", "3\n"),
+    ("applet_fail_rc", f"awk 1 smoke/nope > /dev/null 2>&1; echo $? {R}", "2\n"),
+    ("shebang_fail_rc", f"smoke/sb3.sh > /dev/null 2>&1; echo $? {R}", "3\n"),
+    # A #! frontend has no process exit to flush its output: it arrived after the
+    # redirection was gone, or never.
+    ("shebang_frontend_file", f"Examples/clike/base/hello {R}", "Hello World!\n"),
+    ("shebang_frontend_sub", f"x=$(Examples/clike/base/hello); echo \"got $x\" {R}", "got Hello World!\n"),
+    ("shebang_frontend_pipe", f"Examples/clike/base/hello | cat {R}", "Hello World!\n"),
+    ("shebang_frontend_time", f"time Examples/clike/base/hello | head -1 {R}", "Hello World!\n"),
+    # Slots used as host descriptors: fchdir left find in the first directory, and
+    # fopen on a device read whatever host descriptor had the slot's number.
+    ("find_execdir", f"find smoke/sub smoke/sub2 -type f -execdir pwd \\; {R}", "/home/smoke/sub\n/home/smoke/sub2\n"),
+    ("wc_dev_tty", f"wc -c /dev/tty3 {R}", "0 /dev/tty3\n"),
+    # A missing directory is an error, as in bash: nothing makes it on the way.
+    ("redirect_no_dir", f"echo x > /nonexistent/dir/f; echo $? {R}; ls /nonexistent {A}", "1\nls: cannot access '/nonexistent': No such file or directory\n"),
+    ("touch_no_dir", f"touch /nonexistent/dir/f > /dev/null 2>&1; echo $? {R}; ls /nonexistent {A}", "1\nls: cannot access '/nonexistent': No such file or directory\n"),
+    ("cp_no_dir", f"cp smoke/d.txt /nonexistent/dir/f > /dev/null 2>&1; echo $? {R}; ls /nonexistent {A}", "1\nls: cannot access '/nonexistent': No such file or directory\n"),
     ("tr_cat", f"cat smoke/d.txt | tr a-z A-Z {R}", "B\nA\nC\n"),
     ("awk_cat", f"cat smoke/d.txt | awk '{{print $1}}' {R}", "b\na\nc\n"),
     ("awk_lt", f"awk '{{print $1}}' < smoke/d.txt {R}", "b\na\nc\n"),
@@ -251,6 +274,7 @@ FIXTURES = {
     "hello.rea": 'class Main {}\n\nwriteln("rea ok ", 6*7);\n',
     "hello.aether": '@pure\nfn answer(a: Int, b: Int) -> Int {\n    ret a * b;\n}\n\nfn main() -> Void {\n    fx { println("aether ok ", answer(6, 7)); }\n    ret;\n}\n',
     "slow.pas": "program Slow;\nuses crt;\nbegin\n  delay(800);\n  writeln('slow done');\nend.\n",
+    "halt.pas": "program Halting;\nbegin\n  halt(3);\nend.\n",
 }
 
 # The first lines of auto.sh, run in the app before any test.
@@ -269,12 +293,13 @@ SETUP = [
     "printf '#!/bin/exsh\\npascal smoke/slow.pas >> smoke/res/shebang_order.txt 2>&1\\necho after-pascal >> smoke/res/shebang_order.txt\\n' > smoke/ord_sb.sh",
     "printf 'pascal smoke/slow.pas >> smoke/res/source_order.txt 2>&1\\necho after-pascal >> smoke/res/source_order.txt\\n' > smoke/ord_src.sh",
     "printf '#!/bin/exsh\\necho sb $#\\n' > smoke/sb.sh",
+    "printf '#!/bin/exsh\\nexit 3\\n' > smoke/sb3.sh",
     "printf '#!/bin/exsh\\nset -- x y\\necho $1 $2\\n' > smoke/sbset.sh",
     "printf '#!/bin/exsh\\necho $1 $2\\n' > smoke/pos.sh",
     "printf '#!/bin/exsh\\necho ${1}/${2}\\n' > smoke/posb.sh",
     "printf '#!/bin/exsh\\necho $1.txt\\n' > smoke/posw.sh",
     "printf 'x := 6 * 7;\\nwrite x\\n' > smoke/p.tiny",
-    "chmod +x smoke/ord_sb.sh smoke/sb.sh smoke/sbset.sh smoke/pos.sh smoke/posb.sh smoke/posw.sh",
+    "chmod +x smoke/ord_sb.sh smoke/sb.sh smoke/sb3.sh smoke/sbset.sh smoke/pos.sh smoke/posb.sh smoke/posw.sh",
 ]
 
 
@@ -289,10 +314,7 @@ class Known(NamedTuple):
 # The Known Issues in RELEASE_NOTES_V.1R32.md that these tests hit. A test here
 # that fails any other way is an unexpected failure. When one is fixed, drop it
 # here and from the next release's notes.
-KNOWN = {
-    "awk_lt": Known("`awk '...' < file` can come back empty in a long run", "", always=False),
-    "split_ok": Known("`split -l 1 file prefix; cat prefixaa` can find an empty first piece", "", always=False),
-}
+KNOWN = {}
 
 
 class SetupError(Exception):

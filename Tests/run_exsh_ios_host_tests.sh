@@ -47,6 +47,10 @@ RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only kernel_tree_
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_help_grep_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_empty_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_clike_head_ios
+# A script's `cmd &` starts its children with SIGINT ignored, and a frontend then
+# hung for good waiting for the SIGINT catcher to stop.
+( trap '' INT; RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_clike_head_ios )
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only frontend_status_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_rea_head_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_bg_redirect_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_bg_pipe_redirect_ios

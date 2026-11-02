@@ -2137,6 +2137,14 @@ static void assert_path_truncate_maps_to_sandbox(void) {
     assert(strcmp(buf, msg) == 0);
     close(host_fd);
 
+    /* A missing parent is ENOENT, as on any host: open does not make it. */
+    errno = 0;
+    assert(pscalPathVirtualized_open("/no-such-dir/sub/f.txt", O_CREAT | O_WRONLY, 0600) < 0);
+    assert(errno == ENOENT);
+    char missing_dir[PATH_MAX];
+    snprintf(missing_dir, sizeof(missing_dir), "%s/no-such-dir", root);
+    assert(access(missing_dir, F_OK) != 0);
+
     /* Ensure vprocOpenAt also respects path virtualization. */
     VProc *vp = vprocCreate(NULL);
     assert(vp);
