@@ -46,8 +46,8 @@ A = ">> {o} 2>&1"
 # (name, command, expected output). {o} is the test's result file. With an
 # expected output of None, the result file only has to appear.
 #
-# Each command must redirect itself: a redirect on a nested exsh or sh is lost,
-# and on a { ...; } group too. In a pipeline the redirect goes on the last stage.
+# Each command redirects itself, so its result lands in its own file. In a pipeline
+# the redirect goes on the last stage.
 TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("cat_file", f"cat smoke/d.txt {R}", "b\na\nc\n"),
     ("cat_stdin", f"cat < smoke/d.txt {R}", "b\na\nc\n"),
@@ -243,13 +243,7 @@ class Known(NamedTuple):
 # The Known Issues in RELEASE_NOTES_V.1R31.md that these tests hit. A test here
 # that fails any other way is an unexpected failure. When one is fixed, drop it
 # here and from the next release's notes.
-NESTED_REDIRECT = "`exsh script > file` and `sh ... > file` ignore the redirection on iOS"
 KNOWN = {
-    "exsh_script": Known(NESTED_REDIRECT, ""),
-    "sh_script": Known(NESTED_REDIRECT, ""),
-    "sh_c": Known(NESTED_REDIRECT, ""),
-    "brace_redirect": Known("`{ ...; } > file` ignores the redirection", None),
-    "env_var": Known("`X=1 env | ...`: an applet in a pipeline does not see the assignment", "0\n"),
     "awk_lt": Known("`awk '...' < file` can come back empty in a long run", "", always=False),
     "split_ok": Known("`split -l 1 file prefix; cat prefixaa` can find an empty first piece", "", always=False),
 }

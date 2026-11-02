@@ -975,16 +975,16 @@ static int pscalRawFstat(int fd, struct stat *st) {
 
     if (pscalIsResolving()) {
 #if PSCAL_ENABLE_SYSCALL_FALLBACK
-        return (int)syscall(SYS_fstat, fd, st);
+        return (int)syscall(SYS_fstat64, fd, st);
 #else
         errno = ENOSYS; return -1;
 #endif
     }
-    if (!fn) fn = (int (*)(int, struct stat *))pscalInterposeResolveSystem("__fstat");
+    if (!fn) fn = (int (*)(int, struct stat *))pscalInterposeResolveSystem("fstat64");
     if (!fn) fn = (int (*)(int, struct stat *))pscalInterposeResolveSystem("fstat");
     if (fn) { pscalInterposeEnterRaw(); int r = fn(fd, st); pscalInterposeExitRaw(); return r; }
 #if PSCAL_ENABLE_SYSCALL_FALLBACK
-    return (int)syscall(SYS_fstat, fd, st);
+    return (int)syscall(SYS_fstat64, fd, st);
 #else
     errno = ENOSYS; return -1;
 #endif
@@ -1018,16 +1018,16 @@ static int pscalRawStat(const char *path, struct stat *st) {
 
     if (pscalIsResolving()) {
 #if PSCAL_ENABLE_SYSCALL_FALLBACK && defined(AT_FDCWD)
-        return syscall(SYS_fstatat, AT_FDCWD, path, st, 0);
+        return syscall(SYS_fstatat64, AT_FDCWD, path, st, 0);
 #else
         errno = ENOSYS; return -1;
 #endif
     }
-    if (!fn) fn = (int (*)(const char *, struct stat *))pscalInterposeResolveSystem("__stat");
+    if (!fn) fn = (int (*)(const char *, struct stat *))pscalInterposeResolveSystem("stat64");
     if (!fn) fn = (int (*)(const char *, struct stat *))pscalInterposeResolveSystem("stat");
     if (fn) { pscalInterposeEnterRaw(); int r = fn(path, st); pscalInterposeExitRaw(); return r; }
 #if PSCAL_ENABLE_SYSCALL_FALLBACK && defined(AT_FDCWD)
-    return syscall(SYS_fstatat, AT_FDCWD, path, st, 0);
+    return syscall(SYS_fstatat64, AT_FDCWD, path, st, 0);
 #else
     errno = ENOSYS; return -1;
 #endif
@@ -1039,16 +1039,16 @@ static int pscalRawLstat(const char *path, struct stat *st) {
 
     if (pscalIsResolving()) {
 #if PSCAL_ENABLE_SYSCALL_FALLBACK && defined(AT_FDCWD)
-        return syscall(SYS_fstatat, AT_FDCWD, path, st, AT_SYMLINK_NOFOLLOW);
+        return syscall(SYS_fstatat64, AT_FDCWD, path, st, AT_SYMLINK_NOFOLLOW);
 #else
         errno = ENOSYS; return -1;
 #endif
     }
-    if (!fn) fn = (int (*)(const char *, struct stat *))pscalInterposeResolveSystem("__lstat");
+    if (!fn) fn = (int (*)(const char *, struct stat *))pscalInterposeResolveSystem("lstat64");
     if (!fn) fn = (int (*)(const char *, struct stat *))pscalInterposeResolveSystem("lstat");
     if (fn) { pscalInterposeEnterRaw(); int r = fn(path, st); pscalInterposeExitRaw(); return r; }
 #if PSCAL_ENABLE_SYSCALL_FALLBACK && defined(AT_FDCWD)
-    return syscall(SYS_fstatat, AT_FDCWD, path, st, AT_SYMLINK_NOFOLLOW);
+    return syscall(SYS_fstatat64, AT_FDCWD, path, st, AT_SYMLINK_NOFOLLOW);
 #else
     errno = ENOSYS; return -1;
 #endif

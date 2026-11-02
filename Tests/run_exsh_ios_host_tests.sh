@@ -22,6 +22,10 @@ cmake -S "${ROOT}" -B "${BUILD_DIR}" \
 cmake --build "${BUILD_DIR}" --target exsh
 
 # Run the targeted jobspec regression against the iOS-flavored binary.
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_group_redirect
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_nested_shell_redirect
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_assign_pipeline
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only fstat_regular_file_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only jobspec
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only jobs_wait_all
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only jobspec_kill
