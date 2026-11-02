@@ -54,6 +54,8 @@ VH = "vm.del: delH\nvm.in: inH\nvm.ren: renH\n"
 SILENT_SERVER = socket.create_server(("127.0.0.1", 0))
 SILENT_PORT = SILENT_SERVER.getsockname()[1]
 
+PRIMES = "Find all prime numbers up to: Prime numbers found up to 10:\n2 3 5 7 \n\nDone.\n"
+
 # (name, command, expected output). {o} is the test's result file. With an
 # expected output of None, the result file only has to appear.
 #
@@ -443,6 +445,60 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("redirect_no_dir", f"echo x > /nonexistent/dir/f; echo $? {R}; ls /nonexistent {A}", "1\nls: cannot access '/nonexistent': No such file or directory\n"),
     ("touch_no_dir", f"touch /nonexistent/dir/f > /dev/null 2>&1; echo $? {R}; ls /nonexistent {A}", "1\nls: cannot access '/nonexistent': No such file or directory\n"),
     ("cp_no_dir", f"cp smoke/d.txt /nonexistent/dir/f > /dev/null 2>&1; echo $? {R}; ls /nonexistent {A}", "1\nls: cannot access '/nonexistent': No such file or directory\n"),
+    # A VM program's stdin is the file or pipe it was given: waiting for the keyboard here
+    # stalls the run. Keyboard input and Ctrl-C need a real prompt, which this tool does not
+    # reach. The expected output is what a host build prints.
+    ("stdin_file", f"pascal smoke/fp < smoke/ten {R}", PRIMES),
+    ("stdin_pipe", f"printf '10\\n' | pascal smoke/fp {R}", PRIMES),
+    ("stdin_shebang_file", f"smoke/fp < smoke/ten {R}", PRIMES),
+    ("stdin_shebang_pipe", f"printf '10\\n' | smoke/fp {R}", PRIMES),
+    ("stdin_shebang_twice", f"smoke/fp < smoke/ten {R}; smoke/fp < smoke/ten {A}", PRIMES + PRIMES),
+    ("stdin_twice", f"pascal smoke/rl1.pas < smoke/d.txt {R}; pascal smoke/rl1.pas < smoke/u.txt {A}", "got b\ngot a\n"),
+    ("stdin_dev_null", f"pascal smoke/rl1.pas < /dev/null {R}", "got \n"),
+    ("stdin_lines", f"pascal smoke/rl3.pas < smoke/d.txt {R}", "[b][a][c]\n"),
+    ("stdin_no_last_newline", f"printf 'x\\ny' | pascal smoke/rl3.pas {R}", "[x][y][]\n"),
+    ("stdin_cr", f"printf 'a\\r\\nb\\nc\\n' | pascal smoke/rl3.pas {R}", "[a][b][c]\n"),
+    ("stdin_empty_lines", f"printf '\\n\\nx\\n' | pascal smoke/rl3.pas {R}", "[][][x]\n"),
+    # Only the terminal's input has control keys. Elsewhere ^C is text.
+    ("stdin_control_text", f"pascal smoke/rl3.pas < smoke/ctl.txt {R}", "[^cat][^Zoo][a\x03b]\n"),
+    ("stdin_control_pipe", f"cat smoke/ctl.txt | pascal smoke/rl3.pas {R}", "[^cat][^Zoo][a\x03b]\n"),
+    # Read and Readln share a buffer, and a program's own file is not its stdin.
+    ("stdin_read_mixed", f"printf '12 30 rest of line\\nQnext\\n' | pascal smoke/rdmix.pas {R}", "42|rest of line|Q|next\n"),
+    ("stdin_own_file", f"pascal smoke/rlown.pas < smoke/d.txt {R}", "bba\n"),
+    ("stdin_large_pipe", f"{{ seq 1 50000; echo end; }} | pascal smoke/rlcount.pas {R}", "50000 50000\n"),
+    ("stdin_large_file", f"{{ seq 1 50000; echo end; }} > smoke/big; pascal smoke/rlcount.pas < smoke/big {R}", "50000 50000\n"),
+    # Two VMs: Gen's ioresult needs the lock that Eof holds, and when Gen ends its fflush(NULL)
+    # needs the lock of the FILE the reader is reading. Neither may be held while waiting for Gen.
+    # Different languages: two of one language compiling at once is a Known Issue.
+    ("stdin_vm_to_vm", f"pascal smoke/gen.pas | aether smoke/all.aether {R}", "line 1\nline 2\nline 3\nend\n"),
+    ("stdin_vm_to_vm_eof", f"pascal smoke/gen.pas | clike smoke/rlgen.clike {R}", "4 end\n"),
+    ("stdin_vm_to_vm_short", f"pascal smoke/hello.pas | clike smoke/rlgen.clike {R}", "1 pascal ok 42\n"),
+    ("stdin_heredoc", "pascal smoke/rl3.pas > {o} 2>&1 <<EOF\nh1\nh2\nh3\nEOF", "[h1][h2][h3]\n"),
+    ("stdin_here_string", f"pascal smoke/rl1.pas <<< hs {R}", "got hs\n"),
+    ("stdin_group", f"{{ pascal smoke/rl1.pas; }} < smoke/d.txt {R}", "got b\n"),
+    ("stdin_subshell", f"( pascal smoke/rl1.pas ) < smoke/d.txt {R}", "got b\n"),
+    ("stdin_pipe_into_group", f"cat smoke/d.txt | {{ pascal smoke/rl3.pas; }} {R}", "[b][a][c]\n"),
+    ("stdin_script", f"sh smoke/rds.sh < smoke/d.txt {R}", "got b\n"),
+    # Only its stdout: a background frontend's stderr has debug lines from the shell.
+    ("stdin_background", "pascal smoke/rl1.pas < smoke/d.txt > {o} 2> /dev/null & wait", "got b\n"),
+    ("stdin_loop_body", f"while read l; do echo $l | pascal smoke/rl1.pas {A}; done < smoke/d.txt", "got b\ngot a\ngot c\n"),
+    ("stdin_clike_file", f"clike smoke/sc.clike < smoke/num {R}", "clike got 42\n"),
+    ("stdin_clike_pipe", f"printf '21\\n' | clike smoke/sc.clike {R}", "clike got 42\n"),
+    ("stdin_clike_eof_file", f"clike smoke/rlall.clike < smoke/d.txt {R}", "[b]\n[a]\n[c]\n"),
+    ("stdin_clike_eof_pipe", f"printf 'x\\ny' | clike smoke/rlall.clike {R}", "[x]\n[y]\n"),
+    ("stdin_clike_eof_scanf", f"clike smoke/rlmix.clike < smoke/d.txt {R}", "[b]\n[a]\n[c]\n"),
+    ("stdin_clike_large", f"seq 1 50000 | clike smoke/rlgen.clike {R}", "50000 50000\n"),
+    ("stdin_rea_pipe", f"printf 'x y\\n' | rea smoke/rl.rea {R}", "rea got x y\n"),
+    ("stdin_rea_eof", f"rea smoke/rlall.rea < smoke/d.txt {R}", "[ b]\n[ a]\n[ c]\n"),
+    ("stdin_aether_pipe", f"printf 'p\\nq\\n' | aether smoke/rl.aether {R}", "aether got p\nthen q\n"),
+    ("stdin_aether_end", f"aether smoke/rl.aether < /dev/null {R}", "aether got \nthen \n"),
+    ("stdin_aether_all", f"aether smoke/all.aether < smoke/d.txt {R}", "b\na\nc\n"),
+    ("stdin_aether_all_large", f"seq 1 50000 | aether smoke/all.aether | tail -1 {R}", "50000\n"),
+    # A kill of the job used to end the app in the readln form, and the eof form stopped every VM.
+    ("stdin_killed_readln", f'sleep 30 | clike smoke/rl1.clike > /dev/null & j=$!; sleep 0.5; kill $j; wait $j; echo "rc $?" {R}; clike smoke/sc.clike < smoke/num {A}', "rc 143\nclike got 42\n"),
+    ("stdin_killed_pascal", f'sleep 30 | pascal smoke/rl1.pas > /dev/null & j=$!; sleep 0.5; kill $j; wait $j; echo "rc $?" {R}; clike smoke/sc.clike < smoke/num {A}', "rc 143\nclike got 42\n"),
+    ("stdin_killed_eof", f'sleep 30 | clike smoke/rlall.clike > /dev/null & j=$!; sleep 0.5; kill $j; wait $j; echo "rc $?" {R}; clike smoke/sc.clike < smoke/num {A}', "rc 143\nclike got 42\n"),
+    ("stdin_others_run_while_eof_waits", f'tail -f smoke/d.txt | clike smoke/rlall.clike > /dev/null & j=$!; sleep 0.5; x=$(echo sub); echo "$x" {R}; clike smoke/sc.clike < smoke/num {A}; kill $j; wait $j; echo "rc $?" {A}; unset x', "sub\nclike got 42\nrc 143\n"),
     ("tr_cat", f"cat smoke/d.txt | tr a-z A-Z {R}", "B\nA\nC\n"),
     ("awk_cat", f"cat smoke/d.txt | awk '{{print $1}}' {R}", "b\na\nc\n"),
     ("awk_lt", f"awk '{{print $1}}' < smoke/d.txt {R}", "b\na\nc\n"),
@@ -1259,6 +1315,34 @@ begin
   writeln('ctx ', s);
 end.
 """,
+    "ctl.txt": "^cat\n^Zoo\na\x03b\n",
+    "rl1.pas": "program Rl1;\nvar s: string;\nbegin\n  readln(s);\n  writeln('got ', s);\nend.\n",
+    "rl3.pas": "program Rl3;\nvar a, b, c: string;\nbegin\n  readln(a);\n  readln(b);\n  readln(c);\n"
+               "  writeln('[', a, '][', b, '][', c, ']');\nend.\n",
+    "rlcount.pas": "program RlCount;\nvar s, last: string; n: integer;\nbegin\n  n := 0;\n  readln(s);\n"
+                   "  while (s <> 'end') and (n < 60000) do\n  begin\n    n := n + 1;\n    last := s;\n    readln(s);\n  end;\n"
+                   "  writeln(n, ' ', last);\nend.\n",
+    "rdmix.pas": "program RdMix;\nvar a, b: integer; s, t: string; c: char;\nbegin\n  read(a);\n  read(b);\n"
+                 "  readln(s);\n  read(c);\n  readln(t);\n  writeln(a + b, '|', s, '|', c, '|', t);\nend.\n",
+    "rlown.pas": "program RlOwn;\nvar f: text; a, b, c: string;\nbegin\n  assign(f, 'smoke/d.txt');\n  reset(f);\n"
+                 "  readln(f, a);\n  readln(b);\n  readln(f, c);\n  close(f);\n  writeln(a, b, c);\nend.\n",
+    "gen.pas": "program Gen;\nuses crt;\nvar i, r: integer;\nbegin\n  for i := 1 to 3 do\n  begin\n    delay(200);\n"
+               "    r := ioresult;\n    writeln('line ', i);\n  end;\n  writeln('end');\nend.\n",
+    "sc.clike": 'int main() {\n    int n;\n    scanf(n);\n    printf("clike got %d\\n", n * 2);\n    return 0;\n}\n',
+    "rl1.clike": 'int main() {\n    str s;\n    readln(stdin, s);\n    printf("[%s]\\n", s);\n    return 0;\n}\n',
+    "rlall.clike": 'int main() {\n    str s;\n    while (!eof(stdin)) {\n        readln(stdin, s);\n'
+                   '        printf("[%s]\\n", s);\n    }\n    return 0;\n}\n',
+    "rlmix.clike": 'int main() {\n    str s;\n    while (!eof(stdin)) {\n        scanf(s);\n'
+                   '        printf("[%s]\\n", s);\n    }\n    return 0;\n}\n',
+    "rlgen.clike": 'int main() {\n    str s;\n    int n;\n    n = 0;\n    while (!eof(stdin)) {\n'
+                   '        readln(stdin, s);\n        n = n + 1;\n    }\n    printf("%d %s\\n", n, s);\n'
+                   '    return 0;\n}\n',
+    "rl.rea": 'class Main {}\n\nstr s;\nreadln(s);\nwriteln("rea got ", s);\n',
+    "rlall.rea": 'class Main {}\n\nstr s;\nwhile (!eof(stdin)) {\n    readln(stdin, s);\n'
+                 '    writeln("[", s, "]");\n}\n',
+    "rl.aether": 'fn main() -> Void {\n    fx {\n        println("aether got ", read_line());\n'
+                 '        println("then ", read_line());\n    }\n    ret;\n}\n',
+    "all.aether": 'fn main() -> Void {\n    fx { print(read_all_stdin()); }\n    ret;\n}\n',
 }
 
 # The first lines of auto.sh, run in the app before any test.
@@ -1283,7 +1367,11 @@ SETUP = [
     "printf '#!/bin/exsh\\necho ${1}/${2}\\n' > smoke/posb.sh",
     "printf '#!/bin/exsh\\necho $1.txt\\n' > smoke/posw.sh",
     "printf 'x := 6 * 7;\\nwrite x\\n' > smoke/p.tiny",
-    "chmod +x smoke/ord_sb.sh smoke/sb.sh smoke/sb3.sh smoke/sbset.sh smoke/pos.sh smoke/posb.sh smoke/posw.sh",
+    "cp Examples/pascal/base/FindPrimes smoke/fp",
+    "printf '10\\n' > smoke/ten",
+    "printf '21\\n' > smoke/num",
+    "printf 'pascal smoke/rl1.pas\\n' > smoke/rds.sh",
+    "chmod +x smoke/ord_sb.sh smoke/sb.sh smoke/sb3.sh smoke/sbset.sh smoke/pos.sh smoke/posb.sh smoke/posw.sh smoke/fp",
     "mkdir -p smoke/rs/a/b",
     "printf 'x\\n' > smoke/rs/a/f",
     "printf 'y\\n' > smoke/rs/a/b/g",

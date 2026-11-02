@@ -166,6 +166,7 @@ RUN_VPROC_TESTS=1 RUN_IOS_FRONTEND_STDIN_TESTS=1 python3 "${HARNESS}" --executab
 # Runs under its own throwaway roots, not the harness: a regression here removes files.
 bash "${ROOT}/Tests/ios_vproc/test_empty_path.sh" "${EXE}"
 bash "${ROOT}/Tests/ios_vproc/test_kill_blocked.sh" "${EXE}"
+bash "${ROOT}/Tests/ios_vproc/test_kill_vm_reader.sh" "${EXE}"
 
 # Optional interactive PTY signal regressions. Enable explicitly while
 # debugging local Ctrl-C/Ctrl-Z behavior:
