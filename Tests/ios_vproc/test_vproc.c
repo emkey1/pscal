@@ -5644,16 +5644,33 @@ static void assert_shell_cwd_apis_target_shell_vproc_with_worker_active(void) {
     assert(vprocShellGetcwdShim(cwd, sizeof(cwd)) != NULL);
     assert(strcmp(cwd, "/tmp/cwd-a") == 0);
 
+    VProcOptions bystander_opts = vprocDefaultOptions();
+    bystander_opts.pid_hint = vprocReservePid();
+    VProc *bystander_vp = vprocCreate(&bystander_opts);
+    assert(bystander_vp);
+    vprocActivate(bystander_vp);
+    assert(vprocChdirShim("/tmp/cwd-b") == 0);
+    vprocDeactivate();
+
     assert(vprocShellChdirShim("/tmp/cwd-c") == 0);
     assert(vprocShellGetcwdShim(cwd, sizeof(cwd)) != NULL);
     assert(strcmp(cwd, "/tmp/cwd-c") == 0);
 
+    /* A vproc stacked on the shell's thread is a stage running for the shell, as
+     * in `. script`, so the shell's cd moves it too. */
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-c") == 0);
+    vprocDeactivate();
+
+    /* One that is not on the stack keeps its own directory. */
+    vprocActivate(bystander_vp);
     assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
     assert(strcmp(cwd, "/tmp/cwd-b") == 0);
     vprocDeactivate();
 
     assert(vprocHostClose(host_pipe[1]) == 0);
     vprocSessionStdioDestroy(session);
+    vprocDestroy(bystander_vp);
     vprocDestroy(worker_vp);
     vprocDestroy(shell_vp);
     vprocSetShellSelfPid(prev_shell);
