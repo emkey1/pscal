@@ -86,6 +86,44 @@ they stay in sync with the main toolchain.
 If you rebuild the static libs, simply rerun the CMake commands—Xcode will pick
 up the updated `.a` files without additional project changes.
 
+## In-App Command Test
+**Run this on a Release simulator build before any TestFlight upload.** CI only
+compiles the app and no host suite runs its commands, so code can be badly broken
+on iOS with every suite green.
+
+```sh
+SDK_NAME=iphonesimulator CONFIGURATION=Release bash ios/Tools/ensure_static_libs.sh
+xcodebuild -project ios/PSCAL.xcodeproj -scheme PscalApp -configuration Release \
+    -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+    -derivedDataPath build/DerivedData-ios-sim CODE_SIGNING_ALLOWED=NO build
+ios/Tools/app_smoke_test.py
+```
+
+`app_smoke_test.py` runs about 140 commands inside the app and compares their output:
+applets, pipelines, redirections, absolute paths, every language in sequence and
+in pipelines, scripts and Tiny. It drives no UI. It installs the app fresh, makes
+`~/.exshrc` in the app's container run the commands, and reads their result files
+from the host. When it finishes it uninstalls the app and shuts down any simulator
+it booted.
+
+It takes the newest Release simulator build and a shut-down iPad or iPhone simulator
+that does not have the app. Use `--app` and `--device <udid or name>` to choose.
+
+It exits 0 on a clean run. It exits 1 on an unexpected result or a new crash report,
+or if the app dies or stops making progress, and prints each of them. It exits 2 if
+the run could not be set up. Failures listed under Known Issues in the release notes
+are marked as expected in `KNOWN` in the script. Keep that table in step with the
+notes of the release you are building.
+
+To look into a failure:
+
+- `--only a,b` runs just those tests (`--list` prints the names).
+- `--probe <test or command>` gives each command a launch of its own, so a crash
+  points at the command that caused it.
+- `--bisect <test>` finds which earlier test makes a test fail.
+- `--keep` leaves the app installed and the simulator booted, and `-v` prints the
+  known failures too.
+
 ## Runtime Output Smoke Check (in-app)
 From the terminal tab, run:
 ```sh
