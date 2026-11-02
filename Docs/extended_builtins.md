@@ -19,7 +19,7 @@ The project currently ships several optional built‑in groups:
 | Category | Location | Groups |
 | -------- | -------- | ------ |
 | **Math** | `src/ext_builtins/math` | `series` (`Factorial`, `Fibonacci`), `fractal` (`MandelbrotRow`), `constants` (`Chudnovsky`) |
-| **System** | `src/ext_builtins/system` | `filesystem` (`FileExists`), `process` (`GetPid`), `timing` (`RealTimeClock`), `utility` (`Swap`), `shell` (`__shell_exec`, `__shell_pipeline`, `__shell_and`, `__shell_or`, `__shell_subshell`, `__shell_loop`, `__shell_if`, `cd`, `pwd`, `exit`, `export`, `unset`, `alias`) |
+| **System** | `src/ext_builtins/system` | `filesystem` (`FileExists`), `process` (`GetPid`), `timing` (`RealTimeClock`), `utility` (`Swap`), `shell` (`__shell_exec`, `__shell_exec_body`, `__shell_pipeline`, `__shell_and`, `__shell_or`, `__shell_subshell`, `__shell_loop`, `__shell_if`, `cd`, `pwd`, `exit`, `export`, `unset`, `alias`) |
 | **Strings** | `src/ext_builtins/strings` | `conversion` (`Atoi`) |
 | **Yyjson** | `src/ext_builtins/yyjson` | `document` (`YyjsonRead`, `YyjsonReadFile`, `YyjsonDocFree`), `query` (`YyjsonFreeValue`, `YyjsonGetRoot`, `YyjsonGetKey`, `YyjsonGetIndex`, `YyjsonGetLength`, `YyjsonGetType`), `primitives` (`YyjsonGetString`, `YyjsonGetNumber`, `YyjsonGetInt`, `YyjsonGetBool`, `YyjsonIsNull`) |
 | **Sqlite** | `src/ext_builtins/sqlite` | `connection` (`SqliteOpen`, `SqliteClose`, `SqliteExec`, `SqliteErrMsg`, `SqliteLastInsertRowId`, `SqliteChanges`), `statement` (`SqlitePrepare`, `SqliteFinalize`, `SqliteStep`, `SqliteReset`, `SqliteClearBindings`), `metadata` (`SqliteColumnCount`, `SqliteColumnType`, `SqliteColumnName`), `results` (`SqliteColumnInt`, `SqliteColumnDouble`, `SqliteColumnText`), `binding` (`SqliteBindText`, `SqliteBindInt`, `SqliteBindDouble`, `SqliteBindNull`) |
@@ -82,6 +82,9 @@ interpreters.
 - Logical helpers (`__shell_and`, `__shell_or`, `__shell_subshell`,
   `__shell_loop`, `__shell_if`) allow the compiler to model complex control
   structures without embedding host-specific branching.
+- `__shell_exec_body(chunk, meta)` starts a compiled compound command as one
+  command, for subshells and for compound pipeline stages and background
+  commands, which run apart from the shell.
 - Classic shell utilities (`cd`, `pwd`, `exit`, `export`, `unset`, `alias`) run
   entirely inside the interpreter so callers avoid forking when they need to
   mutate the current environment.
