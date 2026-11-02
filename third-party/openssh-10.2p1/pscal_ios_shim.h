@@ -58,9 +58,13 @@ int pscal_ios_rename(const char *oldpath, const char *newpath);
 int pscal_ios_link(const char *target, const char *linkpath);
 int pscal_ios_symlink(const char *target, const char *linkpath);
 char *pscal_ios_realpath(const char *path, char *resolved_path);
+ssize_t pscal_ios_readlink(const char *path, char *buf, size_t bufsize);
+/* The path as the host names it, for code that goes straight to libc. Free it. */
+char *pscal_ios_host_path(const char *path);
 
 extern __thread sigjmp_buf pscal_ios_fork_jmpbuf;
 pid_t pscal_ios_fork_dispatch(int jump_rc);
+void pscal_ios__exit(int code) __attribute__((noreturn));
 int pscal_ios_execv(const char *path, char *const argv[]);
 int pscal_ios_execvp(const char *file, char *const argv[]);
 int pscal_ios_execl(const char *path, const char *arg, ...);
@@ -69,6 +73,7 @@ int pscal_ios_execlp(const char *file, const char *arg, ...);
 
 #ifndef PSCAL_IOS_SHIM_IMPLEMENTATION
 # define fork() pscal_ios_fork_dispatch(sigsetjmp(pscal_ios_fork_jmpbuf, 1))
+# define _exit(code) pscal_ios__exit(code)
 # define execv(...) pscal_ios_execv(__VA_ARGS__)
 # define execvp(...) pscal_ios_execvp(__VA_ARGS__)
 # define execl(...) pscal_ios_execl(__VA_ARGS__)
@@ -100,6 +105,7 @@ int pscal_ios_execlp(const char *file, const char *arg, ...);
 # define fstat(fd, buf) pscal_ios_fstat((fd), (buf))
 # define stat(path, buf) pscal_ios_stat((path), (buf))
 # define lstat(path, buf) pscal_ios_lstat((path), (buf))
+# define readlink(path, buf, bufsize) pscal_ios_readlink((path), (buf), (bufsize))
 # define access(path, mode) pscal_ios_access((path), (mode))
 # define faccessat(fd, path, mode, flag) \
     pscal_ios_faccessat((fd), (path), (mode), (flag))

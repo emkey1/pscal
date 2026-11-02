@@ -119,6 +119,7 @@ __attribute__((weak)) void pscalRuntimeDebugLog(const char *message);
 int pscal_openssh_ssh_main(int argc, char **argv);
 int pscal_openssh_scp_main(int argc, char **argv);
 int pscal_openssh_sftp_main(int argc, char **argv);
+int smallclueRunRsync(int argc, char **argv);
 int pscalVprocTestChildMain(int argc, char **argv);
 
 typedef struct {
@@ -1263,6 +1264,28 @@ static const char *pscal_ios_effective_path(const char *path,
     return buffer;
 }
 
+char *pscal_ios_host_path(const char *path) {
+    char remapped[PATH_MAX];
+    const char *target = pscal_ios_effective_path(path, remapped,
+        sizeof(remapped));
+    if (target == NULL) {
+        errno = EFAULT;
+        return NULL;
+    }
+    return strdup(target);
+}
+
+ssize_t pscal_ios_readlink(const char *path, char *buf, size_t bufsize) {
+    char remapped[PATH_MAX];
+    const char *target = pscal_ios_effective_path(path, remapped,
+        sizeof(remapped));
+    if (target == NULL) {
+        errno = EFAULT;
+        return -1;
+    }
+    return readlink(target, buf, bufsize);
+}
+
 char *pscal_ios_realpath(const char *path, char *resolved_path) {
     if (path == NULL) {
         errno = EINVAL;
@@ -1496,6 +1519,25 @@ pid_t pscal_ios_fork_dispatch(int jump_rc) {
     return vprocSimulatedForkWithEnv("fork", true, &pscal_ios_fork_jmpbuf);
 }
 
+static int pscal_ios_exit_status_main(int argc, char **argv) {
+    return argc > 1 ? atoi(argv[1]) : 127;
+}
+
+/*
+ * After a simulated fork this thread is the child until it execs, usually with
+ * an _exit behind a failed exec, and a real _exit would end the whole app. So
+ * the child "execs" something that only returns this status, which resumes the
+ * parent at its fork() for waitpid to collect it. Outside a simulated child the
+ * exec fails and the app's exit() ends only this thread.
+ */
+void pscal_ios__exit(int code) {
+    char status[16];
+    snprintf(status, sizeof(status), "%d", code);
+    char *argv[] = { (char *)"_exit", status, NULL };
+    (void)vprocSimulatedExec(pscal_ios_exit_status_main, argv);
+    exit(code);
+}
+
 int pscal_ios_execv(const char *path, char *const argv[]) {
     const char *base = pscal_ios_basename(path);
     VProcExecEntryFn entry = NULL;
@@ -1509,6 +1551,8 @@ int pscal_ios_execv(const char *path, char *const argv[]) {
             entry = pscal_openssh_scp_main;
         } else if (strcmp(base, "sftp") == 0) {
             entry = pscal_openssh_sftp_main;
+        } else if (strcmp(base, "rsync") == 0) {
+            entry = smallclueRunRsync;
         } else if (strcmp(base, "pscal-vproc-test-child") == 0) {
             entry = pscalVprocTestChildMain;
         } else if (strstr(base, "ssh-askpass") != NULL) {

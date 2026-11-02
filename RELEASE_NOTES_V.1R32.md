@@ -9,7 +9,7 @@ Status: Not yet uploaded. Not yet run on a physical device.
 ## Summary
 - `V.1R32` is iOS/iPadOS build 32, and it replaces build 31 within a day of that upload. `CURRENT_PROJECT_VERSION` goes 31 -> 32; `MARKETING_VERSION` is untouched.
 - Build 31 can abort the whole app the first time it compiles a script or program. This build fixes that, two other iOS descriptor bugs, and the exsh redirect issues listed as known in build 31.
-- pscal-core, exsh and SmallCLUE changed. Rea, Pascal and CLike are the same as in build 31. Aether moved only to pin the new pscal-core, and the language stays at `2026-10-30-1`.
+- pscal-core, exsh, SmallCLUE and openrsync changed. Rea, Pascal and CLike are the same as in build 31. Aether moved only to pin the new pscal-core, and the language stays at `2026-10-30-1`.
 
 ## Fixed in the iOS app
 - The app no longer aborts with `runtime: kevent on fd 3 failed with 9`. The bytecode cache writer passed a vproc slot number to `fdopen`, which takes a host descriptor. Each cache write put the bytecode into whichever host descriptor had that number, closed it, and left an empty file in the cache. When that descriptor was the Go runtime's kqueue, the app aborted within milliseconds. Any other descriptor was damaged silently, including a redirect's own file: where `> out` got the writer's number, `tiny a.tiny a.pbc > out` left all of `tiny.clike`'s compiled entry, about 21 KB, in `out`. Build 31 has this: an unpatched simulator run died with this error, and the bug dates from 2026-10-20.
@@ -31,6 +31,7 @@ Status: Not yet uploaded. Not yet run on a physical device.
 - A wakeup no longer writes a NUL into a command's stderr. Replacing stderr during a command, as Aether and Pascal both do, left a saved descriptor number that was closed a second time when the command ended, and that could close the poll wake pipe.
 - `md` and the pagers no longer leak two host descriptors and their unlinked temporary files per run, for as long as the app lives.
 - `who`, `users` and `uptime` find the records in a utmp file, and a wtmp record reaches its file. `fcntl`, `pread` and `pwrite` took a slot number for a host descriptor, the cache writer's mistake again: `who file` saw no records, and a record for `/var/log/wtmp` went to whichever host descriptor had that number while the command reported success. `tail -f` and `stty -F` changed `O_NONBLOCK` on an unrelated descriptor the same way: a system directory in one run, the host's fd 0 in others.
+- `rsync` no longer ends the whole app, and local transfers work. The app had no way to start a local transfer's server side, and the `_exit` after the failed `exec` was a real one, so any transfer ended every terminal session with no crash report. The server now runs as a thread, with its own options, rules and paths, and a transfer that cannot run fails with a message and a status.
 
 ## Fixed in exsh on every platform
 - `{ ...; } > file`, `if ...; fi > file`, `case ... esac > file` and a redirection on a function definition now cover the whole body, including input redirections, and they close when the body leaves early through `return`, `break` or `exit`. They used to be dropped: the output went to the terminal and the file was never created.
@@ -44,7 +45,9 @@ Status: Not yet uploaded. Not yet run on a physical device.
 - `d=$(false) || ...` ignores the command substitution's status, so `d=$(mktemp -d) || exit 1` carries on with an empty `$d`.
 - `echo a &> f` prints a leftover debug line and adds the `;` to the file name. `$-` does not expand.
 - On iOS a VM program's `read` and `readln` take the terminal, whatever its stdin is: `pascal prog < file` and `printf '10\n' | pascal prog` wait for the keyboard. A `#!` program does the same.
-- `rsync` ends the whole app on any real transfer, with no crash report. `rsync --version` works.
+- On iOS a background command that reads a redirected stdin stops as if it were reading the terminal: `cat < f > out &` never finishes, and a `wait` for it never returns. `( cat < f > out ) &` works.
+- `ssh` in the app does not connect a remote command to the local stdin, stdout or a redirection: `ssh host cmd > f` leaves `f` empty, and `echo x | ssh host cat` sends nothing. So `rsync` to or from a remote host fails with `unexpected end of file`, and the app stays up. Local transfers are not affected.
+- On iOS `scp -S nope file host:x` ends the whole app, with no crash report, when the transport program cannot start. Seen once in this build, with the output sent to `/dev/null`. `sftp -S nope` was not tried. A normal `scp` to a host that does not resolve fails with a status and the app stays up.
 - `time clike prog` says `time: clike: command not found`. `time prog` works for a `#!` program.
 - The VM's file builtins (Pascal `Assign`, CLike `fopen`, `mstreamsavetofile`, `fileexists`) do not translate the app's absolute paths. Use a relative path or `$HOME/...`. `/home/x` in a program's own file calls fails.
 - `aether --version` reads `1.01-dev` in this build. The language is the frozen 1.0 one; the label comes from `components/aether/RELEASE`, which moved on right after the 1.0 tag.

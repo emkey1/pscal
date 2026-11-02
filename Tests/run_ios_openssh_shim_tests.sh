@@ -30,13 +30,23 @@ VPROC_SOURCES=(
   "${ROOT}/Tests/ios_vproc/test_smallclue_applets_stub.c"
 )
 
+# The vproc layer itself builds without the shim, as CMakeLists.txt does: with it
+# vprocGetenvShim calls itself until the stack runs out.
+OBJ_DIR="${BUILD_DIR}/ios_openssh_shim_objs"
+rm -rf "${OBJ_DIR}"
+mkdir -p "${OBJ_DIR}"
+(cd "${OBJ_DIR}" && cc -c -DVPROC_ENABLE_STUBS_FOR_TESTS=1 -DPSCAL_TARGET_IOS=1 \
+   -pthread \
+   "${INCLUDE_DIRS[@]}" \
+   "${VPROC_SOURCES[@]}")
+
 cc -DVPROC_ENABLE_STUBS_FOR_TESTS=1 -DPSCAL_TARGET_IOS=1 \
    -pthread \
    -include "${ROOT}/src/ios/vproc_shim.h" \
    "${INCLUDE_DIRS[@]}" \
    "${ROOT}/Tests/ios_vproc/test_pscal_ios_shim_fd_lifecycle.c" \
    "${ROOT}/third-party/openssh-10.2p1/pscal_ios_shim.c" \
-   "${VPROC_SOURCES[@]}" \
+   "${OBJ_DIR}"/*.o \
    -o "${OUT}"
 
 echo "Running iOS OpenSSH shim FD lifecycle tests..."

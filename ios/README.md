@@ -99,9 +99,9 @@ xcodebuild -project ios/PSCAL.xcodeproj -scheme PscalApp -configuration Release 
 ios/Tools/app_smoke_test.py
 ```
 
-`app_smoke_test.py` runs about 260 commands inside the app and compares their output:
+`app_smoke_test.py` runs about 350 commands inside the app and compares their output:
 applets, pipelines, redirections, absolute paths, subshells and background groups,
-every language in sequence and in pipelines, scripts and Tiny. It drives no UI. It installs the app fresh, makes
+every language in sequence and in pipelines, scripts, Tiny and local `rsync`. It drives no UI. It installs the app fresh, makes
 `~/.exshrc` in the app's container run the commands, and reads their result files
 from the host. When it finishes it uninstalls the app and shuts down any simulator
 it booted.

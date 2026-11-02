@@ -276,6 +276,60 @@ static void assert_simulated_fork_exec_socketpair_parent_fd_survives(void) {
     vprocDestroy(vp);
 }
 
+/* Puts a live descriptor on the number the entry just gave up, as another command's
+ * open would, and checks that ending the vproc leaves it alone. */
+static void assert_closed_stdio_number_survives_destroy(VProc *vp, int old_host_fd, int any_fd) {
+    int other = fcntl(any_fd, F_DUPFD, old_host_fd);
+    assert(other == old_host_fd);
+    vprocDestroy(vp);
+    assert(fcntl(other, F_GETFD) != -1);
+    vprocHostClose(other);
+}
+
+static void assert_redirected_stdio_is_closed_once(void) {
+    int p[2];
+    assert(vprocHostPipe(p) == 0);
+    int stdio_fds[] = {STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO};
+    for (size_t i = 0; i < sizeof(stdio_fds) / sizeof(stdio_fds[0]); ++i) {
+        int target = stdio_fds[i];
+        int source = target == STDERR_FILENO ? STDOUT_FILENO : STDERR_FILENO;
+
+        VProc *closed = vprocCreate(NULL);
+        assert(closed);
+        int old_host_fd = vprocTranslateFd(closed, target);
+        assert(old_host_fd >= 0);
+        assert(vprocClose(closed, target) == 0);
+        assert_closed_stdio_number_survives_destroy(closed, old_host_fd, p[0]);
+
+        if (target == STDIN_FILENO) {
+            continue; /* vprocDup2 keeps the controlling stdin open. */
+        }
+        /* The new entry takes the lowest free number. Leave one below the old
+         * entry's, or it takes the old number and nothing is left to close twice. */
+        int lower = vprocHostDup(p[0]);
+        VProc *duped = vprocCreate(NULL);
+        assert(duped);
+        old_host_fd = vprocTranslateFd(duped, target);
+        assert(old_host_fd > lower);
+        vprocHostClose(lower);
+        assert(vprocDup2(duped, source, target) == target);
+        assert(vprocTranslateFd(duped, target) != old_host_fd);
+        assert_closed_stdio_number_survives_destroy(duped, old_host_fd, p[0]);
+
+        lower = vprocHostDup(p[0]);
+        VProc *restored = vprocCreate(NULL);
+        assert(restored);
+        old_host_fd = vprocTranslateFd(restored, target);
+        assert(old_host_fd > lower);
+        vprocHostClose(lower);
+        assert(vprocRestoreHostFd(restored, target, vprocTranslateFd(restored, source)) == target);
+        assert(vprocTranslateFd(restored, target) != old_host_fd);
+        assert_closed_stdio_number_survives_destroy(restored, old_host_fd, p[0]);
+    }
+    vprocHostClose(p[0]);
+    vprocHostClose(p[1]);
+}
+
 static void assert_pipe_cross_vproc(void) {
     int p[2];
     assert(vprocHostPipe(p) == 0);
@@ -7280,6 +7334,8 @@ int main(void) {
     assert_simulated_fork_exec_inherits_nonstdio_fds();
     fprintf(stderr, "TEST simulated_fork_exec_socketpair_parent_fd_survives\n");
     assert_simulated_fork_exec_socketpair_parent_fd_survives();
+    fprintf(stderr, "TEST redirected_stdio_is_closed_once\n");
+    assert_redirected_stdio_is_closed_once();
     fprintf(stderr, "TEST pipe_cross_vproc\n");
     assert_pipe_cross_vproc();
     fprintf(stderr, "TEST socket_closed_on_destroy\n");

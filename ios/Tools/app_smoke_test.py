@@ -433,6 +433,41 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     # Each writer now flushes its own output, on every way out.
     ("frontend_halt_output", f"pascal smoke/halt2.pas | cat {R}", "before halt\n"),
     ("rea_thread_output", f"rea smoke/thread.rea | tr -d ' ' | sort {R}", "childok\nmainok\n"),
+    # Both ends of a local rsync run in this one process, with no fork or process exit
+    # between them: a real _exit took every terminal session with it, and what one run
+    # or one end sets must not reach another.
+    ("rsync_version", f"rsync --version {R}; echo \"rc=$?\" {A}", "openrsync: protocol version 27\nrc=0\n"),
+    ("rsync_dir", f"rsync -a smoke/rs/a smoke/rs/dir {R}; echo \"rc=$?\" {A}; cat smoke/rs/dir/a/f smoke/rs/dir/a/b/g {A}", "rc=0\nx\ny\n"),
+    ("rsync_contents", f"rsync -a smoke/rs/a/ smoke/rs/con {R}; ls smoke/rs/con {A}", "b\nf\n"),
+    ("rsync_dot", f"( cd smoke/rs/a; rsync -a . ../dot ) {R}; ls smoke/rs/dot {A}", "b\nf\n"),
+    ("rsync_dotdot", f"( cd smoke/rs/a/b; rsync -a .. ../../up ) {R}; ls smoke/rs/up {A}", "b\nf\n"),
+    ("rsync_file", f"rsync smoke/d.txt smoke/rs/one {R}; cat smoke/rs/one/d.txt {A}", "b\na\nc\n"),
+    # The list holds the app's own paths, not the container's.
+    ("rsync_progress", f"rsync --progress -a smoke/rs/a smoke/rs/pr 2>&1 | grep -c Documents {R}", "0\n"),
+    ("rsync_error_path", f"rsync -a smoke/nope smoke/rs/ep 2>&1 | head -1 {R}", "rsync: error: /home/smoke/nope: lstat: No such file or directory\n"),
+    ("rsync_abs", f"rsync -a /home/smoke/rs/a /home/smoke/rs/abs {R}; cat smoke/rs/abs/a/b/g {A}", "y\n"),
+    ("rsync_in_subshell", f"( cd smoke/rs; rsync -a a sub ) {R}; cat smoke/rs/sub/a/f {A}", "x\n"),
+    ("rsync_update", f"rsync -a smoke/rs/a smoke/rs/up {R}; cp smoke/d.txt smoke/rs/a/h; rsync -a smoke/rs/a smoke/rs/up {A}; cat smoke/rs/up/a/h {A}; rm smoke/rs/a/h", "b\na\nc\n"),
+    # Big enough to fill the socket between the two ends, then again to send it as a delta.
+    ("rsync_big", f"seq 1 200000 > smoke/rs/big; rsync smoke/rs/big smoke/rs/bd {R}; cmp smoke/rs/big smoke/rs/bd/big {A}; echo more >> smoke/rs/big; rsync smoke/rs/big smoke/rs/bd {A}; cmp smoke/rs/big smoke/rs/bd/big {A}", ""),
+    ("rsync_symlink", f"ln -s f smoke/rs/a/l; rsync -a smoke/rs/a smoke/rs/sl {R}; rm smoke/rs/a/l; readlink smoke/rs/sl/a/l {A}", "f\n"),
+    ("rsync_meta", f"chmod 640 smoke/rs/a/f; touch -t 202001020304 smoke/rs/a/f; rsync -a smoke/rs/a smoke/rs/me {R}; stat -c %a smoke/rs/me/a/f {A}; date -r smoke/rs/me/a/f +%Y {A}", "640\n2020\n"),
+    ("rsync_delete", f"mkdir smoke/rs/del; echo z > smoke/rs/del/old; rsync -a --delete smoke/rs/a/ smoke/rs/del {R}; ls smoke/rs/del {A}", "b\nf\n"),
+    ("rsync_exclude_once", f"rsync -a --exclude f smoke/rs/a/ smoke/rs/e1 > /dev/null 2>&1; rsync -a smoke/rs/a/ smoke/rs/e2 {R}; ls smoke/rs/e1 smoke/rs/e2 {A}", "smoke/rs/e1:\nb\n\nsmoke/rs/e2:\nb\nf\n"),
+    ("rsync_dry_run", f"rsync -an smoke/rs/a smoke/rs/dry {R}; ls smoke/rs/dry {A}", "ls: cannot access 'smoke/rs/dry': No such file or directory\n"),
+    ("rsync_pipe", f"rsync -a smoke/rs/a smoke/rs/pi | cat {R}; cat smoke/rs/pi/a/f {A}", "x\n"),
+    ("rsync_background", f"rsync -a smoke/rs/a smoke/rs/bg > /dev/null 2>&1 & wait $!; echo \"wait $?\" {R}; cat smoke/rs/bg/a/f {A}", "wait 0\nx\n"),
+    ("rsync_loop", f"for i in 1 2 3 4 5 6 7 8; do rsync -a smoke/rs/a smoke/rs/lp$i {A}; echo $? {A}; done", "0\n0\n0\n0\n0\n0\n0\n0\n"),
+    ("rsync_two_at_once", f"rsync -a --exclude f smoke/rs/a/ smoke/rs/t1 > /dev/null 2>&1 & p=$!; rsync -a smoke/rs/a/ smoke/rs/t2 {R}; wait $p; ls smoke/rs/t1 smoke/rs/t2 {A}", "smoke/rs/t1:\nb\n\nsmoke/rs/t2:\nb\nf\n"),
+    # These fail with a status, and the app carries on.
+    ("rsync_no_source", f"rsync -a smoke/nope smoke/rs/no > /dev/null 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
+    ("rsync_bad_dest", f"rsync -a smoke/rs/a smoke/d.txt/x > /dev/null 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
+    ("rsync_no_server", f"rsync -a --rsync-path=nope smoke/rs/a smoke/rs/ns > /dev/null 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
+    ("rsync_no_shell", f"rsync -a -e nope smoke/rs/a host:x > /dev/null 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
+    ("rsync_usage", f"rsync > /dev/null 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
+    ("rsync_after_failures", f"rsync -a smoke/rs/a smoke/rs/af {R}; echo \"rc=$?\" {A}", "rc=0\n"),
+    # A failed ssh under scp. It stops at the name lookup, so nothing connects.
+    ("scp_no_host", f"scp smoke/d.txt nosuch.invalid:x > /dev/null 2>&1; [ $? -ne 0 ] && echo failed {R}", "failed\n"),
 ]
 BY_NAME = {test[0]: test for test in TESTS}
 
@@ -520,6 +555,9 @@ SETUP = [
     "printf '#!/bin/exsh\\necho $1.txt\\n' > smoke/posw.sh",
     "printf 'x := 6 * 7;\\nwrite x\\n' > smoke/p.tiny",
     "chmod +x smoke/ord_sb.sh smoke/sb.sh smoke/sb3.sh smoke/sbset.sh smoke/pos.sh smoke/posb.sh smoke/posw.sh",
+    "mkdir -p smoke/rs/a/b",
+    "printf 'x\\n' > smoke/rs/a/f",
+    "printf 'y\\n' > smoke/rs/a/b/g",
 ]
 
 

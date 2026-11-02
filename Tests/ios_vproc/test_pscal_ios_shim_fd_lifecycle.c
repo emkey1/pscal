@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include "ios/vproc.h"
@@ -35,6 +36,12 @@ int pscal_openssh_sftp_main(int argc, char **argv) {
     return 0;
 }
 
+int smallclueRunRsync(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    return 0;
+}
+
 int pscalVprocTestChildMain(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -48,6 +55,8 @@ ssize_t pscal_ios_write(int fd, const void *buf, size_t nbyte);
 int pscal_ios_open(const char *path, int oflag, ...);
 int pscal_ios_openat(int fd, const char *path, int oflag, ...);
 int pscal_ios_fstat(int fd, struct stat *buf);
+int pscal_ios_execvp(const char *file, char *const argv[]);
+void pscal_ios__exit(int code);
 
 static int createTrackedSocket(void) {
     int fd = vprocSocketShim(AF_INET, SOCK_STREAM, 0);
@@ -308,6 +317,32 @@ static void assertPrivateKeyFstatModePreserved(void) {
     assert(rmdir(root) == 0);
 }
 
+static void assertExitInSimulatedForkEndsOnlyTheChild(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+
+    sigjmp_buf env;
+    if (sigsetjmp(env, 1) == 0) {
+        pid_t forked = vprocSimulatedForkWithEnv("fork-exit", true, &env);
+        assert(forked == 0);
+        /* What a child does when its exec fails. */
+        assert(pscal_ios_execvp("no-such-tool", (char *const[]){"no-such-tool", NULL}) == -1);
+        pscal_ios__exit(7);
+        assert(!"pscal_ios__exit should resume the parent");
+    }
+
+    pid_t child = vprocSimulatedForkParentResume();
+    assert(child > 0);
+    int status = 0;
+    assert(vprocWaitPidShim(child, &status, 0) == child);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 7);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
 int main(void) {
     fprintf(stderr, "TEST pscal_ios_close_untracks_socket_resource\n");
     assertCloseUntracksSocketResource();
@@ -326,6 +361,9 @@ int main(void) {
 
     fprintf(stderr, "TEST pscal_ios_private_key_fstat_mode_preserved\n");
     assertPrivateKeyFstatModePreserved();
+
+    fprintf(stderr, "TEST pscal_ios_exit_in_simulated_fork_ends_only_the_child\n");
+    assertExitInSimulatedForkEndsOnlyTheChild();
 
     fprintf(stderr, "PASS ios openssh shim fd lifecycle tests\n");
     return 0;
