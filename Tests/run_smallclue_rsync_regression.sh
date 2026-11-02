@@ -47,7 +47,8 @@ if [[ -e "${TEST_ROOT}/dst/stale.txt" ]]; then
   exit 1
 fi
 
-dst_mode="$(stat -f %Lp "${TEST_ROOT}/dst/root.txt" 2>/dev/null || stat -c %a "${TEST_ROOT}/dst/root.txt")"
+# GNU form first: GNU stat -f prints filesystem data to stdout before it fails.
+dst_mode="$(stat -c %a "${TEST_ROOT}/dst/root.txt" 2>/dev/null || stat -f %Lp "${TEST_ROOT}/dst/root.txt")"
 if [[ "${dst_mode}" != "600" ]]; then
   echo "FAIL: mode preservation mismatch (expected 600, got ${dst_mode})" >&2
   cat "${TEST_ROOT}/run1.out" >&2 || true

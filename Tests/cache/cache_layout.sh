@@ -13,7 +13,8 @@ run() { (cd "$src" && HOME="$home" "$BIN" --verbose CacheLayout 2>"$home/err") ;
 
 write "'one'"
 [ "$(run)" = one ] || fail "first run"
-[ "$(stat -f %Lp "$cache" 2>/dev/null || stat -c %a "$cache")" = 700 ] || fail "bc_cache is not 0700"
+# GNU form first: GNU stat -f prints filesystem data to stdout before it fails.
+[ "$(stat -c %a "$cache" 2>/dev/null || stat -f %Lp "$cache")" = 700 ] || fail "bc_cache is not 0700"
 [ "$(ls "$cache" | wc -l | tr -d ' ')" = 1 ] || fail "expected one entry: $(ls "$cache")"
 sleep 1
 [ "$(run)" = one ] || fail "second run"
