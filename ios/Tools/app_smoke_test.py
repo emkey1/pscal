@@ -233,9 +233,9 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("rmdir_ok", f"mkdir smoke/rd; rmdir smoke/rd; ls smoke/rd {R}", "ls: cannot access 'smoke/rd': No such file or directory\n"),
     ("touch_times", f"touch -t 202001020304 smoke/tt.txt; date -r smoke/tt.txt +%Y {R}", "2020\n"),
     ("gzip_keep_time", f"cp smoke/d.txt smoke/g2.txt; gzip -f smoke/g2.txt; zcat smoke/g2.txt.gz {R}", "b\na\nc\n"),
-    # In a full run this one captures bytecode in its output, which the release
-    # notes do not list, so it has no expected output yet.
-    ("tiny_compile", f"tiny smoke/max.tiny smoke/max.pbc {R}", None),
+    # A compiler prints nothing here. Build 31 could capture about 21 KB of bytecode,
+    # the size of tiny.clike's cache entry: its cache writer used a slot as a host fd.
+    ("tiny_compile", f"tiny smoke/max.tiny smoke/max.pbc {R}", ""),
     ("tiny_pipe", f"tiny smoke/max.tiny smoke/max2.pbc | cat {R}", ""),
     ("word_home", f"Q=abc; echo $Q/foo {R}", "abc/foo\n"),
     ("word_brace", f"Q=abc; echo ${{Q}}x {R}", "abcx\n"),
@@ -262,8 +262,39 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("grep_abs", f"grep a /home/smoke/d.txt {R}", "a\n"),
     ("tar_abs", f"tar cf /home/smoke/y.tar -C /home/smoke sub2; tar tf /home/smoke/y.tar | head -1 {R}", "sub2/\n"),
     ("realpath_v", f"realpath /home/smoke/d.txt {R}", "/home/smoke/d.txt\n"),
-    # As tiny_compile.
-    ("tiny_full", f"tiny smoke/cd.tiny /home/smoke/cd3.pbc {R}; ls smoke/cd3.pbc {A}", None),
+    ("tiny_full", f"tiny smoke/cd.tiny /home/smoke/cd3.pbc {R}; ls smoke/cd3.pbc {A}", "smoke/cd3.pbc\n"),
+    # cd in a script reaches what the script runs, and a shell run as a command leaves its
+    # caller where it was. These ran in the old directory, with no error: the same name in
+    # both directories shows which copy was hit, and `rm` took the wrong one.
+    ("cd_source_rm", f"printf 'H\\n' > cdv; mkdir smoke/cd1; printf 'D\\n' > smoke/cd1/cdv; printf 'cd smoke/cd1\\nrm cdv\\ncd \"$HOME\"\\n' > smoke/c1.sh; . smoke/c1.sh; cat cdv {R}; ls smoke/cd1 {A}; rm -f cdv", "H\n"),
+    ("cd_source_mv", f"printf 'H\\n' > cdv; mkdir smoke/cd2; printf 'D\\n' > smoke/cd2/cdv; printf 'cd smoke/cd2\\nmv cdv cdw\\ncd \"$HOME\"\\n' > smoke/c2.sh; . smoke/c2.sh; cat cdv {R}; ls smoke/cd2 {A}; rm -f cdv cdw", "H\ncdw\n"),
+    ("cd_source_redirect", f"printf 'cd smoke/sub\\necho there > r.txt\\ncat n.txt > r2.txt\\ncd \"$HOME\"\\n' > smoke/c3.sh; . smoke/c3.sh; cat smoke/sub/r.txt smoke/sub/r2.txt {R}", "there\nneedle\n"),
+    ("cd_source_stays", f"printf 'cd smoke/sub\\n' > smoke/c4.sh; . smoke/c4.sh; pwd > \"$HOME/smoke/res/cd_source_stays.txt\"; cat n.txt >> \"$HOME/smoke/res/cd_source_stays.txt\"; cd \"$HOME\"; pwd {A}", "/home/smoke/sub\nneedle\n/home\n"),
+    ("cd_source_frontend", f"printf 'cd smoke/sub\\npascal ../hello.pas > f.txt 2>&1\\nclike ../hello.clike >> f.txt 2>&1\\ncd \"$HOME\"\\n' > smoke/c5.sh; . smoke/c5.sh; cat smoke/sub/f.txt {R}", "pascal ok 42\nclike ok 42\n"),
+    ("cd_two_levels", f"printf '. smoke/c7.sh\\ncat n.txt\\ncd \"$HOME\"\\n' > smoke/c6.sh; printf 'cd smoke/sub\\n' > smoke/c7.sh; . smoke/c6.sh {R}", "needle\n"),
+    ("cd_eval", f"eval 'cd smoke/sub; cat n.txt; cd \"$HOME\"' {R}", "needle\n"),
+    ("cd_exsh_rm", f"printf 'H\\n' > cdv; mkdir smoke/cd3; printf 'D\\n' > smoke/cd3/cdv; printf 'cd smoke/cd3\\nrm cdv\\n' > smoke/c8.sh; exsh smoke/c8.sh; cat cdv {R}; ls smoke/cd3 {A}; pwd {A}; rm -f cdv", "H\n/home\n"),
+    ("cd_exsh_keeps_caller", f"printf 'cd smoke/sub\\ncat n.txt\\npwd\\n' > smoke/c9.sh; exsh smoke/c9.sh {R}; pwd {A}; echo \"$PWD\" {A}", "needle\n/home/smoke/sub\n/home\n/home\n"),
+    ("cd_sh_c", f"sh -c 'cd smoke/sub; cat n.txt; pwd' {R}; pwd {A}", "needle\n/home/smoke/sub\n/home\n"),
+    ("cd_shebang_rm", f"printf 'H\\n' > cdv; mkdir smoke/cd4; printf 'D\\n' > smoke/cd4/cdv; printf '#!/bin/exsh\\ncd smoke/cd4\\nrm cdv\\n' > smoke/c10.sh; chmod +x smoke/c10.sh; smoke/c10.sh; cat cdv {R}; ls smoke/cd4 {A}; pwd {A}; rm -f cdv", "H\n/home\n"),
+    ("cd_sub_keeps_caller", f"x=$(cd smoke/sub; cat n.txt; pwd); echo \"$x\" {R}; pwd {A}", "needle\n/home/smoke/sub\n/home\n"),
+    ("cd_nested_shells", f"sh -c 'cd smoke; sh -c \"cd sub; pwd\"; pwd' {R}; pwd {A}", "/home/smoke/sub\n/home/smoke\n/home\n"),
+    # A descriptor above stdio is the vproc's slot. A host dup2 onto that number ended the
+    # whole app when it held the Go runtime's kqueue or its poller's pipe.
+    ("fd3_write", f"echo x 3> smoke/f3; echo survived {R}", "survived\n"),
+    ("fd5_write", f"echo x 5> smoke/f5; echo survived {R}", "survived\n"),
+    ("fd3_applet", f"ls smoke/d.txt 3> smoke/f3 {R}", "smoke/d.txt\n"),
+    ("fd3_group", f"{{ echo in-group; }} 3> smoke/f3 {R}", "in-group\n"),
+    ("fd3_frontend", f"pascal smoke/hello.pas 3> smoke/f3 {R}", "pascal ok 42\n"),
+    ("fd3_uses", f"{{ echo to-three >&3; }} 3> smoke/f3b; cat smoke/f3b {R}", "to-three\n"),
+    ("exec3_write", f"exec 3> smoke/e3; echo hi >&3; exec 3>&-; cat smoke/e3 {R}", "hi\n"),
+    ("exec5_write", f"exec 5> smoke/e5; echo hi5 >&5; exec 5>&-; cat smoke/e5 {R}", "hi5\n"),
+    ("exec4_applet", f"exec 4> smoke/e4; ls smoke/d.txt >&4; exec 4>&-; cat smoke/e4 {R}", "smoke/d.txt\n"),
+    ("exec3_read", f"exec 3< smoke/d.txt; read l <&3; exec 3<&-; echo \"$l\" {R}", "b\n"),
+    ("exec6_dup", f"exec 6>&1; echo to-six >&6 {R}; exec 6>&-", "to-six\n"),
+    ("exec3_gone", f"exec 3> smoke/e6; exec 3>&-; echo x 2>/dev/null >&3; echo \"rc $?\" {R}", "rc 1\n"),
+    ("fd_unopened", f"echo x 2>/dev/null >&7; echo \"rc $?\" {R}", "rc 1\n"),
+    ("exec_in_source", f"printf 'exec 8> smoke/e8\\necho in-source >&8\\n' > smoke/c11.sh; . smoke/c11.sh; echo after-source >&8; exec 8>&-; cat smoke/e8 {R}", "in-source\nafter-source\n"),
 ]
 BY_NAME = {test[0]: test for test in TESTS}
 
@@ -314,7 +345,13 @@ class Known(NamedTuple):
 # The Known Issues in RELEASE_NOTES_V.1R32.md that these tests hit. A test here
 # that fails any other way is an unexpected failure. When one is fixed, drop it
 # here and from the next release's notes.
-KNOWN = {}
+KNOWN = {
+    "tiny_full": Known(
+        "the VM's file builtins do not translate the app's absolute paths",
+        "MStreamSaveToFile: Cannot open file '/home/smoke/cd3.pbc' for writing.\n"
+        "ls: cannot access 'smoke/cd3.pbc': No such file or directory\n",
+    ),
+}
 
 
 class SetupError(Exception):
