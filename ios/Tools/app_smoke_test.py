@@ -240,7 +240,7 @@ class Known(NamedTuple):
     always: bool = True  # False: it comes and goes, so a pass is no news.
 
 
-# The Known Issues in RELEASE_NOTES_V.1R31.md that these tests hit. A test here
+# The Known Issues in RELEASE_NOTES_V.1R32.md that these tests hit. A test here
 # that fails any other way is an unexpected failure. When one is fixed, drop it
 # here and from the next release's notes.
 KNOWN = {
