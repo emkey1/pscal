@@ -295,6 +295,41 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("exec3_gone", f"exec 3> smoke/e6; exec 3>&-; echo x 2>/dev/null >&3; echo \"rc $?\" {R}", "rc 1\n"),
     ("fd_unopened", f"echo x 2>/dev/null >&7; echo \"rc $?\" {R}", "rc 1\n"),
     ("exec_in_source", f"printf 'exec 8> smoke/e8\\necho in-source >&8\\n' > smoke/c11.sh; . smoke/c11.sh; echo after-source >&8; exec 8>&-; cat smoke/e8 {R}", "in-source\nafter-source\n"),
+    # A substitution reads its pipe while the command runs. It read only after the command
+    # ended, so a command that wrote more than a pipe holds never ended. Each case unsets
+    # what it captured: every variable reaches the process environment.
+    ("sub_big_applet", f'x=$(seq 1 30000); echo "${{#x}}" {R}; unset x', "168893\n"),
+    ("sub_big_backtick", f'x=`seq 1 30000`; echo "${{#x}}" {R}; unset x', "168893\n"),
+    ("sub_big_last", f'echo "$(seq 1 30000)" | tail -1 {R}', "30000\n"),
+    ("sub_big_builtins", f'x=$(i=0; while [ "$i" -lt 8000 ]; do echo "line number $i"; i=$((i+1)); done); echo "${{#x}}" {R}; unset x', "134889\n"),
+    ("sub_big_echo", f'x=$(seq 1 30000); y=$(echo "$x"; echo "$x"); echo "${{#y}}" {R}; unset x y', "337787\n"),
+    ("sub_big_pipeline", f'x=$(seq 1 30000 | cat); echo "${{#x}}" {R}; unset x', "168893\n"),
+    ("sub_big_pipeline3", f'x=$(seq 1 30000 | cat | cat); echo "${{#x}}" {R}; unset x', "168893\n"),
+    ("sub_big_group", f'x=$({{ seq 1 30000; echo end; }}); echo "${{#x}}" {R}; unset x', "168897\n"),
+    ("sub_big_subshell", f'x=$( (seq 1 30000) ); echo "${{#x}}" {R}; unset x', "168893\n"),
+    ("sub_big_loop", f'x=$(for i in 1 2; do seq 1 30000; done); echo "${{#x}}" {R}; unset x', "337787\n"),
+    ("sub_big_function", f'bigf() {{ seq 1 30000; }}; x=$(bigf); echo "${{#x}}" {R}; unset x', "168893\n"),
+    ("sub_big_nested", f'x=$(echo "$(seq 1 30000)"); echo "${{#x}}" {R}; unset x', "168893\n"),
+    ("sub_big_file", f'seq 1 30000 > smoke/big.txt; x=$(cat smoke/big.txt); echo "${{#x}}" {R}; unset x', "168893\n"),
+    ("sub_big_stdin", f'x=$(cat < smoke/big.txt); echo "${{#x}}" {R}; unset x', "168893\n"),
+    ("sub_big_status", f'x=$(seq 1 30000; exit 3); echo "$? ${{#x}}" {R}; unset x', "3 168893\n"),
+    ("sub_big_pascal", f'x=$(pascal smoke/bigout.pas); echo "${{#x}}" {R}; unset x', "168893\n"),
+    ("sub_big_clike", f'x=$(clike smoke/bigout.clike); echo "${{#x}}" {R}; unset x', "168893\n"),
+    ("sub_big_sh_c", f"x=$(sh -c 'seq 1 30000'); echo \"${{#x}}\" {R}; unset x", "168893\n"),
+    ("sub_big_in_sh_c", f"sh -c 'x=$(seq 1 30000); echo ${{#x}}' {R}", "168893\n"),
+    ("sub_big_script", f"printf 'x=$(seq 1 30000)\\necho ${{#x}}\\n' > smoke/bs.sh; exsh smoke/bs.sh {R}", "168893\n"),
+    ("sub_big_shebang", f"printf '#!/bin/exsh\\nx=$(seq 1 30000)\\necho ${{#x}} {R}\\n' > smoke/bs2.sh; chmod +x smoke/bs2.sh; smoke/bs2.sh", "168893\n"),
+    ("sub_big_in_subshell", f'( x=$(seq 1 30000); echo "${{#x}}" {R} )', "168893\n"),
+    ("sub_big_in_stage", f'echo a | {{ x=$(seq 1 30000); echo "${{#x}}"; }} {R}', "168893\n"),
+    ("sub_big_background", f'( x=$(seq 1 30000); echo "${{#x}}" > smoke/bgb.txt ) & wait $!; cat smoke/bgb.txt {R}', "168893\n"),
+    ("sub_big_twenty", f'n=0; s=0; while [ "$n" -lt 20 ]; do x=$(seq 1 30000); s=$((s+${{#x}})); n=$((n+1)); done; unset x; echo "$s" {R}', "3377860\n"),
+    ("sub_many_small", f'n=0; while [ "$n" -lt 300 ]; do v=$(echo "$n"); n=$((n+1)); done; echo "$v" {R}', "299\n"),
+    ("sub_fd3_exec", f'x=$(exec 3> smoke/s3; echo out); echo "[$x]" {R}; unset x', "[out]\n"),
+    ("sub_fd3_cmd", f'x=$(echo hi 3> smoke/s3); echo "[$x]" {R}; unset x', "[hi]\n"),
+    ("sub_bg_holds", f"printf 'x=$(sleep 1 & echo bg)\\necho \"[$x]\"\\n' > smoke/bh.sh; exsh smoke/bh.sh {R}", "[bg]\n"),
+    # Killing a body that is inside a substitution leaves that substitution's reader with no
+    # one to join it. The next substitution still has to work.
+    ("sub_body_killed", f'( x=$(sleep 30); echo no ) & p=$!; sleep 1; kill $p; wait $p; y=$(echo next); echo "$y" {R}; unset y', "next\n"),
 ]
 BY_NAME = {test[0]: test for test in TESTS}
 
@@ -306,6 +341,8 @@ FIXTURES = {
     "hello.aether": '@pure\nfn answer(a: Int, b: Int) -> Int {\n    ret a * b;\n}\n\nfn main() -> Void {\n    fx { println("aether ok ", answer(6, 7)); }\n    ret;\n}\n',
     "slow.pas": "program Slow;\nuses crt;\nbegin\n  delay(800);\n  writeln('slow done');\nend.\n",
     "halt.pas": "program Halting;\nbegin\n  halt(3);\nend.\n",
+    "bigout.pas": "program BigOut;\nvar i: integer;\nbegin\n  for i := 1 to 30000 do writeln(i);\nend.\n",
+    "bigout.clike": 'int main() {\n    int i;\n    for (i = 1; i <= 30000; i = i + 1) {\n        printf("%d\\n", i);\n    }\n    return 0;\n}\n',
 }
 
 # The first lines of auto.sh, run in the app before any test.
