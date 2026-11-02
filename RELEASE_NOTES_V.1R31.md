@@ -4,7 +4,7 @@ Date: 2026-11-01
 
 Base: `V.1R30` (TestFlight build 30, uploaded 2026-08-18; the repository has no `V.1R30` tag)
 
-Status: Release candidate
+Status: Uploaded to App Store Connect with Transporter on 2026-11-02, built from `e53848c6`. Not yet run on a physical device.
 
 ## Summary
 - `V.1R31` is iOS/iPadOS build 31. Build 30's TestFlight window ends around 2026-11-16, and this build replaces it. `CURRENT_PROJECT_VERSION` goes 30 -> 31; `MARKETING_VERSION` is untouched.
