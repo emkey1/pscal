@@ -376,6 +376,24 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("type_no_names", f"type; echo \"rc $?\" {R}", "rc 0\n"),
     ("escaped_pid", f"echo \"\\$\\$\" \\$\\$ {R}", "$$ $$\n"),
     ("negated_errexit", f"( set -e; ! true; ! true | cat; ! {{ true; }}; echo survived ) {R}", "survived\n"),
+    # A finished frontend flushed every stream in the app, other stages' included. It
+    # waited for a reader that was waiting for its end of the pipe, or for a writer on a
+    # full pipe, and wrote another stage's buffered output to its own stdout.
+    ("frontend_tr", f"pascal smoke/hello.pas | tr -d ' ' {R}", "pascalok42\n"),
+    ("frontend_uniq", f"pascal smoke/hello.pas | uniq {R}", "pascal ok 42\n"),
+    ("frontend_awk", f"pascal smoke/hello.pas | awk '{{print $2}}' {R}", "ok\n"),
+    ("frontend_rev", f"pascal smoke/hello.pas | rev {R}", "24 ko lacsap\n"),
+    ("frontend_wc_tr", f"pascal smoke/hello.pas | wc -l | tr -d ' ' {R}", "1\n"),
+    ("clike_tr", f"clike smoke/hello.clike | tr -d ' ' {R}", "clikeok42\n"),
+    ("rea_tr", f"rea smoke/hello.rea | tr -d ' ' {R}", "reaok42\n"),
+    ("aether_tr", f"aether smoke/hello.aether | tr -d ' ' {R}", "aetherok42\n"),
+    # awk rather than a second frontend: two compiling at once in one process are not safe yet.
+    ("frontend_full_pipe", f"pascal smoke/big.pas | {{ sleep 1; awk 'BEGIN {{ fflush(); print \"flushed\" }}'; }} {R}", "flushed\n"),
+    ("frontend_output_stays", f"pascal smoke/first.pas | {{ sleep 1; awk 'BEGIN {{ fflush(); print \"flushed\" }}'; }} {R}", "flushed\n"),
+    ("frontend_bg_reader", f"{{ sleep 10 | tr a b; }} > /dev/null 2>&1 & s=$(date +%s); pascal smoke/hello.pas {R}; e=$(date +%s); [ $((e - s)) -lt 8 ] && echo quick {A}", "pascal ok 42\nquick\n"),
+    # Each writer now flushes its own output, on every way out.
+    ("frontend_halt_output", f"pascal smoke/halt2.pas | cat {R}", "before halt\n"),
+    ("rea_thread_output", f"rea smoke/thread.rea | tr -d ' ' | sort {R}", "childok\nmainok\n"),
 ]
 BY_NAME = {test[0]: test for test in TESTS}
 
@@ -403,6 +421,10 @@ FIXTURES = {
     "halt.pas": "program Halting;\nbegin\n  halt(3);\nend.\n",
     "bigout.pas": "program BigOut;\nvar i: integer;\nbegin\n  for i := 1 to 30000 do writeln(i);\nend.\n",
     "bigout.clike": 'int main() {\n    int i;\n    for (i = 1; i <= 30000; i = i + 1) {\n        printf("%d\\n", i);\n    }\n    return 0;\n}\n',
+    "big.pas": "program Big;\nvar i: integer;\nbegin\n  for i := 1 to 100000 do writeln('line of big output');\nend.\n",
+    "first.pas": "program First;\nuses crt;\nbegin\n  writeln('first stage');\n  delay(2000);\nend.\n",
+    "halt2.pas": "program Halting2;\nbegin\n  writeln('before halt');\n  halt(3);\nend.\n",
+    "thread.rea": 'void child() {\n    writeln("child ok");\n}\n\nint t = spawn child();\njoin t;\nwriteln("main ok");\n',
 }
 
 # The first lines of auto.sh, run in the app before any test.

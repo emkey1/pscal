@@ -92,6 +92,7 @@ RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_cli
 ( trap '' INT; RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_clike_head_ios )
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only frontend_status_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_rea_head_ios
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_frontend_stage_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_bg_redirect_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_bg_pipe_redirect_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_bg_tool_redirect_ios
