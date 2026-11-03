@@ -195,6 +195,9 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("env_var", f"X=1 env | grep -c '^X=1$' {R}", "1\n"),
     ("pascal_run", f"pascal smoke/hello.pas {R}", "pascal ok 42\n"),
     ("clike_run", f"clike smoke/hello.clike {R}", "clike ok 42\n"),
+    # Build 31's cache writer took a slot for a host descriptor. Where the bytes went depends on
+    # which descriptors are open, but its entries were never bytecode, so this always shows it.
+    ("clike_cache_entry", f'clike smoke/hello.clike > /dev/null 2>&1; cat "$HOME"/.pscal/bc_cache/clike-hello.clike-* | head -c 4 {R}', "3BSP"),
     ("aether_run", f"aether smoke/hello.aether {R}", "aether ok 42\n"),
     ("rea_after_aether", f"rea smoke/hello.rea {R}", "rea ok 42\n"),
     ("aether_after_rea", f"aether smoke/hello.aether {R}", "aether ok 42\n"),
@@ -272,8 +275,8 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("rmdir_ok", f"mkdir smoke/rd; rmdir smoke/rd; ls smoke/rd {R}", "ls: cannot access 'smoke/rd': No such file or directory\n"),
     ("touch_times", f"touch -t 202001020304 smoke/tt.txt; date -r smoke/tt.txt +%Y {R}", "2020\n"),
     ("gzip_keep_time", f"cp smoke/d.txt smoke/g2.txt; gzip -f smoke/g2.txt; zcat smoke/g2.txt.gz {R}", "b\na\nc\n"),
-    # A compiler prints nothing here. Build 31 could capture about 21 KB of bytecode,
-    # the size of tiny.clike's cache entry: its cache writer used a slot as a host fd.
+    # A compiler prints nothing here. Where this file got host descriptor 3, build 31 captured
+    # all of tiny.clike's cache entry, about 21 KB: its cache writer took slot 3 for that descriptor.
     ("tiny_compile", f"tiny smoke/max.tiny smoke/max.pbc {R}", ""),
     ("tiny_pipe", f"tiny smoke/max.tiny smoke/max2.pbc | cat {R}", ""),
     ("word_home", f"Q=abc; echo $Q/foo {R}", "abc/foo\n"),
