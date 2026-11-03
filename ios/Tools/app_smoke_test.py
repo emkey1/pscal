@@ -517,10 +517,13 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("at_once_both", f"clike --no-cache smoke/v.clike | {{ clike --no-cache smoke/x.clike; cat; }} {R}", "clike2 4 9 8\nclike 3 5 7\n"),
     ("at_once_rea_aether", f"rea --no-cache smoke/v.rea | {{ aether --no-cache smoke/x.aether; cat; }} {R}", "aether2 4 x false\nrea 3 3 true\n"),
     ("at_once_aether_rea", f"aether --no-cache smoke/v.aether | {{ rea --no-cache smoke/x.rea; cat; }} {R}", "rea2 4 4 false\naether 3 b true\n"),
-    # grep: the nested .exshrc context announces each background job.
-    ("at_once_background", f"{{ clike --no-cache smoke/v.clike & pascal --no-cache smoke/v.pas & rea --no-cache smoke/v.rea & aether --no-cache smoke/v.aether & wait; }} | grep -v '^\\[' | sort {R}", "aether 3 b true\nclike 3 5 7\npascal 3 a TRUE\nrea 3 3 true\n"),
+    ("at_once_background", f"{{ clike --no-cache smoke/v.clike & pascal --no-cache smoke/v.pas & rea --no-cache smoke/v.rea & aether --no-cache smoke/v.aether & wait; }} 2>&1 | sort {R}", "aether 3 b true\nclike 3 5 7\npascal 3 a TRUE\nrea 3 3 true\n"),
     # One printf, one write: clike's used to go out a byte at a time and interleave mid-line.
-    ("at_once_same_lines", f"{{ clike --no-cache smoke/v.clike & clike --no-cache smoke/x.clike & clike --no-cache smoke/v.clike & clike --no-cache smoke/x.clike & wait; }} | grep -v '^\\[' | sort {R}", "clike 3 5 7\nclike 3 5 7\nclike2 4 9 8\nclike2 4 9 8\n"),
+    ("at_once_same_lines", f"{{ clike --no-cache smoke/v.clike & clike --no-cache smoke/x.clike & clike --no-cache smoke/v.clike & clike --no-cache smoke/x.clike & wait; }} 2>&1 | sort {R}", "clike 3 5 7\nclike 3 5 7\nclike2 4 9 8\nclike2 4 9 8\n"),
+    # A background frontend says nothing of its own. A subshell announces no jobs, and a prompt's
+    # announcement goes to stderr, as under bash.
+    ("bg_no_debug_lines", f"{{ pascal smoke/hello.pas & wait; }} 2>&1 | cat {R}", "pascal ok 42\n"),
+    ("bg_notice_on_stderr", f"x=$(pascal smoke/hello.pas > /dev/null & wait); echo \"[$x]\" {R}", "[]\n"),
     ("at_once_bad_stage", f"pascal --no-cache smoke/bad.pas 2>/dev/null | pascal --no-cache smoke/x.pas {R}", "pascal2 4 FALSE\n"),
     ("at_once_cache", f"clike smoke/v.clike | clike smoke/v.clike {R}", "clike 3 5 7\n"),
     # A run's conventions, its interface tables and its --deny stay its own.
