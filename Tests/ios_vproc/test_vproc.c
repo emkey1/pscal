@@ -3065,6 +3065,75 @@ static void assert_proc_device_entries_present(void) {
     (void)system(cleanup_cmd);
 }
 
+static void assert_proc_device_self_survives_full_snapshot(void) {
+    char templ[] = "/tmp/vproc-procdevfull-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    /* The snapshot keeps 256 processes, newest first, so these children fill it
+     * before it reaches this one. Each waits on the pipe, so a failed assert
+     * below ends them too. */
+    int hold[2];
+    assert(pipe(hold) == 0);
+    pid_t kids[300];
+    size_t kid_count = 0;
+    while (kid_count < sizeof(kids) / sizeof(kids[0])) {
+        pid_t kid = fork();
+        if (kid < 0) {
+            break;
+        }
+        if (kid == 0) {
+            close(hold[1]);
+            char byte;
+            (void)read(hold[0], &byte, 1);
+            _exit(0);
+        }
+        kids[kid_count++] = kid;
+    }
+
+    int host_pid = getpid();
+    char expected[32];
+    snprintf(expected, sizeof(expected), "%d", host_pid);
+    char self_target[64] = {0};
+    ssize_t n = pscalPathVirtualized_readlink("/proc/device/self", self_target, sizeof(self_target) - 1);
+    assert(n > 0);
+    self_target[n] = '\0';
+    assert(strcmp(self_target, expected) == 0);
+
+    char status_path[PATH_MAX];
+    snprintf(status_path, sizeof(status_path), "/proc/device/%s/status", self_target);
+    char buf[4096];
+    assert(read_virtual_file(status_path, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Name:\t") != NULL);
+
+    int device_pids[1024];
+    size_t device_pid_count = read_numeric_virtual_entries("/proc/device",
+                                                           device_pids,
+                                                           sizeof(device_pids) / sizeof(device_pids[0]));
+    assert(int_list_contains(device_pids, device_pid_count, host_pid));
+#if defined(__APPLE__)
+    /* Only the host's process list can fill it. A machine at its process limit
+     * can leave fork short of that, which is no fault of the code under test. */
+    if (kid_count >= 256) {
+        assert(device_pid_count >= 256);
+    }
+#endif
+
+    close(hold[0]);
+    close(hold[1]);
+    for (size_t i = 0; i < kid_count; ++i) {
+        while (waitpid(kids[i], NULL, 0) < 0 && errno == EINTR) {
+        }
+    }
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
 static void assert_proc_pid_namespace_and_device_namespace_separated(void) {
     char templ[] = "/tmp/vproc-procpidns-XXXXXX";
     char *root = mkdtemp(templ);
@@ -7339,6 +7408,8 @@ int main(void) {
     assert_proc_task_entries_present();
     fprintf(stderr, "TEST proc_device_entries_present\n");
     assert_proc_device_entries_present();
+    fprintf(stderr, "TEST proc_device_self_survives_full_snapshot\n");
+    assert_proc_device_self_survives_full_snapshot();
     fprintf(stderr, "TEST proc_pid_namespace_and_device_namespace_separated\n");
     assert_proc_pid_namespace_and_device_namespace_separated();
     fprintf(stderr, "TEST proc_root_listing_latency_regression\n");
