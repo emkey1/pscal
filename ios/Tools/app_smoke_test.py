@@ -261,6 +261,22 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("tail_F_appears", f"tail -F -s 0.2 smoke/appear {R} & t=$!; sleep 0.5; ln -s /dev/null smoke/appear; i=0; while [ $i -lt 200 ] && ! grep -q appeared {{o}}; do sleep 0.1; i=$((i+1)); done; kill $t; wait $t 2>/dev/null", "tail: cannot open 'smoke/appear' for reading: No such file or directory\ntail: 'smoke/appear' has appeared;  following new file\n"),
     ("stty_named", f"stty -F /dev/tty size > /dev/null 2>&1; echo $? {R}", "0\n"),
     ("stty_not_tty", f"stty -F /dev/null {R}; echo $? {A}", "stty: /dev/null: Inappropriate ioctl for device\n1\n"),
+    # pscal-core's own fcntl on 0-2 and on dup's slots reached the host's descriptors.
+    # ReadKey set O_NONBLOCK on the host's fd 0, so a lone ESC on a pipe waited for the
+    # rest of a sequence until the writer ended, where it should give up after 100 ms.
+    ("readkey_lone_esc", f"s=$(date +%s); {{ cat smoke/esc.bin; sleep 8; }} | {{ pascal smoke/key.pas; e=$(date +%s); [ $((e - s)) -lt 6 ] && echo quick; }} {R}", "27\nquick\n"),
+    ("readkey_after_esc", f"{{ cat smoke/esc.bin; sleep 1; printf x; }} | pascal smoke/key2.pas {R}", "27\n120\n"),
+    # /proc/<pid>/fd listed the host's descriptors, whichever vproc asked and for
+    # whichever pid. Numbers this high are slots only here: no host descriptor has them.
+    ("proc_fd_own_slot", f"ls /proc/self/fd 201< smoke/d.txt | grep -x 201 {R}", "201\n"),
+    # The sleep is the refresh's limit of once in 250 ms: the last test's refresh is that recent.
+    ("proc_fd_other_vproc", f"exec 202< smoke/d.txt; sleep 0.3; ls /proc/$$/fd | grep -x 202 {R}; exec 202<&-", "202\n"),
+    ("proc_fdinfo_slot", f"{{ read x; cat /proc/self/fdinfo/0; }} < smoke/d.txt {R}", "pos:\t2\nflags:\t00\nmnt_id:\t0\n"),
+    # vi's F_FULLFSYNC after a write reached whichever host descriptor had the slot's
+    # number and failed there, so the file never got one. Only a trace shows that.
+    ("vi_write", f"EXINIT='w! smoke/vo.txt:q!' vi -s smoke/d.txt < /dev/null > /dev/null 2>&1; echo $? {R}; cat smoke/vo.txt {A}", "0\nb\na\nc\n"),
+    # A socket's number is a host descriptor, so socketSetBlocking stays the host's fcntl.
+    ("socket_set_blocking", f"pascal smoke/sock.pas {R}", "0\n0\n"),
     # A missing directory is an error, as in bash: nothing makes it on the way.
     ("redirect_no_dir", f"echo x > /nonexistent/dir/f; echo $? {R}; ls /nonexistent {A}", "1\nls: cannot access '/nonexistent': No such file or directory\n"),
     ("touch_no_dir", f"touch /nonexistent/dir/f > /dev/null 2>&1; echo $? {R}; ls /nonexistent {A}", "1\nls: cannot access '/nonexistent': No such file or directory\n"),
@@ -597,6 +613,11 @@ FIXTURES = {
     "halt2.pas": "program Halting2;\nbegin\n  writeln('before halt');\n  halt(3);\nend.\n",
     "thread.rea": 'void child() {\n    writeln("child ok");\n}\n\nint t = spawn child();\njoin t;\nwriteln("main ok");\n',
     **AT_ONCE_FIXTURES,
+    "esc.bin": "\x1b",
+    "key.pas": "program Key;\nuses crt;\nvar c: char;\nbegin\n  c := readkey;\n  writeln(ord(c));\nend.\n",
+    "key2.pas": "program Key2;\nuses crt;\nvar c: char;\nbegin\n  c := readkey;\n  writeln(ord(c));\n  c := readkey;\n  writeln(ord(c));\nend.\n",
+    "where.pas": "program Where;\nuses crt;\nbegin\n  writeln(wherex > 0, ' ', wherey > 0);\nend.\n",
+    "sock.pas": "program Sock;\nvar s: integer;\nbegin\n  s := socketcreate(0);\n  socketsetblocking(s, false);\n  writeln(socketlasterror);\n  socketclose(s);\n  writeln(socketlasterror);\nend.\n",
 }
 
 # The first lines of auto.sh, run in the app before any test.

@@ -543,6 +543,14 @@ static void assert_fcntl_pread_pwrite_take_slots(void) {
     assert(pread(other_host, buf, sizeof(buf), 0) == 9);
     assert(memcmp(buf, "unrelated", 9) == 0);
 
+    /* F_SETFD, as the shell sets close-on-exec on each dup of its stdio. */
+    int other_fd_flags = fcntl(SHIM_TEST_SLOT, F_GETFD);
+    assert(vprocFcntlShim(SHIM_TEST_SLOT, F_SETFD, 0) == 0);
+    assert(!(vprocFcntlShim(SHIM_TEST_SLOT, F_GETFD) & FD_CLOEXEC));
+    assert(vprocFcntlShim(SHIM_TEST_SLOT, F_SETFD, FD_CLOEXEC) == 0);
+    assert(vprocFcntlShim(SHIM_TEST_SLOT, F_GETFD) & FD_CLOEXEC);
+    assert(fcntl(SHIM_TEST_SLOT, F_GETFD) == other_fd_flags);
+
     /* F_DUPFD makes slots, from the lowest free one at or above its argument. */
     assert(vprocFcntlShim(SHIM_TEST_SLOT, F_DUPFD, 50) == 50);
     assert(vprocFcntlShim(SHIM_TEST_SLOT, F_DUPFD_CLOEXEC, 50) == 51);
@@ -3065,6 +3073,129 @@ static void assert_proc_self_entries_present(void) {
     char cleanup_cmd[PATH_MAX + 16];
     snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
     (void)system(cleanup_cmd);
+}
+
+enum {
+    PROC_FD_TEST_PIPE_READ = 214,
+    PROC_FD_TEST_PIPE_WRITE = 215,
+    PROC_FD_TEST_LATER_SLOT = 216,
+    PROC_FD_TEST_SLOT = 217,
+    PROC_FD_TEST_HOST = 218,
+};
+
+/* /proc/<pid>/fd is that vproc's table: its slots, not the host's descriptors, and
+ * from any vproc, as `ls /proc/$$/fd` reads the shell's from a child. */
+static void assert_proc_fd_lists_the_vprocs_slots(void) {
+    char data[] = "/tmp/vproc-procfd-data-XXXXXX";
+    int data_host = mkstemp(data);
+    assert(data_host >= 0);
+    assert(write(data_host, "abcdef", 6) == 6);
+    assert(lseek(data_host, 0, SEEK_SET) == 0);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = vprocReservePid();
+    VProc *vp = vprocCreate(&opts);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+    int opened = vprocAdoptHostFd(vp, data_host);
+    assert(opened >= 0);
+    assert(vprocDup2Shim(opened, PROC_FD_TEST_SLOT) == PROC_FD_TEST_SLOT);
+    char two[2];
+    assert(vprocReadShim(PROC_FD_TEST_SLOT, two, 2) == 2);
+    /* A host descriptor whose number no slot has. */
+    assert(dup2(STDERR_FILENO, PROC_FD_TEST_HOST) == PROC_FD_TEST_HOST);
+
+    char templ[] = "/tmp/vproc-procfd-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    int fds[1024];
+    size_t count = read_numeric_virtual_entries("/proc/self/fd", fds, sizeof(fds) / sizeof(fds[0]));
+    assert(int_list_contains(fds, count, STDOUT_FILENO));
+    assert(int_list_contains(fds, count, PROC_FD_TEST_SLOT));
+    assert(!int_list_contains(fds, count, PROC_FD_TEST_HOST));
+
+    char path[64];
+    char buf[256];
+    snprintf(path, sizeof(path), "/proc/self/fdinfo/%d", PROC_FD_TEST_SLOT);
+    assert(read_virtual_file(path, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "pos:\t2\n") != NULL);
+
+    /* A slot opened since the last refresh: only asking its vproc's table from the
+     * other vproc can list this one. The sleep is that refresh's 250 ms limit. */
+    assert(vprocDup2Shim(opened, PROC_FD_TEST_LATER_SLOT) == PROC_FD_TEST_LATER_SLOT);
+    opts = vprocDefaultOptions();
+    opts.pid_hint = vprocReservePid();
+    VProc *reader = vprocCreate(&opts);
+    assert(reader);
+    vprocRegisterThread(reader, pthread_self());
+    vprocActivate(reader);
+    usleep(300000);
+    snprintf(path, sizeof(path), "/proc/%d/fd", vprocPid(vp));
+    count = read_numeric_virtual_entries(path, fds, sizeof(fds) / sizeof(fds[0]));
+    assert(int_list_contains(fds, count, PROC_FD_TEST_LATER_SLOT));
+    assert(int_list_contains(fds, count, PROC_FD_TEST_SLOT));
+    assert(!int_list_contains(fds, count, PROC_FD_TEST_HOST));
+    vprocDeactivate();
+    vprocDestroy(reader);
+
+    /* A closed slot leaves the listing, whatever the host has at that number. */
+    assert(vprocCloseShim(PROC_FD_TEST_LATER_SLOT) == 0);
+    assert(vprocCloseShim(opened) == 0);
+    count = read_numeric_virtual_entries("/proc/self/fd", fds, sizeof(fds) / sizeof(fds[0]));
+    assert(!int_list_contains(fds, count, PROC_FD_TEST_LATER_SLOT));
+    assert(int_list_contains(fds, count, PROC_FD_TEST_SLOT));
+    /* An in-process pipe has no host descriptor: its ends' flags are their own. */
+    struct pscal_fd *read_end = NULL;
+    struct pscal_fd *write_end = NULL;
+    assert(vprocCreateInprocPipe(&read_end, &write_end) == 0);
+    assert(vprocAdoptPscalFd(vp, PROC_FD_TEST_PIPE_READ, read_end) == 0);
+    assert(vprocAdoptPscalFd(vp, PROC_FD_TEST_PIPE_WRITE, write_end) == 0);
+    pscal_fd_close(read_end);
+    pscal_fd_close(write_end);
+    assert(vprocFcntlShim(PROC_FD_TEST_PIPE_READ, F_SETFL, O_NONBLOCK) == 0);
+
+    VProcFdSnapshot table[256];
+    ssize_t rows = vprocSnapshotFds(vprocPid(vp), table, 256);
+    assert(rows > 0);
+    int seen = 0;
+    for (ssize_t i = 0; i < rows; ++i) {
+        assert(table[i].fd >= 0 && table[i].fd < 256);
+        assert(i == 0 || table[i].fd > table[i - 1].fd);
+        if (table[i].fd == PROC_FD_TEST_SLOT) {
+            seen++;
+            assert(table[i].pos == 2);
+            assert((table[i].open_flags & O_ACCMODE) == O_RDWR);
+        } else if (table[i].fd == PROC_FD_TEST_PIPE_READ) {
+            seen++;
+            assert(table[i].pos == 0);
+            assert(table[i].open_flags == (O_RDONLY | O_NONBLOCK));
+        } else if (table[i].fd == PROC_FD_TEST_PIPE_WRITE) {
+            seen++;
+            assert(table[i].open_flags == O_WRONLY);
+        }
+    }
+    assert(seen == 3);
+    assert(vprocCloseShim(PROC_FD_TEST_PIPE_READ) == 0);
+    assert(vprocCloseShim(PROC_FD_TEST_PIPE_WRITE) == 0);
+    /* Only the numbers below capacity, however many the table has. */
+    assert(vprocSnapshotFds(vprocPid(vp), table, 3) <= 3);
+    assert(vprocSnapshotFds(-1, table, 256) == -1);
+    close(PROC_FD_TEST_HOST);
+
+    vprocDeactivate();
+    int gone_pid = vprocPid(vp);
+    vprocDestroy(vp);
+    assert(vprocSnapshotFds(gone_pid, table, 256) == -1);
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+    unlink(data);
 }
 
 static void assert_proc_task_entries_present(void) {
@@ -7832,6 +7963,8 @@ int main(void) {
     assert_proc_misc_entries_present();
     fprintf(stderr, "TEST proc_self_entries_present\n");
     assert_proc_self_entries_present();
+    fprintf(stderr, "TEST proc_fd_lists_the_vprocs_slots\n");
+    assert_proc_fd_lists_the_vprocs_slots();
     fprintf(stderr, "TEST proc_task_entries_present\n");
     assert_proc_task_entries_present();
     fprintf(stderr, "TEST proc_device_entries_present\n");

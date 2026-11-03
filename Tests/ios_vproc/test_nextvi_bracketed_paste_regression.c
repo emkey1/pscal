@@ -55,6 +55,13 @@ int pscalRuntimeOpenShellTab(void) { return -1; }
 VProc *vprocCurrent(void) { return NULL; }
 int vprocAdoptHostFd(VProc *vp, int host_fd) { (void)vp; return host_fd; }
 int vprocHostClose(int fd) { return close(fd); }
+int vprocFcntlShim(int fd, int cmd, ...) {
+    va_list ap;
+    va_start(ap, cmd);
+    intptr_t arg = va_arg(ap, intptr_t);
+    va_end(ap);
+    return fcntl(fd, cmd, arg);
+}
 
 bool pathTruncateExpand(const char *input_path, char *out, size_t out_size) {
     if (out == NULL || out_size == 0) {
