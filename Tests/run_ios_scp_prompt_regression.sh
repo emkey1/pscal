@@ -17,6 +17,7 @@ mkdir -p "${BUILD_DIR}"
 
 VPROC_SOURCES=(
   "${CORE}/src/runtime/vproc/vproc.c"
+  "${CORE}/src/common/frontend_kind.c"
   "${CORE}/src/common/path_virtualization.c"
   "${CORE}/src/common/path_truncate.c"
   "${CORE}/src/common/runtime_tty.c"

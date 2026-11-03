@@ -7235,6 +7235,40 @@ static void assert_sigint_non_shell_same_tid_does_not_request_runtime_interrupt(
     vprocSetShellSelfPid(prev_shell);
 }
 
+/* Replacing slot 2 closes the number vprocCreate saved for it. vprocDestroy closed that number
+ * again, and by then it could be anything. It was the poll wake pipe's when Aether muted stderr
+ * around its pre-pass, and wakeups then wrote NULs to whatever had the number next. */
+static void assert_destroy_leaves_replaced_stdio_number_alone(void) {
+    int hole = vprocHostOpen("/dev/null", O_RDONLY);
+    assert(hole >= 0);
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    int pipefd[2];
+    assert(vprocPipe(vp, pipefd) == 0);
+    int saved = vprocTranslateFd(vp, STDERR_FILENO);
+    assert(saved > hole);
+    vprocHostClose(hole);
+    assert(vprocDup2(vp, pipefd[1], STDERR_FILENO) == STDERR_FILENO);
+    assert(vprocTranslateFd(vp, STDERR_FILENO) != saved);
+
+    /* Whatever the process opens next can get the number. */
+    int takers[256];
+    int count = 0;
+    int taker = -1;
+    while (count < 256 && taker != saved) {
+        taker = vprocHostOpen("/dev/null", O_RDONLY);
+        assert(taker >= 0 && taker <= saved);
+        takers[count++] = taker;
+    }
+    assert(taker == saved);
+
+    vprocDestroy(vp);
+    assert((fcntl)(saved, F_GETFD) >= 0);
+    for (int i = 0; i < count; ++i) {
+        vprocHostClose(takers[i]);
+    }
+}
+
 int main(void) {
     /* Default truncation path for tests to keep path virtualization in /tmp. */
     setenv("PATH_TRUNCATE", "/tmp", 1);
@@ -7528,6 +7562,8 @@ int main(void) {
     assert_stop_unsupported_sigtstp_queues_pending_signal();
     fprintf(stderr, "TEST sigint_non_shell_same_tid_does_not_request_runtime_interrupt\n");
     assert_sigint_non_shell_same_tid_does_not_request_runtime_interrupt();
+    fprintf(stderr, "TEST destroy_leaves_replaced_stdio_number_alone\n");
+    assert_destroy_leaves_replaced_stdio_number_alone();
     fprintf(stderr, "TEST kernel_mounts_from_fstab_at_startup\n");
     assert_kernel_mounts_from_fstab_at_startup();
 #if defined(PSCAL_TARGET_IOS)

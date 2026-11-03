@@ -401,9 +401,34 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("clike_tr", f"clike smoke/hello.clike | tr -d ' ' {R}", "clikeok42\n"),
     ("rea_tr", f"rea smoke/hello.rea | tr -d ' ' {R}", "reaok42\n"),
     ("aether_tr", f"aether smoke/hello.aether | tr -d ' ' {R}", "aetherok42\n"),
-    # awk rather than a second frontend: two compiling at once in one process are not safe yet.
     ("frontend_full_pipe", f"pascal smoke/big.pas | {{ sleep 1; awk 'BEGIN {{ fflush(); print \"flushed\" }}'; }} {R}", "flushed\n"),
     ("frontend_output_stays", f"pascal smoke/first.pas | {{ sleep 1; awk 'BEGIN {{ fflush(); print \"flushed\" }}'; }} {R}", "flushed\n"),
+    ("frontend_full_pipe_real", f"pascal smoke/big.pas | {{ sleep 1; pascal smoke/hello.pas; }} {R}", "pascal ok 42\n"),
+    ("frontend_stays_real", f"pascal smoke/first.pas | {{ sleep 1; clike smoke/hello.clike; }} {R}", "clike ok 42\n"),
+    # Stages and tabs are threads of one process: one crash here takes the whole app with it.
+    ("at_once_clike", f"for i in 1 2 3 4 5; do clike --no-cache smoke/v.clike | clike --no-cache smoke/x.clike; done {R}", "clike2 4 9 8\n" * 5),
+    ("at_once_rea", f"for i in 1 2 3 4 5; do rea --no-cache smoke/v.rea | rea --no-cache smoke/x.rea; done {R}", "rea2 4 4 false\n" * 5),
+    ("at_once_pascal", f"for i in 1 2 3 4 5; do pascal --no-cache smoke/v.pas | pascal --no-cache smoke/x.pas; done {R}", "pascal2 4 FALSE\n" * 5),
+    ("at_once_aether", f"for i in 1 2 3 4 5; do aether --no-cache smoke/v.aether | aether --no-cache smoke/x.aether; done {R}", "aether2 4 x false\n" * 5),
+    ("at_once_clike_pascal", f"for i in 1 2 3 4 5; do clike --no-cache smoke/v.clike | pascal --no-cache smoke/x.pas; done {R}", "pascal2 4 FALSE\n" * 5),
+    ("at_once_pascal_clike", f"for i in 1 2 3 4 5; do pascal --no-cache smoke/v.pas | clike --no-cache smoke/x.clike; done {R}", "clike2 4 9 8\n" * 5),
+    ("at_once_both", f"clike --no-cache smoke/v.clike | {{ clike --no-cache smoke/x.clike; cat; }} {R}", "clike2 4 9 8\nclike 3 5 7\n"),
+    ("at_once_rea_aether", f"rea --no-cache smoke/v.rea | {{ aether --no-cache smoke/x.aether; cat; }} {R}", "aether2 4 x false\nrea 3 3 true\n"),
+    ("at_once_aether_rea", f"aether --no-cache smoke/v.aether | {{ rea --no-cache smoke/x.rea; cat; }} {R}", "rea2 4 4 false\naether 3 b true\n"),
+    # grep: the nested .exshrc context announces each background job.
+    ("at_once_background", f"{{ clike --no-cache smoke/v.clike & pascal --no-cache smoke/v.pas & rea --no-cache smoke/v.rea & aether --no-cache smoke/v.aether & wait; }} | grep -v '^\\[' | sort {R}", "aether 3 b true\nclike 3 5 7\npascal 3 a TRUE\nrea 3 3 true\n"),
+    # One printf, one write: clike's used to go out a byte at a time and interleave mid-line.
+    ("at_once_same_lines", f"{{ clike --no-cache smoke/v.clike & clike --no-cache smoke/x.clike & clike --no-cache smoke/v.clike & clike --no-cache smoke/x.clike & wait; }} | grep -v '^\\[' | sort {R}", "clike 3 5 7\nclike 3 5 7\nclike2 4 9 8\nclike2 4 9 8\n"),
+    ("at_once_bad_stage", f"pascal --no-cache smoke/bad.pas 2>/dev/null | pascal --no-cache smoke/x.pas {R}", "pascal2 4 FALSE\n"),
+    ("at_once_cache", f"clike smoke/v.clike | clike smoke/v.clike {R}", "clike 3 5 7\n"),
+    # A run's conventions, its interface tables and its --deny stay its own.
+    ("at_once_styles", f"pascal --no-cache smoke/rt.pas | {{ rea --no-cache smoke/rt.rea; cat; }} {R}", "rea-rt 0 true\nA B 1\npascal-rt 0 TRUE\nAB1\n"),
+    ("at_once_index", f"aether --no-cache smoke/rt.aether | {{ pascal --no-cache smoke/rt.pas; cat; }} {R}", "pascal-rt 0 TRUE\nAB1\naether-rt 0 true\n"),
+    ("at_once_worker", f"rea --no-cache smoke/rt.rea | {{ pascal --no-cache smoke/th.pas; cat; }} {R}", "pascal-worker TRUE\npascal-main TRUE\nrea-rt 0 true\nA B 1\n"),
+    ("iface_in_turn", f"pascal --no-cache smoke/if1.pas {R}; pascal --no-cache smoke/if2.pas {A}", "one:pm\ntwo:qm\ntwo-other:qn\n"),
+    ("iface_at_once", f"pascal --no-cache smoke/if1.pas | {{ pascal --no-cache smoke/if2.pas; cat; }} {R}", "two:qm\ntwo-other:qn\none:pm\n"),
+    ("deny_not_shared", f"pascal --no-cache --deny net smoke/rt.pas 2>/dev/null | pascal --no-cache smoke/n.pas {R}", "session ok\n"),
+    ("deny_kept", f"pascal --no-cache --deny net smoke/n.pas 2>&1 | {{ pascal --no-cache smoke/rt.pas > /dev/null; cat; }} | grep -c 'denied by --deny' {R}", "1\n"),
     ("frontend_bg_reader", f"{{ sleep 10 | tr a b; }} > /dev/null 2>&1 & s=$(date +%s); pascal smoke/hello.pas {R}; e=$(date +%s); [ $((e - s)) -lt 8 ] && echo quick {A}", "pascal ok 42\nquick\n"),
     # Each writer now flushes its own output, on every way out.
     ("frontend_halt_output", f"pascal smoke/halt2.pas | cat {R}", "before halt\n"),
@@ -424,6 +449,36 @@ def utmp_record(user: str, line: str) -> str:
     return record.decode("ascii")
 
 
+# Two frontends at once. Each program declares variables and routines, or a collision hides: a
+# program with no names has nothing to collide. Same routine names in all of them, on purpose.
+_PAD = range(1, 41)
+_PAS_PAD = "".join(f"function p{n}(a: integer): integer;\nvar q: integer;\nbegin\n  q := a + 1;\n  p{n} := q;\nend;\n" for n in _PAD)
+_C_PAD = "".join(f"int p{n}(int a) {{ int q; q = a + 1; return q; }}\n" for n in _PAD)
+_REA_PAD = "".join(f"int p{n}(int a) {{ int q = a + 1; return q; }}\n" for n in _PAD)
+_AE_PAD = "".join(f"fn p{n}(a: Int) -> Int {{ let q: Int = a + 1; ret q; }}\n" for n in _PAD)
+AT_ONCE_FIXTURES = {
+    "v.pas": "program V;\ntype TR = record x: integer; end;\nvar i: integer; s: string; b: boolean; r: TR;\n" + _PAS_PAD
+             + "begin\n  s := 'abc'; b := true; i := p3(2); r.x := i;\n  writeln('pascal ', r.x, ' ', s[1], ' ', b);\nend.\n",
+    "x.pas": "program X;\nvar j: integer; i: real; b: boolean;\n" + _PAS_PAD
+             + "begin\n  j := p4(3); b := false;\n  writeln('pascal2 ', j, ' ', b);\nend.\n",
+    "bad.pas": "program Bad;\nvar i: integer;\nbegin\n  i := undefinedname + 1;\nend.\n",
+    "v.clike": "struct P { int x; };\nint g = 5;\nconst int K = 7;\n" + _C_PAD
+               + 'int main() {\n    int i;\n    struct P* p;\n    new(&p);\n    p->x = p3(2);\n    i = p->x;\n    printf("clike %d %d %d\\n", i, g, K);\n    dispose(&p);\n    return 0;\n}\n',
+    "x.clike": "struct Q { int y; int z; };\nint g = 9;\nconst int K = 8;\n" + _C_PAD
+               + 'int main() {\n    int i;\n    struct Q* p;\n    new(&p);\n    p->z = p4(3);\n    i = p->z;\n    printf("clike2 %d %d %d\\n", i, g, K);\n    dispose(&p);\n    return 0;\n}\n',
+    "v.rea": _REA_PAD + 'class C { int v; int get() { return my.v; } }\nint i = 3;\nC c = new C();\nc.v = p3(2);\nwriteln("rea ", c.get(), " ", i, " ", true);\n',
+    "x.rea": _REA_PAD + 'class D { int w; int two() { return my.w * 2; } }\nint i = 4;\nD d = new D();\nd.w = p2(1);\nwriteln("rea2 ", d.two(), " ", i, " ", false);\n',
+    "v.aether": _AE_PAD + 'fn main() -> Void {\n    let i: Int = p3(2);\n    let s = "abc";\n    let b = true;\n    fx { println("aether ", i, " ", s[1], " ", b); }\n}\n',
+    "x.aether": _AE_PAD + 'fn main() -> Void {\n    let i: Int = p4(3);\n    let s = "xyz";\n    fx { println("aether2 ", i, " ", s[0], " ", false); }\n}\n',
+    "rt.pas": "program Rt;\nvar k, bad: integer; s: string; b: boolean;\nbegin\n  s := 'abc'; b := true; bad := 0;\n  for k := 1 to 100000 do\n    if s[1] <> 'a' then bad := bad + 1;\n  writeln('pascal-rt ', bad, ' ', b);\n  writeln('A', 'B', 1);\nend.\n",
+    "rt.rea": 'int bad = 0;\nstr s = "abc";\nint k = 0;\nwhile (k < 100000) {\n  if (s[1] != "a") { bad = bad + 1; }\n  k = k + 1;\n}\nwriteln("rea-rt ", bad, " ", true);\nwriteln("A", "B", 1);\n',
+    "rt.aether": 'fn main() -> Void {\n    let s = "abc";\n    let bad: Int = 0;\n    let k: Int = 0;\n    while k < 100000 {\n        if s[0] != "a" { bad = bad + 1; }\n        k = k + 1;\n    }\n    fx { println("aether-rt ", bad, " ", true); }\n}\n',
+    "th.pas": "program Th;\nvar t: integer; ok: boolean;\nprocedure Worker;\nbegin\n  ok := true;\n  writeln('pascal-worker ', ok);\nend;\nbegin\n  ok := false;\n  t := spawn Worker;\n  join t;\n  writeln('pascal-main ', ok);\nend.\n",
+    "if1.pas": "program If1;\ntype\n  ILog = interface\n    procedure Say(const m: string);\n  end;\n  TLog = record\n    P: string;\n    procedure Say(const m: string);\n  end;\nprocedure TLog.Say(const m: string);\nbegin\n  writeln('one:', P, m);\nend;\nvar l: TLog; s: ILog;\nbegin\n  l.P := 'p'; s := l; s.Say('m');\nend.\n",
+    "if2.pas": "program If2;\ntype\n  ILog = interface\n    procedure Other(const m: string);\n    procedure Say(const m: string);\n  end;\n  TLog = record\n    Q: string;\n    procedure Other(const m: string);\n    procedure Say(const m: string);\n  end;\nprocedure Unrelated(n: integer);\nbegin\n  writeln('unrelated ', n);\nend;\nprocedure TLog.Other(const m: string);\nbegin\n  writeln('two-other:', Q, m);\nend;\nprocedure TLog.Say(const m: string);\nbegin\n  writeln('two:', Q, m);\nend;\nvar l: TLog; s: ILog;\nbegin\n  l.Q := 'q'; s := l; s.Say('m'); s.Other('n');\nend.\n",
+    "n.pas": "program N;\nvar sess: integer;\nbegin\n  sess := HttpSession();\n  if sess >= 0 then writeln('session ok');\nend.\n",
+}
+
 # Written from the host, since they are awkward to quote in a shell script.
 FIXTURES = {
     "utmp.rec": utmp_record("alice", "pts/1") + utmp_record("bob", "pts/2"),
@@ -439,6 +494,7 @@ FIXTURES = {
     "first.pas": "program First;\nuses crt;\nbegin\n  writeln('first stage');\n  delay(2000);\nend.\n",
     "halt2.pas": "program Halting2;\nbegin\n  writeln('before halt');\n  halt(3);\nend.\n",
     "thread.rea": 'void child() {\n    writeln("child ok");\n}\n\nint t = spawn child();\njoin t;\nwriteln("main ok");\n',
+    **AT_ONCE_FIXTURES,
 }
 
 # The first lines of auto.sh, run in the app before any test.

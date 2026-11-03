@@ -21,6 +21,9 @@ cmake -S "${ROOT}" -B "${BUILD_DIR}" \
 # Build the exsh binary that exercises the vproc path.
 cmake --build "${BUILD_DIR}" --target exsh
 
+# Nothing a command compiles with may be shared by every command in the process.
+bash "${ROOT}/Tests/ios_host_statics.sh" "${BUILD_DIR}"
+
 # Run the targeted jobspec regression against the iOS-flavored binary.
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_subshell
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_cd_nested
@@ -96,6 +99,9 @@ RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_cli
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only frontend_status_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_rea_head_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_frontend_stage_ios
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only frontends_at_once_ios
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only frontends_at_once_run_ios
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only frontends_at_once_aether_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_bg_redirect_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_bg_pipe_redirect_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_bg_tool_redirect_ios

@@ -1,0 +1,54 @@
+#!/bin/bash
+# A mutable static in a frontend's compile path is shared by every command on iOS, where a
+# pipeline's stages and a terminal's tabs are threads of one process. compiler.c's made
+# `clike a | clike b` crash the whole app. Such a variable has to be PSCAL_THREAD_LOCAL.
+# Usage: ios_host_statics.sh <iOS-flavoured build dir>. Lists what nm finds in writable data.
+set -euo pipefail
+BUILD_DIR="${1:?usage: ios_host_statics.sh <build dir>}"
+if [ "$(uname)" != "Darwin" ]; then
+    echo "SKIP ios_host_statics: nm -m is macOS only"
+    exit 0
+fi
+
+# Read-only in practice, or process-wide on purpose. Add here only with a reason.
+ALLOWED='
+_CLIKE_USAGE
+_PASCAL_USAGE
+_REA_USAGE
+_holdPendingWarnings.registered
+_aetherCollectionTypeAdvice.arrayNames
+_aetherCollectionTypeAdvice.mapNames
+_g_sigArity
+_g_sigArityCount
+_g_sigArityCap
+_g_sigArityOnce
+_break_requested
+_globals_mutex
+'
+
+list_writable() {
+    nm -m "$1" 2>/dev/null | awk -v want="$2" '
+        /\.o:$/ { obj = $1; sub(/:$/, "", obj); next }
+        /\(__DATA,__data\)|\(__DATA,__bss\)|\(__DATA,__common\)/ {
+            if ($NF !~ /^ltmp/ && (want == "" || index(want, " " obj " "))) print obj, $NF
+        }'
+}
+
+found=$(
+    list_writable "$BUILD_DIR/libpscal_pascal_static.a" ""
+    list_writable "$BUILD_DIR/libpscal_clike_static.a" ""
+    list_writable "$BUILD_DIR/libpscal_rea_static.a" ""
+    list_writable "$BUILD_DIR/libpscal_aether_static.a" ""
+    list_writable "$BUILD_DIR/libpscal_core_static.a" " compiler.c.o globals.c.o frontend_kind.c.o diagmap.c.o "
+)
+
+status=0
+while read -r obj symbol; do
+    [ -n "$symbol" ] || continue
+    if ! printf '%s' "$ALLOWED" | grep -qx -- "$symbol"; then
+        echo "FAIL ios_host_statics: $symbol in $obj is process-wide; make it PSCAL_THREAD_LOCAL"
+        status=1
+    fi
+done <<< "$found"
+[ "$status" -eq 0 ] && echo "PASS ios_host_statics"
+exit "$status"
