@@ -377,6 +377,12 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("alias_bad_option", f"alias -z 2>/dev/null; echo \"rc $?\" {R}", "rc 2\n"),
     ("type_missing", f"type sm-missing 2>/dev/null; echo \"rc $?\" {R}", "rc 1\n"),
     ("type_no_names", f"type; echo \"rc $?\" {R}", "rc 0\n"),
+    # An alias counts only while aliases expand. The subshells keep the option from leaking.
+    ("alias_option_off", f"( alias sm='ls -l'; shopt -u expand_aliases; type -t sm; echo \"rc $?\"; command -v sm; echo \"rc $?\" ) {R}", "rc 1\nrc 1\n"),
+    ("alias_option_on", f"( alias sm='ls -l'; shopt -s expand_aliases; type -t sm; command -v sm ) {R}", "alias\nalias sm='ls -l'\n"),
+    ("posix_turns_aliases_on", f"shopt -q expand_aliases; was=$?; ( shopt -u expand_aliases; set -o posix; shopt -q expand_aliases; echo \"rc $?\" ) {R}; shopt -q expand_aliases; [ $? = $was ] && echo same {A}; echo \"${{POSIXLY_CORRECT-unset}}\" {A}; unset was", "rc 0\nsame\nunset\n"),
+    ("posix_in_subshell", f"( shopt -u expand_aliases; set -o posix; shopt -u expand_aliases; ( set -o posix; shopt -q expand_aliases; echo \"rc $?\" ) ) {R}", "rc 1\n"),
+    ("type_path_not_a_file", f"type -p echo {R}; echo \"rc $?\" {A}", "rc 0\n"),
     ("escaped_pid", f"echo \"\\$\\$\" \\$\\$ {R}", "$$ $$\n"),
     ("negated_errexit", f"( set -e; ! true; ! true | cat; ! {{ true; }}; echo survived ) {R}", "survived\n"),
     # A finished frontend flushed every stream in the app, other stages' included. It
