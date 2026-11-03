@@ -1019,7 +1019,15 @@ main(int argc, char **argv)
 	    iamrecursive ? " -r" : "", pflag ? " -p" : "",
 	    targetshouldbedirectory ? " -d" : "");
 
+#ifndef PSCAL_TARGET_IOS
 	(void) ssh_signal(SIGPIPE, lostconn);
+#else
+	/*
+	 * A handler is the whole app's, and it can run on any thread: on the main
+	 * thread its _exit ends every terminal session. The wrapper leaves SIGPIPE
+	 * ignored, so a lost connection is an EPIPE on the write and a fatal() here.
+	 */
+#endif
 
 	if (colon(argv[argc - 1]))	/* Dest is remote host. */
 		toremote(argc, argv, mode, sftp_direct);

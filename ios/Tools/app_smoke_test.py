@@ -516,9 +516,14 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("rsync_no_server", f"rsync -a --rsync-path=nope smoke/rs/a smoke/rs/ns > /dev/null 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
     ("rsync_no_shell", f"rsync -a -e nope smoke/rs/a host:x > /dev/null 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
     ("rsync_usage", f"rsync > /dev/null 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
-    ("rsync_after_failures", f"rsync -a smoke/rs/a smoke/rs/af {R}; echo \"rc=$?\" {A}", "rc=0\n"),
-    # A failed ssh under scp. It stops at the name lookup, so nothing connects.
+    # A transport that fails. No ssh connects: the first program does not exist, and the
+    # others stop at the name lookup. A SIGPIPE handler of scp's ended the app from the main
+    # thread, and closing its one socket twice closed a host descriptor with that number.
+    ("scp_no_program", f"scp -S nope smoke/d.txt h:x > /dev/null 2>&1; [ $? -ne 0 ] && echo failed {R}", "failed\n"),
+    ("sftp_no_program", f"sftp -S nope h < /dev/null > /dev/null 2>&1; [ $? -ne 0 ] && echo failed {R}", "failed\n"),
     ("scp_no_host", f"scp smoke/d.txt nosuch.invalid:x > /dev/null 2>&1; [ $? -ne 0 ] && echo failed {R}", "failed\n"),
+    ("sftp_no_host", f"sftp nosuch.invalid < /dev/null > /dev/null 2>&1; [ $? -ne 0 ] && echo failed {R}", "failed\n"),
+    ("rsync_after_failures", f"rsync -a smoke/rs/a smoke/rs/af {R}; echo \"rc=$?\" {A}", "rc=0\n"),
 ]
 BY_NAME = {test[0]: test for test in TESTS}
 
