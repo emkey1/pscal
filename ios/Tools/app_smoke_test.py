@@ -177,6 +177,15 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     # A job with its output redirected lets go of the pipe it replaced: the reader sees end of
     # file while the job runs. The job marks a held pipe and gives up, so this cannot hang.
     ("background_release", f"( {{ : > smoke/rel.up; i=0; while [ ! -e smoke/rel.seen ] && [ $i -lt 30 ]; do i=$((i+1)); sleep 0.1; done; [ -e smoke/rel.seen ] || : > smoke/rel.held; }} > /dev/null 2>&1 & until [ -e smoke/rel.up ]; do sleep 0.05; done ) | {{ cat > /dev/null; if [ -e smoke/rel.held ]; then echo held; else echo released; fi; : > smoke/rel.seen; }} {R}; wait", "released\n"),
+    # A job outlives what started it, with the stdout and descriptors that had at the `&`. Its
+    # thread used to read the starter's destroyed vproc, and a crash here ends the whole app.
+    # grep: the nested .exshrc context announces each background job, here into the pipe.
+    ("background_starter_gone", f"for i in 1 2 3 4 5 6 7 8 9 10; do ( {{ echo job; }} & ) | grep -v '^\\[' | tr a-z A-Z {A}; done", "JOB\n" * 10),
+    ("background_eval_gone", f"for i in 1 2 3 4 5 6 7 8 9 10; do ( eval \"{{ echo job; }} &\" ) | grep -v '^\\[' | tr a-z A-Z {A}; done", "JOB\n" * 10),
+    ("background_eval_wait", f"eval \"{{ exit 3; }} &\"; wait $!; echo \"wait $?\" {R}", "wait 3\n"),
+    ("background_subshell_wait", f"( eval \"{{ exit 5; }} &\"; wait $!; echo \"wait $?\" ) | grep -v '^\\[' {R}", "wait 5\n"),
+    ("background_starter_fd", f"exec 3> smoke/bs3.txt; ( {{ echo x >&3; }} & ) | cat; exec 3>&-; cat smoke/bs3.txt {R}", "x\n"),
+    ("background_starter_copy", f"exec 3> smoke/bs4.txt; ( {{ sleep 0.1; echo kept >&3; }} & exec 3>&- ) | cat; exec 3>&-; cat smoke/bs4.txt {R}", "kept\n"),
     ("subshell_exit_trap_redirect", f"( trap 'echo bye' EXIT; echo body ) > smoke/et.txt; cat smoke/et.txt {R}", "body\nbye\n"),
     ("stage_redirect_undone", f"echo a | {{ cat; echo b; }} > smoke/st.txt; echo back {R}; cat smoke/st.txt {A}", "back\na\nb\n"),
     ("background_status", f"{{ exit 7; }} & wait $!; echo \"wait $?\" {R}", "wait 7\n"),

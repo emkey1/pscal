@@ -1235,6 +1235,34 @@ static void assert_children_reparent_to_shell(void) {
     vprocSetShellSelfPid(previous_shell);
 }
 
+static void assert_children_pass_to_parent(void) {
+    VProc *waiter = vprocCreate(NULL);
+    VProc *stage = vprocCreate(NULL);
+    VProc *job = vprocCreate(NULL);
+    assert(waiter && stage && job);
+    int stage_pid = vprocPid(stage);
+    int job_pid = vprocPid(job);
+    vprocSetParent(stage_pid, vprocPid(waiter));
+    vprocSetParent(job_pid, stage_pid);
+
+    vprocPassChildrenToParent(stage_pid);
+    vprocMarkExit(stage, 0);
+    vprocMarkExit(job, 0);
+
+    vprocActivate(waiter);
+    int status = 0;
+    assert(vprocWaitPidShim(job_pid, &status, 0) == job_pid);
+    assert(vprocWaitPidShim(stage_pid, &status, 0) == stage_pid);
+    vprocDeactivate();
+
+    int waiter_pid = vprocPid(waiter);
+    vprocMarkExit(waiter, 0);
+    assert(vprocWaitPidShim(waiter_pid, &status, 0) == waiter_pid);
+    vprocDestroy(job);
+    vprocDestroy(stage);
+    vprocDestroy(waiter);
+}
+
 static void assert_sigchld_pending_snapshot(void) {
     int shell_pid = current_waiter_pid();
     vprocSetShellSelfPid(shell_pid);
@@ -6483,6 +6511,214 @@ static void assert_pthread_inherits_session_ids(void) {
     vprocSetKernelPid(prev_kernel);
 }
 
+typedef struct {
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    bool creator_gone;
+    bool saw_vproc;
+    VProc *current;
+} CreatorGoneArg;
+
+static void *creator_gone_thread(void *arg) {
+    CreatorGoneArg *state = (CreatorGoneArg *)arg;
+    pthread_mutex_lock(&state->mu);
+    while (!state->creator_gone) {
+        pthread_cond_wait(&state->cv, &state->mu);
+    }
+    pthread_mutex_unlock(&state->mu);
+    state->saw_vproc = vprocCurrent() != NULL;
+    return NULL;
+}
+
+static bool snapshot_has_pid(int pid) {
+    size_t cap = vprocSnapshot(NULL, 0);
+    VProcSnapshot *snaps = calloc(cap ? cap : 1, sizeof(VProcSnapshot));
+    size_t count = snaps ? vprocSnapshot(snaps, cap) : 0;
+    bool found = false;
+    for (size_t i = 0; i < count; ++i) {
+        if (snaps[i].pid == pid) {
+            found = true;
+        }
+    }
+    free(snaps);
+    return found;
+}
+
+/* A creator does not wait for its thread. It usually gets here first, so the thread's first
+ * look finds the vproc gone: activating it then marked the freed pointer as checked, and
+ * registering the thread brought back the task the creator had just discarded. */
+static void assert_thread_starting_after_creator_ended(void) {
+    for (int round = 0; round < 500; ++round) {
+        VProc *vp = vprocCreate(NULL);
+        assert(vp);
+        int pid = vprocPid(vp);
+        vprocActivate(vp);
+
+        CreatorGoneArg state;
+        memset(&state, 0, sizeof(state));
+        pthread_mutex_init(&state.mu, NULL);
+        pthread_cond_init(&state.cv, NULL);
+        pthread_t t;
+        assert(vprocPthreadCreateShim(&t, NULL, creator_gone_thread, &state) == 0);
+
+        vprocDeactivate();
+        vprocMarkExit(vp, 0);
+        vprocDiscard(pid);
+        vprocDestroy(vp);
+
+        pthread_mutex_lock(&state.mu);
+        state.creator_gone = true;
+        pthread_cond_signal(&state.cv);
+        pthread_mutex_unlock(&state.mu);
+        assert(pthread_join(t, NULL) == 0);
+
+        assert(!state.saw_vproc);
+        assert(!snapshot_has_pid(pid));
+        pthread_cond_destroy(&state.cv);
+        pthread_mutex_destroy(&state.mu);
+    }
+}
+
+static void *spawned_thread_entry(void *arg) {
+    CreatorGoneArg *state = (CreatorGoneArg *)arg;
+    state->current = vprocCurrent();
+    return NULL;
+}
+
+/* The thread runs under the vproc it was given and owes nothing to whoever made that one. */
+static void assert_spawned_thread_outlives_creator(void) {
+    VProc *creator = vprocCreate(NULL);
+    assert(creator);
+    vprocActivate(creator);
+    int pipefd[2];
+    assert(vprocHostPipeUnowned(pipefd) == 0);
+    assert(vprocRestoreHostFd(creator, 7, pipefd[1]) == 7);
+    vprocMarkFdInherited(creator, 7);
+
+    VProc *job = vprocCreate(NULL);
+    assert(job);
+    vprocDeactivate();
+    int creator_pid = vprocPid(creator);
+    vprocMarkExit(creator, 0);
+    vprocDiscard(creator_pid);
+    vprocDestroy(creator);
+    vprocHostClose(pipefd[1]);
+
+    CreatorGoneArg state;
+    memset(&state, 0, sizeof(state));
+    pthread_t t;
+    assert(vprocSpawnThread(job, spawned_thread_entry, &state, &t) == 0);
+    assert(pthread_join(t, NULL) == 0);
+    assert(state.current == job);
+
+    /* The copy made when the job's vproc was created outlived the creator. */
+    vprocActivate(job);
+    assert(vprocWriteShim(7, "x", 1) == 1);
+    vprocDeactivate();
+    char byte = 0;
+    assert(vprocHostRead(pipefd[0], &byte, 1) == 1);
+    assert(byte == 'x');
+
+    int job_pid = vprocPid(job);
+    vprocMarkExit(job, 0);
+    vprocDiscard(job_pid);
+    vprocDestroy(job);
+    assert(vprocHostRead(pipefd[0], &byte, 1) == 0);
+    vprocHostClose(pipefd[0]);
+}
+
+static void *spawned_sleeper_thread(void *arg) {
+    (void)arg;
+    for (;;) {
+        pthread_testcancel();
+        sched_yield();
+    }
+    return NULL;
+}
+
+/* `cmd & kill $!`: the kill comes before the job's thread has run, and it still has to end it. */
+static void assert_kill_reaches_spawned_thread_before_it_runs(void) {
+    VProc *shell = vprocCreate(NULL);
+    assert(shell);
+    vprocActivate(shell);
+    for (int round = 0; round < 50; ++round) {
+        VProc *job = vprocCreate(NULL);
+        assert(job);
+        int pid = vprocPid(job);
+        pthread_t t;
+        assert(vprocSpawnThread(job, spawned_sleeper_thread, NULL, &t) == 0);
+        assert(vprocKillShim(pid, SIGTERM) == 0);
+        void *ret = NULL;
+        assert(pthread_join(t, &ret) == 0);
+        assert(ret == PTHREAD_CANCELED);
+        vprocDiscard(pid);
+        vprocDestroy(job);
+    }
+    vprocDeactivate();
+    vprocDestroy(shell);
+}
+
+/* A job's own redirection leaves nothing of what it replaced, so whoever reads that pipe sees
+ * the end of it while the job runs. */
+static void assert_replace_stdio_keeps_no_copy(void) {
+    int pipefd[2];
+    assert(vprocHostPipeUnowned(pipefd) == 0);
+    VProcOptions opts = vprocDefaultOptions();
+    opts.stdin_fd = pipefd[0];
+    opts.stdout_fd = pipefd[1];
+    VProc *vp = vprocCreate(&opts);
+    assert(vp);
+
+    int null_fd = vprocHostOpen("/dev/null", O_RDWR);
+    assert(null_fd >= 0);
+    struct stat null_st;
+    assert(fstat(null_fd, &null_st) == 0);
+    assert(vprocReplaceStdio(vp, STDOUT_FILENO, null_fd) == STDOUT_FILENO);
+    assert(vprocReplaceStdio(vp, STDIN_FILENO, null_fd) == STDIN_FILENO);
+    struct stat slot_st;
+    assert(fstat(vprocTranslateFd(vp, STDOUT_FILENO), &slot_st) == 0);
+    assert(slot_st.st_rdev == null_st.st_rdev);
+    assert(fstat(vprocTranslateFd(vp, STDIN_FILENO), &slot_st) == 0);
+    assert(slot_st.st_rdev == null_st.st_rdev);
+
+    /* The vproc held the only other copy of the write end. */
+    vprocHostClose(pipefd[1]);
+    char byte = 0;
+    assert(vprocHostRead(pipefd[0], &byte, 1) == 0);
+
+    /* A pipe's write end is gone when nothing holds its read end. */
+    int second[2];
+    assert(vprocHostPipeUnowned(second) == 0);
+    VProcOptions second_opts = vprocDefaultOptions();
+    second_opts.stdin_fd = second[0];
+    VProc *reader = vprocCreate(&second_opts);
+    assert(reader);
+    assert(vprocReplaceStdio(reader, STDIN_FILENO, null_fd) == STDIN_FILENO);
+    vprocHostClose(second[0]);
+    void (*prev_sigpipe)(int) = signal(SIGPIPE, SIG_IGN);
+    errno = 0;
+    assert(vprocHostWrite(second[1], "x", 1) == -1);
+    assert(errno == EPIPE);
+    signal(SIGPIPE, prev_sigpipe);
+    vprocHostClose(second[1]);
+
+    /* Destroying them closes each slot once: a descriptor opened since stays open. */
+    int bystander = vprocHostOpen("/dev/null", O_RDONLY);
+    assert(bystander >= 0);
+    int pid = vprocPid(vp);
+    vprocMarkExit(vp, 0);
+    vprocDiscard(pid);
+    vprocDestroy(vp);
+    int reader_pid = vprocPid(reader);
+    vprocMarkExit(reader, 0);
+    vprocDiscard(reader_pid);
+    vprocDestroy(reader);
+    assert(fstat(bystander, &slot_st) == 0);
+    vprocHostClose(bystander);
+    vprocHostClose(null_fd);
+    vprocHostClose(pipefd[0]);
+}
+
 static void assert_runtime_request_ctrl_c_dispatches_to_foreground_job(void) {
     int prev_shell = vprocGetShellSelfPid();
     int shell_pid = vprocReservePid();
@@ -7474,6 +7710,8 @@ int main(void) {
     assert_kill_zero_targets_current_pgid();
     fprintf(stderr, "TEST children_reparent_to_shell\n");
     assert_children_reparent_to_shell();
+    fprintf(stderr, "TEST children_pass_to_parent\n");
+    assert_children_pass_to_parent();
     fprintf(stderr, "TEST sigchld_pending_snapshot\n");
     assert_sigchld_pending_snapshot();
     fprintf(stderr, "TEST sigchld_pending_api\n");
@@ -7566,6 +7804,14 @@ int main(void) {
     assert_terminate_session_discards_entries();
     fprintf(stderr, "TEST pthread_inherits_session_ids\n");
     assert_pthread_inherits_session_ids();
+    fprintf(stderr, "TEST thread_starting_after_creator_ended\n");
+    assert_thread_starting_after_creator_ended();
+    fprintf(stderr, "TEST spawned_thread_outlives_creator\n");
+    assert_spawned_thread_outlives_creator();
+    fprintf(stderr, "TEST kill_reaches_spawned_thread_before_it_runs\n");
+    assert_kill_reaches_spawned_thread_before_it_runs();
+    fprintf(stderr, "TEST replace_stdio_keeps_no_copy\n");
+    assert_replace_stdio_keeps_no_copy();
     fprintf(stderr, "TEST setpgid_zero_defaults_to_pid\n");
     assert_setpgid_zero_defaults_to_pid();
     fprintf(stderr, "TEST path_truncate_maps_to_sandbox\n");
