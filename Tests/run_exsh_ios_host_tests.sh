@@ -106,6 +106,7 @@ RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_fro
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only frontends_at_once_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only frontends_at_once_run_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only frontends_at_once_aether_ios
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only vm_files_follow_cd_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_bg_redirect_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_bg_pipe_redirect_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only pipeline_bg_tool_redirect_ios

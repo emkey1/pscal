@@ -42,6 +42,11 @@ NOISE = re.compile(r"^(objc\[\d+\]: |\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+ PSCAL\[
 
 R = "> {o} 2>&1"
 A = ">> {o} 2>&1"
+O = '"$HOME/{o}"'  # The result file, from another directory.
+
+# What vmfiles and vmshow, in SETUP, print for a directory whose copies nothing touched.
+V2 = "smoke/v2/vm.del: del2\nsmoke/v2/vm.in: in2\nsmoke/v2/vm.ren: ren2\n"
+VH = "vm.del: delH\nvm.in: inH\nvm.ren: renH\n"
 
 # (name, command, expected output). {o} is the test's result file. With an
 # expected output of None, the result file only has to appear.
@@ -549,6 +554,42 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("scp_no_host", f"scp smoke/d.txt nosuch.invalid:x > /dev/null 2>&1; [ $? -ne 0 ] && echo failed {R}", "failed\n"),
     ("sftp_no_host", f"sftp nosuch.invalid < /dev/null > /dev/null 2>&1; [ $? -ne 0 ] && echo failed {R}", "failed\n"),
     ("rsync_after_failures", f"rsync -a smoke/rs/a smoke/rs/af {R}; echo \"rc=$?\" {A}", "rc=0\n"),
+    # A program's file builtins follow cd and take the app's absolute paths. They used the
+    # process's directory, with no error. Each directory has its own copy of each name, so
+    # vmshow tells which copies were read, written, renamed and erased.
+    ("vm_pascal", f'vmfiles; cd smoke/v1; pascal ../vmio.pas > {O} 2>&1; cd "$HOME"; vmshow {A}', "read in1\nsize 4\nexists TRUE FALSE FALSE\ncwd /home/smoke/v1\nrename 0\nerase 0\nsmoke/v1/vm.in: in1\nsmoke/v1/vm.out: wrote in1\nappended\nsmoke/v1/vm.ren2: ren1\n" + V2 + VH),
+    ("vm_pascal_other_dir", f'vmfiles; cd smoke/v2; pascal ../vmio.pas > {O} 2>&1; cd "$HOME"; cat smoke/v2/vm.out {A}', "read in2\nsize 4\nexists TRUE FALSE FALSE\ncwd /home/smoke/v2\nrename 0\nerase 0\nwrote in2\nappended\n"),
+    ("vm_clike", f'vmfiles; cd smoke/v1; clike ../vmio.clike > {O} 2>&1; cd "$HOME"; vmshow {A}', "read in1\nexists 1 0 0\ncwd /home/smoke/v1\nrename 0\nerase 0\nsmoke/v1/vm.in: in1\nsmoke/v1/vm.out: wrote in1\nappended\nsmoke/v1/vm.ren2: ren1\n" + V2 + VH),
+    ("vm_rea", f'vmfiles; cd smoke/v1; rea ../vmio.rea > {O} 2>&1; cd "$HOME"; vmshow {A}', "read in1\nexists true false false\ncwd /home/smoke/v1\nrename 0\nerase 0\nsmoke/v1/vm.in: in1\nsmoke/v1/vm.out: wrote in1\nappended\nsmoke/v1/vm.ren2: ren1\n" + V2 + VH),
+    ("vm_aether", f'vmfiles; cd smoke/v1; aether ../vmio.aether > {O} 2>&1; cd "$HOME"; vmshow {A}', "read in1\nexists true false false\ncwd /home/smoke/v1\nrename true\ndelete true\nsmoke/v1/vm.in: in1\nsmoke/v1/vm.out: wrote in1\nappended\nsmoke/v1/vm.ren2: ren1\n" + V2 + VH),
+    ("vm_abs_pascal", f'vmfiles; cd smoke/v2; pascal ../vmabs.pas > {O} 2>&1; cd "$HOME"; vmshow {A}', "read in1\nexists TRUE\nrename 0\nerase 0\nnull 0\nup in1\nsmoke/v1/vm.in: in1\nsmoke/v1/vm.out: wrote in1\nsmoke/v1/vm.ren2: ren1\n" + V2 + VH),
+    ("vm_abs_aether", f'vmfiles; cd smoke/v2; aether ../vmabs.aether > {O} 2>&1; cd "$HOME"; vmshow {A}', "read in1\nexists true\nrename true\ndelete true\nsmoke/v1/vm.in: in1\nsmoke/v1/vm.out: wrote in1\nsmoke/v1/vm.ren2: ren1\n" + V2 + VH),
+    ("vm_clike_fopen_mstream", f'vmfiles; cd smoke/v1; clike ../vmm.clike > {O} 2>&1; cd "$HOME"; vmshow {A}', "mstream in1\ndir only1\nattr 16\nsmoke/v1/vm.del: del1\nsmoke/v1/vm.fa: fopen abs\nsmoke/v1/vm.fo: fopen\nsmoke/v1/vm.in: in1\nsmoke/v1/vm.ma: in1\nsmoke/v1/vm.ms: in1\nsmoke/v1/vm.ren: ren1\n" + V2 + VH),
+    ("vm_aether_more", f'vmfiles; cd smoke/v1; aether ../vmx.aether > {O} 2>&1; cd "$HOME"; ls -d smoke/v1/vmk smoke/v1/vmx.db {A}; vmshow {A}', "rmdir 0 0\nmkdir 0\nmstream in1\n\ntoon 10\ntry toon true 10\nsqlite 0\nmemory 0\nhttp 200 in1\nhttp abs 200 in1\nhttp file 200\nasync 200 in1\n\nsmoke/v1/vmk\nsmoke/v1/vmx.db\nsmoke/v1/vm.del: del1\nsmoke/v1/vm.hf: in1\nsmoke/v1/vm.in: in1\nsmoke/v1/vm.ms: in1\nsmoke/v1/vm.ren: ren1\n" + V2 + VH),
+    ("vm_thread", f'vmfiles; cd smoke/v1; rea ../vmthread.rea > {O} 2>&1; cd "$HOME"; vmshow {A}', "main done\nsmoke/v1/vm.del: del1\nsmoke/v1/vm.in: in1\nsmoke/v1/vm.out: child in1\nsmoke/v1/vm.ren: ren1\n" + V2 + VH),
+    # Each way of starting a frontend gives it its own vproc, and each has to inherit the directory.
+    ("vm_subshell", f'vmfiles; ( cd smoke/v1; pascal ../vmctx.pas > {O} 2>&1 ); vmctx {A}', "ctx in1\nin1\n"),
+    ("vm_pipeline_first", f'vmfiles; cd smoke/v1; pascal ../vmctx.pas | cat > {O} 2>&1; cd "$HOME"; vmctx {A}', "ctx in1\nin1\n"),
+    ("vm_pipeline_last", f'vmfiles; cd smoke/v1; echo x | pascal ../vmctx.pas > {O} 2>&1; cd "$HOME"; vmctx {A}', "ctx in1\nin1\n"),
+    ("vm_background", f'vmfiles; cd smoke/v1; pascal ../vmctx.pas > {O} 2>/dev/null & wait $!; cd "$HOME"; vmctx {A}', "ctx in1\nin1\n"),
+    ("vm_substitution", f'vmfiles; cd smoke/v1; x=$(pascal ../vmctx.pas); cd "$HOME"; echo "$x" {R}; vmctx {A}', "ctx in1\nin1\n"),
+    ("vm_sh_c", f"vmfiles; sh -c 'cd smoke/v1; pascal ../vmctx.pas' {R}; vmctx {A}", "ctx in1\nin1\n"),
+    ("vm_exsh_script", f"vmfiles; printf 'cd smoke/v1\\npascal ../vmctx.pas\\n' > smoke/vc1.sh; exsh smoke/vc1.sh {R}; vmctx {A}", "ctx in1\nin1\n"),
+    # A frontend on its own runs on a worker thread, which a nested shell's directory has to reach.
+    ("vm_sh_c_clike", f"vmfiles; sh -c 'cd smoke/v1; clike ../vmio.clike > vmr.txt 2>&1'; head -1 smoke/v1/vmr.txt {R}", "read in1\n"),
+    ("vm_sh_c_rea", f"vmfiles; sh -c 'cd smoke/v1; rea ../vmio.rea > vmr.txt 2>&1'; head -1 smoke/v1/vmr.txt {R}", "read in1\n"),
+    ("vm_sh_c_aether", f"vmfiles; sh -c 'cd smoke/v1; aether ../vmio.aether > vmr.txt 2>&1'; head -1 smoke/v1/vmr.txt {R}", "read in1\n"),
+    ("vm_sh_c_twice", f"vmfiles; sh -c 'cd smoke; sh -c \"cd v1; pascal ../vmctx.pas\"; pwd' {R}; pwd {A}; vmctx {A}", "ctx in1\n/home/smoke\n/home\nin1\n"),
+    ("vm_sh_c_subshell", f"vmfiles; sh -c 'cd smoke/v1; ( pascal ../vmctx.pas )' {R}; vmctx {A}", "ctx in1\nin1\n"),
+    ("vm_sh_c_shebang", f"vmfiles; printf '#!/bin/exsh\\ncat vm.in\\n' > smoke/vc3.sh; chmod +x smoke/vc3.sh; sh -c 'cd smoke/v1; ../vc3.sh' {R}", "in1\n"),
+    ("vm_script_shebang", f"vmfiles; printf '#!/bin/exsh\\ncd smoke/v1\\npascal ../vmctx.pas\\n' > smoke/vc4.sh; chmod +x smoke/vc4.sh; smoke/vc4.sh {R}; vmctx {A}", "ctx in1\nin1\n"),
+    ("vm_sourced", f"vmfiles; printf 'cd smoke/v1\\npascal ../vmctx.pas\\ncd \"$HOME\"\\n' > smoke/vc2.sh; . smoke/vc2.sh {R}; vmctx {A}", "ctx in1\nin1\n"),
+    ("vm_tiny_cd", f'cd smoke; tiny p.tiny p3.pbc > {O} 2>&1; cd "$HOME"; ls smoke/p3.pbc {A}', "smoke/p3.pbc\n"),
+    # Paths that are not plain files in the app's tree keep working.
+    ("vm_devices_home", f'vmfiles; cd smoke/v2; pascal ../vmdev.pas > {O} 2>&1; cd "$HOME"', "urandom 0\nzero 0\nnull 0\ntty 0\nhome in1\n"),
+    ("urandom_applet", f"head -c 4 /dev/urandom | wc -c {R}", "4\n"),
+    # Last, so that the listing tests above never see these names in $HOME.
+    ("vm_cleanup", f"rm -rf vm.* vmj.json smoke/v1 smoke/v2; ls vm.in 2>/dev/null | wc -l {R}", "0\n"),
 ]
 BY_NAME = {test[0]: test for test in TESTS}
 
@@ -618,6 +659,172 @@ FIXTURES = {
     "key2.pas": "program Key2;\nuses crt;\nvar c: char;\nbegin\n  c := readkey;\n  writeln(ord(c));\n  c := readkey;\n  writeln(ord(c));\nend.\n",
     "where.pas": "program Where;\nuses crt;\nbegin\n  writeln(wherex > 0, ' ', wherey > 0);\nend.\n",
     "sock.pas": "program Sock;\nvar s: integer;\nbegin\n  s := socketcreate(0);\n  socketsetblocking(s, false);\n  writeln(socketlasterror);\n  socketclose(s);\n  writeln(socketlasterror);\nend.\n",
+    "vmio.pas": """program VmIo;
+var f: text; s: string;
+begin
+  assign(f, 'vm.in'); reset(f); readln(f, s); close(f);
+  writeln('read ', s);
+  writeln('size ', filesize(f));
+  assign(f, 'vm.out'); rewrite(f); writeln(f, 'wrote ', s); close(f);
+  assign(f, 'vm.out'); append(f); writeln(f, 'appended'); close(f);
+  writeln('exists ', fileexists('vm.in'), ' ', fileexists('nope'), ' ', fileexists(''));
+  writeln('cwd ', getcurrentdir());
+  assign(f, 'vm.ren'); rename(f, 'vm.ren2'); writeln('rename ', ioresult);
+  assign(f, 'vm.del'); erase(f); writeln('erase ', ioresult);
+end.
+""",
+    "vmio.clike": """int main() {
+    text f;
+    str s;
+    assign(f, "vm.in"); reset(f); readln(f, s); close(f);
+    printf("read %s\\n", s);
+    assign(f, "vm.out"); rewrite(f); fprintf(f, "wrote %s\\n", s); close(f);
+    assign(f, "vm.out"); append(f); fprintf(f, "appended\\n"); close(f);
+    printf("exists %d %d %d\\n", fileexists("vm.in"), fileexists("nope"), fileexists(""));
+    printf("cwd %s\\n", getcurrentdir());
+    assign(f, "vm.ren"); rename(f, "vm.ren2"); printf("rename %d\\n", ioresult());
+    assign(f, "vm.del"); remove(f); printf("erase %d\\n", ioresult());
+    return 0;
+}
+""",
+    "vmio.rea": """class Main {}
+text f;
+str s;
+assign(f, "vm.in"); reset(f); readln(f, s); close(f);
+writeln("read ", s);
+assign(f, "vm.out"); rewrite(f); writeln(f, "wrote ", s); close(f);
+assign(f, "vm.out"); append(f); writeln(f, "appended"); close(f);
+writeln("exists ", fileexists("vm.in"), " ", fileexists("nope"), " ", fileexists(""));
+writeln("cwd ", getcurrentdir());
+assign(f, "vm.ren"); rename(f, "vm.ren2"); writeln("rename ", ioresult());
+assign(f, "vm.del"); erase(f); writeln("erase ", ioresult());
+""",
+    "vmio.aether": """fn main() -> Void {
+    fx {
+        let lines: Text[] = read_lines("vm.in");
+        println("read ", lines[0]);
+        write_file("vm.out", "wrote " + lines[0] + "\\n");
+        append_file("vm.out", "appended\\n");
+        println("exists ", file_exists("vm.in"), " ", file_exists("nope"), " ", file_exists(""));
+        println("cwd ", get_current_dir());
+        println("rename ", rename_file("vm.ren", "vm.ren2"));
+        println("delete ", delete_file("vm.del"));
+    }
+    ret;
+}
+""",
+    "vmabs.pas": """program VmAbs;
+var f: text; s: string;
+begin
+  assign(f, '/home/smoke/v1/vm.in'); reset(f); readln(f, s); close(f);
+  writeln('read ', s);
+  assign(f, '/home/smoke/v1/vm.out'); rewrite(f); writeln(f, 'wrote ', s); close(f);
+  writeln('exists ', fileexists('/home/smoke/v1/vm.in'));
+  assign(f, '../v1/vm.ren'); rename(f, '/home/smoke/v1/vm.ren2'); writeln('rename ', ioresult);
+  assign(f, '/home/smoke/v1/vm.del'); erase(f); writeln('erase ', ioresult);
+  assign(f, '/dev/null'); rewrite(f); writeln('null ', ioresult); writeln(f, 'x'); close(f);
+  assign(f, '../v1/vm.in'); reset(f); readln(f, s); close(f);
+  writeln('up ', s);
+end.
+""",
+    "vmabs.aether": """fn main() -> Void {
+    fx {
+        let lines: Text[] = read_lines("/home/smoke/v1/vm.in");
+        println("read ", lines[0]);
+        write_file("/home/smoke/v1/vm.out", "wrote " + lines[0] + "\\n");
+        println("exists ", file_exists("/home/smoke/v1/vm.in"));
+        println("rename ", rename_file("/home/smoke/v1/vm.ren", "/home/smoke/v1/vm.ren2"));
+        println("delete ", delete_file("/home/smoke/v1/vm.del"));
+    }
+    ret;
+}
+""",
+    "vmm.clike": """int main() {
+    text f;
+    str mode;
+    mstream ms;
+    mode = "wb";
+    f = fopen("vm.fo", mode);
+    fprintf(f, "fopen\\n");
+    fclose(f);
+    f = fopen("/home/smoke/v1/vm.fa", mode);
+    fprintf(f, "fopen abs\\n");
+    fclose(f);
+    ms = mstreamcreate();
+    mstreamloadfromfile(&ms, "vm.in");
+    mstreamsavetofile(&ms, "vm.ms");
+    mstreamsavetofile(&ms, "/home/smoke/v1/vm.ma");
+    printf("mstream %s", mstreambuffer(ms));
+    mstreamfree(&ms);
+    printf("dir %s\\n", dosfindfirst("vmo"));
+    printf("attr %d\\n", dosgetfattr("vmo"));
+    return 0;
+}
+""",
+    "vmx.aether": """fn main() -> Void {
+    fx {
+        println("rmdir ", mkdir("vmr"), " ", rmdir("vmr"));
+        println("mkdir ", mkdir("vmk"));
+        let ms: MStream = mstream_load("vm.in");
+        println("mstream ", mstream_text(ms));
+        mstream_save(ms, "vm.ms");
+        mstream_free(ms);
+        let doc: ToonDoc = toon_parse_file("vmj.json");
+        println("toon ", toon_get_int(toon_root(doc), "n"));
+        toon_close(doc);
+        let (tried, ok) = try_toon_parse_file("vmj.json");
+        println("try toon ", ok, " ", toon_get_int(toon_root(tried), "n"));
+        toon_close(tried);
+        let db: Int = sqlite_open("vmx.db");
+        println("sqlite ", sqlite_exec(db, "CREATE TABLE t(a INTEGER);"));
+        sqlite_close(db);
+        let mem: Int = sqlite_open(":memory:");
+        println("memory ", sqlite_exec(mem, "CREATE TABLE t(a INTEGER);"));
+        sqlite_close(mem);
+        let s: Int = http_session();
+        let out: MStream = mstream_new();
+        println("http ", http_request(s, "GET", "file://vm.in", "", out), " ", mstream_text(out));
+        println("http abs ", http_request(s, "GET", "file:///home/smoke/v1/vm.in", "", out), " ", mstream_text(out));
+        println("http file ", http_request_to_file(s, "GET", "file://vm.in", "", "vm.hf"));
+        let id: Int = http_request_async(s, "GET", "file://vm.in", "");
+        loop !http_is_done(id) {
+            sleep(1);
+        }
+        println("async ", http_await(id, out), " ", mstream_text(out));
+        http_close(s);
+    }
+    ret;
+}
+""",
+    "vmthread.rea": """void child() {
+    text f;
+    str s;
+    assign(f, "vm.in"); reset(f); readln(f, s); close(f);
+    assign(f, "vm.out"); rewrite(f); writeln(f, "child ", s); close(f);
+}
+int t = spawn child();
+join t;
+writeln("main done");
+""",
+    "vmdev.pas": """program VmDev;
+var f: text; s: string;
+begin
+  assign(f, '/dev/urandom'); reset(f); writeln('urandom ', ioresult); close(f);
+  assign(f, '/dev/zero'); reset(f); writeln('zero ', ioresult); close(f);
+  assign(f, '/dev/null'); rewrite(f); writeln('null ', ioresult); writeln(f, 'x'); close(f);
+  assign(f, '/dev/tty'); rewrite(f); writeln('tty ', ioresult); writeln(f, ''); close(f);
+  assign(f, getenv('HOME') + '/smoke/v1/vm.in'); reset(f); readln(f, s); close(f);
+  writeln('home ', s);
+end.
+""",
+    "vmctx.pas": """program VmCtx;
+var f: text; s: string;
+begin
+  assign(f, 'vm.in'); reset(f); readln(f, s); close(f);
+  assign(f, 'vm.out'); rewrite(f); writeln(f, s); close(f);
+  writeln('ctx ', s);
+end.
+""",
 }
 
 # The first lines of auto.sh, run in the app before any test.
@@ -646,6 +853,10 @@ SETUP = [
     "mkdir -p smoke/rs/a/b",
     "printf 'x\\n' > smoke/rs/a/f",
     "printf 'y\\n' > smoke/rs/a/b/g",
+    # The same names in two directories and the start directory, for the vm_ tests.
+    "vmfiles() { rm -rf smoke/v1 smoke/v2; rm -f vm.* vmj.json; for t in 1 2 H; do if [ $t = H ]; then d=.; else d=smoke/v$t; mkdir -p $d/vmo; touch $d/vmo/only$t; fi; printf \"in$t\\n\" > $d/vm.in; printf \"ren$t\\n\" > $d/vm.ren; printf \"del$t\\n\" > $d/vm.del; printf '{\"n\":%s}\\n' \"${t#H}0\" > $d/vmj.json; done; }",
+    "vmshow() { for f in smoke/v1/vm.* smoke/v2/vm.* vm.*; do echo \"$f: $(cat $f)\"; done; }",
+    'vmctx() { cat smoke/v1/vm.out; [ -e vm.out ] && echo "wrong directory"; true; }',
 ]
 
 
@@ -660,13 +871,7 @@ class Known(NamedTuple):
 # The Known Issues in RELEASE_NOTES_V.1R32.md that these tests hit. A test here
 # that fails any other way is an unexpected failure. When one is fixed, drop it
 # here and from the next release's notes.
-KNOWN = {
-    "tiny_full": Known(
-        "the VM's file builtins do not translate the app's absolute paths",
-        "MStreamSaveToFile: Cannot open file '/home/smoke/cd3.pbc' for writing.\n"
-        "ls: cannot access 'smoke/cd3.pbc': No such file or directory\n",
-    ),
-}
+KNOWN = {}
 
 
 class SetupError(Exception):
