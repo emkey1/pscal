@@ -151,6 +151,8 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("parity_function_head", f"pg() {{ cat smoke/d.txt; }}; pg | head -1 {R}", "b\n"),
     ("parity_function_stage_var", f"pv() {{ PV=in; }}; PV=out; echo | pv; echo \"$PV\" {R}", "out\n"),
     ("parity_process_subst", f"wc -l < <(seq 1 3) | tr -d ' ' {R}", "3\n"),
+    ("parity_stage_stdio_reuse",
+     f"{{ for i in 1 2 3 4 5 6 7 8; do ls /nonexistent/zz 2>&1 | wc -l | tr -d ' '; done; }} {R}", "1\n" * 8),
     ("parity_here_string_fd", f"exec 3<<< from3; read -u 3 pr; exec 3<&-; echo \"$pr\" {R}", "from3\n"),
     ("parity_noclobber", f"rm -f smoke/nc; ( set -C; echo a > smoke/nc; echo \"st $?\" ) {R}; rm -f smoke/nc", "st 0\n"),
     ("parity_dotglob", f"( mkdir smoke/dg; cd smoke/dg; touch .a b; shopt -s dotglob; echo * ) {R}; rm -r smoke/dg", ".a b\n"),

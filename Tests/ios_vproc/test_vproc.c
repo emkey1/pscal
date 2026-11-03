@@ -330,6 +330,30 @@ static void assert_redirected_stdio_is_closed_once(void) {
     vprocHostClose(p[1]);
 }
 
+/* vprocDup2's other branch, with an in-process pipe as the source. In a pipeline that is `2>&1`:
+ * `ls x 2>&1 | wc -l | cat` lost cat's output, its stdout having taken the number by then. */
+static void assert_stdio_replaced_by_inproc_pipe_is_closed_once(void) {
+    int p[2];
+    assert(vprocHostPipe(p) == 0);
+    for (int target = STDIN_FILENO; target <= STDERR_FILENO; ++target) {
+        int source = target == STDERR_FILENO ? STDOUT_FILENO : STDERR_FILENO;
+        struct pscal_fd *read_end = NULL;
+        struct pscal_fd *write_end = NULL;
+        assert(vprocCreateInprocPipe(&read_end, &write_end) == 0);
+        VProc *vp = vprocCreate(NULL);
+        assert(vp);
+        assert(vprocAdoptPscalFd(vp, source, write_end) == 0);
+        pscal_fd_close(write_end);
+        int old_host_fd = vprocTranslateFd(vp, target);
+        assert(old_host_fd >= 0);
+        assert(vprocDup2(vp, source, target) == target);
+        assert_closed_stdio_number_survives_destroy(vp, old_host_fd, p[0]);
+        pscal_fd_close(read_end);
+    }
+    vprocHostClose(p[0]);
+    vprocHostClose(p[1]);
+}
+
 static void assert_pipe_cross_vproc(void) {
     int p[2];
     assert(vprocHostPipe(p) == 0);
@@ -7402,6 +7426,8 @@ int main(void) {
     assert_simulated_fork_exec_socketpair_parent_fd_survives();
     fprintf(stderr, "TEST redirected_stdio_is_closed_once\n");
     assert_redirected_stdio_is_closed_once();
+    fprintf(stderr, "TEST stdio_replaced_by_inproc_pipe_is_closed_once\n");
+    assert_stdio_replaced_by_inproc_pipe_is_closed_once();
     fprintf(stderr, "TEST pipe_cross_vproc\n");
     assert_pipe_cross_vproc();
     fprintf(stderr, "TEST socket_closed_on_destroy\n");
