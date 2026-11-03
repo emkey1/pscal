@@ -36,9 +36,10 @@ Status: Not yet uploaded. Not yet run on a physical device.
 ## Fixed in exsh on every platform
 - `{ ...; } > file`, `if ...; fi > file`, `case ... esac > file` and a redirection on a function definition now cover the whole body, including input redirections, and they close when the body leaves early through `return`, `break` or `exit`. They used to be dropped: the output went to the terminal and the file was never created.
 - A redirection on a compound command that cannot be opened now fails that command with status 1 and skips its body, and the script goes on.
+- What exsh starts sees only exported variables, as in bash: `x=1; env` no longer lists `x`, and a big variable no longer makes later commands fail with `Argument list too long`. On iOS the same goes for applets, frontends and scripts, `X=1 cmd | ...` shows `X` only to `cmd`, and a background `X=1 cmd &` sees it. What a program sets stays with that program.
+- `y=$(echo "$v")`, `( ... )`, `{ ...; } | cat` and `&` inside a function see the function's locals. A substitution came back empty on every platform.
 
 ## Known Issues
-- On iOS, `X=1 cmd | ...` also shows `X` to later stages of the same pipeline and to their word expansion, because all stages share one process environment. `X=1 env | env` differs from bash here. A background `X=1 cmd &` restores `X` at once, so the command may not see it.
 - A failed redirection's message says `exec:` even when no `exec` was involved.
 - exsh subshells are not separate: `( exit 3 )` ends the script, and a subshell's assignments and `cd` persist. `(echo s)` needs spaces, as in `( echo s )`.
 - In `{ a; b; } | cat` only the first command goes through the pipe, `echo o | { read x; }` reads nothing, and `{ ...; } &` runs in the foreground.
