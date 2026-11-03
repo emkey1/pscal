@@ -872,14 +872,10 @@ final class PscalRuntimeBootstrap: ObservableObject, @unchecked Sendable {
     func sendInterrupt() {
         let activeSession = resolveActiveSessionId()
         if activeSession != 0 {
-            let delivered = withRuntimeContext {
-                PSCALRuntimeSendSignalForSession(activeSession, SIGINT) != 0
-            }
-            if !delivered {
-                // Fallback keeps local semantics working if foreground signal
-                // routing is temporarily unresolved.
-                sendControlByteToSession(0x03, sessionId: activeSession)
-            }
+            // As a key, in order with what was typed before it. The session's
+            // reader sends the signal, and takes the line back and ends a read
+            // that waits on it, which a signal alone could not.
+            sendControlByteToSession(0x03, sessionId: activeSession)
             return
         }
         withRuntimeContext {

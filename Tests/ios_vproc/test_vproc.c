@@ -4461,6 +4461,12 @@ static void assert_session_write_to_master_nonblocking_respects_capacity(void) {
     assert(pscalPtyUnlock(master) == 0);
     assert(pscalPtyOpenSlave(pty_num, O_RDWR, &slave) == 0);
 
+    /* In line mode what does not fit in a line is dropped, as on any terminal. */
+    struct termios_ termios;
+    assert(slave->ops->ioctl(slave, TCGETS_, &termios) == 0);
+    termios.lflags &= ~ICANON_;
+    assert(slave->ops->ioctl(slave, TCSETS_, &termios) == 0);
+
     uint64_t session_id = 2468;
     VProcSessionStdio *session = vprocSessionStdioCreate();
     assert(session);
