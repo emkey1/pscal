@@ -457,7 +457,28 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("sub_bg_holds", f"printf 'x=$(sleep 1 & echo bg)\\necho \"[$x]\"\\n' > smoke/bh.sh; exsh smoke/bh.sh {R}", "[bg]\n"),
     # Killing a body that is inside a substitution leaves that substitution's reader with no
     # one to join it. The next substitution still has to work.
-    ("sub_body_killed", f'( x=$(sleep 30); echo no ) & p=$!; sleep 1; kill $p; wait $p; y=$(echo next); echo "$y" {R}; unset y', "next\n"),
+    ("sub_body_killed", f'( x=$(sleep 30); echo no ) & p=$!; sleep 1; kill $p; wait $p; s=$?; y=$(echo next); echo "$s $y" {R}; unset s y', "143 next\n"),
+    # `kill` cancels a job's thread wherever it is: wait's status has to survive that, and so
+    # does everything the thread held.
+    ("body_killed", f'( sleep 30; echo no ) & p=$!; sleep 0.2; kill $p; wait $p; echo "rc $?" {R}', "rc 143\n"),
+    ("body_killed_at_once", f'( sleep 30; echo no ) & p=$!; kill $p; wait $p; echo "rc $?" {R}', "rc 143\n"),
+    ("body_killed_sub_at_once", f'( x=$(sleep 30); echo no ) & p=$!; kill $p; wait $p; echo "rc $?" {R}', "rc 143\n"),
+    ("body_killed_in_wait", f'( sleep 30 & wait; echo no ) & p=$!; sleep 0.2; kill $p; wait $p; echo "rc $?" {R}', "rc 143\n"),
+    ("body_killed_busy", f'( while :; do echo hi > /dev/null; done ) & p=$!; sleep 0.2; kill $p; wait $p; echo "rc $?" {R}', "rc 143\n"),
+    ("body_killed_busy_sub", f'( while :; do x=$(echo hi); done ) & p=$!; sleep 0.2; kill $p; wait $p; echo "rc $?" {R}', "rc 143\n"),
+    ("body_killed_pipe", f'( sleep 30 | cat; echo no ) & p=$!; sleep 0.2; kill $p; wait $p; echo "rc $?" {R}', "rc 143\n"),
+    ("body_killed_reading", f'( read x; echo no ) & p=$!; sleep 0.2; kill $p; wait $p; echo "rc $?" {R}', "rc 143\n"),
+    # These two print a job notification into their own output, which is not what they check.
+    ("body_killed_in_subshell", '( ( sleep 30 ) & p=$!; sleep 0.2; kill $p; wait $p; echo "rc $?" > {o} ) > /dev/null 2>&1', "rc 143\n"),
+    ("body_killed_in_stage", f'{{ ( sleep 30 ) & p=$!; sleep 0.2; kill $p; wait $p; echo "rc $?"; }} | grep rc {R}', "rc 143\n"),
+    ("simple_killed_at_once", f'sleep 30 & p=$!; kill $p; wait $p; echo "rc $?" {R}', "rc 143\n"),
+    # What the killed job was running goes with it: a shell inside it, and what that shell ran.
+    ("body_killed_nested_shell", f'( sh -c "sleep 37; echo no" ) & p=$!; sleep 0.2; kill $p; wait $p; echo "rc $?" {R}; sleep 0.2; lps | grep "[s]leep 37" {A}', "rc 143\n"),
+    ("body_killed_nested_reader", f'{{ ( sh -c "sleep 37; echo no" ) & p=$!; sleep 0.2; kill $p; wait $p; echo "rc $?"; }} | grep rc {R}', "rc 143\n"),
+    # A loop that makes no calls stops too. It holds stdout, so the reader would never finish.
+    ("kill_vm_loop", f"( pascal smoke/spin.pas & p=$!; sleep 1; kill $p; wait $p; echo $? ) | grep -v '^\\[' {R}; echo after | cat {A}", "143\nafter\n"),
+    # [s]: grep's own row holds its argument, and an empty result shows any row that is left.
+    ("killed_leaves_no_rows", f'( sleep 37 ) & p=$!; sleep 0.2; kill $p; wait $p; sleep 37 & p=$!; kill $p; wait $p; lps | grep "[s]leep 37" {R}', ""),
     # A question to alias or type, and the rest of bash_parity_alias_type_lookup's kind.
     ("alias_lookup", f"alias sm='ls -l'; alias sm {R}; alias sm-missing 2>/dev/null; echo \"rc $?\" {A}; unalias sm", "alias sm='ls -l'\nrc 1\n"),
     ("alias_bad_option", f"alias -z 2>/dev/null; echo \"rc $?\" {R}", "rc 2\n"),
@@ -640,6 +661,7 @@ AT_ONCE_FIXTURES = {
 FIXTURES = {
     "utmp.rec": utmp_record("alice", "pts/1") + utmp_record("bob", "pts/2"),
     "hello.pas": "program Hello;\nbegin\n  writeln('pascal ok ', 6*7);\nend.\n",
+    "spin.pas": "program Spin;\nvar i: integer;\nbegin\n  i := 0;\n  while true do i := 1 - i;\nend.\n",
     "hello.clike": 'int main() {\n    printf("clike ok %d\\n", 6*7);\n    return 0;\n}\n',
     "envp.clike": 'int main() {\n    printf("[%s]\\n", getenv("ep"));\n    return 0;\n}\n',
     "envp.pas": "program EnvP;\nbegin\n  writeln('[', getenv('ep'), ']');\nend.\n",

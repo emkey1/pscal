@@ -2341,6 +2341,245 @@ static void assert_kill_does_not_self_cancel(void) {
     assert(ctx.completed == 1);
 }
 
+typedef struct {
+    VProc *parent;
+    int child_pid;
+    int parked;
+    int returned;
+} vproc_cancelled_waiter_ctx;
+
+static void *vproc_cancelled_waiter_thread(void *arg) {
+    vproc_cancelled_waiter_ctx *ctx = (vproc_cancelled_waiter_ctx *)arg;
+    vprocActivate(ctx->parent);
+    __atomic_store_n(&ctx->parked, 1, __ATOMIC_RELEASE);
+    int status = 0;
+    (void)vprocWaitPidShim(ctx->child_pid, &status, 0);
+    ctx->returned = 1;
+    return NULL;
+}
+
+/* `kill` cancels a job's threads. A thread cancelled in a condition wait gets the mutex back
+ * before it dies, and the task table must not stay locked: every vproc call would hang. */
+static void assert_cancelled_wait_lets_go_of_task_table(void) {
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = vprocReservePid();
+    VProc *parent = vprocCreate(&opts);
+    assert(parent);
+    opts = vprocDefaultOptions();
+    opts.pid_hint = vprocReservePid();
+    VProc *child = vprocCreate(&opts);
+    assert(child);
+    int child_pid = vprocPid(child);
+    vprocSetParent(child_pid, vprocPid(parent));
+
+    vproc_cancelled_waiter_ctx ctx = {.parent = parent, .child_pid = child_pid};
+    pthread_t tid;
+    assert(pthread_create(&tid, NULL, vproc_cancelled_waiter_thread, &ctx) == 0);
+    while (!__atomic_load_n(&ctx.parked, __ATOMIC_ACQUIRE)) {
+        sched_yield();
+    }
+    struct timespec nap = {.tv_sec = 0, .tv_nsec = 50000000};
+    nanosleep(&nap, NULL);
+    assert(pthread_cancel(tid) == 0);
+    void *ret = NULL;
+    assert(pthread_join(tid, &ret) == 0);
+    assert(ret == PTHREAD_CANCELED);
+    assert(ctx.returned == 0);
+
+    alarm(30);
+    assert(vprocGetPgid(child_pid) > 0);
+    alarm(0);
+    vprocDiscard(child_pid);
+    vprocDestroy(child);
+    vprocDiscard(vprocPid(parent));
+    vprocDestroy(parent);
+}
+
+typedef struct {
+    VProc *vp;
+    int ready;
+    int cancel_sent;
+} vproc_cancelled_clone_ctx;
+
+static void *vproc_cancelled_clone_thread(void *arg) {
+    vproc_cancelled_clone_ctx *ctx = (vproc_cancelled_clone_ctx *)arg;
+    pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
+    __atomic_store_n(&ctx->ready, 1, __ATOMIC_RELEASE);
+    while (!__atomic_load_n(&ctx->cancel_sent, __ATOMIC_ACQUIRE)) {
+        sched_yield();
+    }
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    /* Duplicates a descriptor under the vproc's lock, with a cancel pending. */
+    (void)vprocRestoreHostFd(ctx->vp, STDOUT_FILENO, STDOUT_FILENO);
+    pthread_testcancel();
+    return NULL;
+}
+
+static void assert_cancel_pending_lets_go_of_vproc_lock(void) {
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = vprocReservePid();
+    VProc *vp = vprocCreate(&opts);
+    assert(vp);
+    vproc_cancelled_clone_ctx ctx = {.vp = vp};
+    pthread_t tid;
+    assert(pthread_create(&tid, NULL, vproc_cancelled_clone_thread, &ctx) == 0);
+    while (!__atomic_load_n(&ctx.ready, __ATOMIC_ACQUIRE)) {
+        sched_yield();
+    }
+    assert(pthread_cancel(tid) == 0);
+    __atomic_store_n(&ctx.cancel_sent, 1, __ATOMIC_RELEASE);
+    void *ret = NULL;
+    assert(pthread_join(tid, &ret) == 0);
+    assert(ret == PTHREAD_CANCELED);
+
+    /* This takes the lock the thread must have let go of. */
+    alarm(30);
+    struct pscal_fd *held = vprocGetPscalFd(vp, STDOUT_FILENO);
+    alarm(0);
+    if (held) {
+        pscal_fd_close(held);
+    }
+    vprocDiscard(vprocPid(vp));
+    vprocDestroy(vp);
+}
+
+/* The job table clears what it kept on a job once it has reaped it, and the job's thread ends
+ * its vproc when it gets there. Neither may bring the pid back as a row. */
+static void assert_reaped_job_stays_gone(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    VProcOptions leader_opts = vprocDefaultOptions();
+    leader_opts.pid_hint = vprocReservePid();
+    VProc *leader = vprocCreate(&leader_opts);
+    assert(leader);
+    int leader_pid = vprocPid(leader);
+    vprocSetShellSelfPid(leader_pid);
+    VProc *prev = vprocCurrent();
+    vprocActivate(leader);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = vprocReservePid();
+    VProc *vp = vprocCreate(&opts);
+    assert(vp);
+    int pid = vprocPid(vp);
+    vprocSetParent(pid, leader_pid);
+    assert(vprocKillShim(pid, SIGTERM) == 0);
+    int status = 0;
+    assert(vprocWaitPidShim(pid, &status, WNOHANG) == pid);
+    assert(WIFSIGNALED(status));
+    assert(WTERMSIG(status) == SIGTERM);
+
+    /* Reaped: a second wait has nothing to find. */
+    errno = 0;
+    assert(vprocWaitPidShim(pid, &status, WNOHANG) == -1);
+    assert(errno == ECHILD);
+
+    vprocSetJobId(pid, 0);
+    vprocSetCommandLabel(pid, NULL);
+    assert(vprocGetPgid(pid) == -1);
+    vprocMarkExit(vp, 128 + SIGKILL);
+    assert(vprocGetPgid(pid) == -1);
+    vprocDestroy(vp);
+
+    vprocDeactivate();
+    if (prev) {
+        vprocActivate(prev);
+    }
+    vprocSetShellSelfPid(prev_shell);
+    vprocDiscard(leader_pid);
+    vprocDestroy(leader);
+}
+
+typedef struct {
+    int scope_pid;
+    int ready;
+} vproc_scope_thread_ctx;
+
+static void *vproc_scope_thread(void *arg) {
+    vproc_scope_thread_ctx *ctx = (vproc_scope_thread_ctx *)arg;
+    VProcCommandScope scope;
+    assert(vprocCommandScopeBegin(&scope, "scoped", true, false));
+    ctx->scope_pid = scope.pid;
+    __atomic_store_n(&ctx->ready, 1, __ATOMIC_RELEASE);
+    for (;;) {
+        struct timespec nap = {.tv_sec = 1, .tv_nsec = 0};
+        nanosleep(&nap, NULL);
+    }
+    return NULL;
+}
+
+/* A killed thread never reaches the end of a command scope it made, and what the scope holds
+ * would stay open. The vproc it was started under has an owner, which ends that. */
+static void assert_kill_ends_what_the_thread_made(void) {
+    VProc *shell = vprocCreate(NULL);
+    assert(shell);
+    vprocActivate(shell);
+    VProc *job = vprocCreate(NULL);
+    assert(job);
+    int job_pid = vprocPid(job);
+    vproc_scope_thread_ctx ctx = {0};
+    pthread_t tid;
+    assert(vprocSpawnThread(job, vproc_scope_thread, &ctx, &tid) == 0);
+    while (!__atomic_load_n(&ctx.ready, __ATOMIC_ACQUIRE)) {
+        sched_yield();
+    }
+    assert(vprocGetPgid(ctx.scope_pid) > 0);
+    assert(vprocKillShim(job_pid, SIGTERM) == 0);
+    void *ret = NULL;
+    assert(pthread_join(tid, &ret) == 0);
+    assert(ret == PTHREAD_CANCELED);
+    assert(vprocGetPgid(ctx.scope_pid) == -1);
+    assert(vprocGetPgid(job_pid) > 0);
+    vprocDiscard(job_pid);
+    vprocDestroy(job);
+    vprocDeactivate();
+    vprocDiscard(vprocPid(shell));
+    vprocDestroy(shell);
+}
+
+typedef struct {
+    VProc *vp;
+    int fd;
+} vproc_cancelled_read_ctx;
+
+static void *vproc_cancelled_read_thread(void *arg) {
+    vproc_cancelled_read_ctx *ctx = (vproc_cancelled_read_ctx *)arg;
+    vprocActivate(ctx->vp);
+    char c;
+    (void)vprocReadShim(ctx->fd, &c, 1);
+    return NULL;
+}
+
+/* A read holds a reference to its descriptor. Left behind by a cancel, that end of the pipe
+ * would never close, and the writer would never hear that nobody reads. */
+static void assert_cancelled_read_lets_go_of_its_descriptor(void) {
+    struct pscal_fd *read_end = NULL;
+    struct pscal_fd *write_end = NULL;
+    assert(vprocCreateInprocPipe(&read_end, &write_end) == 0);
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = vprocReservePid();
+    VProc *vp = vprocCreate(&opts);
+    assert(vp);
+    assert(vprocAdoptPscalFd(vp, STDIN_FILENO, read_end) == 0);
+    pscal_fd_close(read_end);
+
+    vproc_cancelled_read_ctx ctx = {.vp = vp, .fd = STDIN_FILENO};
+    pthread_t tid;
+    assert(pthread_create(&tid, NULL, vproc_cancelled_read_thread, &ctx) == 0);
+    struct timespec nap = {.tv_sec = 0, .tv_nsec = 300000000};
+    nanosleep(&nap, NULL);
+    assert(pthread_cancel(tid) == 0);
+    void *ret = NULL;
+    assert(pthread_join(tid, &ret) == 0);
+    assert(ret == PTHREAD_CANCELED);
+
+    /* The vproc's was the only other reference. */
+    vprocDiscard(vprocPid(vp));
+    vprocDestroy(vp);
+    char c = 'x';
+    assert(write_end->ops->write(write_end, &c, 1) < 0);
+    pscal_fd_close(write_end);
+}
+
 static void assert_background_tty_signals(void) {
     int prev_shell = vprocGetShellSelfPid();
     VProcOptions leader_opts = vprocDefaultOptions();
@@ -7911,6 +8150,16 @@ int main(void) {
     assert_siginfo_handler_invoked();
     fprintf(stderr, "TEST kill_does_not_self_cancel\n");
     assert_kill_does_not_self_cancel();
+    fprintf(stderr, "TEST cancelled_wait_lets_go_of_task_table\n");
+    assert_cancelled_wait_lets_go_of_task_table();
+    fprintf(stderr, "TEST cancel_pending_lets_go_of_vproc_lock\n");
+    assert_cancel_pending_lets_go_of_vproc_lock();
+    fprintf(stderr, "TEST reaped_job_stays_gone\n");
+    assert_reaped_job_stays_gone();
+    fprintf(stderr, "TEST kill_ends_what_the_thread_made\n");
+    assert_kill_ends_what_the_thread_made();
+    fprintf(stderr, "TEST cancelled_read_lets_go_of_its_descriptor\n");
+    assert_cancelled_read_lets_go_of_its_descriptor();
     fprintf(stderr, "TEST sigkill_not_blockable\n");
     assert_sigkill_not_blockable();
     fprintf(stderr, "TEST sigstop_not_ignorable_or_blockable\n");
