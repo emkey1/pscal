@@ -302,6 +302,8 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("mv_abs", f"mv /home/smoke/ma/d /home/smoke/ma/e; cat /home/smoke/ma/e {R}", "b\na\nc\n"),
     ("rm_abs", f"rm /home/smoke/ma/e; ls /home/smoke/ma {R}", "mb\nt\n"),
     ("rm_r_abs", f"rm -r /home/smoke/ma; ls /home/smoke/ma {R}", "ls: cannot access '/home/smoke/ma': No such file or directory\n"),
+    ("empty_path_rm", f"touch /zz_em; mkdir smoke/em; touch smoke/em/zz_em; ( cd smoke/em; rm -rf \"\"; echo \"rf $?\"; rm -rf \"$nosuch\"; echo \"unset $?\"; rm -r \"\"; echo \"r $?\"; ln -s zz_ln \"\"; echo \"ln $?\" ) {R}; ls /zz_em smoke/em/zz_em {A}; [ -L /zz_ln ]; echo \"link $?\" {A}; rm -rf /zz_em /zz_ln smoke/em", "rf 0\nunset 0\nrm: cannot remove '': No such file or directory\nr 1\nln: failed to create symbolic link '': No such file or directory\nln 1\n/zz_em\nsmoke/em/zz_em\nlink 1\n"),
+    ("empty_path_other", f"ls \"\" {R}; echo \"ls $?\" {A}; cat \"\" {A}; echo \"cat $?\" {A}; cd \"\" {A}; echo \"cd $?\" {A}", "ls: cannot access '': No such file or directory\nls 2\ncat: '': No such file or directory\ncat 1\ncd 0\n"),
     ("find_abs", f"find /home/smoke/sub2 -type f {R}", "/home/smoke/sub2/x\n"),
     ("du_abs", f"du -s /home/smoke/sub2 | wc -l {R}", "1\n"),
     ("stat_abs", f"stat -c %s /home/smoke/d.txt {R}", "6\n"),

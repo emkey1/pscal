@@ -115,6 +115,9 @@ RUN_VPROC_TESTS=1 RUN_IOS_TIME_TESTS=1 python3 "${HARNESS}" --executable "${EXE}
 RUN_VPROC_TESTS=1 RUN_IOS_FRONTEND_STDIN_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only frontend_stdin_findprimes_direct
 RUN_VPROC_TESTS=1 RUN_IOS_FRONTEND_STDIN_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only frontend_stdin_findprimes_time
 
+# Runs under its own throwaway roots, not the harness: a regression here removes files.
+bash "${ROOT}/Tests/ios_vproc/test_empty_path.sh" "${EXE}"
+
 # Optional interactive PTY signal regressions. Enable explicitly while
 # debugging local Ctrl-C/Ctrl-Z behavior:
 #   RUN_INTERACTIVE_SIGNAL_TESTS=1 Tests/run_exsh_ios_host_tests.sh

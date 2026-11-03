@@ -3329,6 +3329,72 @@ static void assert_path_virtualized_glob_matches_dynamic_proc_entries(void) {
     (void)system(cleanup_cmd);
 }
 
+static void assert_empty_path_names_nothing(void) {
+    char templ[] = "/tmp/vproc-empty-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    assert(pscalPathVirtualized_mkdir("/tmp", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/empty", 0700) == 0 || errno == EEXIST);
+
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+    assert(vprocChdirShim("/tmp/empty") == 0);
+
+    struct stat st;
+    char link[16];
+    errno = 0;
+    assert(vprocStatShim("", &st) == -1 && errno == ENOENT);
+    errno = 0;
+    assert(vprocLstatShim("", &st) == -1 && errno == ENOENT);
+    errno = 0;
+    assert(vprocAccessShim("", F_OK) == -1 && errno == ENOENT);
+    errno = 0;
+    assert(vprocOpenShim("", O_RDONLY) == -1 && errno == ENOENT);
+    errno = 0;
+    assert(vprocOpendirShim("") == NULL && errno == ENOENT);
+    errno = 0;
+    assert(vprocMkdirShim("", 0700) == -1 && errno == ENOENT);
+    errno = 0;
+    assert(vprocRmdirShim("") == -1 && errno == ENOENT);
+    errno = 0;
+    assert(vprocUnlinkShim("") == -1 && errno == ENOENT);
+    errno = 0;
+    assert(vprocRenameShim("", "moved") == -1 && errno == ENOENT);
+    errno = 0;
+    assert(vprocSymlinkShim("target", "") == -1 && errno == ENOENT);
+    errno = 0;
+    assert(vprocReadlinkShim("", link, sizeof(link)) == -1 && errno == ENOENT);
+    errno = 0;
+    assert(vprocChdirShim("") == -1 && errno == ENOENT);
+
+    char cwd[PATH_MAX];
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/empty") == 0);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+
+    /* The same names reached without a vproc. */
+    glob_t matches;
+    memset(&matches, 0, sizeof(matches));
+    errno = 0;
+    assert(pscalPathVirtualized_lstat("", &st) == -1 && errno == ENOENT);
+    errno = 0;
+    assert(pscalPathVirtualized_opendir("") == NULL && errno == ENOENT);
+    errno = 0;
+    assert(pscalPathVirtualized_rmdir("") == -1 && errno == ENOENT);
+    assert(pscalPathVirtualized_glob("", 0, NULL, &matches) == GLOB_NOMATCH);
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
 static void assert_vproc_cwd_isolated_between_vprocs(void) {
     char templ[] = "/tmp/vproc-cwd-XXXXXX";
     char *root = mkdtemp(templ);
@@ -7622,6 +7688,8 @@ int main(void) {
     assert_destroy_leaves_replaced_stdio_number_alone();
     fprintf(stderr, "TEST kernel_mounts_from_fstab_at_startup\n");
     assert_kernel_mounts_from_fstab_at_startup();
+    fprintf(stderr, "TEST empty_path_names_nothing\n");
+    assert_empty_path_names_nothing();
 #if defined(PSCAL_TARGET_IOS)
     /* Ensure path virtualization macros remain visible even when vproc shim is included. */
     int (*fn)(const char *) = chdir;
