@@ -16,6 +16,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <setjmp.h>
+#include <stdatomic.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <signal.h>
@@ -859,6 +860,389 @@ static void assert_fcntl_on_pty(void) {
     vprocDeactivate();
     vprocDestroy(vp);
     vprocSessionStdioDestroy(session);
+}
+
+/* What a pipeline's pipe and a terminal look like: tail asks, to know what to follow. */
+static void assert_fstat_and_ttyname_on_slots(void) {
+    struct pscal_fd *read_end = NULL;
+    struct pscal_fd *write_end = NULL;
+    assert(vprocCreateInprocPipe(&read_end, &write_end) == 0);
+    struct pscal_fd *other_read = NULL;
+    struct pscal_fd *other_write = NULL;
+    assert(vprocCreateInprocPipe(&other_read, &other_write) == 0);
+    struct pscal_fd *master = NULL;
+    struct pscal_fd *slave = NULL;
+    int pty_num = -1;
+    assert(pscalPtyOpenMaster(O_RDWR, &master, &pty_num) == 0);
+    assert(pscalPtyUnlock(master) == 0);
+    assert(pscalPtyOpenSlave(pty_num, O_RDWR, &slave) == 0);
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+    assert(vprocAdoptPscalFd(vp, 10, read_end) == 0);
+    assert(vprocAdoptPscalFd(vp, 11, write_end) == 0);
+    assert(vprocAdoptPscalFd(vp, 12, other_read) == 0);
+    assert(vprocAdoptPscalFd(vp, 13, other_write) == 0);
+    assert(vprocAdoptPscalFd(vp, 14, slave) == 0);
+    assert(vprocAdoptPscalFd(vp, 15, master) == 0);
+    pscal_fd_close(read_end);
+    pscal_fd_close(write_end);
+    pscal_fd_close(other_read);
+    pscal_fd_close(other_write);
+    pscal_fd_close(slave);
+    pscal_fd_close(master);
+
+    struct stat a;
+    struct stat b;
+    assert(vprocFstatShim(10, &a) == 0 && S_ISFIFO(a.st_mode));
+    assert(vprocFstatShim(11, &b) == 0 && S_ISFIFO(b.st_mode));
+    assert(a.st_ino == b.st_ino);
+    assert(vprocFstatShim(12, &b) == 0 && S_ISFIFO(b.st_mode));
+    assert(a.st_ino != b.st_ino);
+    assert(vprocFstatShim(14, &a) == 0 && S_ISCHR(a.st_mode));
+    assert(vprocFstatShim(15, &a) == 0 && S_ISCHR(a.st_mode));
+
+    errno = 0;
+    assert(vprocTtynameShim(10) == NULL && errno == ENOTTY);
+    char expected[32];
+    snprintf(expected, sizeof(expected), "/dev/pts/%d", pty_num);
+    const char *name = vprocTtynameShim(14);
+    assert(name && strcmp(name, expected) == 0);
+    name = vprocTtynameShim(15);
+    assert(name && strcmp(name, "/dev/ptmx") == 0);
+
+    /* A host file in a slot is no terminal, whatever host descriptor has the slot's number. */
+    int file = vprocOpenShim("/dev/null", O_RDONLY);
+    assert(file >= 0);
+    errno = 0;
+    assert(vprocTtynameShim(file) == NULL && errno != 0);
+    assert(vprocCloseShim(file) == 0);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
+static int gSpawnSlot = -1;
+static int gSpawnOtherSlot = -1;
+
+static int vprocSpawnWriteEntry(int argc, char **argv) {
+    (void)argc;
+    const char *value = vprocGetenvShim("SPAWN_TEST_VALUE");
+    if (!value || strcmp(value, "parent") != 0) {
+        return 90;
+    }
+    vprocSetenvShim("SPAWN_TEST_VALUE", "child", 1);
+    if (vprocWriteShim(gSpawnSlot, argv[1], 1) != 1) {
+        return 91;
+    }
+    return 7;
+}
+
+static int vprocSpawnBlockedReadEntry(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    char c;
+    (void)vprocCloseShim(gSpawnOtherSlot);
+    return vprocReadShim(gSpawnSlot, &c, 1) == 1 ? 80 : 81;
+}
+
+static int vprocSpawnBlockedWriteEntry(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    char buf[4096];
+    memset(buf, 'w', sizeof(buf));
+    (void)vprocCloseShim(gSpawnOtherSlot);
+    for (;;) {
+        if (vprocWriteShim(gSpawnSlot, buf, sizeof(buf)) < 0) {
+            return 82;
+        }
+    }
+}
+
+static int vprocSpawnWaitEntry(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    char *child_argv[] = {"spawn-grandchild", NULL};
+    pid_t child = vprocSpawnEntry("spawn-grandchild", true, vprocSpawnBlockedReadEntry, child_argv);
+    if (child < 0) {
+        return 83;
+    }
+    int status = 0;
+    (void)vprocWaitPidShim(child, &status, 0);
+    return 84;
+}
+
+/* What a nested shell's command is: vprocs of its own on the same thread, a command scope
+ * and a stage run in line. */
+static struct pscal_fd *gSpawnScopeHeld = NULL;
+static atomic_int gSpawnScopePid;
+
+static int vprocSpawnScopeEntry(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    VProcCommandScope scope;
+    if (!vprocCommandScopeBegin(&scope, "spawn-scope", true, true)) {
+        return 85;
+    }
+    VProc *stage = vprocCreate(NULL);
+    if (!stage) {
+        return 89;
+    }
+    vprocActivate(stage);
+    if (vprocAdoptPscalFd(stage, 10, gSpawnScopeHeld) != 0) {
+        return 86;
+    }
+    atomic_store(&gSpawnScopePid, scope.pid);
+    for (;;) {
+        usleep(10000);
+    }
+}
+
+/* Ends only by a kill, and holds the read end of gSpawnSlot until then. */
+static int vprocSpawnHoldEntry(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    (void)vprocCloseShim(gSpawnOtherSlot);
+    for (;;) {
+        usleep(10000);
+    }
+}
+
+static int vprocSpawnHolderParentEntry(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    char *child_argv[] = {"spawn-holder", NULL};
+    pid_t child = vprocSpawnEntry("spawn-holder", true, vprocSpawnHoldEntry, child_argv);
+    if (child < 0) {
+        return 87;
+    }
+    int status = 0;
+    (void)vprocWaitPidShim(child, &status, 0);
+    return 88;
+}
+
+/* A kill unwinds the thread past the scope's end, and the scope has to end anyway. */
+static void assert_kill_ends_scopes_and_descendants(void) {
+    alarm(60);
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+
+    struct pscal_fd *read_end = NULL;
+    struct pscal_fd *write_end = NULL;
+    assert(vprocCreateInprocPipe(&read_end, &write_end) == 0);
+    assert(vprocAdoptPscalFd(vp, 10, read_end) == 0);
+    pscal_fd_close(read_end);
+    gSpawnScopeHeld = write_end;
+    atomic_store(&gSpawnScopePid, 0);
+    char *scope_argv[] = {"spawn-scope", NULL};
+    pid_t child = vprocSpawnEntry("spawn-scope", true, vprocSpawnScopeEntry, scope_argv);
+    assert(child > 0);
+    while (atomic_load(&gSpawnScopePid) == 0) {
+        usleep(1000);
+    }
+    pscal_fd_close(write_end);
+    assert(vprocKillShim(atomic_load(&gSpawnScopePid), 0) == 0);
+    assert(vprocKillShim(child, SIGTERM) == 0);
+    int status = 0;
+    assert(vprocWaitPidShim(child, &status, 0) == child);
+    assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGTERM);
+    char c;
+    assert(vprocReadShim(10, &c, 1) == 0);
+    /* The stage ends first and its descriptors go with it, so the scope is a moment behind. */
+    while (vprocKillShim(atomic_load(&gSpawnScopePid), 0) == 0) {
+        usleep(1000);
+    }
+    assert(errno == ESRCH);
+    assert(vprocCloseShim(10) == 0);
+
+    /* Down the tree: the grandchild's read end is the last one, so the writer sees it go. */
+    assert(vprocCreateInprocPipe(&read_end, &write_end) == 0);
+    assert(vprocAdoptPscalFd(vp, 10, read_end) == 0);
+    assert(vprocAdoptPscalFd(vp, 11, write_end) == 0);
+    pscal_fd_close(read_end);
+    pscal_fd_close(write_end);
+    gSpawnSlot = 10;
+    gSpawnOtherSlot = 11;
+    char *holder_argv[] = {"spawn-holder-parent", NULL};
+    child = vprocSpawnEntry("spawn-holder-parent", true, vprocSpawnHolderParentEntry, holder_argv);
+    assert(child > 0);
+    usleep(200000);
+    assert(vprocCloseShim(10) == 0);
+    assert(vprocKillTree(child, SIGKILL) == 0);
+    assert(vprocWaitPidShim(child, &status, 0) == child);
+    ssize_t wrote;
+    do {
+        usleep(1000);
+        wrote = vprocWriteShim(11, "x", 1);
+    } while (wrote == 1);
+    assert(wrote == -1 && errno == EPIPE);
+    assert(vprocCloseShim(11) == 0);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+    alarm(0);
+}
+
+/* A kill cancels the child's thread: nothing it was waiting in may stay locked, and what it
+ * held has to close. A hang here is the failure, so alarm() turns it into one. */
+static void assert_spawn_entry_runs_as_a_child(void) {
+    alarm(120);
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+    vprocSetenvShim("SPAWN_TEST_VALUE", "parent", 1);
+
+    /* Runs, on the caller's descriptors and environment, and gets waited for. */
+    int p[2];
+    assert(vprocPipeShim(p) == 0);
+    gSpawnSlot = p[1];
+    gSpawnOtherSlot = p[0];
+    char *argv[] = {"spawn-child", "K", NULL};
+    pid_t child = vprocSpawnEntry("spawn-child", true, vprocSpawnWriteEntry, argv);
+    assert(child > 0);
+    assert(child != vprocPid(vp));
+    assert(vprocGetPgid((int)child) == vprocGetPgid(vprocPid(vp)));
+    int status = 0;
+    assert(vprocWaitPidShim(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 7);
+    char c = 0;
+    assert(vprocCloseShim(p[1]) == 0);
+    assert(vprocReadShim(p[0], &c, 1) == 1 && c == 'K');
+    assert(vprocReadShim(p[0], &c, 1) == 0);
+    assert(vprocCloseShim(p[0]) == 0);
+    assert(strcmp(vprocGetenvShim("SPAWN_TEST_VALUE"), "parent") == 0);
+    vprocUnsetenvShim("SPAWN_TEST_VALUE");
+
+    /* Its own group, when asked for. */
+    assert(vprocPipeShim(p) == 0);
+    gSpawnSlot = p[1];
+    gSpawnOtherSlot = p[0];
+    child = vprocSpawnEntry("spawn-child", false, vprocSpawnWriteEntry, argv);
+    assert(child > 0);
+    assert(vprocGetPgid((int)child) == (int)child);
+    assert(vprocWaitPidShim(child, &status, 0) == child);
+    assert(vprocCloseShim(p[1]) == 0);
+    assert(vprocCloseShim(p[0]) == 0);
+
+    /* Killed while waiting on a pipe with nothing in it: the writer then sees it gone. */
+    struct pscal_fd *read_end = NULL;
+    struct pscal_fd *write_end = NULL;
+    assert(vprocCreateInprocPipe(&read_end, &write_end) == 0);
+    assert(vprocAdoptPscalFd(vp, 10, read_end) == 0);
+    assert(vprocAdoptPscalFd(vp, 11, write_end) == 0);
+    pscal_fd_close(read_end);
+    pscal_fd_close(write_end);
+    gSpawnSlot = 10;
+    gSpawnOtherSlot = 11;
+    char *blocked_argv[] = {"spawn-blocked", NULL};
+    child = vprocSpawnEntry("spawn-blocked", true, vprocSpawnBlockedReadEntry, blocked_argv);
+    assert(child > 0);
+    assert(vprocCloseShim(10) == 0);
+    usleep(200000);
+    assert(vprocKillShim(child, SIGTERM) == 0);
+    assert(vprocWaitPidShim(child, &status, 0) == child);
+    assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGTERM);
+    ssize_t wrote = 1;
+    for (int i = 0; i < 200 && wrote > 0; ++i) {
+        usleep(10000);
+        wrote = vprocWriteShim(11, "x", 1);
+    }
+    assert(wrote == -1 && errno == EPIPE);
+    assert(vprocCloseShim(11) == 0);
+
+    /* Killed while waiting to write to a full pipe: the reader then reaches end of file. */
+    assert(vprocCreateInprocPipe(&read_end, &write_end) == 0);
+    assert(vprocAdoptPscalFd(vp, 10, read_end) == 0);
+    assert(vprocAdoptPscalFd(vp, 11, write_end) == 0);
+    pscal_fd_close(read_end);
+    pscal_fd_close(write_end);
+    gSpawnSlot = 11;
+    gSpawnOtherSlot = 10;
+    child = vprocSpawnEntry("spawn-blocked", true, vprocSpawnBlockedWriteEntry, blocked_argv);
+    assert(child > 0);
+    assert(vprocCloseShim(11) == 0);
+    usleep(200000);
+    assert(vprocKillShim(child, SIGKILL) == 0);
+    assert(vprocWaitPidShim(child, &status, 0) == child);
+    char buf[4096];
+    ssize_t got;
+    do {
+        got = vprocReadShim(10, buf, sizeof(buf));
+    } while (got > 0);
+    assert(got == 0);
+    assert(vprocCloseShim(10) == 0);
+
+    /* Killed in waitpid, under the task table's lock: everything else needs that lock. */
+    assert(vprocCreateInprocPipe(&read_end, &write_end) == 0);
+    assert(vprocAdoptPscalFd(vp, 10, read_end) == 0);
+    assert(vprocAdoptPscalFd(vp, 11, write_end) == 0);
+    pscal_fd_close(read_end);
+    pscal_fd_close(write_end);
+    gSpawnSlot = 10;
+    gSpawnOtherSlot = 11;
+    char *wait_argv[] = {"spawn-waiter", NULL};
+    child = vprocSpawnEntry("spawn-waiter", true, vprocSpawnWaitEntry, wait_argv);
+    assert(child > 0);
+    usleep(200000);
+    assert(vprocKillShim(child, SIGTERM) == 0);
+    assert(vprocWaitPidShim(child, &status, 0) == child);
+    assert(WIFSIGNALED(status));
+    assert(vprocGetPgid(vprocPid(vp)) > 0);
+    /* The grandchild only ends with its pipe. */
+    assert(vprocCloseShim(11) == 0);
+    assert(vprocCloseShim(10) == 0);
+
+    /* Killed before its thread got going, or just after: the status says killed either way. */
+    assert(vprocPipeShim(p) == 0);
+    gSpawnSlot = p[0];
+    gSpawnOtherSlot = p[1];
+    for (int i = 0; i < 20; ++i) {
+        child = vprocSpawnEntry("spawn-child", true, vprocSpawnBlockedReadEntry, blocked_argv);
+        assert(child > 0);
+        assert(vprocKillShim(child, SIGTERM) == 0);
+        assert(vprocWaitPidShim(child, &status, 0) == child);
+        assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGTERM);
+    }
+    assert(vprocCloseShim(p[1]) == 0);
+    assert(vprocCloseShim(p[0]) == 0);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+    alarm(0);
+}
+
+/* A cancelled wait on a terminal must not take the terminal with it. */
+static void *vprocTtyReadCancelThread(void *arg) {
+    struct pscal_fd *slave = (struct pscal_fd *)arg;
+    char c;
+    (void)slave->ops->read(slave, &c, 1);
+    return NULL;
+}
+
+static void assert_cancelled_terminal_read_leaves_terminal_usable(void) {
+    alarm(60);
+    struct pscal_fd *master = NULL;
+    struct pscal_fd *slave = NULL;
+    int pty_num = -1;
+    assert(pscalPtyOpenMaster(O_RDWR, &master, &pty_num) == 0);
+    assert(pscalPtyUnlock(master) == 0);
+    assert(pscalPtyOpenSlave(pty_num, O_RDWR, &slave) == 0);
+    pthread_t reader;
+    assert(pthread_create(&reader, NULL, vprocTtyReadCancelThread, slave) == 0);
+    usleep(200000);
+    assert(pthread_cancel(reader) == 0);
+    void *result = NULL;
+    assert(pthread_join(reader, &result) == 0);
+    assert(result == PTHREAD_CANCELED);
+    /* Takes the lock the cancelled read would have kept. */
+    assert(slave->ops->write(slave, "x", 1) == 1);
+    pscal_fd_close(slave);
+    pscal_fd_close(master);
+    alarm(0);
 }
 
 static void assert_fcntl_keeps_session_host_stdin_blocking(void) {
@@ -3210,6 +3594,86 @@ static void assert_background_read_of_a_file_does_not_stop(void) {
     vprocMarkExit(leader, 0);
     (void)vprocWaitPidShim(sid, &status, 0);
     vprocDestroy(leader);
+    vprocSetShellSelfPid(prev_shell);
+    unlink(path);
+}
+
+/* A session's stdin is its terminal, tty or not. A file in its place doesn't stop a job, and given
+ * back, it does again. */
+static void assert_background_read_of_session_stdin_stops(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int session_pipe[2];
+    assert(pipe(session_pipe) == 0);
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    vprocSessionStdioInitWithFds(session, session_pipe[0], session_pipe[1], session_pipe[1], 0);
+    vprocSessionStdioActivate(session);
+    VProcOptions leader_opts = vprocDefaultOptions();
+    leader_opts.pid_hint = vprocReservePid();
+    VProc *leader = vprocCreate(&leader_opts);
+    assert(leader);
+    int sid = vprocPid(leader);
+    vprocSetShellSelfPid(sid);
+    assert(vprocSetSid(sid, sid) == 0);
+    assert(vprocSetForegroundPgid(sid, sid) == 0);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = vprocReservePid();
+    opts.stdin_fd = session_pipe[0];
+    VProc *vp = vprocCreate(&opts);
+    assert(vp);
+    int pid = vprocPid(vp);
+    assert(vprocSetPgid(pid, sid + 5) == 0);
+
+    VProc *prev = vprocCurrent();
+    vprocActivate(vp);
+    char ch = 0;
+    errno = 0;
+    assert(vprocReadShim(STDIN_FILENO, &ch, 1) == -1);
+    assert(errno == EINTR);
+    vprocDeactivate();
+    int status = 0;
+    assert(vprocWaitPidShim(pid, &status, WUNTRACED) == pid);
+    assert(WIFSTOPPED(status));
+    assert(vprocKillShim(pid, SIGCONT) == 0);
+
+    char path[] = "/tmp/vproc_bg_read_XXXXXX";
+    int file = mkstemp(path);
+    assert(file >= 0);
+    assert(write(file, "f", 1) == 1);
+    assert(lseek(file, 0, SEEK_SET) == 0);
+    vprocActivate(vp);
+    int slot = vprocAdoptHostFd(vp, file);
+    assert(slot >= 0);
+    assert(vprocDup2Shim(slot, STDIN_FILENO) == STDIN_FILENO);
+    assert(vprocReadShim(STDIN_FILENO, &ch, 1) == 1);
+    assert(ch == 'f');
+    vprocDeactivate();
+    assert(vprocWaitPidShim(pid, &status, WUNTRACED | WNOHANG) == 0);
+
+    assert(vprocRestoreHostFd(vp, STDIN_FILENO, session_pipe[0]) == STDIN_FILENO);
+    vprocActivate(vp);
+    errno = 0;
+    assert(vprocReadShim(STDIN_FILENO, &ch, 1) == -1);
+    assert(errno == EINTR);
+    vprocDeactivate();
+    assert(vprocWaitPidShim(pid, &status, WUNTRACED) == pid);
+    assert(WIFSTOPPED(status));
+    assert(vprocKillShim(pid, SIGCONT) == 0);
+    if (prev) {
+        vprocActivate(prev);
+        vprocDeactivate();
+    }
+
+    vprocMarkExit(vp, 0);
+    (void)vprocWaitPidShim(pid, &status, 0);
+    vprocDestroy(vp);
+    vprocMarkExit(leader, 0);
+    (void)vprocWaitPidShim(sid, &status, 0);
+    vprocDestroy(leader);
+    vprocSessionStdioDestroy(session);
+    close(session_pipe[0]);
+    close(session_pipe[1]);
     vprocSetShellSelfPid(prev_shell);
     unlink(path);
 }
@@ -8711,6 +9175,14 @@ int main(void) {
     assert_fcntl_on_inproc_pipe();
     fprintf(stderr, "TEST fcntl_on_pty\n");
     assert_fcntl_on_pty();
+    fprintf(stderr, "TEST fstat_and_ttyname_on_slots\n");
+    assert_fstat_and_ttyname_on_slots();
+    fprintf(stderr, "TEST spawn_entry_runs_as_a_child\n");
+    assert_spawn_entry_runs_as_a_child();
+    fprintf(stderr, "TEST kill_ends_scopes_and_descendants\n");
+    assert_kill_ends_scopes_and_descendants();
+    fprintf(stderr, "TEST cancelled_terminal_read_leaves_terminal_usable\n");
+    assert_cancelled_terminal_read_leaves_terminal_usable();
     fprintf(stderr, "TEST fcntl_keeps_session_host_stdin_blocking\n");
     assert_fcntl_keeps_session_host_stdin_blocking();
     fprintf(stderr, "TEST winsize_round_trip\n");
@@ -8846,6 +9318,8 @@ int main(void) {
 
     fprintf(stderr, "TEST background_read_of_a_file_does_not_stop\n");
     assert_background_read_of_a_file_does_not_stop();
+    fprintf(stderr, "TEST background_read_of_session_stdin_stops\n");
+    assert_background_read_of_session_stdin_stops();
     fprintf(stderr, "TEST getpid_fallback_and_create_inherits\n");
     assert_getpid_falls_back_to_shell_and_create_inherits_session();
     fprintf(stderr, "TEST job_id_present_in_snapshot\n");

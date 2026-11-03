@@ -29,6 +29,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import List, NamedTuple, Optional, Sequence, Tuple
@@ -311,12 +312,20 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("wc_dev_tty", f"wc -c /dev/tty3 {R}", "0 /dev/tty3\n"),
     # fcntl, pread and pwrite had no shim: utmp records were read from and written to
     # whichever host descriptor had the slot's number, or nowhere if none did.
-    ("who_file", f"who -q smoke/utmp.rec {R}", "alice bob\n# users=2\n"),
-    ("users_file", f"users smoke/utmp.rec {R}", "alice bob\n"),
-    ("uptime_users", f"mkdir -p /var/run; cp smoke/utmp.rec /var/run/utmp; uptime | grep -c ' 2 users, ' {R}; rm /var/run/utmp", "1\n"),
-    # xargs, because at the prompt halt and poweroff are the VM's Halt builtin.
+    ("who_file", f"who -q smoke/utmp.rec {R}", "alice bob carol\n# users=3\n"),
+    ("users_file", f"users smoke/utmp.rec {R}", "alice bob carol\n"),
+    # ttyname took a slot for a host descriptor, so nothing was this session's terminal.
+    ("who_m", f"who -m smoke/utmp.rec {R}; cut -d' ' -f1 {{o}} > {{o}}.1; mv {{o}}.1 {{o}}", "carol\n"),
+    ("who_m_not_tty", f"who -m smoke/utmp.rec < /dev/null {R}", ""),
+    ("tty_named", f"tty {R}", "/dev/pts/0\n"),
+    ("uptime_users", f"mkdir -p /var/run; cp smoke/utmp.rec /var/run/utmp; uptime | grep -c ' 3 users, ' {R}; rm /var/run/utmp", "1\n"),
+    # xargs reaches the applet by a call; the next two go through shell dispatch.
     ("wtmp_append", f"mkdir -p /var/log; rm -f /var/log/wtmp; xargs halt -w < /dev/null {R}; xargs halt -w < /dev/null {A}; wc -c < /var/log/wtmp {A}; who -r /var/log/wtmp | wc -l {A}", "800\n2\n"),
     ("wtmp_partial", f"printf x > /var/log/wtmp; xargs halt -w < /dev/null {R}; wc -c < /var/log/wtmp {A}", "400\n"),
+    # These reached the VM's Halt, which takes one integer: "Halt expects 0 or 1 integer argument."
+    ("halt_w", f"rm -f /var/log/wtmp; halt -w {R}; echo $? {A}; reboot -w {A}; echo $? {A}; poweroff -w {A}; echo $? {A}; wc -c < /var/log/wtmp {A}", "0\n0\n0\n1200\n"),
+    ("halt_w_sourced", f"printf 'halt -w\\necho after\\n' > smoke/hw.sh; . smoke/hw.sh {R}", "after\n"),
+    ("halt_bad_option", f"halt -z {R}; echo $? {A}", "halt: illegal option -- z\nusage: halt|poweroff|reboot [-dfhHinpw]\n1\n"),
     # And F_SETFL reached a host descriptor too: fd 0 from tail, a system directory
     # from stty. Only a trace shows that, so these say the paths still work; the shims
     # have their tests in Tests/ios_vproc.
@@ -324,6 +333,11 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("tail_f_stdin", f"tail -f --pid=999999 < /dev/null {R}; echo $? {A}", "0\n"),
     ("tail_f_device", f"tail -f --pid=999999 /dev/null {R}; echo $? {A}", "0\n"),
     ("tail_F_appears", f"tail -F -s 0.2 smoke/appear {R} & t=$!; sleep 0.5; ln -s /dev/null smoke/appear; i=0; while [ $i -lt 200 ] && ! grep -q appeared {{o}}; do sleep 0.1; i=$((i+1)); done; kill $t; wait $t 2>/dev/null", "tail: cannot open 'smoke/appear' for reading: No such file or directory\ntail: 'smoke/appear' has appeared;  following new file\n"),
+    # fstat called a pipeline's pipe a character device, so tail followed it for ever,
+    # and did not see that its own reader had gone.
+    ("tail_f_stdin_pipe", f"cat smoke/d.txt | tail -f {R}; echo $? {A}", "b\na\nc\n0\n"),
+    ("tail_f_reader_gone", f"tail -f smoke/d.txt | head -1 {R}", "b\n"),
+    ("stat_stdin_pipe", f"echo x | stat -c %F - {R}", "fifo\n"),
     ("stty_named", f"stty -F /dev/tty size > /dev/null 2>&1; echo $? {R}", "0\n"),
     ("stty_not_tty", f"stty -F /dev/null {R}; echo $? {A}", "stty: /dev/null: Inappropriate ioctl for device\n1\n"),
     # pscal-core's own fcntl on 0-2 and on dup's slots reached the host's descriptors.
@@ -350,6 +364,49 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     # A stream can't write to stdout opened for reading. Its fallback dup'ed the host number
     # through the slot shim and kept what came back: four or five descriptors a command.
     ("read_only_stdout_keeps_nothing", f"pascal smoke/sno.pas > /dev/null; a=$(pascal smoke/sno.pas); i=0; while [ $i -lt 10 ]; do echo x 1<smoke/d.txt 2>/dev/null; pascal smoke/hello.pas 1<smoke/d.txt 2>/dev/null; i=$((i+1)); done; b=$(pascal smoke/sno.pas); if [ $((b-a)) -lt 10 ]; then echo ok {R}; else echo \"$a $b\" {R}; fi", "ok\n"),
+    # A command under timeout is a child: a thread with a vproc of its own. A real fork left
+    # the shim's waitpid with no child it knew: "timeout: waitpid: No child processes", 125.
+    ("timeout_echo", f"timeout 5 echo hi {R}; echo $? {A}", "hi\n0\n"),
+    ("timeout_status", f"timeout 5 false {R}; echo $? {A}", "1\n"),
+    ("timeout_expires", f"timeout 0.3 sleep 30 {R}; echo $? {A}", "124\n"),
+    ("timeout_zero", f"timeout 0 echo no-limit {R}; echo $? {A}", "no-limit\n0\n"),
+    ("timeout_preserve", f"timeout --preserve-status 0.3 sleep 30 {R}; echo $? {A}", "143\n"),
+    ("timeout_signal", f"timeout -s KILL --preserve-status 0.3 sleep 30 {R}; echo $? {A}", "137\n"),
+    ("timeout_missing", f"timeout 5 no-such-command {R}; echo $? {A}", "timeout: no-such-command: No such file or directory\n127\n"),
+    ("timeout_stdin", f"timeout 5 cat < smoke/d.txt {R}", "b\na\nc\n"),
+    ("timeout_pipe", f"cat smoke/d.txt | timeout 5 tail -1 | cat {R}", "c\n"),
+    ("timeout_cwd", f"(cd smoke/sub; timeout 5 pwd) {R}", "/home/smoke/sub\n"),
+    ("timeout_env", f"SPAWNV=1 timeout 5 printenv SPAWNV {R}", "1\n"),
+    ("timeout_subshell_env", f"(export SPAWNS=2; timeout 5 printenv SPAWNS) {R}; printenv SPAWNS {A}", "2\n"),
+    ("timeout_frontend", f"timeout 5 pascal smoke/hello.pas {R}; echo $? {A}", "pascal ok 42\n0\n"),
+    ("timeout_frontend_status", f"timeout 5 pascal smoke/halt.pas > /dev/null 2>&1; echo $? {R}", "3\n"),
+    ("timeout_script", f"timeout 5 smoke/sb3.sh; echo $? {R}", "3\n"),
+    ("timeout_shell", f"timeout 5 sh -c 'echo in-sh; exit 4' {R}; echo $? {A}", "in-sh\n4\n"),
+    ("timeout_keeps_shell", f"timeout 5 sh -c 'SPAWNK=1; cd smoke; exit 0'; echo \"[$SPAWNK]\" {R}; ls -d smoke {A}", "[]\nsmoke\n"),
+    # A kill cancels the command's thread wherever it waits. Left with the lock held, the
+    # pipe's other end, the terminal or every later command would wait for ever.
+    ("timeout_empty_pipe", f"sleep 1 | timeout 0.3 cat {R}; echo $? {A}; echo after | cat {A}", "124\nafter\n"),
+    ("timeout_full_pipe", f"timeout 0.3 yes | sleep 1 {R}; echo $? {A}; echo after | cat {A}", "0\nafter\n"),
+    ("timeout_reader_gone", f"yes | timeout 0.3 cat > /dev/null; echo $? {R}; echo after | cat {A}", "124\nafter\n"),
+    ("timeout_terminal", f"timeout 0.3 cat {R}; echo $? {A}; stty size > /dev/null 2>&1; echo $? {A}; echo after | cat {A}", "124\n0\nafter\n"),
+    ("timeout_nested_shell", f"timeout 0.3 sh -c 'sleep 30; echo late'; echo $? {R}; sleep 0.2; echo after | cat {A}", "124\nafter\n"),
+    ("timeout_killed", f"timeout 30 sleep 30 & t=$!; sleep 0.3; kill $t; wait $t; echo $? {R}; echo after | cat {A}", "143\nafter\n"),
+    # What the killed shell was running must go with it: its descriptors keep the reader waiting.
+    ("timeout_nested_reader", f"(timeout 0.3 sh -c 'sleep 30; echo late') | cat {R}; echo $? {A}", "0\n"),
+    ("timeout_nested_pipeline", f"timeout 0.3 sh -c 'sleep 30 | cat; echo late' | cat {R}; echo $? {A}; lps | grep -c '[s]leep 30' {A}", "0\n0\n"),
+    # A loop that makes no calls stops too. Left running it keeps a core busy until the app quits,
+    # and it holds stdout, so the reader never finishes.
+    ("timeout_vm_loop", f"timeout 1 pascal smoke/spin.pas | cat {R}; echo $? {A}; echo after | cat {A}", "0\nafter\n"),
+    # A shell run as a command is no prompt, and says nothing about the one that ran it, running,
+    # killed or not. A prompt told it was a script gave commands no terminal, so `awk < f` read nothing.
+    ("sh_c_not_prompt", f"sh -c 'case $- in *i*) echo prompt;; *) echo script;; esac' {R}", "script\n"),
+    ("stage_is_prompt", f"{{ case $- in *i*) echo prompt;; *) echo script;; esac; }} | cat {R}", "prompt\n"),
+    ("nested_bg_prompt", f"sh -c 'sleep 0.5' & sleep 0.2; case $- in *i*) echo prompt {R};; *) echo script {R};; esac; wait", "prompt\n"),
+    ("nested_killed_prompt", f"sh -c 'sleep 30' & t=$!; sleep 0.2; kill $t; wait $t; case $- in *i*) echo prompt {R};; *) echo script {R};; esac", "prompt\n"),
+    ("timeout_nested_prompt", f"timeout 0.3 sh -c 'sleep 30'; case $- in *i*) echo prompt {R};; *) echo script {R};; esac; awk '{{print $1}}' < smoke/d.txt {A}", "prompt\nb\na\nc\n"),
+    ("xargs_frontend", f"echo smoke/hello.pas | xargs pascal {R}; echo $? {A}", "pascal ok 42\n0\n"),
+    ("xargs_missing", f"echo x | xargs no-such-command {R}; echo $? {A}", "xargs: no-such-command: No such file or directory\n127\n"),
+    ("find_exec_frontend", f"find smoke/hello.pas -exec pascal {{}} \\; {R}", "pascal ok 42\n"),
     # A missing directory is an error, as in bash: nothing makes it on the way.
     ("redirect_no_dir", f"echo x > /nonexistent/dir/f; echo $? {R}; ls /nonexistent {A}", "1\nls: cannot access '/nonexistent': No such file or directory\n"),
     ("touch_no_dir", f"touch /nonexistent/dir/f > /dev/null 2>&1; echo $? {R}; ls /nonexistent {A}", "1\nls: cannot access '/nonexistent': No such file or directory\n"),
@@ -357,6 +414,12 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("tr_cat", f"cat smoke/d.txt | tr a-z A-Z {R}", "B\nA\nC\n"),
     ("awk_cat", f"cat smoke/d.txt | awk '{{print $1}}' {R}", "b\na\nc\n"),
     ("awk_lt", f"awk '{{print $1}}' < smoke/d.txt {R}", "b\na\nc\n"),
+    # Only the terminal stops a background reader. These stopped for good, or read nothing.
+    ("bg_awk_lt", f"awk '{{print $1}}' < smoke/d.txt {R} & wait $!; echo \"rc=$?\" {A}", "b\na\nc\nrc=0\n"),
+    ("bg_cat_lt", f"cat < smoke/d.txt {R} & wait $!; echo \"rc=$?\" {A}", "b\na\nc\nrc=0\n"),
+    ("bg_group_lt", f"{{ cat; }} < smoke/d.txt {R} & wait $!; echo \"rc=$?\" {A}", "b\na\nc\nrc=0\n"),
+    ("bg_read_lt", f"read x < smoke/d.txt & wait $!; echo \"rc=$?\" {R}", "rc=0\n"),
+    ("bg_sort_lt", f"sort < smoke/d.txt {R} & wait $!; echo \"rc=$?\" {A}", "a\nb\nc\nrc=0\n"),
     ("b64_cat", f"cat smoke/c.txt | base64 {R}", "b25lOnR3bwo=\n"),
     ("od_cat", f"cat smoke/c.txt | od -c | wc -l {R}", "2\n"),
     ("rev_cat", f"cat smoke/c.txt | rev {R}", "owt:eno\n"),
@@ -891,7 +954,8 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("trap_builtin_stage_sends", f"{{ trap 'echo got' USR1; kill -USR1 $$ | cat; echo after; trap - USR1; }} {R}", "got\nafter\n"),
     ("trap_not_for_nested_shell", f"{{ trap 'echo got' USR1; sh -c 'trap; echo in'; trap - USR1; }} {R}", "in\n"),
     ("trap_nested_own", f"{{ trap 'echo outer' USR1; sh -c 'trap \"echo inner\" USR1; kill -USR1 $$; echo in'; echo out; trap - USR1; }} {R}", "inner\nin\nout\n"),
-    ("trap_not_for_child", f"{{ trap 'echo x' TERM; sleep 5 & tp=$!; kill -TERM $tp; wait $tp; echo \"rc=$?\"; trap - TERM; }} {R}", "rc=143\n"),
+    # Stdout only: this list runs from a sourced file, where the app announces `[1] 123` on stderr.
+    ("trap_not_for_child", f"{{ trap 'echo x' TERM; sleep 5 & tp=$!; kill -TERM $tp; wait $tp; echo \"rc=$?\"; trap - TERM; }} > {{o}}", "rc=143\n"),
     ("trap_chld_no_loop", f"{{ trap 'echo chld' CHLD; echo a; trap - CHLD; echo after; }} {R}", "a\nafter\n"),
     # The rest of that round: the same code as on a host, here on the app's threads.
     ("prefix_chain", f"pA=1 pB=$pA sh -c 'echo \"[$pA][$pB]\"' {R}; echo \"[$pA][$pB]\" {A}", "[1][1]\n[][]\n"),
@@ -959,14 +1023,14 @@ AT_ONCE_FIXTURES = {
 
 # Written from the host, since they are awkward to quote in a shell script.
 FIXTURES = {
-    "utmp.rec": utmp_record("alice", "pts/1") + utmp_record("bob", "pts/2"),
+    "utmp.rec": utmp_record("alice", "pts/1") + utmp_record("bob", "pts/2") + utmp_record("carol", "pts/0"),
     "hello.pas": "program Hello;\nbegin\n  writeln('pascal ok ', 6*7);\nend.\n",
-    "spin.pas": "program Spin;\nvar i: integer;\nbegin\n  i := 0;\n  while true do i := 1 - i;\nend.\n",
     "hello.clike": 'int main() {\n    printf("clike ok %d\\n", 6*7);\n    return 0;\n}\n',
     "envp.clike": 'int main() {\n    printf("[%s]\\n", getenv("ep"));\n    return 0;\n}\n',
     "envp.pas": "program EnvP;\nbegin\n  writeln('[', getenv('ep'), ']');\nend.\n",
     "hello.rea": 'class Main {}\n\nwriteln("rea ok ", 6*7);\n',
     "hello.aether": '@pure\nfn answer(a: Int, b: Int) -> Int {\n    ret a * b;\n}\n\nfn main() -> Void {\n    fx { println("aether ok ", answer(6, 7)); }\n    ret;\n}\n',
+    "spin.pas": "program Spin;\nvar i: integer;\nbegin\n  i := 0;\n  while true do i := 1 - i;\nend.\n",
     "slow.pas": "program Slow;\nuses crt;\nbegin\n  delay(800);\n  writeln('slow done');\nend.\n",
     "halt.pas": "program Halting;\nbegin\n  halt(3);\nend.\n",
     "bigout.pas": "program BigOut;\nvar i: integer;\nbegin\n  for i := 1 to 30000 do writeln(i);\nend.\n",
@@ -1395,6 +1459,8 @@ class Session:
         started = time.time()
         state = self._wait(pid, timeout)
         seconds = time.time() - started
+        if state == "stalled":
+            self._sample(pid)
         simctl("terminate", udid, self.bundle)
         # Reports land a little after the process goes.
         return Run(state, seconds, self._last_step(), self._new_crashes(before, 20 if state == "died" else 2))
@@ -1418,6 +1484,13 @@ class Session:
                 return "stalled"
             time.sleep(0.3)
         return "done"
+
+    def _sample(self, pid: int) -> None:
+        """Where each thread is: a stall leaves no crash report, and the app is stopped next."""
+        path = Path(tempfile.gettempdir()) / f"pscal-stall-{self._last_step() or 'start'}-{pid}.txt"
+        taken = subprocess.run(["/usr/bin/sample", str(pid), "2", "-file", str(path)],
+                               capture_output=True, text=True)
+        print(f"stack sample: {path}" if taken.returncode == 0 else f"no stack sample: {taken.stderr.strip()}")
 
     def _last_step(self) -> Optional[str]:
         try:

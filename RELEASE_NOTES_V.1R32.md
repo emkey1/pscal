@@ -52,6 +52,12 @@ Status: Not yet uploaded. Not yet run on a physical device.
 - A background job's `$(...)` takes stdout from that job alone. It used to move the app's own, so beside a job the shell's output could vanish or land in the job's variable, and the shell could end. A job's `$(echo hi)` could also come back empty with `hi` on the screen. `sh x | cat` now returns when `x` killed a job inside `$(...)`; it used to hang with its output complete.
 - `lps` could crash the app. Finding the CPU time of a task whose thread had ended used the name that thread's Mach port used to have. By then the name could belong to something else, so the app could die at once or release a right it still needed.
 - A job that ended while a `$(...)` ran no longer hangs `wait`: `true & x=$(echo e); wait` almost never returned. `x=$(sleep 1 & echo bg)` at a prompt no longer captures the `[1] pid` line.
+- `timeout` works. `timeout 5 echo hi` said `timeout: waitpid: No child processes`, status 125, because the applet forked and the app has nothing to fork. It now runs an applet, a frontend or a script as a child task with the caller's descriptors and environment. A limit that expires gives 124, otherwise the command's own status comes back, `timeout 0` means no limit, and a missing command gives 127. The command can read the terminal and Ctrl-C reaches it, and the signal reaches what a nested `sh -c` runs.
+- A prompt stays a prompt. `sh -c ...` told the whole app it was not interactive until it returned, so a background one turned job control off at the prompt while it ran, and one that was killed turned it off for good, after which `awk '{print}' < f` printed nothing. The setting is now each shell's own.
+- A background job can read a file. `cat < f &` stopped and never went on, and `awk '{print}' < f &` printed nothing, because a read of any redirected stdin counted as a background job reading the terminal. Only the terminal stops a reader now.
+- `cat f | tail -f` ends, and `tail -f f | head -1` ends with `head`. `fstat` called every in-process pipe a character device, so `tail` did not see a pipe on either side. `stat -` says FIFO on one now.
+- `who -m file` finds the terminal's line. `ttyname` took a slot number for a host descriptor, the cache writer's mistake again. `who am i` at a prompt still prints nothing, see Known Issues.
+- `halt -w`, `poweroff -w` and `reboot -w` write their record and return at the prompt. They reached the VM's `Halt` routine, which said `Halt expects 0 or 1 integer argument.` and stopped a sourced script there.
 
 ## Fixed in exsh on every platform
 - `{ ...; } > file`, `if ...; fi > file`, `case ... esac > file` and a redirection on a function definition now cover the whole body, including input redirections, and they close when the body leaves early through `return`, `break` or `exit`. They used to be dropped: the output went to the terminal and the file was never created.
@@ -64,19 +70,22 @@ Status: Not yet uploaded. Not yet run on a physical device.
 - `printf` no longer cuts a number or `%c` at 255 characters: `printf '%300d' 7` prints all 300.
 
 ## Known Issues
+- On iOS a file run with `.` at a prompt announces its background jobs, `[1] 123` on stderr. bash announces only what is typed at the prompt.
 - A failed redirection's message says `exec:` even when no `exec` was involved.
 - exsh subshells are not separate: `( exit 3 )` ends the script, and a subshell's assignments and `cd` persist. `(echo s)` needs spaces, as in `( echo s )`.
 - In `{ a; b; } | cat` only the first command goes through the pipe, `echo o | { read x; }` reads nothing, and `{ ...; } &` runs in the foreground.
 - `d=$(false) || ...` ignores the command substitution's status, so `d=$(mktemp -d) || exit 1` carries on with an empty `$d`.
-- `echo a &> f` prints a leftover debug line and adds the `;` to the file name. `$-` does not expand.
+- `echo a &> f` prints a leftover debug line and adds the `;` to the file name.
 - On iOS a VM program's `read` and `readln` take the terminal, whatever its stdin is: `pascal prog < file` and `printf '10\n' | pascal prog` wait for the keyboard. A `#!` program does the same.
-- On iOS a background command that reads a redirected stdin stops as if it were reading the terminal: `cat < f > out &` never finishes, and a `wait` for it never returns. `( cat < f > out ) &` works.
 - On iOS `scp` ends with status 1 after a good copy, so `scp a host:b && next` never reaches `next`. Its wait asks the host about a simulated process, which always fails. `sftp` has the same wait and ignores the failure, so its status does not include `ssh`'s.
 - On iOS `scp -3` fails with `subsystem request failed` and copies nothing, because a second connection's `ssh` also gets the first one's arguments. From the code, `scp host:a host:b .` should fail the same way at its second source; that form has not been run.
 - On iOS ^C does not stop `rsync` to or from a remote host, which starts its `ssh` directly. A background `ssh` can take a ^C meant for the foreground, because the interrupt flag is process-wide.
 - `time clike prog` says `time: clike: command not found`. `time prog` works for a `#!` program.
 - `aether --version` reads `1.01-dev` in this build. The language is the frozen 1.0 one; the label comes from `components/aether/RELEASE`, which moved on right after the 1.0 tag.
 - The app bundles no Aether guide: `~/Docs` has the PSCAL documents only.
+- `who am i` prints nothing at a prompt, because nothing in the app writes a utmp record for a terminal. `who -m file` finds the line in a file that has a record for it.
+- `lps` keeps an `exited` row for a frontend that `timeout` killed, until the app restarts. It holds no thread or descriptor.
+- `halt`, `reboot` and `poweroff` without `-w` print `System halt requested...` and end the shell, which leaves its tab open with no prompt. Open a new tab. Build 31 ends the shell the same way, without the message.
 
 ## Validation
 Results are recorded here once this commit's build has been tested.
