@@ -3046,7 +3046,9 @@ main(int argc, char **argv)
 #endif
 
 	close(in);
-	close(out);
+	/* Without USE_PIPES these are one socket: see the same close in scp.c. */
+	if (out != in)
+		close(out);
 	if (batchmode)
 		fclose(infile);
 

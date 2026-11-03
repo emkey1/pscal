@@ -1033,9 +1033,14 @@ main(int argc, char **argv)
 	 * and no error has occurred yet
 	 */
 	if (do_cmd_pid != -1 && (mode == MODE_SFTP || errs == 0)) {
+		/*
+		 * Without USE_PIPES remin and remout are one socket. In the app a
+		 * second close of its number reaches whatever host descriptor has
+		 * that number, such as the Go runtime's kqueue.
+		 */
 		if (remin != -1)
 		    (void) close(remin);
-		if (remout != -1)
+		if (remout != -1 && remout != remin)
 		    (void) close(remout);
 		if (waitpid(do_cmd_pid, &status, 0) == -1)
 			errs = 1;
@@ -1448,7 +1453,8 @@ toremote(int argc, char **argv, enum scp_mode_e mode, char *sftp_direct)
 				    remin2, remout2, (long)do_cmd_pid2);
 				throughlocal_sftp(conn2, conn, src, targ);
 				(void) close(remin2);
-				(void) close(remout2);
+				if (remout2 != remin2)
+					(void) close(remout2);
 				remin2 = remout2 = -1;
 				if (waitpid(do_cmd_pid2, &status, 0) == -1)
 					++errs;
@@ -1471,7 +1477,8 @@ toremote(int argc, char **argv, enum scp_mode_e mode, char *sftp_direct)
 					exit(1);
 				free(bp);
 				(void) close(remin);
-				(void) close(remout);
+				if (remout != remin)
+					(void) close(remout);
 				remin = remout = -1;
 			}
 		} else if (host) {	/* standard remote to remote */
@@ -1622,7 +1629,8 @@ tolocal(int argc, char **argv, enum scp_mode_e mode, char *sftp_direct)
 			sink_sftp(1, argv[argc - 1], src, conn);
 
 			(void) close(remin);
-			(void) close(remout);
+			if (remout != remin)
+				(void) close(remout);
 			remin = remout = -1;
 			continue;
 		}
@@ -2614,11 +2622,11 @@ cleanup_exit(int i)
 	(void)i;
 	if (remin > 0)
 		close(remin);
-	if (remout > 0)
+	if (remout > 0 && remout != remin)
 		close(remout);
 	if (remin2 > 0)
 		close(remin2);
-	if (remout2 > 0)
+	if (remout2 > 0 && remout2 != remin2)
 		close(remout2);
 	if (do_cmd_pid > 0)
 		(void)waitpid(do_cmd_pid, NULL, 0);
