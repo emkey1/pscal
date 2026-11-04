@@ -197,6 +197,13 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     # grep: the nested .exshrc context announces each background job, here into the pipe.
     ("background_starter_gone", f"for i in 1 2 3 4 5 6 7 8 9 10; do ( {{ echo job; }} & ) | grep -v '^\\[' | tr a-z A-Z {A}; done", "JOB\n" * 10),
     ("background_eval_gone", f"for i in 1 2 3 4 5 6 7 8 9 10; do ( eval \"{{ echo job; }} &\" ) | grep -v '^\\[' | tr a-z A-Z {A}; done", "JOB\n" * 10),
+    # A substitution moves only its own shell's stdout. It used to move host fd 1, the whole app's,
+    # so a job's substitution could cost the shell its output. And a job killed inside one must let
+    # go of the pipe it was writing to, or `cat` never returns.
+    ("substitution_beside_job", f"( i=0; while [ $i -lt 50 ]; do x=$(echo hi); i=$((i+1)); done ) & for k in 1 2 3 4 5; do y=$(echo next); echo \"$y\" {A}; done; wait", "next\n" * 5),
+    ("substitution_two_jobs", f"for j in 1 2; do ( i=0; bad=0; while [ $i -lt 50 ]; do x=$(echo hi); [ \"$x\" = hi ] || bad=$((bad+1)); i=$((i+1)); done; echo \"$bad wrong\" {A} ) & done; wait", "0 wrong\n0 wrong\n"),
+    ("substitution_killed_job_pipe", f"echo '( x=$(sleep 2); echo no ) & p=$!; sleep 0.05; kill $p; wait $p; echo \"killed $?\"' > smoke/ss3.sh; sh smoke/ss3.sh | cat {R}", "killed 143\n"),
+    ("substitution_killed_job_sourced", f"echo '( x=$(sleep 2); echo no ) & p=$!; sleep 0.05; kill $p; wait $p; echo \"killed $?\"' > smoke/ss4.sh; . smoke/ss4.sh | cat {R}", "killed 143\n"),
     ("background_eval_wait", f"eval \"{{ exit 3; }} &\"; wait $!; echo \"wait $?\" {R}", "wait 3\n"),
     ("background_subshell_wait", f"( eval \"{{ exit 5; }} &\"; wait $!; echo \"wait $?\" ) | grep -v '^\\[' {R}", "wait 5\n"),
     ("background_starter_fd", f"exec 3> smoke/bs3.txt; ( {{ echo x >&3; }} & ) | cat; exec 3>&-; cat smoke/bs3.txt {R}", "x\n"),
