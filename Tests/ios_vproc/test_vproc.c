@@ -512,6 +512,15 @@ static void assert_host_stdio_untouched_after_vproc_close(void) {
     vprocActivate(vp);
     // Closing vproc stdout must not close the host stdout.
     assert(vprocCloseShim(1) == 0);
+    // Nor may a write to the closed slot find it.
+    errno = 0;
+    assert(vprocWriteShim(1, "x", 1) == -1);
+    assert(errno == EBADF);
+    assert(vprocCloseShim(0) == 0);
+    char ch = 0;
+    errno = 0;
+    assert(vprocReadShim(0, &ch, 1) == -1);
+    assert(errno == EBADF);
     vprocDeactivate();
     vprocDestroy(vp);
     int after = fcntl(STDOUT_FILENO, F_GETFD);
@@ -2614,6 +2623,17 @@ static void assert_cancelled_read_lets_go_of_its_descriptor(void) {
     pscal_fd_close(write_end);
 }
 
+static int open_test_terminal(int *out_master) {
+    int master = posix_openpt(O_RDWR | O_NOCTTY);
+    assert(master >= 0);
+    assert(grantpt(master) == 0);
+    assert(unlockpt(master) == 0);
+    int terminal = open(ptsname(master), O_RDWR | O_NOCTTY);
+    assert(terminal >= 0);
+    *out_master = master;
+    return terminal;
+}
+
 static void assert_background_tty_signals(void) {
     int prev_shell = vprocGetShellSelfPid();
     VProcOptions leader_opts = vprocDefaultOptions();
@@ -2625,8 +2645,11 @@ static void assert_background_tty_signals(void) {
     assert(vprocSetSid(sid, sid) == 0);
     assert(vprocSetForegroundPgid(sid, sid) == 0);
 
+    int master = -1;
+    int terminal = open_test_terminal(&master);
     VProcOptions opts = vprocDefaultOptions();
     opts.pid_hint = vprocReservePid();
+    opts.stdin_fd = terminal;
     VProc *vp = vprocCreate(&opts);
     assert(vp);
     int pid = vprocPid(vp);
@@ -2658,6 +2681,62 @@ static void assert_background_tty_signals(void) {
     (void)vprocWaitPidShim(sid, &status, 0);
     vprocDestroy(leader);
     vprocSetShellSelfPid(prev_shell);
+    close(terminal);
+    close(master);
+}
+
+/* Only the terminal stops a job that reads it: not the /dev/null it starts with, and not a file it
+ * redirected stdin from, which `cat < f &` waited on for ever. */
+static void assert_background_read_of_a_file_does_not_stop(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    VProcOptions leader_opts = vprocDefaultOptions();
+    leader_opts.pid_hint = vprocReservePid();
+    VProc *leader = vprocCreate(&leader_opts);
+    assert(leader);
+    int sid = vprocPid(leader);
+    vprocSetShellSelfPid(sid);
+    assert(vprocSetSid(sid, sid) == 0);
+    assert(vprocSetForegroundPgid(sid, sid) == 0);
+
+    char path[] = "/tmp/vproc_bg_read_XXXXXX";
+    int file = mkstemp(path);
+    assert(file >= 0);
+    assert(write(file, "f", 1) == 1);
+    assert(lseek(file, 0, SEEK_SET) == 0);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = vprocReservePid();
+    opts.stdin_fd = -2;
+    VProc *vp = vprocCreate(&opts);
+    assert(vp);
+    int pid = vprocPid(vp);
+    assert(vprocSetPgid(pid, sid + 5) == 0);
+
+    VProc *prev = vprocCurrent();
+    vprocActivate(vp);
+    char ch = 0;
+    assert(vprocReadShim(STDIN_FILENO, &ch, 1) == 0);
+    int slot = vprocAdoptHostFd(vp, file);
+    assert(slot >= 0);
+    assert(vprocDup2Shim(slot, STDIN_FILENO) == STDIN_FILENO);
+    assert(vprocReadShim(STDIN_FILENO, &ch, 1) == 1);
+    assert(ch == 'f');
+    vprocDeactivate();
+    int status = 0;
+    assert(vprocWaitPidShim(pid, &status, WUNTRACED | WNOHANG) == 0);
+    if (prev) {
+        vprocActivate(prev);
+        vprocDeactivate();
+    }
+
+    vprocMarkExit(vp, 0);
+    (void)vprocWaitPidShim(pid, &status, 0);
+    vprocDestroy(vp);
+    vprocMarkExit(leader, 0);
+    (void)vprocWaitPidShim(sid, &status, 0);
+    vprocDestroy(leader);
+    vprocSetShellSelfPid(prev_shell);
+    unlink(path);
 }
 
 static void assert_getpid_falls_back_to_shell_and_create_inherits_session(void) {
@@ -8267,6 +8346,9 @@ int main(void) {
     assert_sigstop_not_ignorable_or_blockable();
     fprintf(stderr, "TEST background_tty_signals\n");
     assert_background_tty_signals();
+
+    fprintf(stderr, "TEST background_read_of_a_file_does_not_stop\n");
+    assert_background_read_of_a_file_does_not_stop();
     fprintf(stderr, "TEST getpid_fallback_and_create_inherits\n");
     assert_getpid_falls_back_to_shell_and_create_inherits_session();
     fprintf(stderr, "TEST job_id_present_in_snapshot\n");
