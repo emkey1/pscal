@@ -3220,10 +3220,20 @@ static BOOL PSCALRuntimeActivateSDLWindow(UIWindow *sdlWindow, NSArray<UIWindow 
     return promoted;
 }
 
+// SDL clears the root view controller when it destroys a window. A promote can arrive after that (a
+// retry, the tab code reacting to the open of a program that has already ended) and has to leave the
+// window down: shown again, it stays key over the terminal until the last retry lets go of it.
+static BOOL PSCALRuntimeSDLWindowIsLive(UIWindow *window) {
+    return window != nil && window.rootViewController != nil;
+}
+
 static BOOL PSCALRuntimePromoteSDLWindowAttempt(void) {
     NSArray<UIWindow *> *windows = PSCALRuntimeAllWindows();
     PSCALRuntimeRefreshTrackedWindows(windows);
     UIWindow *sdlWindow = sTrackedSDLWindow ?: PSCALRuntimeFindSDLWindow(windows);
+    if (!PSCALRuntimeSDLWindowIsLive(sdlWindow)) {
+        return NO;
+    }
     if (sSDLModeActive && sdlWindow && sdlWindow.isKeyWindow && !sdlWindow.isHidden) {
         UIWindow *terminalKeyWindow = PSCALRuntimeFindWindowMatching(^BOOL(UIWindow *window) {
             return PSCALRuntimeIsTerminalWindow(window) && window.isKeyWindow;
@@ -3237,6 +3247,9 @@ static BOOL PSCALRuntimePromoteSDLWindowAttempt(void) {
 
 static BOOL PSCALRuntimePromoteSpecificSDLWindowAttempt(UIWindow *preferredSDLWindow) {
     UIWindow *sdlWindow = preferredSDLWindow;
+    if (sdlWindow && !PSCALRuntimeSDLWindowIsLive(sdlWindow)) {
+        return NO;
+    }
     if (sdlWindow) {
         PSCALRuntimeMarkSDLWindow(sdlWindow);
         sTrackedSDLWindow = sdlWindow;
@@ -3352,6 +3365,10 @@ static void PSCALRuntimeSwitchToTerminalWindowInternal(BOOL hideSDLWindows) {
 
 extern "C" void pscalIOSPromoteSDLWindow(void) {
     PSCALRuntimeRunOnMainSync(^{
+        // Too late for this window: SDL mode must stay off, or the terminal can't become key again.
+        if (!PSCALRuntimeSDLWindowIsLive(sTrackedSDLWindow ?: PSCALRuntimeFindSDLWindow(PSCALRuntimeAllWindows()))) {
+            return;
+        }
         PSCALRuntimeInstallSDLKeyWindowGuard();
         PSCALRuntimeLockSDLFocusObserverFor(0.5);
         sSDLModeActive = YES;

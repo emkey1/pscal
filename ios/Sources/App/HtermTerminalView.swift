@@ -1463,12 +1463,15 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
 
     private func installWindowObservers() {
         let center = NotificationCenter.default
+        // A key window that is released posts didResignKey from its own dealloc, and retaining
+        // an object in dealloc doesn't keep it. The notification's object is good only until
+        // the post returns, so handle it here and never in a later Task.
         let becameKey = center.addObserver(
             forName: UIWindow.didBecomeKeyNotification,
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 self?.handleWindowNotification(notification)
             }
         }
@@ -1477,7 +1480,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 self?.handleWindowNotification(notification)
             }
         }
