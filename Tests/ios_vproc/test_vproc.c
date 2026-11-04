@@ -7359,7 +7359,7 @@ static void assert_runtime_request_ctrl_z_stops_with_explicit_shell_pid(void) {
     vprocSetShellSelfPid(prev_shell);
 }
 
-static void assert_runtime_request_ctrl_c_dispatches_with_explicit_session_id(void) {
+static void assert_ctrl_c_ends_foreground_job_in_session(const char *label, uint64_t session_id) {
     int prev_shell = vprocGetShellSelfPid();
     int shell_pid = vprocReservePid();
     int worker_pid = vprocReservePid();
@@ -7387,6 +7387,9 @@ static void assert_runtime_request_ctrl_c_dispatches_with_explicit_session_id(vo
     vprocSetParent(worker_pid, shell_pid);
     assert(vprocSetSid(worker_pid, shell_pid) == 0);
     assert(vprocSetPgid(worker_pid, worker_pid) == 0);
+    if (label) {
+        vprocSetCommandLabel(worker_pid, label);
+    }
     assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
 
     struct pscal_fd *master = NULL;
@@ -7395,7 +7398,6 @@ static void assert_runtime_request_ctrl_c_dispatches_with_explicit_session_id(vo
     assert(pscalPtyOpenMaster(O_RDWR, &master, &pty_num) == 0);
     assert(pscalPtyUnlock(master) == 0);
     assert(pscalPtyOpenSlave(pty_num, O_RDWR, &slave) == 0);
-    uint64_t session_id = 9501;
     VProcSessionStdio *session = vprocSessionStdioCreate();
     assert(session);
     assert(vprocSessionStdioInitWithPty(session, slave, master, session_id, 0) == 0);
@@ -7427,6 +7429,16 @@ static void assert_runtime_request_ctrl_c_dispatches_with_explicit_session_id(vo
     vprocDeactivate();
     vprocDestroy(shell_vp);
     vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_runtime_request_ctrl_c_dispatches_with_explicit_session_id(void) {
+    assert_ctrl_c_ends_foreground_job_in_session(NULL, 9501);
+}
+
+/* ^C belongs to the remote end only when ssh has a terminal there, and that sets
+ * the session's passthrough flag. By name alone it's a job like any other. */
+static void assert_runtime_request_ctrl_c_ends_ssh_without_passthrough(void) {
+    assert_ctrl_c_ends_foreground_job_in_session("ssh example.com", 9506);
 }
 
 static void assert_runtime_request_ctrl_z_stops_with_explicit_session_id(void) {
@@ -7532,7 +7544,7 @@ static void assert_runtime_request_ctrl_signals_defer_for_remote_foreground_sess
     vprocSetParent(remote_pid, shell_pid);
     assert(vprocSetSid(remote_pid, shell_pid) == 0);
     assert(vprocSetPgid(remote_pid, remote_pid) == 0);
-    vprocSetCommandLabel(remote_pid, "ssh example.com");
+    vprocSetCommandLabel(remote_pid, "scp a example.com:b");
     assert(vprocSetForegroundPgid(shell_pid, remote_pid) == 0);
 
     struct pscal_fd *master = NULL;
@@ -8059,6 +8071,53 @@ static void assert_destroy_leaves_replaced_stdio_number_alone(void) {
     }
 }
 
+static void *inproc_pipe_read_thread(void *arg) {
+    struct pscal_fd *fd = (struct pscal_fd *)arg;
+    char c;
+    (void)fd->ops->read(fd, &c, 1);
+    return NULL;
+}
+
+static void *inproc_pipe_fill_thread(void *arg) {
+    struct pscal_fd *fd = (struct pscal_fd *)arg;
+    char buf[4096];
+    memset(buf, 'x', sizeof(buf));
+    while (fd->ops->write(fd, buf, sizeof(buf)) > 0) {
+    }
+    return NULL;
+}
+
+static void cancel_after_it_parks(void *(*start)(void *), struct pscal_fd *fd) {
+    pthread_t tid;
+    void *ret = NULL;
+    assert(pthread_create(&tid, NULL, start, fd) == 0);
+    usleep(300000);
+    assert(pthread_cancel(tid) == 0);
+    assert(pthread_join(tid, &ret) == 0);
+    assert(ret == PTHREAD_CANCELED);
+}
+
+/* A cancelled thread leaves a cond wait holding the mutex. A hang here is that
+ * mutex: whoever has the other end of the pipe would wait for it for good. */
+static void assert_cancelled_pipe_wait_leaves_pipe_usable(void) {
+    struct pscal_fd *read_end = NULL;
+    struct pscal_fd *write_end = NULL;
+    assert(vprocCreateInprocPipe(&read_end, &write_end) == 0);
+
+    cancel_after_it_parks(inproc_pipe_read_thread, read_end);
+    char c = 'y';
+    assert(write_end->ops->write(write_end, &c, 1) == 1);
+    c = 0;
+    assert(read_end->ops->read(read_end, &c, 1) == 1 && c == 'y');
+
+    cancel_after_it_parks(inproc_pipe_fill_thread, write_end);
+    char buf[4096];
+    assert(read_end->ops->read(read_end, buf, sizeof(buf)) > 0);
+
+    pscal_fd_close(read_end);
+    pscal_fd_close(write_end);
+}
+
 int main(void) {
     /* Default truncation path for tests to keep path virtualization in /tmp. */
     setenv("PATH_TRUNCATE", "/tmp", 1);
@@ -8358,6 +8417,8 @@ int main(void) {
     assert_runtime_request_ctrl_c_dispatches_with_explicit_session_id();
     fprintf(stderr, "TEST runtime_request_ctrl_z_stops_with_explicit_session_id\n");
     assert_runtime_request_ctrl_z_stops_with_explicit_session_id();
+    fprintf(stderr, "TEST runtime_request_ctrl_c_ends_ssh_without_passthrough\n");
+    assert_runtime_request_ctrl_c_ends_ssh_without_passthrough();
     fprintf(stderr, "TEST runtime_request_ctrl_signals_defer_for_remote_foreground_session\n");
     assert_runtime_request_ctrl_signals_defer_for_remote_foreground_session();
     fprintf(stderr, "TEST runtime_request_ctrl_signals_defer_when_session_passthrough\n");
@@ -8382,6 +8443,8 @@ int main(void) {
     assert_sigint_non_shell_same_tid_does_not_request_runtime_interrupt();
     fprintf(stderr, "TEST destroy_leaves_replaced_stdio_number_alone\n");
     assert_destroy_leaves_replaced_stdio_number_alone();
+    fprintf(stderr, "TEST cancelled_pipe_wait_leaves_pipe_usable\n");
+    assert_cancelled_pipe_wait_leaves_pipe_usable();
     fprintf(stderr, "TEST kernel_mounts_from_fstab_at_startup\n");
     assert_kernel_mounts_from_fstab_at_startup();
     fprintf(stderr, "TEST empty_path_names_nothing\n");

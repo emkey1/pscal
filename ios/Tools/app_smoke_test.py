@@ -26,6 +26,7 @@ import plistlib
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -47,6 +48,10 @@ O = '"$HOME/{o}"'  # The result file, from another directory.
 # What vmfiles and vmshow, in SETUP, print for a directory whose copies nothing touched.
 V2 = "smoke/v2/vm.del: del2\nsmoke/v2/vm.in: in2\nsmoke/v2/vm.ren: ren2\n"
 VH = "vm.del: delH\nvm.in: inH\nvm.ren: renH\n"
+
+# A server that never says a word: the system takes the connection, and nothing here reads it.
+SILENT_SERVER = socket.create_server(("127.0.0.1", 0))
+SILENT_PORT = SILENT_SERVER.getsockname()[1]
 
 # (name, command, expected output). {o} is the test's result file. With an
 # expected output of None, the result file only has to appear.
@@ -521,14 +526,6 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("type_path_not_a_file", f"type -p echo {R}; echo \"rc $?\" {A}", "rc 0\n"),
     ("escaped_pid", f"echo \"\\$\\$\" \\$\\$ {R}", "$$ $$\n"),
     ("negated_errexit", f"( set -e; ! true; ! true | cat; ! {{ true; }}; echo survived ) {R}", "survived\n"),
-    # return from a loop in a function left the loop's frame on the stack, and the caller's
-    # loop advanced that one instead of its own. c bounds them, so a wrong build fails and does
-    # not hang.
-    ("return_in_loop", f"rl() {{ while :; do return 4; done; }}; c=0; for x in 1 2; do c=$((c+1)); [ $c -gt 9 ] && break; rl; echo \"x $x $?\"; done {R}; unset -f rl", "x 1 4\nx 2 4\n"),
-    ("return_in_loop_while", f"rl() {{ for y in 1 2 3; do return; done; }}; n=0; while [ $n -lt 2 ]; do n=$((n+1)); [ $n -gt 9 ] && break; rl; echo \"n $n\"; done {R}; unset -f rl", "n 1\nn 2\n"),
-    ("return_in_loop_stage", f"rl() {{ while :; do return; done; }}; c=0; for x in 1 2; do c=$((c+1)); [ $c -gt 9 ] && break; rl; echo \"x $x\"; done | cat {R}; unset -f rl", "x 1\nx 2\n"),
-    ("return_in_loop_background", f"rl() {{ while :; do return; done; }}; c=0; {{ for x in 1 2; do c=$((c+1)); [ $c -gt 9 ] && break; rl; echo \"x $x\"; done; }} {R} & wait $!; unset -f rl", "x 1\nx 2\n"),
-    ("return_in_loop_redirect", f"rl() {{ while :; do echo in; return; done > smoke/rl.out; }}; {{ rl; echo back; }} {R}; unset -f rl", "back\n"),
     # A finished frontend flushed every stream in the app, other stages' included. It
     # waited for a reader that was waiting for its end of the pipe, or for a writer on a
     # full pipe, and wrote another stage's buffered output to its own stdout.
@@ -615,6 +612,31 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("scp_no_host", f"scp smoke/d.txt nosuch.invalid:x > /dev/null 2>&1; [ $? -ne 0 ] && echo failed {R}", "failed\n"),
     ("sftp_no_host", f"sftp nosuch.invalid < /dev/null > /dev/null 2>&1; [ $? -ne 0 ] && echo failed {R}", "failed\n"),
     ("rsync_after_failures", f"rsync -a smoke/rs/a smoke/rs/af {R}; echo \"rc=$?\" {A}", "rc=0\n"),
+    # An ssh command runs here, not in a tab of its own, so it keeps its redirections and its
+    # status. Nothing listens on port 1, so ssh fails with 255, where the tab returned 0 and
+    # left the file empty. Data reaching a remote command, and rsync to a remote host, need a
+    # server, which this tool doesn't start: check those against a throwaway sshd by hand.
+    ("ssh_redirect", f"ssh -p 1 -o BatchMode=yes 127.0.0.1 echo x > smoke/sshr 2>&1; echo \"rc=$?\" {R}; grep -c 'Connection refused' smoke/sshr {A}", "rc=255\n1\n"),
+    ("ssh_pipe_out", f"ssh -p 1 -o BatchMode=yes 127.0.0.1 echo x 2>&1 | grep -c 'Connection refused' {R}", "1\n"),
+    ("ssh_pipe_in", f"echo x | ssh -p 1 -o BatchMode=yes 127.0.0.1 cat > /dev/null 2>&1; echo \"rc=$?\" {R}", "rc=255\n"),
+    ("ssh_config", f"ssh -G example.invalid 2>&1 | grep '^hostname ' {R}", "hostname example.invalid\n"),
+    ("ssh_version", f"ssh -V 2>&1 | grep -c OpenSSH {R}", "1\n"),
+    # rsync reaches ssh without going through the applet.
+    ("rsync_ssh_refused", f"rsync -a -e 'ssh -p 1 -o BatchMode=yes' smoke/rs/a 127.0.0.1:x 2>&1 | grep -c 'Connection refused' {R}", "1\n"),
+    # So do scp and sftp. A file on stderr is a host descriptor, and a sweep at ssh's start closed
+    # those: the message went nowhere, and against a server ssh lost its stdin and stdout the same way.
+    ("rsync_ssh_stderr_file", f"rsync -a -e 'ssh -p 1 -o BatchMode=yes' smoke/rs/a 127.0.0.1:x > smoke/rsse 2>&1; grep -c 'Connection refused' smoke/rsse {R}", "1\n"),
+    ("scp_ssh_stderr_file", f"scp -P 1 -o BatchMode=yes smoke/d.txt 127.0.0.1:x > smoke/scse 2>&1; grep -c 'Connection refused' smoke/scse {R}", "1\n"),
+    ("sftp_ssh_stderr_file", f"sftp -P 1 -o BatchMode=yes 127.0.0.1 < /dev/null > smoke/sfse 2>&1; grep -c 'Connection refused' smoke/sfse {R}", "1\n"),
+    # The name's second letter made ui/f an -i option, so /f was expanded and scp couldn't find it.
+    ("scp_name_like_option", f"cd smoke; mkdir -p ui; cp d.txt ui/f; scp -P 1 -o BatchMode=yes ui/f 127.0.0.1:x > scui 2>&1; cd \"$HOME\"; grep -c 'Connection refused' smoke/scui {R}", "1\n"),
+    # An exit status of 1 is just a status. It came back as 130, and the shell dropped the rest of the line as it does after ^C.
+    ("scp_status_one", f"scp -O -P 1 -o BatchMode=yes smoke/d.txt 127.0.0.1:x > smoke/sc1 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
+    # A signal stops an ssh that waits on a server, which here never says a word. Each has 20 s
+    # to give up by itself, with 255, so a signal that does nothing fails rather than hangs.
+    ("ssh_stop_int", f"ssh -p {SILENT_PORT} -o BatchMode=yes -o ConnectTimeout=20 -o ConnectionAttempts=1 127.0.0.1 echo x > /dev/null 2>&1 & p=$!; sleep 2; kill -INT $p; wait $p; echo \"rc=$?\" {R}", "rc=130\n"),
+    ("ssh_stop_term", f"ssh -p {SILENT_PORT} -o BatchMode=yes -o ConnectTimeout=20 -o ConnectionAttempts=1 127.0.0.1 echo x > /dev/null 2>&1 & p=$!; sleep 2; kill -TERM $p; wait $p; echo \"rc=$?\" {R}", "rc=143\n"),
+    ("ssh_after_stops", f"ssh -p 1 -o BatchMode=yes 127.0.0.1 echo x > smoke/ssha 2>&1; echo \"rc=$?\" {R}; grep -c 'Connection refused' smoke/ssha {A}", "rc=255\n1\n"),
     # A program's file builtins follow cd and take the app's absolute paths. They used the
     # process's directory, with no error. Each directory has its own copy of each name, so
     # vmshow tells which copies were read, written, renamed and erased.

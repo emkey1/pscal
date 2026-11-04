@@ -1050,11 +1050,16 @@ main(int argc, char **argv)
 		    (void) close(remin);
 		if (remout != -1 && remout != remin)
 		    (void) close(remout);
-		if (waitpid(do_cmd_pid, &status, 0) == -1)
+		if (waitpid(do_cmd_pid, &status, 0) == -1) {
+			debug("waitpid %ld: %s", (long)do_cmd_pid,
+			    strerror(errno));
 			errs = 1;
-		else {
-			if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+		} else {
+			if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+				debug("%s ended with wait status 0x%x",
+				    ssh_program, status);
 				errs = 1;
+			}
 		}
 	}
 #ifdef PSCAL_TARGET_IOS

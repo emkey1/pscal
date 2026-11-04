@@ -826,15 +826,12 @@ main(int ac, char **av)
 	/*
 	 * Discard other fds that are hanging around. These can cause problem
 	 * with backgrounded ssh processes started by ControlPersist.
+	 *
+	 * Not in the app. Its sweep goes by number, and takes the host descriptors
+	 * behind this thread's stdin, stdout and stderr for ones to close. rsync and
+	 * scp start ssh with those on a socket and a file, so it lost both ends.
 	 */
-#ifdef PSCAL_TARGET_IOS
-	if (pscalSshEnvEnabled("PSCALI_SSH_SKIP_CLOSEFROM")) {
-		pscalSshDebugLog("[ssh-main] closefrom skipped via PSCALI_SSH_SKIP_CLOSEFROM");
-	} else {
-		closefrom(STDERR_FILENO + 1);
-		pscalSshDebugLog("[ssh-main] closefrom complete");
-	}
-#else
+#ifndef PSCAL_TARGET_IOS
 	closefrom(STDERR_FILENO + 1);
 #endif
 
