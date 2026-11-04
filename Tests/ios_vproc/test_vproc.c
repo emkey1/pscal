@@ -1425,6 +1425,30 @@ static void assert_children_pass_to_parent(void) {
     vprocDestroy(waiter);
 }
 
+/* A caller sizes its buffer with one call and fills it with the next, and a task can start in
+ * between. It loops over what the second call returns, so that must be what the buffer holds. */
+static void assert_snapshot_fits_its_buffer(void) {
+    VProc *first = vprocCreate(NULL);
+    VProc *second = vprocCreate(NULL);
+    assert(first && second);
+    int first_pid = vprocPid(first);
+    int second_pid = vprocPid(second);
+    assert(vprocSnapshot(NULL, 0) >= 2);
+
+    VProcSnapshot snaps[2];
+    memset(snaps, 0, sizeof(snaps));
+    assert(vprocSnapshot(snaps, 1) == 1);
+    assert(snaps[0].pid > 0);
+    assert(snaps[1].pid == 0);
+
+    vprocMarkExit(first, 0);
+    vprocMarkExit(second, 0);
+    vprocDiscard(first_pid);
+    vprocDiscard(second_pid);
+    vprocDestroy(first);
+    vprocDestroy(second);
+}
+
 static void assert_sigchld_pending_snapshot(void) {
     int shell_pid = current_waiter_pid();
     vprocSetShellSelfPid(shell_pid);
@@ -8655,6 +8679,8 @@ int main(void) {
     assert_virtual_control_signals_do_not_hit_host_process();
     fprintf(stderr, "TEST pipe_round_trip\n");
     assert_pipe_round_trip();
+    fprintf(stderr, "TEST snapshot_fits_its_buffer\n");
+    assert_snapshot_fits_its_buffer();
     fprintf(stderr, "TEST closed_output_slot_stays_closed\n");
     assert_closed_output_slot_stays_closed();
     fprintf(stderr, "TEST simulated_fork_exec_inherits_nonstdio_fds\n");
