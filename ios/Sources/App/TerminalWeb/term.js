@@ -90,6 +90,16 @@ x-row {
     return Number.isFinite(value) ? value : 0;
   }
 
+  // hterm answers an OSC 12 query by reading the cursor colour back exactly as it was set,
+  // and it can only report the rgb() form. Native sends #RRGGBB, which would leave the query
+  // unanswered and a program waiting for the reply hung. It draws the same either way.
+  function inRgbForm(color) {
+    if (typeof color !== 'string') {
+      return color;
+    }
+    return lib.colors.normalizeCSS(color) || color;
+  }
+
   // Everything below needs a terminal that has finished starting.
   function terminalIsReady(term) {
     const port = term.scrollPort_;
@@ -259,7 +269,7 @@ x-row {
         setIfGiven('background-color', style.backgroundColor);
         setIfGiven('foreground-color', style.foregroundColor);
         // There is no separate cursor colour to set.
-        setIfGiven('cursor-color', style.foregroundColor);
+        setIfGiven('cursor-color', inRgbForm(style.foregroundColor));
         setIfGiven('font-family', style.fontFamily);
         setIfGiven('font-size', style.fontSize);
         setIfGiven('cursor-blink', style.blinkCursor);
@@ -372,10 +382,9 @@ x-row {
       }
     };
 
-    // io.onVTKeystroke stays as hterm left it, which logs a key and drops it. Keys only get
-    // this far while the web view holds first responder, for instance with the selection
-    // menu up. Forwarding them to the program would be new behaviour.
-    term.installKeyboard();
+    // hterm's keyboard handler is deliberately not installed, because typing reaches the
+    // session through the native key view alone. hterm therefore never detects a keystroke,
+    // and io.onVTKeystroke has nothing to do.
 
     // Start blank, then bound the scrollback: every row kept past the top of the screen
     // stays alive as DOM nodes, and without a cap the system eventually kills the app.
@@ -417,8 +426,9 @@ x-row {
     }, true);
 
     // While the web view holds first responder Tab would otherwise move focus away from
-    // the terminal. Tab with a modifier stays a system shortcut. hterm's keyboard handler
-    // sits on the body, so capturing at the document gets here first.
+    // the terminal, so on the screen it goes to the program instead. It's the only key the
+    // page forwards. Tab with a modifier stays a system shortcut. Capturing at the document
+    // runs this ahead of anything on the screen itself, and the browser's default.
     iframeDocument.addEventListener('keydown', (event) => {
       if (event.key !== 'Tab' || event.metaKey || event.ctrlKey || event.altKey ||
           !screen.contains(event.target)) {
