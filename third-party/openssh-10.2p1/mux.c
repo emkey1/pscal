@@ -1457,8 +1457,11 @@ control_client_sigrelay(int signo)
 {
 	int save_errno = errno;
 
+#ifndef PSCAL_TARGET_IOS
+	/* In the app this handler can run on any thread, holding any lock. */
 	if (muxserver_pid > 1)
 		kill(muxserver_pid, signo);
+#endif
 
 	errno = save_errno;
 }

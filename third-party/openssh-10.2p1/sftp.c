@@ -2459,7 +2459,11 @@ interactive_loop(struct sftp_conn *conn, char *file1, char *file2)
 
 		interrupted = 0;
 		memset(&sa, 0, sizeof(sa));
+#ifdef PSCAL_TARGET_IOS
+		sa.sa_handler = read_interrupt;
+#else
 		sa.sa_handler = interactive ? read_interrupt : killchild;
+#endif
 		if (sigaction(SIGINT, &sa, NULL) == -1) {
 			debug3("sigaction(%s): %s", strsignal(SIGINT),
 			    strerror(errno));
@@ -2698,6 +2702,8 @@ connect_to_server(char *path, char **args, int *in, int *out)
 		_exit(1);
 		}
 
+#ifndef PSCAL_TARGET_IOS
+	/* In the app a handler is the whole app's, and it can run on any thread. */
 	ssh_signal(SIGTERM, killchild);
 	ssh_signal(SIGINT, killchild);
 	ssh_signal(SIGHUP, killchild);
@@ -2705,6 +2711,7 @@ connect_to_server(char *path, char **args, int *in, int *out)
 	ssh_signal(SIGTTIN, suspchild);
 	ssh_signal(SIGTTOU, suspchild);
 	ssh_signal(SIGCHLD, sigchld_handler);
+#endif
 #ifdef USE_PIPES
 #if defined(PSCAL_TARGET_IOS)
 	close(pout_parent[0]);
@@ -3052,17 +3059,26 @@ main(int argc, char **argv)
 	if (batchmode)
 		fclose(infile);
 
-	while (waitpid(sshpid, NULL, 0) == -1 && sshpid > 1) {
-		if (errno == EINTR)
-			continue;
+	{
+		int ssh_status = 0;
+
+		while (waitpid(sshpid, &ssh_status, 0) == -1 && sshpid > 1) {
+			if (errno == EINTR)
+				continue;
 #ifdef PSCAL_TARGET_IOS
-		if (errno == ECHILD) {
-			sshpid = -1;
-			break;
-		}
+			if (errno == ECHILD) {
+				debug("waitpid %ld: %s", (long)sshpid,
+				    strerror(errno));
+				sshpid = -1;
+				break;
+			}
 #endif
-		fatal("Couldn't wait for ssh process: %s",
-		    strerror(errno));
+			fatal("Couldn't wait for ssh process: %s",
+			    strerror(errno));
+		}
+		if (sshpid > 1)
+			debug("%s ended with wait status 0x%x", ssh_program,
+			    ssh_status);
 	}
 
 #ifdef PSCAL_TARGET_IOS

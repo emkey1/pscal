@@ -284,6 +284,21 @@ suspchild(int signo)
 	errno = save_errno;
 }
 
+#ifdef PSCAL_TARGET_IOS
+/*
+ * Upstream adds a connection's arguments in the child. A simulated fork shares
+ * them with this thread, so the next connection would get these too.
+ */
+static void
+pscal_scp_forget_args(u_int num)
+{
+	while (args.num > num) {
+		free(args.list[--args.num]);
+		args.list[args.num] = NULL;
+	}
+}
+#endif
+
 static int
 do_local_cmd(arglist *a)
 {
@@ -321,9 +336,12 @@ do_local_cmd(arglist *a)
 	}
 
 	do_cmd_pid = pid;
+#ifndef PSCAL_TARGET_IOS
+	/* In the app a handler is the whole app's: see SIGPIPE in main(). */
 	ssh_signal(SIGTERM, killchild);
 	ssh_signal(SIGINT, killchild);
 	ssh_signal(SIGHUP, killchild);
+#endif
 
 	while (waitpid(pid, &status, 0) == -1)
 		if (errno != EINTR)
@@ -393,10 +411,16 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 #endif
 #endif
 
+#ifndef PSCAL_TARGET_IOS
+	/* In the app a handler is the whole app's: see SIGPIPE in main(). */
 	ssh_signal(SIGTSTP, suspchild);
 	ssh_signal(SIGTTIN, suspchild);
 	ssh_signal(SIGTTOU, suspchild);
+#endif
 
+#if defined(PSCAL_TARGET_IOS)
+	const u_int args_kept = args.num;
+#endif
 	replacearg(&args, 0, "%s", program);
 	if (port != -1) {
 		addargs(&args, "-p");
@@ -505,6 +529,10 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 	*pid = child;
 	}
 
+#if defined(PSCAL_TARGET_IOS)
+	pscal_scp_forget_args(args_kept);
+#endif
+
 	/* Parent.  Close the other side, and return the local side. */
 #ifdef USE_PIPES
 #if defined(PSCAL_TARGET_IOS)
@@ -592,9 +620,12 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 		    errno);
 	}
 #endif
+#ifndef PSCAL_TARGET_IOS
+	/* In the app a handler is the whole app's: see SIGPIPE in main(). */
 	ssh_signal(SIGTERM, killchild);
 	ssh_signal(SIGINT, killchild);
 	ssh_signal(SIGHUP, killchild);
+#endif
 	return 0;
 }
 
@@ -623,6 +654,9 @@ do_cmd2(char *host, char *remuser, int port, char *cmd,
 	if (port == -1)
 		port = sshport;
 
+#if defined(PSCAL_TARGET_IOS)
+	const u_int args_kept = args.num;
+#endif
 	replacearg(&args, 0, "%s", ssh_program);
 	if (port != -1) {
 		addargs(&args, "-p");
@@ -684,6 +718,10 @@ do_cmd2(char *host, char *remuser, int port, char *cmd,
 		fatal("do_cmd2: spawn(%s): %s", ssh_program, strerror(errno));
 	}
 	}
+
+#if defined(PSCAL_TARGET_IOS)
+	pscal_scp_forget_args(args_kept);
+#endif
 
 	while (waitpid(pid, &status, 0) == -1)
 		if (errno != EINTR)
@@ -1627,6 +1665,16 @@ tolocal(int argc, char **argv, enum scp_mode_e mode, char *sftp_direct)
 				++errs;
 			continue;
 		}
+#ifdef PSCAL_TARGET_IOS
+		/*
+		 * The last source's ssh has seen its socket close. Upstream lets
+		 * the process's exit clear it, and here no process exits.
+		 */
+		if (do_cmd_pid > 1) {
+			(void)waitpid(do_cmd_pid, NULL, 0);
+			do_cmd_pid = -1;
+		}
+#endif
 		/* Remote to local. */
 		if (mode == MODE_SFTP) {
 			sftp_free(conn);

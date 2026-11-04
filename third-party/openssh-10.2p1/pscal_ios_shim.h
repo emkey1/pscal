@@ -4,12 +4,15 @@
 #ifdef PSCAL_TARGET_IOS
 #include <dirent.h>
 #include <errno.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <termios.h>
+#include <unistd.h>
 #include <pthread.h>
 #include <setjmp.h>
 #include "ios/tty/pscal_fd.h"
@@ -64,6 +67,8 @@ char *pscal_ios_host_path(const char *path);
 
 extern __thread sigjmp_buf pscal_ios_fork_jmpbuf;
 pid_t pscal_ios_fork_dispatch(int jump_rc);
+pid_t pscal_ios_waitpid(pid_t pid, int *status, int options);
+int pscal_ios_kill(pid_t pid, int sig);
 void pscal_ios__exit(int code) __attribute__((noreturn));
 int pscal_ios_execv(const char *path, char *const argv[]);
 int pscal_ios_execvp(const char *file, char *const argv[]);
@@ -74,6 +79,9 @@ int pscal_ios_execlp(const char *file, const char *arg, ...);
 #ifndef PSCAL_IOS_SHIM_IMPLEMENTATION
 # define fork() pscal_ios_fork_dispatch(sigsetjmp(pscal_ios_fork_jmpbuf, 1))
 # define _exit(code) pscal_ios__exit(code)
+# define waitpid(...) pscal_ios_waitpid(__VA_ARGS__)
+# define kill(...) pscal_ios_kill(__VA_ARGS__)
+# define getpid() vprocGetPidShim()
 # define execv(...) pscal_ios_execv(__VA_ARGS__)
 # define execvp(...) pscal_ios_execvp(__VA_ARGS__)
 # define execl(...) pscal_ios_execl(__VA_ARGS__)

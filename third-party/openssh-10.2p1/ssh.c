@@ -1983,7 +1983,10 @@ main(int ac, char **av)
 	    options.num_system_hostfiles);
 	tilde_expand_paths(options.user_hostfiles, options.num_user_hostfiles);
 
+#ifndef PSCAL_TARGET_IOS
+	/* In the app a handler is the whole app's, and it can run on any thread. */
 	ssh_signal(SIGCHLD, main_sigchld_handler);
+#endif
 
 	/* Log into the remote system.  Never returns if the login fails. */
 	ssh_login(ssh, &sensitive_data, host, (struct sockaddr *)&hostaddr,

@@ -12,6 +12,12 @@
  * helpers. Undefine injected macros before libc headers are parsed so normal
  * declarations remain visible.
  */
+#ifdef waitpid
+#undef waitpid
+#endif
+#ifdef kill
+#undef kill
+#endif
 #ifdef read
 #undef read
 #endif
@@ -1061,8 +1067,29 @@ void pscal_ios_closefrom(int lowfd) {
     if (maxfd <= 0 || maxfd > 32768) {
         maxfd = 32768;
     }
+    /*
+     * What's below lowfd stays open, so the host descriptors behind it do too.
+     * This task owns them, and their numbers are up in the sweep.
+     */
+    int kept[64];
+    size_t kept_count = 0;
+    for (int fd = 0; fd < lowfd && kept_count < sizeof(kept) / sizeof(kept[0]); ++fd) {
+        int host = vprocTranslateFd(vp, fd);
+        if (host >= lowfd) {
+            kept[kept_count++] = host;
+        }
+    }
     for (int fd = lowfd; fd < (int)maxfd; ++fd) {
-        (void)vprocCloseShim(fd);
+        bool is_kept = false;
+        for (size_t i = 0; i < kept_count && !is_kept; ++i) {
+            is_kept = kept[i] == fd;
+        }
+        if (is_kept) {
+            /* Only a slot with this number, if there is one. */
+            (void)vprocClose(vp, fd);
+        } else {
+            (void)vprocCloseShim(fd);
+        }
     }
 }
 
@@ -1517,6 +1544,28 @@ pid_t pscal_ios_fork_dispatch(int jump_rc) {
         return vprocSimulatedForkParentResume();
     }
     return vprocSimulatedForkWithEnv("fork", true, &pscal_ios_fork_jmpbuf);
+}
+
+/*
+ * A pid from fork() here is a task's, and the host knows nothing of it: its
+ * waitpid says ECHILD every time, and its kill can reach an unrelated process
+ * that has the same number. Only a real child, from posix_spawn, is the host's.
+ */
+pid_t pscal_ios_waitpid(pid_t pid, int *status, int options) {
+    pid_t waited = vprocWaitPidShim(pid, status, options);
+    if (waited == -1 && errno == ECHILD && pid > 0) {
+        return waitpid(pid, status, options);
+    }
+    return waited;
+}
+
+/* With no task, vprocKillShim would pass this on to the host. */
+int pscal_ios_kill(pid_t pid, int sig) {
+    if (!vprocCurrent()) {
+        errno = ESRCH;
+        return -1;
+    }
+    return vprocKillShim(pid, sig);
 }
 
 static int pscal_ios_exit_status_main(int argc, char **argv) {

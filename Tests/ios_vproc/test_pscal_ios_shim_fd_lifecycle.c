@@ -2,6 +2,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,9 +27,15 @@ int pscal_openssh_ssh_main(int argc, char **argv) {
     return 0;
 }
 
+static volatile int gScpStubRunning;
+
 int pscal_openssh_scp_main(int argc, char **argv) {
     (void)argc;
     (void)argv;
+    gScpStubRunning = 1;
+    for (;;) {
+        sleep(30);
+    }
     return 0;
 }
 
@@ -57,6 +66,8 @@ int pscal_ios_openat(int fd, const char *path, int oflag, ...);
 int pscal_ios_fstat(int fd, struct stat *buf);
 int pscal_ios_execvp(const char *file, char *const argv[]);
 void pscal_ios__exit(int code);
+pid_t pscal_ios_waitpid(pid_t pid, int *status, int options);
+int pscal_ios_kill(pid_t pid, int sig);
 
 static int createTrackedSocket(void) {
     int fd = vprocSocketShim(AF_INET, SOCK_STREAM, 0);
@@ -343,7 +354,121 @@ static void assertExitInSimulatedForkEndsOnlyTheChild(void) {
     vprocDestroy(vp);
 }
 
+/* The stdio of a task whose host descriptors have numbers in the sweep. */
+static void assertClosefromKeepsHostFdsBehindStdio(void) {
+    int out[2] = {-1, -1};
+    assert(pipe(out) == 0);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.stdout_fd = out[1];
+    VProc *vp = vprocCreate(&opts);
+    assert(vp);
+    vprocActivate(vp);
+    int host = vprocTranslateFd(vp, STDOUT_FILENO);
+    assert(host >= 3);
+
+    pscal_ios_closefrom(3);
+
+    assert(vprocTranslateFd(vp, STDOUT_FILENO) == host);
+    assert(fcntl(host, F_GETFD) != -1);
+    assert(pscal_ios_write(STDOUT_FILENO, "x", 1) == 1);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+
+    char got = 0;
+    assert(read(out[0], &got, 1) == 1);
+    assert(got == 'x');
+    close(out[0]);
+    close(out[1]);
+}
+
+static void assertWaitpidCollectsATask(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+
+    sigjmp_buf env;
+    if (sigsetjmp(env, 1) == 0) {
+        assert(vprocSimulatedForkWithEnv("fork-wait", true, &env) == 0);
+        pscal_ios__exit(7);
+        assert(!"pscal_ios__exit should resume the parent");
+    }
+    pid_t child = vprocSimulatedForkParentResume();
+    assert(child > 0);
+
+    int status = 0;
+    assert(pscal_ios_waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 7);
+
+    errno = 0;
+    assert(pscal_ios_waitpid(child, &status, 0) == -1);
+    assert(errno == ECHILD);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
+/* killchild in scp and sftp: the signal has to end the task, or the wait never returns. */
+static void assertKillEndsATaskAndWaitReturns(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+
+    gScpStubRunning = 0;
+    sigjmp_buf env;
+    if (sigsetjmp(env, 1) == 0) {
+        assert(vprocSimulatedForkWithEnv("fork-kill", true, &env) == 0);
+        pscal_ios_execvp("scp", (char *const[]){"scp", NULL});
+        assert(!"exec should resume the parent");
+    }
+    pid_t child = vprocSimulatedForkParentResume();
+    assert(child > 0);
+    for (int i = 0; i < 500 && !gScpStubRunning; ++i) {
+        usleep(10000);
+    }
+    assert(gScpStubRunning);
+
+    assert(pscal_ios_kill(child, SIGTERM) == 0);
+    int status = 0;
+    assert(pscal_ios_waitpid(child, &status, 0) == child);
+    assert(WIFSIGNALED(status) ? WTERMSIG(status) == SIGTERM : WEXITSTATUS(status) != 0);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
+/* A real child is the host's to wait for, and kill never reaches it: its number isn't a task's. */
+static void assertKillStaysOffTheHost(void) {
+    char *const argv[] = {"sleep", "1", NULL};
+    pid_t real = -1;
+    assert(posix_spawn(&real, "/bin/sleep", NULL, NULL, argv, NULL) == 0);
+
+    errno = 0;
+    assert(pscal_ios_kill(real, SIGTERM) == -1);
+    assert(errno == ESRCH);
+
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+    errno = 0;
+    assert(pscal_ios_kill(real, SIGTERM) == -1);
+    assert(errno == ESRCH);
+
+    int status = 0;
+    assert(pscal_ios_waitpid(real, &status, 0) == real);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
 int main(void) {
+    fprintf(stderr, "TEST pscal_ios_closefrom_keeps_host_fds_behind_stdio\n");
+    assertClosefromKeepsHostFdsBehindStdio();
+
     fprintf(stderr, "TEST pscal_ios_close_untracks_socket_resource\n");
     assertCloseUntracksSocketResource();
 
@@ -364,6 +489,15 @@ int main(void) {
 
     fprintf(stderr, "TEST pscal_ios_exit_in_simulated_fork_ends_only_the_child\n");
     assertExitInSimulatedForkEndsOnlyTheChild();
+
+    fprintf(stderr, "TEST pscal_ios_waitpid_collects_a_task\n");
+    assertWaitpidCollectsATask();
+
+    fprintf(stderr, "TEST pscal_ios_kill_ends_a_task_and_wait_returns\n");
+    assertKillEndsATaskAndWaitReturns();
+
+    fprintf(stderr, "TEST pscal_ios_kill_stays_off_the_host\n");
+    assertKillStaysOffTheHost();
 
     fprintf(stderr, "PASS ios openssh shim fd lifecycle tests\n");
     return 0;

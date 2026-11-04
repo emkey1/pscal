@@ -659,6 +659,12 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("scp_name_like_option", f"cd smoke; mkdir -p ui; cp d.txt ui/f; scp -P 1 -o BatchMode=yes ui/f 127.0.0.1:x > scui 2>&1; cd \"$HOME\"; grep -c 'Connection refused' smoke/scui {R}", "1\n"),
     # An exit status of 1 is just a status. It came back as 130, and the shell dropped the rest of the line as it does after ^C.
     ("scp_status_one", f"scp -O -P 1 -o BatchMode=yes smoke/d.txt 127.0.0.1:x > smoke/sc1 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
+    # scp waits for its ssh in the task table and gets ssh's 255. The host's waitpid knew no such child, so a good copy ended with 1.
+    ("scp_wait_status", f"scp -O -v -P 1 -o BatchMode=yes 127.0.0.1:x smoke/sc2 > smoke/sc2.log 2>&1; grep -c 'ended with wait status 0xff00' smoke/sc2.log {R}", "1\n"),
+    # Each source connects again, after collecting the last one's ssh.
+    ("scp_two_sources", f"scp -O -P 1 -o BatchMode=yes 127.0.0.1:a 127.0.0.1:b smoke/ > smoke/sc3.log 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
+    # The child can't start a shell here, and its kill(getpid(), SIGTERM) was the host's: it ended the whole app.
+    ("ssh_match_exec", f"printf 'Match exec \"true\"\\n  Port 23\\n' > smoke/mx.cfg; ssh -G -F smoke/mx.cfg 127.0.0.1 > smoke/mx.log 2>&1; echo alive {R}", "alive\n"),
     # A signal stops an ssh that waits on a server, which here never says a word. Each has 20 s
     # to give up by itself, with 255, so a signal that does nothing fails rather than hangs.
     ("ssh_stop_int", f"ssh -p {SILENT_PORT} -o BatchMode=yes -o ConnectTimeout=20 -o ConnectionAttempts=1 127.0.0.1 echo x > /dev/null 2>&1 & p=$!; sleep 2; kill -INT $p; wait $p; echo \"rc=$?\" {R}", "rc=130\n"),
