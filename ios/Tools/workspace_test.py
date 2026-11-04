@@ -889,7 +889,8 @@ def run_media_tests(app, results):
     shown = "%s/wt_media" % home
 
     # Browser. A local server proves plain http reaches the page, which needs Info.plist's say.
-    server = subprocess.Popen([sys.executable, "-I", "-m", "http.server", "--bind", "127.0.0.1", "0"],
+    # -u: piped, it would otherwise hold its banner back until it exits, and the read below hangs.
+    server = subprocess.Popen([sys.executable, "-I", "-u", "-m", "http.server", "--bind", "127.0.0.1", "0"],
                               cwd=os.path.join(base, "web"), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     try:
         banner = server.stdout.readline()
