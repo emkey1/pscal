@@ -531,6 +531,27 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("sub_keeps_sh_c", f"sh -c 'x=$(echo a); echo \"$x\"' {R}", "a\n"),
     ("sub_keeps_background", f'( x=$(echo a); echo "$x" ) {R} & wait $!', "a\n"),
     ("sub_stdout_closed", f'( exec >&-; x=$(echo a); echo "[$x]" {R} )', "[a]\n"),
+    # With stdout closed a write fails, and the text goes nowhere: it used to reach the session's
+    # terminal with status 0. So the status is what shows it. Applets and programs have their own
+    # say in their status, so those rows only show that the shell goes on.
+    ("closed_echo", f'( exec >&-; echo a ) 2>/dev/null; echo "rc $?" {R}', "rc 1\n"),
+    ("closed_printf", f"( exec >&-; printf 'a\\n' ) 2>/dev/null; echo \"rc $?\" {R}", "rc 1\n"),
+    ("closed_pwd", f'( exec >&-; pwd ) 2>/dev/null; echo "rc $?" {R}', "rc 1\n"),
+    ("closed_type", f'( exec >&-; type echo ) 2>/dev/null; echo "rc $?" {R}', "rc 1\n"),
+    ("closed_dirs", f'( exec >&-; dirs ) 2>/dev/null; echo "rc $?" {R}', "rc 1\n"),
+    ("closed_pushd", f'( exec >&-; pushd . ) 2>/dev/null; echo "rc $?" {R}', "rc 0\n"),
+    ("closed_nested", f'( exec >&-; ( echo a ) 2>/dev/null; echo "rc $?" {R} )', "rc 1\n"),
+    ("closed_no_text", f'( exec >&-; true; echo "rc $?" {R} )', "rc 0\n"),
+    ("closed_command", f'echo a >&- 2>/dev/null; echo "rc $?" {R}', "rc 1\n"),
+    ("closed_group", f'{{ echo a; }} >&- 2>/dev/null; echo "rc $?" {R}', "rc 1\n"),
+    ("closed_at_top", f'exec 8>&1; exec >&-; echo a 2>/dev/null; s=$?; exec >&8 8>&-; echo "rc $s" {R}; unset s', "rc 1\n"),
+    ("closed_copy", f'( exec >&-; echo a 2>&1; echo "rc $?" {R} ) 2>/dev/null', "rc 1\n"),
+    ("closed_stage", f'( exec >&-; true | {{ echo a; }} 2>/dev/null; echo "rc $?" {R} )', "rc 1\n"),
+    ("closed_background", f'( exec >&-; {{ echo a; }} 2>/dev/null & wait $!; echo "rc $?" {R} )', "rc 1\n"),
+    ("closed_stderr_copy", f'( exec 2>&-; echo a >&2; echo "rc $?" {R} )', "rc 1\n"),
+    ("closed_applet_goes_on", f'( exec >&-; cat smoke/d.txt; ls; echo on {R} ) 2>/dev/null', "on\n"),
+    ("closed_frontend_goes_on", f'( exec >&-; clike smoke/hello.clike; pascal smoke/hello.pas; echo on {R} ) 2>/dev/null', "on\n"),
+    ("closed_then_stdout_works", f'( exec >&-; echo lost 2>/dev/null; exec {R}; echo kept )', "kept\n"),
     ("sub_keeps_killed", f'( x=$(sleep 30); echo no ) {R} & p=$!; sleep 1; kill $p; wait $p; y=$(echo next); echo "$y" {A}; unset y', "next\n"),
     # A question to alias or type, and the rest of bash_parity_alias_type_lookup's kind.
     ("alias_lookup", f"alias sm='ls -l'; alias sm {R}; alias sm-missing 2>/dev/null; echo \"rc $?\" {A}; unalias sm", "alias sm='ls -l'\nrc 1\n"),

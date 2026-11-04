@@ -142,6 +142,38 @@ static void assert_pipe_round_trip(void) {
     vprocDestroy(vp);
 }
 
+/* A closed stdout or stderr is closed: no write, no stat, and nothing stands in for it. A slot
+ * that gets a file again works again. */
+static void assert_closed_output_slot_stays_closed(void) {
+    int p[2];
+    assert(vprocHostPipe(p) == 0);
+    int slots[] = {STDOUT_FILENO, STDERR_FILENO};
+    for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); ++i) {
+        int slot = slots[i];
+        VProc *vp = vprocCreate(NULL);
+        assert(vp);
+        vprocActivate(vp);
+        assert(vprocClose(vp, slot) == 0);
+
+        errno = 0;
+        assert(vprocWriteShim(slot, "x", 1) == -1 && errno == EBADF);
+        struct stat st;
+        errno = 0;
+        assert(vprocFstatShim(slot, &st) == -1 && errno == EBADF);
+        errno = 0;
+        assert(vprocDupShim(slot) == -1 && errno == EBADF);
+
+        assert(vprocRestoreHostFd(vp, slot, p[1]) == slot);
+        assert(vprocWriteShim(slot, "y", 1) == 1);
+        char c = 0;
+        assert(vprocHostRead(p[0], &c, 1) == 1 && c == 'y');
+        vprocDeactivate();
+        vprocDestroy(vp);
+    }
+    vprocHostClose(p[0]);
+    vprocHostClose(p[1]);
+}
+
 static int gForkExecInheritedWriteFd = -1;
 static int gForkExecSocketpairChildPeerFd = -1;
 static int gForkExecSocketpairChildCloseFd = -1;
@@ -8204,6 +8236,8 @@ int main(void) {
     assert_virtual_control_signals_do_not_hit_host_process();
     fprintf(stderr, "TEST pipe_round_trip\n");
     assert_pipe_round_trip();
+    fprintf(stderr, "TEST closed_output_slot_stays_closed\n");
+    assert_closed_output_slot_stays_closed();
     fprintf(stderr, "TEST simulated_fork_exec_inherits_nonstdio_fds\n");
     assert_simulated_fork_exec_inherits_nonstdio_fds();
     fprintf(stderr, "TEST simulated_fork_exec_socketpair_parent_fd_survives\n");
