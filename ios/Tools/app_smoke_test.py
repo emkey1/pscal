@@ -474,6 +474,10 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("body_killed_in_subshell", '( ( sleep 30 ) & p=$!; sleep 0.2; kill $p; wait $p; echo "rc $?" > {o} ) > /dev/null 2>&1', "rc 143\n"),
     ("body_killed_in_stage", f'{{ ( sleep 30 ) & p=$!; sleep 0.2; kill $p; wait $p; echo "rc $?"; }} | grep rc {R}', "rc 143\n"),
     ("simple_killed_at_once", f'sleep 30 & p=$!; kill $p; wait $p; echo "rc $?" {R}', "rc 143\n"),
+    # wait finds any job that has ended, in any order and as often as it is asked.
+    ("wait_any_job", f'( exit 3 ) & a=$!; ( exit 4 ) & b=$!; sleep 0.3; wait $a; echo "a $?" {R}; wait $b; echo "b $?" {A}; wait $a; echo "a $?" {A}', "a 3\nb 4\na 3\n"),
+    ("wait_two_killed", f'( sleep 37 ) & a=$!; ( sleep 37 ) & b=$!; sleep 0.2; kill $a $b; wait $a; echo "a $?" {R}; wait $b; echo "b $?" {A}', "a 143\nb 143\n"),
+    ("wait_several", f'( exit 3 ) & a=$!; ( exit 4 ) & b=$!; sleep 0.3; wait $b $a; echo "$?" {R}; wait; echo "$?" {A}', "3\n0\n"),
     # What the killed job was running goes with it: a shell inside it, and what that shell ran.
     ("body_killed_nested_shell", f'( sh -c "sleep 37; echo no" ) & p=$!; sleep 0.2; kill $p; wait $p; echo "rc $?" {R}; sleep 0.2; lps | grep "[s]leep 37" {A}', "rc 143\n"),
     ("body_killed_nested_reader", f'{{ ( sh -c "sleep 37; echo no" ) & p=$!; sleep 0.2; kill $p; wait $p; echo "rc $?"; }} | grep rc {R}', "rc 143\n"),
