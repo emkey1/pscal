@@ -7,7 +7,12 @@ import os
 
 struct TerminalView: View {
     let showsOverlay: Bool
+    /// On screen, so hterm stays attached and the grid follows the view's size.
+    /// Several terminals can be visible at once in Workspace.
+    let isVisible: Bool
+    /// Holds the keyboard. At most one terminal does.
     let isActive: Bool
+    let topPadding: CGFloat
     let runtime: PscalRuntimeBootstrap
     let tabId: UInt64
 
@@ -16,13 +21,17 @@ struct TerminalView: View {
 
     init(
         showsOverlay: Bool = true,
+        isVisible: Bool = true,
         isActive: Bool = true,
+        topPadding: CGFloat = TerminalContentView.topPadding,
         runtime: PscalRuntimeBootstrap,
         tabId: UInt64,
         appearanceSettings: TerminalTabAppearanceSettings
     ) {
         self.showsOverlay = showsOverlay
+        self.isVisible = isVisible
         self.isActive = isActive
+        self.topPadding = topPadding
         self.runtime = runtime
         self.tabId = tabId
         _fontSettings = ObservedObject(wrappedValue: appearanceSettings)
@@ -38,7 +47,9 @@ struct TerminalView: View {
                 TerminalContentView(
                     availableSize: proxy.size,
                     fontSettings: fontSettings,
+                    isVisible: isVisible,
                     isActive: isActive,
+                    topPadding: topPadding,
                     runtime: runtime
                 )
                 // Ensure each tab's terminal view gets its own UIKit backing view.
@@ -135,7 +146,9 @@ struct TerminalContentView: View {
 
     @ObservedObject private var fontSettings: TerminalTabAppearanceSettings
     let runtime: PscalRuntimeBootstrap
+    private let isVisible: Bool
     private let isActive: Bool
+    private let contentTopPadding: CGFloat
 
     @State private var lastReportedMetrics: TerminalGeometryCalculator.TerminalGeometryMetrics?
     @State private var hasMeasuredGeometry: Bool = false
@@ -150,12 +163,16 @@ struct TerminalContentView: View {
     init(
         availableSize: CGSize,
         fontSettings: TerminalTabAppearanceSettings,
+        isVisible: Bool,
         isActive: Bool,
+        topPadding: CGFloat,
         runtime: PscalRuntimeBootstrap
     ) {
         self.availableSize = availableSize
         _fontSettings = ObservedObject(wrappedValue: fontSettings)
+        self.isVisible = isVisible
         self.isActive = isActive
+        self.contentTopPadding = topPadding
         self.runtime = runtime
         _exitStatus = State(initialValue: runtime.exitStatus)
         _editorRenderTokenState = State(initialValue: runtime.editorRenderToken)
@@ -185,6 +202,7 @@ struct TerminalContentView: View {
                         foregroundColor: fontSettings.foregroundColor,
                         backgroundColor: fontSettings.backgroundColor,
                         focusToken: 0,
+                        isVisible: isVisible,
                         isActive: isActive,
                         onInput: handleInput,
                         onPaste: handlePaste,
@@ -302,27 +320,29 @@ struct TerminalContentView: View {
         // Align to top so that if we have extra vertical space (e.g. fractional line height)
         // it appears at the bottom.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .padding(.top, Self.topPadding)
+        .padding(.top, contentTopPadding)
         .background(Color(fontSettings.backgroundColor))
         .contentShape(Rectangle())
         .onTapGesture {
             requestInputFocus()
         }
-        .onChange(of: isActive) { active in
-            if active {
+        .onChange(of: isVisible) { visible in
+            if visible {
                 ensureHtermControllerIfNeeded()
                 updateTerminalGeometry()
                 startRuntimeIfNeeded()
-                if !initialFocusRequested {
-                    initialFocusRequested = true
-                    requestInputFocus()
-                }
             } else {
                 detachHtermControllerIfNeeded()
             }
         }
+        .onChange(of: isActive) { active in
+            if active && !initialFocusRequested {
+                initialFocusRequested = true
+                requestInputFocus()
+            }
+        }
         .onAppear {
-            tabInitLog("TerminalView appear runtime=\(runtime.runtimeId) active=\(isActive)")
+            tabInitLog("TerminalView appear runtime=\(runtime.runtimeId) visible=\(isVisible) active=\(isActive)")
             ensureHtermControllerIfNeeded()
             updateTerminalGeometry()
             startRuntimeIfNeeded()
@@ -365,7 +385,7 @@ struct TerminalContentView: View {
     // MARK: Geometry
 
     private func updateTerminalGeometry() {
-        guard isActive else { return }
+        guard isVisible else { return }
         let font = fontSettings.currentFont
         let showingStatus = exitStatus != nil
 
@@ -374,7 +394,7 @@ struct TerminalContentView: View {
         var usableHeight = availableSize.height
 
         // Subtract top padding (applied to VStack)
-        usableHeight -= Self.topPadding
+        usableHeight -= contentTopPadding
 
         // If status is shown, we subtract the status overlay height.
         // The Divider is part of this space, effectively.
@@ -415,7 +435,7 @@ struct TerminalContentView: View {
     }
 
     private func ensureHtermControllerIfNeeded() {
-        guard isActive else { return }
+        guard isVisible else { return }
         if htermController == nil {
             htermController = runtime.ensureHtermController()
         }

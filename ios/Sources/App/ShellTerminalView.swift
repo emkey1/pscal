@@ -3,7 +3,12 @@ import UIKit
 
 struct ShellTerminalView: View {
     @ObservedObject var session: ShellRuntimeSession
+    /// On screen, so hterm stays attached and the grid follows the view's size.
+    let isVisible: Bool
+    /// Holds the keyboard. At most one terminal does.
     let isActive: Bool
+    let topPadding: CGFloat
+    let showsOverlay: Bool
     let tabId: UInt64
     @ObservedObject private var fontSettings: TerminalTabAppearanceSettings
     @State private var focusAnchor: Int = 0
@@ -11,12 +16,18 @@ struct ShellTerminalView: View {
 
     init(
         session: ShellRuntimeSession,
+        isVisible: Bool = true,
         isActive: Bool,
+        topPadding: CGFloat = 32.0,
+        showsOverlay: Bool = true,
         tabId: UInt64,
         appearanceSettings: TerminalTabAppearanceSettings
     ) {
         self.session = session
+        self.isVisible = isVisible
         self.isActive = isActive
+        self.topPadding = topPadding
+        self.showsOverlay = showsOverlay
         self.tabId = tabId
         _fontSettings = ObservedObject(wrappedValue: appearanceSettings)
     }
@@ -33,23 +44,27 @@ struct ShellTerminalView: View {
                     fontSettings: fontSettings,
                     session: session,
                     focusAnchor: $focusAnchor,
-                    isActive: isActive
+                    isVisible: isVisible,
+                    isActive: isActive,
+                    topPadding: topPadding
                 )
                 .id(session.sessionId)
                 .frame(width: proxy.size.width, height: proxy.size.height)
 
-                Button {
-                    showingSettings = true
-                } label: {
-                    Image(systemName: "textformat.size")
-                        .font(.system(size: 16, weight: .semibold))
-                        .padding(8)
-                        .background(.ultraThinMaterial, in: Circle())
+                if showsOverlay {
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        Image(systemName: "textformat.size")
+                            .font(.system(size: 16, weight: .semibold))
+                            .padding(8)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .padding(.bottom, 16)
+                    .padding(.trailing, 10)
+                    .accessibilityLabel("Terminal Settings")
+                    .accessibilityHint("Configure appearance and behavior")
                 }
-                .padding(.bottom, 16)
-                .padding(.trailing, 10)
-                .accessibilityLabel("Terminal Settings")
-                .accessibilityHint("Configure appearance and behavior")
             }
         }
         .sheet(isPresented: $showingSettings) {
@@ -65,15 +80,13 @@ struct ShellTerminalView: View {
 }
 
 private struct ShellTerminalContentView: View {
-    private enum Layout {
-        static let topPadding: CGFloat = 32.0
-    }
-
     let availableSize: CGSize
     @ObservedObject var fontSettings: TerminalTabAppearanceSettings
     @ObservedObject var session: ShellRuntimeSession
     @Binding var focusAnchor: Int
+    let isVisible: Bool
     let isActive: Bool
+    let topPadding: CGFloat
 
     @State private var hasMeasuredGeometry: Bool = false
     @State private var lastReportedMetrics: TerminalGeometryCalculator.TerminalGeometryMetrics?
@@ -92,6 +105,7 @@ private struct ShellTerminalContentView: View {
                 foregroundColor: fontSettings.foregroundColor,
                 backgroundColor: fontSettings.backgroundColor,
                 focusToken: focusAnchor,
+                isVisible: isVisible,
                 isActive: isActive,
                 onInput: handleInput,
                 onPaste: handlePaste,
@@ -132,20 +146,22 @@ private struct ShellTerminalContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .padding(.top, Layout.topPadding)
+        .padding(.top, topPadding)
         .background(Color(fontSettings.backgroundColor))
         .contentShape(Rectangle())
         .onTapGesture {
             requestInputFocus()
         }
         .onAppear {
-            tabInitLog("ShellTerminalView appear session=\(session.sessionId) active=\(isActive)")
-            session.setViewVisible(isActive)
+            tabInitLog("ShellTerminalView appear session=\(session.sessionId) visible=\(isVisible) active=\(isActive)")
+            session.setViewVisible(isVisible)
             updateTerminalGeometry()
             let started = session.start()
             tabInitLog("ShellTerminalView start session=\(session.sessionId) started=\(started)")
-            DispatchQueue.main.async {
-                requestInputFocus()
+            if isActive {
+                DispatchQueue.main.async {
+                    requestInputFocus()
+                }
             }
         }
         .onChange(of: availableSize) { _ in
@@ -155,9 +171,9 @@ private struct ShellTerminalContentView: View {
             hasMeasuredGeometry = false
             updateTerminalGeometry()
         }
-        .onChange(of: isActive) { active in
-            session.setViewVisible(active)
-            if active {
+        .onChange(of: isVisible) { visible in
+            session.setViewVisible(visible)
+            if visible {
                 updateTerminalGeometry()
             }
         }
@@ -175,11 +191,11 @@ private struct ShellTerminalContentView: View {
     }
 
     private func updateTerminalGeometry() {
-        guard isActive else {
+        guard isVisible else {
             return
         }
         let font = fontSettings.currentFont
-        let usableHeight = availableSize.height - Layout.topPadding
+        let usableHeight = availableSize.height - topPadding
         let usableSize = CGSize(width: availableSize.width, height: usableHeight)
         let grid = TerminalGeometryCalculator.calculateCapacity(
             for: usableSize,

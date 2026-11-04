@@ -1148,6 +1148,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     private var focusRetry: DispatchWorkItem?
     private var pendingFocus = false
     private var isAttached = false
+    private var isVisibleOnScreen = true
     private var isActiveForInput = true
     private var lastVisibilityForInput: Bool?
     private var attachHandler: (() -> Void)?
@@ -1407,14 +1408,18 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
         updateVisibilityForInput()
     }
 
-    func setActive(_ active: Bool) {
-        if isActiveForInput == active {
+    /// `visible` keeps the web view attached and sized; `active` gives the terminal
+    /// the keyboard. A tab that is shown has both; a Workspace window that is
+    /// behind another has only the first.
+    func setDisplayState(visible: Bool, active: Bool) {
+        if isVisibleOnScreen == visible && isActiveForInput == active {
             updateInputEnabled()
             return
         }
+        isVisibleOnScreen = visible
         isActiveForInput = active
         let keyWindow = window?.isKeyWindow ?? false
-        logTabInit("active=\(active) loaded=\(isTerminalLoaded) attached=\(isAttached) window=\(window != nil) key=\(keyWindow)")
+        logTabInit("visible=\(visible) active=\(active) loaded=\(isTerminalLoaded) attached=\(isAttached) window=\(window != nil) key=\(keyWindow)")
         updateInputEnabled()
         if !active {
             pendingFocus = false
@@ -1422,6 +1427,8 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
             if keyInputView.isFirstResponder {
                 _ = keyInputView.resignFirstResponder()
             }
+        }
+        if !visible {
             updateDisplayAttachment()
         } else if controller.isLoaded {
             updateDisplayAttachment()
@@ -1596,7 +1603,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
 
     private func updateFocusForKeyWindow() {
         guard window != nil else { return }
-        let focused = (window?.isKeyWindow ?? false) && isEffectivelyVisible()
+        let focused = (window?.isKeyWindow ?? false) && isActiveForInput && isEffectivelyVisible()
         controller.setFocused(focused)
         if focused {
             updateVisibilityForInput()
@@ -1642,7 +1649,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     }
 
     private func isEffectivelyVisible() -> Bool {
-        if !isActiveForInput || window == nil {
+        if !isVisibleOnScreen || window == nil {
             return false
         }
         return true
@@ -1720,6 +1727,7 @@ struct HtermTerminalView: UIViewRepresentable {
     let foregroundColor: UIColor
     let backgroundColor: UIColor
     var focusToken: Int = 0
+    var isVisible: Bool = true
     var isActive: Bool = true
     var onInput: ((String) -> Void)?
     var onPaste: ((String) -> Void)?
@@ -1790,7 +1798,7 @@ struct HtermTerminalView: UIViewRepresentable {
             }
         )
 
-        uiView.setActive(isActive)
+        uiView.setDisplayState(visible: isVisible, active: isActive)
         controller.updateStyle(font: font, foreground: foregroundColor, background: backgroundColor)
 
         if context.coordinator.focusToken != focusToken {
