@@ -175,6 +175,13 @@ void PSCALRuntimeUpdateSessionWindowSize(uint64_t session_id, int columns, int r
 
 /// Requests the UI to open an additional shell tab (iOS only).
 int pscalRuntimeOpenShellTab(void);
+/// `ws open`: asks Workspace to open a tool, passing it an absolute path if not NULL. Returns
+/// 0 once accepted, -EINVAL for an unknown tool, -EOPNOTSUPP when Workspace isn't on screen.
+int pscalRuntimeWorkspaceOpen(const char *tool, const char *path);
+/// `ws status`: a malloc-allocated "key=value" list. Caller must free().
+char *pscalRuntimeWorkspaceStatus(void);
+/// `ws applets`: a malloc-allocated list, one applet window per line. Caller must free().
+char *pscalRuntimeWorkspaceApplets(void);
 /// Opens an interactive iOS folder picker and returns a malloc-allocated path.
 /// Caller must free() the returned string; NULL indicates cancel/error with errno set.
 char *pscalRuntimePickMountSourceDirectory(void);

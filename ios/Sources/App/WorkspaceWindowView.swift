@@ -26,33 +26,6 @@ enum WorkspaceMetrics {
     }
 }
 
-enum WorkspaceTheme {
-    static let accent = UIColor(red: 0.20, green: 0.48, blue: 0.96, alpha: 1)
-
-    static let desktopBackground = UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.07, green: 0.08, blue: 0.11, alpha: 1)
-            : UIColor(red: 0.92, green: 0.93, blue: 0.96, alpha: 1)
-    }
-
-    private static func luminance(_ color: UIColor) -> CGFloat {
-        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
-        color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
-        func linear(_ value: CGFloat) -> CGFloat {
-            value <= 0.03928 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
-        }
-        return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
-    }
-
-    /// Text and glyphs are measured against the fill they sit on rather than assumed
-    /// white: white reads well on a teal accent and badly on a mint one.
-    static func ink(on fill: UIColor) -> UIColor {
-        let light = luminance(fill)
-        let whiteContrast = 1.05 / (light + 0.05)
-        return whiteContrast >= 4.5 ? .white : UIColor(white: 0.08, alpha: 1)
-    }
-}
-
 /// How far the system's window controls reach down over the content, in an iPadOS 26
 /// window. A window placed at the top of the desktop would otherwise sit with its title
 /// bar, close button included, under them.
@@ -89,6 +62,7 @@ final class WorkspaceWindowView: UIView, UIGestureRecognizerDelegate {
 
     /// A number no other window this run has had.
     let serial: Int
+    let openedAt = CACurrentMediaTime()
     let titleBarView = UIView()
     let titleLabel = UILabel()
     let closeButton = UIButton(type: .system)
@@ -259,18 +233,17 @@ final class WorkspaceWindowView: UIView, UIGestureRecognizerDelegate {
     }
 
     func applyChrome(active: Bool) {
-        let dark = traitCollection.userInterfaceStyle == .dark
-        let accent = WorkspaceTheme.accent
-        let card = dark ? UIColor(red: 0.13, green: 0.14, blue: 0.17, alpha: 1) : UIColor.white
-        let titleText = dark ? UIColor(white: 0.92, alpha: 1) : UIColor(red: 0.11, green: 0.13, blue: 0.18, alpha: 1)
-        let hairline = dark ? UIColor(white: 1, alpha: 0.14) : UIColor(white: 0, alpha: 0.10)
-        let mutedGlyph = dark ? UIColor(white: 0.62, alpha: 1) : UIColor(white: 0.42, alpha: 1)
+        let colors = WorkspaceTheme.current
+        let accent = colors.focusRing
+        let card = colors.card
+        let hairline = colors.stroke
+        let mutedGlyph = colors.secondary
         let ink = WorkspaceTheme.ink(on: accent)
 
         panelView.backgroundColor = card
         contentContainerView.backgroundColor = card
         titleBarView.backgroundColor = active ? accent : card
-        titleLabel.textColor = active ? ink : titleText
+        titleLabel.textColor = active ? ink : colors.primary
         panelView.layer.borderWidth = active ? 1.5 : 1
         panelView.layer.borderColor = (active ? accent : hairline).cgColor
         closeButton.setTitleColor(active ? ink : mutedGlyph, for: .normal)

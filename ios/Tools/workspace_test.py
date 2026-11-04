@@ -442,6 +442,142 @@ def run_desktop_tests(app, results, root_tab, root_win):
     results.check("a relaunch reads as saved", dump and dump["saved"], dump)
     app.screenshot("after-relaunch")
 
+    run_applet_tests(app, results)
+
+
+APPLETS = ["clock", "monitor", "networks", "status", "launcher", "shortcuts", "sessions", "themes", "settings", "diagnostics"]
+
+
+def inside(frame, surface):
+    return frame[0] >= -0.5 and frame[1] >= -0.5 and frame[0] + frame[2] <= surface[0] + 0.5 and frame[1] + frame[3] <= surface[1] + 0.5
+
+
+def run_applet_tests(app, results):
+    """Each applet at its opening size, then what the kit gives them all, then `ws`."""
+    dump = wait_for(app, lambda d: d.get("mode") == "workspace")
+    results.check("the theme draws a wallpaper", dump and dump.get("hasWallpaper"), dump)
+    results.check("Graphite is the default theme", dump and dump.get("theme") == "graphite", dump)
+    root = [t["id"] for t in dump["tabs"] if t["root"]][0]
+
+    for tool in APPLETS:
+        before = len(app.dump().get("windows", []))
+        app.send("open-or-focus", tool)
+        dump = wait_for(app, lambda d: any(w["tool"] == tool for w in d.get("windows", [])))
+        results.check("%s opens" % tool, dump and any(w["tool"] == tool for w in dump.get("windows", [])), dump)
+        if not dump:
+            continue
+        window = [w for w in dump["windows"] if w["tool"] == tool][0]
+        results.check("%s opens in front" % tool, window["front"] and window["focused"], window)
+        results.check("%s fits the desktop" % tool, inside(window["frame"], dump["surface"]), (window, dump["surface"]))
+        results.check("%s adds one window" % tool, len(dump["windows"]) == before + 1, dump)
+        time.sleep(1)
+        app.screenshot("applet-%s" % tool)
+        app.send("open-or-focus", tool)
+        dump = wait_for(app, lambda d: sum(w["tool"] == tool for w in d.get("windows", [])) == 1)
+        results.check("%s keeps one window when asked again" % tool,
+                      dump and sum(w["tool"] == tool for w in dump["windows"]) == 1, dump)
+        app.send("close", str(window["id"]))
+        dump = wait_for(app, lambda d: not any(w["tool"] == tool for w in d.get("windows", [])))
+        results.check("%s closes" % tool, dump and not any(w["tool"] == tool for w in dump["windows"]), dump)
+
+    # Every shell must have outlived all of that.
+    text = app.wait_file("wt_after_applets", root, "echo alive > ~/wt_after_applets")
+    results.check("the shell runs after the applets", text == "alive", text)
+
+    # A theme reaches everything open, and it's saved.
+    app.send("open-or-focus", "monitor")
+    dump = wait_for(app, lambda d: any(w["tool"] == "monitor" for w in d.get("windows", [])))
+    monitor = [w for w in dump["windows"] if w["tool"] == "monitor"][0]
+    rings_size = monitor["frame"][3]
+    for theme in ["aurora", "solstice", "graphite"]:
+        app.send("theme", theme)
+        dump = wait_for(app, lambda d: d.get("theme") == theme)
+        results.check("theme %s applies" % theme, dump and dump["theme"] == theme, dump)
+        time.sleep(0.5)
+        app.screenshot("theme-%s" % theme)
+    app.send("gauge", "bar")
+    dump = wait_for(app, lambda d: window_info(d, monitor["id"])["frame"][3] < rings_size)
+    results.check("Monitor resizes for bar gauges", dump and window_info(dump, monitor["id"])["frame"][3] < rings_size, dump)
+    app.screenshot("monitor-bars")
+    app.send("gauge", "ring")
+    dump = wait_for(app, lambda d: window_info(d, monitor["id"])["frame"][3] == rings_size)
+    results.check("Monitor resizes back for rings", dump and window_info(dump, monitor["id"])["frame"][3] == rings_size, dump)
+
+    # The text size is per window, grows Monitor's window, and is saved with the arrangement.
+    app.send("text-scale", "%d 1" % monitor["id"])
+    dump = wait_for(app, lambda d: window_info(d, monitor["id"]).get("textScale", 1) > 1)
+    results.check("the text size steps up", dump and window_info(dump, monitor["id"])["textScale"] > 1, dump)
+    results.check("Monitor's window grows with its text", dump and window_info(dump, monitor["id"])["frame"][2] > monitor["frame"][2], dump)
+    scale = window_info(dump, monitor["id"])["textScale"]
+    app.screenshot("monitor-large-text")
+    app.send("save-arrangement")
+    wait_for(app, lambda d: d.get("saved"))
+
+    # A Launcher shortcut: a {token} opens an applet, a command runs in a new terminal.
+    app.send("add-shortcut", "probe echo launched > ~/wt_launcher")
+    dump = wait_for(app, lambda d: d.get("shortcuts") == 1)
+    results.check("a shortcut is added", dump and dump["shortcuts"] == 1, dump)
+    app.send("open-or-focus", "launcher")
+    wait_for(app, lambda d: any(w["tool"] == "launcher" for w in d.get("windows", [])))
+    time.sleep(0.5)
+    app.screenshot("launcher-one-shortcut")
+    tabs_before = len(app.dump()["tabs"])
+    app.clear_file("wt_launcher")
+    app.send("run-shortcut", "echo launched > ~/wt_launcher")
+    dump = wait_for(app, lambda d: len(d["tabs"]) == tabs_before + 1)
+    results.check("a shortcut opens a terminal", dump and len(dump["tabs"]) == tabs_before + 1, dump)
+    text = app.wait_file("wt_launcher", timeout=30)
+    results.check("a shortcut's command runs once the prompt is up", text == "launched", text)
+    app.send("run-shortcut", "{clock}")
+    dump = wait_for(app, lambda d: any(w["tool"] == "clock" for w in d.get("windows", [])))
+    results.check("a {token} opens its applet", dump and any(w["tool"] == "clock" for w in dump["windows"]), dump)
+
+    # `ws`, from a real shell.
+    app.clear_file("wt_ws_status")
+    text = app.wait_file("wt_ws_status", root, "ws status > ~/wt_ws_status")
+    results.check("ws status says hosted", bool(text) and "hosted=1" in text and "clock" in text, text)
+    app.send("close", str([w["id"] for w in app.dump()["windows"] if w["tool"] == "clock"][0]))
+    wait_for(app, lambda d: not any(w["tool"] == "clock" for w in d.get("windows", [])))
+    app.send("type", "%s ws open clock\\n" % root)
+    dump = wait_for(app, lambda d: any(w["tool"] == "clock" for w in d.get("windows", [])))
+    results.check("ws open opens an applet", dump and any(w["tool"] == "clock" for w in dump["windows"]), dump)
+    app.send("focus", str([w["id"] for w in dump["windows"] if hosted_info(w, root)][0]))
+    app.clear_file("wt_ws_applets")
+    text = app.wait_file("wt_ws_applets", root, "ws applets > ~/wt_ws_applets")
+    results.check("ws applets lists it", bool(text) and " clock " in text, text)
+    app.clear_file("wt_ws_bad")
+    text = app.wait_file("wt_ws_bad", root, "ws open nosuchtool 2> ~/wt_ws_bad")
+    results.check("ws open refuses an unknown tool", bool(text) and "no such tool" in text, text)
+
+    # And it answers honestly from tabs, without hanging the shell.
+    app.send("tabs")
+    wait_for(app, lambda d: d["mode"] == "tabs")
+    app.clear_file("wt_ws_tabs")
+    text = app.wait_file("wt_ws_tabs", root, "ws status > ~/wt_ws_tabs")
+    results.check("ws status says not hosted in tabs", bool(text) and "hosted=0" in text, text)
+    app.clear_file("wt_ws_tabs2")
+    text = app.wait_file("wt_ws_tabs2", root, "ws open clock 2> ~/wt_ws_tabs2")
+    results.check("ws open refuses in tabs", bool(text) and "not under Workspace" in text, text)
+    app.send("workspace")
+    wait_for(app, lambda d: d["mode"] == "workspace")
+
+    # A relaunch keeps the theme's choice, the applet and its text size.
+    app.send("theme", "solstice")
+    wait_for(app, lambda d: d.get("theme") == "solstice")
+    app.terminate()
+    time.sleep(2)
+    app.launch()
+    time.sleep(1)
+    results.check("hooks answer after the applet relaunch", app.wait_ready(), "no ready.json")
+    wait_for(app, lambda d: d.get("mode") == "tabs" and d["tabs"])
+    app.send("workspace")
+    dump = wait_for(app, lambda d: d.get("mode") == "workspace" and any(w["tool"] == "monitor" for w in d.get("windows", [])))
+    results.check("a relaunch keeps the theme", dump and dump.get("theme") == "solstice", dump)
+    window = next((w for w in (dump or {}).get("windows", []) if w["tool"] == "monitor"), None)
+    results.check("a relaunch restores the applet", window is not None, dump)
+    results.check("a relaunch restores its text size", window and window["textScale"] == scale, window)
+    app.screenshot("after-applet-relaunch")
+
 
 def run_inert_control(app, results):
     """A launch without the variable must not answer. SIMCTL_CHILD_ variables stay in the

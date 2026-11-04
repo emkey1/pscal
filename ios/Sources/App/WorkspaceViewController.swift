@@ -41,6 +41,10 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
 
     private let manager = TerminalTabManager.shared
     private let desktopSurfaceView = UIView()
+    private let wallpaperView = UIImageView()
+    private var appliedWallpaperSize: CGSize = .zero
+    private var appliedWallpaperIdentifier: String?
+    private var themeObserver: NSObjectProtocol?
     private let menuPip = UIButton(type: .system)
     private let desktopToast = UILabel()
     private var toastHide: DispatchWorkItem?
@@ -84,6 +88,19 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         desktopSurfaceView.accessibilityIdentifier = "workspace.desktop"
         view.addSubview(desktopSurfaceView)
 
+        // Behind every window, and it must not take their touches or be taken for one.
+        wallpaperView.frame = desktopSurfaceView.bounds
+        wallpaperView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        wallpaperView.contentMode = .scaleAspectFill
+        wallpaperView.clipsToBounds = true
+        wallpaperView.isUserInteractionEnabled = false
+        desktopSurfaceView.addSubview(wallpaperView)
+        themeObserver = NotificationCenter.default.addObserver(forName: .workspaceThemeDidChange, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.themeDidChange()
+            }
+        }
+
         // The root menu fires on the bare desktop only, never on a window.
         let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleDesktopLongPress(_:)))
         longPress.minimumPressDuration = 0.4
@@ -121,6 +138,7 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
             desktopSurfaceView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         installKeyboardObservers()
+        WorkspaceBridge.setHosted(tools: WorkspaceToolRegistry.availableTools)
         lastSeenSelectedId = manager.selectedId
         managerObserver = manager.objectWillChange.sink { [weak self] _ in
             self?.scheduleSync()
@@ -129,13 +147,70 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
 
     deinit {
         keyboardObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        if let themeObserver {
+            NotificationCenter.default.removeObserver(themeObserver)
+        }
+    }
+
+    // MARK: - Theme
+
+    private func themeDidChange() {
+        view.backgroundColor = WorkspaceTheme.desktopBackground
+        desktopSurfaceView.backgroundColor = WorkspaceTheme.desktopBackground
+        styleMenuPip()
+        applyThemeWallpaper(force: true)
+        for window in desktopWindows {
+            window.applyChrome(active: window.isChromeActive)
+        }
+    }
+
+    private func wallpaperImageSize() -> CGSize {
+        var size = desktopSurfaceView.bounds.size
+        if size.width <= 1 || size.height <= 1 {
+            size = view.bounds.size
+        }
+        let scale = max(view.window?.screen.scale ?? traitCollection.displayScale, 2)
+        return CGSize(width: max(1, (size.width * scale).rounded()), height: max(1, (size.height * scale).rounded()))
+    }
+
+    private func applyThemeWallpaper(force: Bool) {
+        let size = wallpaperImageSize()
+        guard size.width > 1, size.height > 1 else { return }
+        let identifier = WorkspaceTheme.currentIdentifier
+        if !force, wallpaperView.image != nil, appliedWallpaperSize == size, appliedWallpaperIdentifier == identifier {
+            return
+        }
+        guard let image = WorkspaceTheme.artworkImage(identifier: identifier,
+                                                      palette: WorkspaceTheme.palette(forIdentifier: identifier),
+                                                      size: size,
+                                                      wallpaper: true) else { return }
+        wallpaperView.image = image
+        appliedWallpaperIdentifier = identifier
+        appliedWallpaperSize = size
+    }
+
+    /// The Themes applet's Apply Wallpaper: a palette that needn't be saved, until the size or
+    /// the theme next changes.
+    func applyWallpaper(identifier: String, palette: WorkspacePalette) {
+        let size = wallpaperImageSize()
+        guard let image = WorkspaceTheme.artworkImage(identifier: identifier, palette: palette, size: size, wallpaper: true) else { return }
+        wallpaperView.image = image
+        appliedWallpaperSize = size
+    }
+
+    var hasWallpaperForTesting: Bool {
+        wallpaperView.image != nil
+    }
+
+    private func styleMenuPip() {
+        menuPip.tintColor = WorkspaceTheme.ink(on: WorkspaceTheme.accent)
+        menuPip.backgroundColor = WorkspaceTheme.accent
     }
 
     private func buildMenuPip() {
         menuPip.translatesAutoresizingMaskIntoConstraints = false
         menuPip.setImage(UIImage(systemName: "line.3.horizontal"), for: .normal)
-        menuPip.tintColor = WorkspaceTheme.ink(on: WorkspaceTheme.accent)
-        menuPip.backgroundColor = WorkspaceTheme.accent
+        styleMenuPip()
         menuPip.layer.cornerRadius = 22
         menuPip.layer.borderWidth = 1.5
         menuPip.layer.borderColor = UIColor(white: 1, alpha: 0.85).cgColor
@@ -191,6 +266,7 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         guard desktopSurfaceView.bounds.width > 0, desktopSurfaceView.bounds.height > 0 else { return }
+        applyThemeWallpaper(force: false)
         if !didInitialSync {
             didInitialSync = true
             // Next turn: the tab bar's views are still leaving, and a session can only be
@@ -222,6 +298,7 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
 
     /// Takes every window down without touching a session, on the way back to tabs.
     func tearDownWindows() {
+        WorkspaceBridge.setHosted(tools: nil)
         Self.arrangementAtLeave = arrangementDescriptors()
         managerObserver = nil
         for window in desktopWindows {
@@ -545,8 +622,45 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         return window
     }
 
+    /// What a menu does: one window per applet. An existing one comes to this Desktop rather
+    /// than a duplicate opening.
+    @discardableResult
+    func openOrFocusTool(_ identifier: String) -> WorkspaceWindowView? {
+        guard let existing = window(forTool: identifier) else {
+            return openTool(identifier)
+        }
+        if !WorkspaceToolRegistry.isGlobal(identifier) {
+            existing.desktopIndex = activeDesktopIndex
+        }
+        existing.isHidden = false
+        focus(window: existing)
+        postDesktopsDidChange()
+        return existing
+    }
+
     func window(forTool identifier: String) -> WorkspaceWindowView? {
         desktopWindows.first { $0.toolIdentifier == identifier }
+    }
+
+    func window(holding applet: WorkspaceAppletViewController) -> WorkspaceWindowView? {
+        desktopWindows.first { appletByWindow[$0.serial] === applet }
+    }
+
+    /// A size an applet asks for, which later becomes the window's own.
+    func resizeWindow(_ window: WorkspaceWindowView, to size: CGSize) {
+        guard !window.zoomedToFullscreen, window.frame.size != size else { return }
+        var frame = window.frame
+        frame.size = size
+        window.frame = clampedFrame(frame, for: window)
+        window.preferredSize = window.frame.size
+    }
+
+    /// Goes to a session's window, wherever it is, and shows its tab.
+    func focusSession(tabID: UInt64) {
+        guard let window = windowHosting(tabID: tabID) else { return }
+        contentByWindow[window.serial]?.select(tabID: tabID)
+        focus(window: window)
+        applyStates()
     }
 
     private func placeAtTopRight(_ window: WorkspaceWindowView) {
@@ -627,6 +741,13 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         syncFromManager()
     }
 
+    /// A new terminal that runs `command` once its prompt is up.
+    func openNewTerminalWindow(runningOnce command: String, title: String?) {
+        pendingTabWindow = nil
+        _ = manager.openShellTab(runningOnce: command, title: title)
+        syncFromManager()
+    }
+
     func openNewTab(in window: WorkspaceWindowView) {
         pendingTabWindow = window
         _ = manager.openShellTab()
@@ -686,6 +807,8 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
                 manager.selectedId = tabID
             }
             lastSeenSelectedId = tabID
+        } else if let focusable = appletByWindow[window.serial] as? WorkspaceFocusable {
+            focusable.workspaceToolDidBecomeFrontmost()
         } else {
             // An applet with no typing of its own takes the keyboard away from whatever
             // terminal had it.
@@ -914,6 +1037,14 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
             if let identifier = window.toolIdentifier {
                 descriptor["kind"] = "tool"
                 descriptor["toolIdentifier"] = identifier
+                if let applet = appletByWindow[window.serial] {
+                    if abs(applet.workspaceTextScale - 1) > 0.001 {
+                        descriptor["textScale"] = Double(applet.workspaceTextScale)
+                    }
+                    if let state = (applet as? WorkspaceStatefulTool)?.workspaceToolStateForSaving() {
+                        descriptor["state"] = state
+                    }
+                }
             } else if let content = contentByWindow[window.serial] {
                 descriptor["kind"] = "terminal"
                 descriptor["tabCount"] = content.hostedTabs.count
@@ -1028,6 +1159,12 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
             guard let identifier = descriptor["toolIdentifier"] as? String, !identifier.isEmpty,
                   wanted.insert(identifier).inserted else { continue }
             guard let window = window(forTool: identifier) ?? openTool(identifier) else { continue }
+            if let applet = appletByWindow[window.serial] {
+                applet.workspaceTextScale = CGFloat((descriptor["textScale"] as? NSNumber)?.doubleValue ?? 1)
+                if let state = descriptor["state"] as? [String: Any] {
+                    (applet as? WorkspaceStatefulTool)?.workspaceRestoreToolState(state)
+                }
+            }
             assign(window, descriptor)
         }
         for window in desktopWindows {
@@ -1165,6 +1302,13 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
                 switchToDesktop(number - 1)
                 return true
             }
+            // A terminal binds these itself, so only an applet with text to scale takes them.
+            if modifiers == .command || modifiers == [.command, .shift], ["=", "+", "-", "0"].contains(input),
+               let window = focusedWindow, let applet = appletByWindow[window.serial], applet is WorkspaceTextScalable {
+                let step = input == "-" ? -1 : (input == "0" ? 0 : 1)
+                applet.workspaceTextScale = WorkspaceTextScale.stepped(applet.workspaceTextScale, step: step)
+                return true
+            }
             if modifiers == .command {
                 if input == "t" {
                     if let window = focusedWindow, contentByWindow[window.serial] != nil {
@@ -1268,8 +1412,8 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         return nil
     }
 
-    private func presentSheet(title: String?, actions: [UIAlertAction], from sourceView: UIView, sourceRect: CGRect) {
-        let sheet = UIAlertController(title: title, message: nil, preferredStyle: .actionSheet)
+    private func presentSheet(title: String?, message: String? = nil, actions: [UIAlertAction], from sourceView: UIView, sourceRect: CGRect) {
+        let sheet = UIAlertController(title: title, message: message, preferredStyle: .actionSheet)
         actions.forEach(sheet.addAction)
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         // An iPad presents this as a popover, which must have an anchor or UIKit raises.
@@ -1301,12 +1445,15 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
                 self.openNewTab(in: menuWindow)
             })
         }
+        actions.append(UIAlertAction(title: "Launcher", style: .default, handler: deferred { [weak self] in
+            self?.presentLauncher(from: sourceView, sourceRect: sourceRect)
+        }))
+        actions.append(UIAlertAction(title: "Applets", style: .default, handler: deferred { [weak self] in
+            self?.presentAppletGroups(from: sourceView, sourceRect: sourceRect)
+        }))
         actions.append(UIAlertAction(title: "Windows", style: .default, handler: deferred { [weak self] in
             self?.presentWindowList(from: sourceView, sourceRect: sourceRect)
         }))
-        actions.append(UIAlertAction(title: "Desktops", style: .default) { [weak self] _ in
-            self?.openTool(WorkspaceToolRegistry.desktops)
-        })
         actions.append(UIAlertAction(title: "New Desktop", style: .default) { [weak self] _ in
             self?.createNewDesktop()
         })
@@ -1320,17 +1467,28 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
                 self?.presentTerminalSettings(tabID: tabID)
             }))
         }
-        actions.append(UIAlertAction(title: "App Diagnostics", style: .default, handler: deferred { [weak self] in
-            self?.present(UIHostingController(rootView: AppDiagnosticsView()), animated: true)
-        }))
-        let opensAtLaunch = WorkspaceSettings.opensAtLaunch
-        actions.append(UIAlertAction(title: "Open at Launch: \(opensAtLaunch ? "On" : "Off")", style: .default) { _ in
-            WorkspaceSettings.opensAtLaunch = !opensAtLaunch
-        })
         actions.append(UIAlertAction(title: "Back to Tabs", style: .default, handler: deferred { [weak self] in
             self?.leaveHandler?()
         }))
         presentSheet(title: "Workspace", actions: actions, from: sourceView, sourceRect: sourceRect)
+    }
+
+    private func presentAppletGroups(from sourceView: UIView, sourceRect: CGRect) {
+        let actions = WorkspaceToolRegistry.menuGroups.map { group in
+            UIAlertAction(title: group.title, style: .default, handler: deferred { [weak self] in
+                self?.presentApplets(group: group, from: sourceView, sourceRect: sourceRect)
+            })
+        }
+        presentSheet(title: "Applets", actions: actions, from: sourceView, sourceRect: sourceRect)
+    }
+
+    private func presentApplets(group: (title: String, message: String, items: [String]), from sourceView: UIView, sourceRect: CGRect) {
+        let actions = group.items.map { identifier in
+            UIAlertAction(title: WorkspaceToolRegistry.title(for: identifier), style: .default) { [weak self] _ in
+                self?.openOrFocusTool(identifier)
+            }
+        }
+        presentSheet(title: group.title, message: group.message, actions: actions, from: sourceView, sourceRect: sourceRect)
     }
 
     private func presentWindowList(from sourceView: UIView, sourceRect: CGRect) {

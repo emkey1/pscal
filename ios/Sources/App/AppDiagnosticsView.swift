@@ -818,6 +818,7 @@ private final class AppDiagnosticsRunner: ObservableObject {
 }
 
 struct AppDiagnosticsView: View {
+    var showsDoneButton = true
     @Environment(\.dismiss) private var dismiss
     @StateObject private var runner = AppDiagnosticsRunner()
     @State private var copiedReport: Bool = false
@@ -898,8 +899,10 @@ struct AppDiagnosticsView: View {
             .navigationTitle("App Diagnostics")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
-                        dismiss()
+                    if showsDoneButton {
+                        Button("Close") {
+                            dismiss()
+                        }
                     }
                 }
                 ToolbarItemGroup(placement: .primaryAction) {

@@ -7,14 +7,16 @@ struct TerminalSettingsView: View {
     @ObservedObject private var settings = TerminalFontSettings.shared
     @Environment(\.dismiss) private var dismiss
     private let tabId: UInt64
+    private let showsDoneButton: Bool
     @State private var tabNameDraft: String
     @State private var resetTabNameOnAppStart: Bool
     @State private var startupCommandDraft: String
     @State private var copiedColors: Bool = false
 
-    init(appearanceSettings: TerminalTabAppearanceSettings, tabId: UInt64) {
+    init(appearanceSettings: TerminalTabAppearanceSettings, tabId: UInt64, showsDoneButton: Bool = true) {
         _appearanceSettings = ObservedObject(wrappedValue: appearanceSettings)
         self.tabId = tabId
+        self.showsDoneButton = showsDoneButton
         _tabNameDraft = State(initialValue: TerminalTabManager.shared.tabTitle(tabId: tabId) ?? "")
         _resetTabNameOnAppStart = State(initialValue: TerminalTabManager.shared.resetTabNameOnAppStart(tabId: tabId))
         _startupCommandDraft = State(initialValue: TerminalTabManager.shared.startupCommand(tabId: tabId) ?? "")
@@ -311,7 +313,9 @@ struct TerminalSettingsView: View {
             .navigationTitle("Terminal Settings")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    if showsDoneButton {
+                        Button("Done") { dismiss() }
+                    }
                 }
             }
         }

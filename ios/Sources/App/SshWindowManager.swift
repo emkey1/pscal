@@ -146,7 +146,19 @@ final class TerminalTabManager: ObservableObject {
         scheduleFocusDance(primary: newId, secondary: previousId)
         return 0
     }
-    
+
+    /// A new shell for one job: it runs `command` when its prompt is up and takes `title`,
+    /// for this tab only. Neither is saved as the shell's profile.
+    func openShellTab(runningOnce command: String, title: String?) -> Int32 {
+        let result = openShellTab()
+        guard result == 0, let index = tabs.indices.last else { return result }
+        _ = applyStartupCommand(command, toTabAtIndex: index, persist: false)
+        if let title, !title.isEmpty {
+            _ = applyTabTitle(title, toTabAtIndex: index, persist: false)
+        }
+        return result
+    }
+
     func registerShellPgid(_ pgid: Int, tabId: UInt64) {
         guard pgid > 0 else { return }
         pgidToTab[pgid] = tabId

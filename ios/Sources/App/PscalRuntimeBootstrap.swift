@@ -106,6 +106,7 @@ public final class RuntimeLogger {
 
     private let queue: DispatchQueue
     private let fileURL: URL
+    var logFileURL: URL { fileURL }
     private static func timestampString() -> String {
         var ts = timespec()
         if clock_gettime(CLOCK_REALTIME, &ts) != 0 {

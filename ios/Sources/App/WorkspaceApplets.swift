@@ -7,71 +7,153 @@
 import UIKit
 
 /// The applets a Workspace window can hold, by the identifier saved layouts and `ws` use.
+@MainActor
 enum WorkspaceToolRegistry {
     static let desktops = "workspaces"
+    static let launcher = "launcher"
+    static let quickActions = "shortcuts"
+    static let sessions = "sessions"
+    static let themes = "themes"
+    static let clock = "clock"
+    static let monitor = "monitor"
+    static let networks = "networks"
+    static let logs = "status"
+    static let settings = "settings"
+    static let diagnostics = "diagnostics"
+    // Later stages. Named here so a saved {token} keeps its meaning.
+    static let storage = "storage"
+    static let fileManager = "filemanager"
+    static let motePad = "motepad"
+    static let markdown = "markdown"
+    static let imageViewer = "imageviewer"
+    static let videoPlayer = "videoplayer"
+    static let browser = "browser"
+    static let music = "audio"
+    static let equalizer = "equalizer"
 
     /// One window, shared by every Desktop, rather than a window per request.
     static func isGlobal(_ identifier: String) -> Bool {
-        identifier == desktops
+        identifier == desktops || identifier == launcher
+    }
+
+    static func isAvailable(_ identifier: String) -> Bool {
+        factories[identifier] != nil
+    }
+
+    private static let factories: [String: () -> WorkspaceAppletViewController] = [
+        desktops: { WorkspaceDesktopsAppletViewController() },
+        launcher: { WorkspaceLauncherAppletViewController() },
+        quickActions: { WorkspaceQuickActionsAppletViewController() },
+        sessions: { WorkspaceSessionsAppletViewController() },
+        themes: { WorkspaceThemesAppletViewController() },
+        clock: { WorkspaceClockAppletViewController() },
+        monitor: { WorkspaceMonitorAppletViewController() },
+        networks: { WorkspaceNetworksAppletViewController() },
+        logs: { WorkspaceLogsAppletViewController() },
+        settings: { WorkspaceSettingsAppletViewController() },
+        diagnostics: { WorkspaceDiagnosticsAppletViewController() },
+    ]
+
+    static var availableTools: [String] {
+        factories.keys.sorted()
+    }
+
+    static func makeViewController(for identifier: String) -> WorkspaceAppletViewController? {
+        factories[identifier]?()
+    }
+
+    /// The Applets menu. A group with nothing available isn't shown.
+    static var menuGroups: [(title: String, message: String, items: [String])] {
+        let groups: [(title: String, message: String, items: [String])] = [
+            ("Workspace", "Launchers and workspace-wide controls.",
+             [desktops, launcher, quickActions, browser, music, equalizer, motePad, fileManager, sessions, themes]),
+            ("Media", "Document and image viewers.", [markdown, imageViewer, videoPlayer]),
+            ("Status", "Live clocks and runtime summaries.", [clock, monitor, networks, logs]),
+            ("Storage", "What the app's folders hold.", [storage]),
+            ("Support", "Settings and diagnostics tools.", [settings, diagnostics]),
+        ]
+        return groups.compactMap { group in
+            let items = group.items.filter(isAvailable)
+            return items.isEmpty ? nil : (group.title, group.message, items)
+        }
     }
 
     static func title(for identifier: String) -> String {
         switch identifier {
-        case desktops:
-            return "Desktops"
-        default:
-            return identifier
+        case desktops: return "Desktops"
+        case launcher: return "Launcher"
+        case quickActions: return "Quick Actions"
+        case sessions: return "Sessions"
+        case themes: return "Themes"
+        case clock: return "Clock"
+        case monitor: return "Monitor"
+        case networks: return "Networks"
+        case logs: return "Logs"
+        case settings: return "Settings"
+        case diagnostics: return "Diagnostics"
+        default: return identifier
         }
     }
 
+    /// Big enough for the applet's default display without clipping. Placement clamps it to
+    /// the usable area, so a width too wide for a small phone shrinks to fit.
     static func preferredSize(for identifier: String) -> CGSize {
         let phone = WorkspaceMetrics.usesPhoneLayout
         switch identifier {
         case desktops:
             return phone ? CGSize(width: 240, height: 200) : CGSize(width: 280, height: 240)
+        case launcher:
+            return WorkspaceLauncherMetrics.contentSize(itemCount: WorkspaceLauncherStore.shortcuts.count, showsBackRow: false, textScale: 1)
+        case quickActions:
+            return phone ? CGSize(width: 312, height: 300) : CGSize(width: 400, height: 320)
+        case sessions:
+            return phone ? CGSize(width: 332, height: 300) : CGSize(width: 460, height: 340)
+        case themes:
+            return phone ? CGSize(width: 360, height: 620) : CGSize(width: 640, height: 760)
+        case clock:
+            return phone ? CGSize(width: 220, height: 140) : CGSize(width: 240, height: 148)
+        case monitor:
+            return WorkspaceMonitorAppletViewController.windowSize(textScale: 1)
+        case networks:
+            return phone ? CGSize(width: 328, height: 188) : CGSize(width: 360, height: 206)
+        case logs:
+            return phone ? CGSize(width: 340, height: 248) : CGSize(width: 460, height: 300)
+        case settings:
+            return phone ? CGSize(width: 376, height: 620) : CGSize(width: 560, height: 620)
+        case diagnostics:
+            return phone ? CGSize(width: 352, height: 620) : CGSize(width: 620, height: 640)
         default:
             return phone ? CGSize(width: 320, height: 300) : CGSize(width: 460, height: 420)
         }
     }
 
     static func minimumSize(for identifier: String) -> CGSize {
+        let phone = WorkspaceMetrics.usesPhoneLayout
         switch identifier {
         case desktops:
-            return WorkspaceMetrics.usesPhoneLayout ? CGSize(width: 200, height: 120) : CGSize(width: 240, height: 140)
+            return phone ? CGSize(width: 200, height: 120) : CGSize(width: 240, height: 140)
+        case launcher:
+            return phone ? CGSize(width: 168, height: 80) : CGSize(width: 200, height: 96)
+        case quickActions:
+            return phone ? CGSize(width: 260, height: 148) : CGSize(width: 300, height: 164)
+        case sessions:
+            return phone ? CGSize(width: 280, height: 176) : CGSize(width: 340, height: 208)
+        case themes:
+            return phone ? CGSize(width: 320, height: 420) : CGSize(width: 520, height: 560)
+        case clock:
+            // Below this the date and zone lines overflow the card whatever the fonts do.
+            return CGSize(width: 180, height: 124)
+        case monitor:
+            return phone ? CGSize(width: 280, height: 144) : CGSize(width: 300, height: 150)
+        case networks:
+            return phone ? CGSize(width: 280, height: 150) : CGSize(width: 300, height: 156)
+        case logs:
+            return phone ? CGSize(width: 300, height: 220) : CGSize(width: 360, height: 220)
+        case settings, diagnostics:
+            return CGSize(width: 320, height: 420)
         default:
             return CGSize(width: 220, height: 160)
         }
-    }
-
-    static func makeViewController(for identifier: String) -> WorkspaceAppletViewController? {
-        switch identifier {
-        case desktops:
-            return WorkspaceDesktopsAppletViewController()
-        default:
-            return nil
-        }
-    }
-}
-
-/// Every applet's base: a themed background, the area to build in, and the Workspace that
-/// holds it. A subclass builds its interface in `viewDidLoad`, calling super first.
-@MainActor
-class WorkspaceAppletViewController: UIViewController {
-    weak var workspaceHost: WorkspaceViewController?
-    /// The safe-area-inset area a subclass builds in.
-    let toolContentView = UIView()
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .clear
-        toolContentView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(toolContentView)
-        NSLayoutConstraint.activate([
-            toolContentView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            toolContentView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
-            toolContentView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-            toolContentView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
-        ])
     }
 }
 
@@ -83,6 +165,7 @@ final class WorkspaceDesktopsAppletViewController: WorkspaceAppletViewController
     private let contentStack = UIStackView()
     private let rowsStack = UIStackView()
     private let saveButton = UIButton(type: .system)
+    private let restoreButton = UIButton(type: .system)
     private var observer: NSObjectProtocol?
 
     deinit {
@@ -114,7 +197,6 @@ final class WorkspaceDesktopsAppletViewController: WorkspaceAppletViewController
                             action: #selector(saveTapped))
         saveButton.accessibilityIdentifier = "workspace.desktops.save"
         layoutRow.addArrangedSubview(saveButton)
-        let restoreButton = UIButton(type: .system)
         configureIconButton(restoreButton, symbol: "arrow.clockwise", label: "Restore Desktops",
                             hint: "Puts the windows back as they were last saved",
                             action: #selector(restoreTapped))
@@ -144,6 +226,11 @@ final class WorkspaceDesktopsAppletViewController: WorkspaceAppletViewController
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        rebuild()
+    }
+
+    override func themeDidChange() {
+        super.themeDidChange()
         rebuild()
     }
 
@@ -181,8 +268,10 @@ final class WorkspaceDesktopsAppletViewController: WorkspaceAppletViewController
         // Green means what is on screen is what is saved: a Save that works would otherwise
         // look exactly like one that does nothing.
         let saved = host.arrangementIsSaved
-        saveButton.tintColor = saved ? .systemGreen : nil
+        saveButton.tintColor = saved ? .systemGreen : theme.accent
         saveButton.accessibilityValue = saved ? "Saved" : "Not saved"
+        restoreButton.tintColor = theme.accent
+        add.tintColor = theme.accent
 
         // After the host's own placement, which would otherwise undo it.
         DispatchQueue.main.async { [weak self] in
@@ -192,7 +281,8 @@ final class WorkspaceDesktopsAppletViewController: WorkspaceAppletViewController
     }
 
     private func row(index: Int, active: Bool, removable: Bool, host: WorkspaceViewController) -> UIView {
-        let accent = WorkspaceTheme.accent
+        let colors = theme
+        let accent = colors.accent
         let locked = host.isDesktopLocked(index)
         let name = host.nameForDesktop(index)
 
@@ -204,7 +294,7 @@ final class WorkspaceDesktopsAppletViewController: WorkspaceAppletViewController
         lock.tag = index
         let symbols = UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
         lock.setImage(UIImage(systemName: locked ? "lock.fill" : "lock.open", withConfiguration: symbols), for: .normal)
-        lock.tintColor = locked ? accent : .secondaryLabel
+        lock.tintColor = locked ? accent : colors.secondary
         // The first Desktop is always protected, so its lock shows closed and doesn't toggle.
         lock.isEnabled = index != 0
         lock.accessibilityLabel = index == 0 ? "\(name) is protected" : (locked ? "Unlock \(name)" : "Lock \(name)")
@@ -221,13 +311,13 @@ final class WorkspaceDesktopsAppletViewController: WorkspaceAppletViewController
         jump.titleLabel?.lineBreakMode = .byTruncatingTail
         jump.layer.cornerRadius = 10
         jump.layer.borderWidth = 1
-        jump.layer.borderColor = (active ? accent : UIColor.separator).cgColor
+        jump.layer.borderColor = (active ? accent : colors.stroke).cgColor
         // The active Desktop reads by its border and fill, with its label measured against
         // that fill: the accent drawn on a wash of the same accent is hard to read.
-        let fill = accent.withAlphaComponent(0.22)
+        let fill = WorkspaceTheme.wash(accent, alpha: 0.22, over: colors.backgroundBottom)
         jump.backgroundColor = active ? fill : nil
         jump.setTitle(name, for: .normal)
-        jump.setTitleColor(.label, for: .normal)
+        jump.setTitleColor(active ? WorkspaceTheme.onSurface(fill) : colors.primary, for: .normal)
         jump.accessibilityTraits = active ? [.button, .selected] : .button
         jump.accessibilityIdentifier = "workspace.desktops.row.\(index)"
         jump.heightAnchor.constraint(equalToConstant: WorkspaceMetrics.usesPhoneLayout ? 30 : 38).isActive = true

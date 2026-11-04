@@ -37,6 +37,13 @@ import UIKit
 ///   remove-desktop <desktop>       what the Desktops applet's × does
 ///   save-arrangement               the Desktops applet's Save
 ///   restore-arrangement            the Desktops applet's Restore
+///   open-or-focus <identifier>     what a menu does with an applet
+///   text-scale <id> <step>         Cmd+= (1), Cmd+- (-1) or Cmd+0 (0) for that window's applet
+///   theme <identifier>             choose a theme
+///   gauge <ring|bar>               choose the gauge style
+///   density <0..1>                 set the density
+///   run-shortcut <command>         what tapping a Launcher shortcut does
+///   add-shortcut <name> <command>  add a Launcher shortcut at the top level (command may be empty)
 ///
 /// Off unless PSCALI_WORKSPACE_TEST=1 is in the app's environment.
 @MainActor
@@ -209,6 +216,34 @@ enum WorkspaceTestHooks {
         case "restore-arrangement":
             guard let workspace else { return ["ok": false, "error": "not in Workspace"] }
             workspace.restoreArrangementFromButton()
+        case "open-or-focus":
+            guard let workspace, let identifier = args.first, workspace.openOrFocusTool(identifier) != nil else {
+                return ["ok": false, "error": "no such applet"]
+            }
+        case "text-scale":
+            guard let workspace, let target = window(args.first), args.count > 1, let step = Int(args[1]),
+                  let applet = workspace.applet(of: target), applet is WorkspaceTextScalable else {
+                return ["ok": false, "error": "no scalable applet in that window"]
+            }
+            applet.workspaceTextScale = WorkspaceTextScale.stepped(applet.workspaceTextScale, step: step)
+        case "theme":
+            guard let identifier = args.first, WorkspaceTheme.record(forIdentifier: identifier) != nil else {
+                return ["ok": false, "error": "no such theme"]
+            }
+            WorkspaceTheme.setCurrentIdentifier(identifier)
+        case "gauge":
+            WorkspaceTheme.usesRingGauges = args.first != "bar"
+        case "density":
+            guard let text = args.first, let value = Double(text) else { return ["ok": false, "error": "usage: density <0..1>"] }
+            WorkspaceTheme.density = CGFloat(value)
+        case "run-shortcut":
+            guard let workspace else { return ["ok": false, "error": "not in Workspace"] }
+            workspace.runLauncherShortcut(command: decode(rest), title: nil)
+        case "add-shortcut":
+            let pieces = rest.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            guard let name = pieces.first, !name.isEmpty else { return ["ok": false, "error": "usage: add-shortcut <name> <command>"] }
+            let command = pieces.count > 1 ? decode(pieces[1]) : ""
+            WorkspaceLauncherStore.mutate(atPath: []) { $0.append(["name": name, "command": command]) }
         default:
             return ["ok": false, "error": "unknown verb \(verb)"]
         }
@@ -265,10 +300,14 @@ enum WorkspaceTestHooks {
         result["activeDesktop"] = workspace.activeDesktopIndex
         result["desktopCount"] = workspace.desktopCount
         result["saved"] = workspace.arrangementIsSaved
+        result["theme"] = WorkspaceTheme.currentIdentifier
+        result["hasWallpaper"] = workspace.hasWallpaperForTesting
+        result["shortcuts"] = WorkspaceLauncherStore.shortcuts.count
         result["windows"] = workspace.desktopWindows.map { window -> [String: Any] in
             let content = workspace.content(of: window)
             return [
                 "id": window.serial,
+                "textScale": Double(workspace.applet(of: window)?.workspaceTextScale ?? 1),
                 "title": window.titleLabel.text ?? "",
                 "tool": window.toolIdentifier ?? "",
                 "desktop": window.desktopIndex,
