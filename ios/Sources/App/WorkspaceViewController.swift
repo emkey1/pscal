@@ -8,6 +8,15 @@ import Combine
 import SwiftUI
 import UIKit
 
+extension CGRect {
+    /// To whole points, each value on its own. `integral` rounds outward, so a window at a
+    /// fractional origin opens a point larger, and one restored from a saved fraction can
+    /// grow by a point each time.
+    var roundedToPoints: CGRect {
+        CGRect(x: minX.rounded(), y: minY.rounded(), width: width.rounded(), height: height.rounded())
+    }
+}
+
 /// While Workspace is on screen it decides what the window-level keys do. See
 /// `TerminalWindow.sendEvent`.
 @MainActor
@@ -442,7 +451,7 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         originX = min(originX, usable.maxX - width)
         originY = min(originY, usable.maxY - height)
         cascadeIndex += 1
-        return CGRect(x: originX, y: originY, width: width, height: height).integral
+        return CGRect(x: originX, y: originY, width: width, height: height).roundedToPoints
     }
 
     private func applyInitialFrameIfNeeded(_ window: WorkspaceWindowView) {
@@ -773,7 +782,7 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         let frame = CGRect(x: bounds.width * fractions.minX,
                            y: bounds.height * fractions.minY,
                            width: bounds.width * fractions.width,
-                           height: bounds.height * fractions.height).integral
+                           height: bounds.height * fractions.height).roundedToPoints
         window.frame = clampedFrame(frame, for: window)
         window.preferredSize = window.frame.size
         window.frameDidChangeHandler?()
@@ -1013,7 +1022,7 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         let height = min(max(value("height") > 0 ? value("height") * usable.height : window.preferredSize.height, 1), usable.height)
         let originX = min(max(usable.minX + value("x") * usable.width, usable.minX), usable.maxX - width)
         let originY = min(max(usable.minY + value("y") * usable.height, usable.minY), usable.maxY - height)
-        let frame = CGRect(x: originX, y: originY, width: width, height: height).integral
+        let frame = CGRect(x: originX, y: originY, width: width, height: height).roundedToPoints
         window.frame = frame
         window.preferredSize = frame.size
         window.didApplyInitialFrame = true

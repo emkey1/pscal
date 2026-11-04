@@ -346,8 +346,8 @@ final class WorkspaceWindowView: UIView, UIGestureRecognizerDelegate {
         }
         frame.size.width = min(width, superview.bounds.width - frame.minX)
         frame.size.height = min(height, superview.bounds.height - frame.minY)
-        self.frame = frame.integral
-        preferredSize = frame.size
+        self.frame = frame.roundedToPoints
+        preferredSize = self.frame.size
         frameDidChangeHandler?()
         recognizer.setTranslation(.zero, in: superview)
     }
@@ -363,14 +363,14 @@ final class WorkspaceWindowView: UIView, UIGestureRecognizerDelegate {
         if zoomedToFullscreen {
             guard !restoreFrameBeforeZoom.isNull, !restoreFrameBeforeZoom.isEmpty else { return }
             zoomedToFullscreen = false
-            let restored = roundedOrigin(restoreFrameBeforeZoom.integral)
+            let restored = restoreFrameBeforeZoom.roundedToPoints
             frame = restored
             preferredSize = restored.size
             // Only on the way back down: a handler that saves the position on every change
             // would otherwise record the full-screen frame as the window's normal spot.
             frameDidChangeHandler?()
         } else {
-            restoreFrameBeforeZoom = roundedOrigin(frame.integral)
+            restoreFrameBeforeZoom = frame.roundedToPoints
             zoomedToFullscreen = true
             var fullscreen = superview.bounds
             // In an iPadOS 26 window the system's controls sit over the top-leading corner,
