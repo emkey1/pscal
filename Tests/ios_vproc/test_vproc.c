@@ -301,9 +301,6 @@ static void assert_redirected_stdio_is_closed_once(void) {
         assert(vprocClose(closed, target) == 0);
         assert_closed_stdio_number_survives_destroy(closed, old_host_fd, p[0]);
 
-        if (target == STDIN_FILENO) {
-            continue; /* vprocDup2 keeps the controlling stdin open. */
-        }
         /* The new entry takes the lowest free number. Leave one below the old
          * entry's, or it takes the old number and nothing is left to close twice. */
         int lower = vprocHostDup(p[0]);
@@ -352,6 +349,43 @@ static void assert_stdio_replaced_by_inproc_pipe_is_closed_once(void) {
     }
     vprocHostClose(p[0]);
     vprocHostClose(p[1]);
+}
+
+static int count_open_host_fds(void) {
+    int count = 0;
+    for (int fd = 0; fd < 1024; ++fd) {
+        if (fcntl(fd, F_GETFD) != -1) {
+            count++;
+        }
+    }
+    return count;
+}
+
+/* `cat < f`, as the shell does it: stdin replaced, then put back through both restores. Each round
+ * used to leave 2 or 3 descriptors, and a loop of them ran out after about 116 rounds. */
+static void assert_replacing_stdin_leaves_no_descriptor(void) {
+    int at_start = count_open_host_fds();
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    int saved = vprocDup(vp, STDIN_FILENO);
+    assert(saved >= 0);
+    int before = count_open_host_fds();
+    for (int round = 0; round < 16; ++round) {
+        assert(vprocDup2(vp, STDERR_FILENO, STDIN_FILENO) == STDIN_FILENO);
+        assert(vprocRestoreHostFd(vp, STDIN_FILENO, vprocTranslateFd(vp, saved)) == STDIN_FILENO);
+        assert(vprocDup2(vp, saved, STDIN_FILENO) == STDIN_FILENO);
+    }
+    assert(count_open_host_fds() == before);
+
+    /* The source can be the descriptor being replaced. */
+    int host = vprocTranslateFd(vp, STDIN_FILENO);
+    assert(vprocRestoreHostFd(vp, STDIN_FILENO, host) == STDIN_FILENO);
+    assert(fcntl(vprocTranslateFd(vp, STDIN_FILENO), F_GETFD) != -1);
+    assert(count_open_host_fds() == before);
+
+    assert(vprocClose(vp, saved) == 0);
+    vprocDestroy(vp);
+    assert(count_open_host_fds() == at_start);
 }
 
 static void assert_pipe_cross_vproc(void) {
@@ -8040,6 +8074,8 @@ int main(void) {
     assert_redirected_stdio_is_closed_once();
     fprintf(stderr, "TEST stdio_replaced_by_inproc_pipe_is_closed_once\n");
     assert_stdio_replaced_by_inproc_pipe_is_closed_once();
+    fprintf(stderr, "TEST replacing_stdin_leaves_no_descriptor\n");
+    assert_replacing_stdin_leaves_no_descriptor();
     fprintf(stderr, "TEST pipe_cross_vproc\n");
     assert_pipe_cross_vproc();
     fprintf(stderr, "TEST socket_closed_on_destroy\n");
