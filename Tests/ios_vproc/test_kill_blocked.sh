@@ -137,5 +137,30 @@ if ! cmp -s "$T/f" "$T/o"; then
     fails=$((fails + 1))
 fi
 
+# A job killed while it starts a pipeline: a stage thread was using the job's vproc as the job
+# destroyed it. In the app that ends every tab. It takes about 3 runs in 100, so it needs many.
+n=$((n + 1))
+T="$BASE/r$n"
+mkdir -p "$T"
+printf '%s\n' '( while :; do echo hi | cat > /dev/null; done ) & p=$!; sleep 0.02; kill $p; wait $p; echo "wait $?"' > "$T/t.sh"
+bad=0
+last=
+i=0
+while [ $i -lt 300 ]; do
+    i=$((i + 1))
+    (cd "$T" && PATH_TRUNCATE="$T" HOME="$T" TMPDIR="$T" /usr/bin/perl -e 'alarm 15; exec @ARGV' "$EXE" --no-cache t.sh > out.txt 2>/dev/null < /dev/null)
+    rc=$?
+    if [ "$rc" != 0 ] || [ "$(cat "$T/out.txt")" != "wait 143" ]; then
+        bad=$((bad + 1))
+        last="status $rc"
+    fi
+done
+if [ "$bad" != 0 ]; then
+    echo "FAIL killed_starting_pipeline: $bad of 300, the last with $last"
+    fails=$((fails + 1))
+else
+    echo "ok killed_starting_pipeline"
+fi
+
 echo "kill_blocked: $n cases, $fails failed"
 [ "$fails" -eq 0 ]
