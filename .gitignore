@@ -6,7 +6,6 @@ links
 Misc/old
 .gitignore
 .bin
-third-party/SDL/*
 Tests/edge_input.txt
 Tests/vm_bench/vm_bench_io_scratch.txt
 Tests/readln_test.txt

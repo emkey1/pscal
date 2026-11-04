@@ -62,7 +62,7 @@ fi
 /bin/cp -f "${PROJECT_DIR}/../LICENSE" "${license_dest}/pscal_LICENSE.txt" || true
 /bin/cp -f "${PROJECT_DIR}/../third-party/openssl-3.6.0/LICENSE.txt" "${license_dest}/openssl_LICENSE.txt" || true
 /bin/cp -f "${PROJECT_DIR}/../third-party/curl-8.17.0/COPYING" "${license_dest}/curl_LICENSE.txt" || true
-/bin/cp -f "${PROJECT_DIR}/../third-party/SDL/LICENSE.txt" "${license_dest}/sdl_LICENSE.txt" || true
+/bin/cp -f "${PROJECT_DIR}/../third-party/SDL2/SDL2-2.32.10/LICENSE.txt" "${license_dest}/sdl_LICENSE.txt" || true
 /bin/cp -f "${PROJECT_DIR}/../third-party/nextvi/LICENSE" "${license_dest}/nextvi_LICENSE.txt" || true
 /bin/cp -f "${PROJECT_DIR}/../third-party/micro/LICENSE" "${license_dest}/micro_LICENSE.txt" || true
 /bin/cp -f "${PROJECT_DIR}/../third-party/openssh-10.6p2/LICENCE" "${license_dest}/openssh_LICENSE.txt" || true
