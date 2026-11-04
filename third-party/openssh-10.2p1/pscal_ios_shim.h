@@ -4,6 +4,7 @@
 #ifdef PSCAL_TARGET_IOS
 #include <dirent.h>
 #include <errno.h>
+#include <libgen.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -87,6 +88,12 @@ int pscal_ios_execlp(const char *file, const char *arg, ...);
 # define execl(...) pscal_ios_execl(__VA_ARGS__)
 # define execle(...) pscal_ios_execle(__VA_ARGS__)
 # define execlp(...) pscal_ios_execlp(__VA_ARGS__)
+
+/* libc answers these in one buffer for the whole app, and scp sends the name it gets. */
+# undef basename
+# undef dirname
+# define basename(path) vprocBasenameShim((path))
+# define dirname(path) vprocDirnameShim((path))
 
 # define read(...) pscal_ios_read(__VA_ARGS__)
 # define open(...) pscal_ios_open(__VA_ARGS__)

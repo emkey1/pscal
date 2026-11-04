@@ -57,6 +57,14 @@ if nm -u "$BUILD_DIR/bin/exsh" 2>/dev/null | grep -x _strtok > /dev/null; then
     echo "FAIL ios_host_statics: exsh calls strtok, whose place in a string is process-wide; use strtok_r"
     status=1
 fi
+# The same for what answers in one buffer of libc's: the macros in vproc_shim.h and pscal_ios_shim.h
+# keep these from libc, so a reference means a source got past them. hcreate has one table per process.
+for name in _basename _dirname _hcreate _hsearch _hdestroy; do
+    if nm -u "$BUILD_DIR/bin/exsh" 2>/dev/null | grep -x "$name" > /dev/null; then
+        echo "FAIL ios_host_statics: exsh calls ${name#_}, whose state is process-wide"
+        status=1
+    fi
+done
 
 [ "$status" -eq 0 ] && echo "PASS ios_host_statics"
 exit "$status"
