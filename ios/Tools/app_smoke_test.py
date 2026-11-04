@@ -1157,6 +1157,9 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     ("ssh_stop_int", f"ssh -p {SILENT_PORT} -o BatchMode=yes -o ConnectTimeout=20 -o ConnectionAttempts=1 127.0.0.1 echo x > /dev/null 2>&1 & p=$!; sleep 2; kill -INT $p; wait $p; echo \"rc=$?\" {R}", "rc=130\n"),
     ("ssh_stop_term", f"ssh -p {SILENT_PORT} -o BatchMode=yes -o ConnectTimeout=20 -o ConnectionAttempts=1 127.0.0.1 echo x > /dev/null 2>&1 & p=$!; sleep 2; kill -TERM $p; wait $p; echo \"rc=$?\" {R}", "rc=143\n"),
     ("ssh_after_stops", f"ssh -p 1 -o BatchMode=yes 127.0.0.1 echo x > smoke/ssha 2>&1; echo \"rc=$?\" {R}; grep -c 'Connection refused' smoke/ssha {A}", "rc=255\n1\n"),
+    # rsync reaches ssh by exec and sits in poll. ^C reaches the group, kill -INT only rsync, which has to end its ssh. Neither looked: rsync waited out ConnectTimeout.
+    ("rsync_stop_int", f"rsync -a -e 'ssh -p {SILENT_PORT} -o BatchMode=yes -o ConnectTimeout=20 -o ConnectionAttempts=1' smoke/rs/a 127.0.0.1:x > smoke/rstop 2>&1 & p=$!; sleep 2; kill -INT $p; wait $p; echo \"rc=$?\" {R}; wc -c < smoke/rstop {A}", "rc=130\n0\n"),
+    ("rsync_after_stop", f"rsync -a -e 'ssh -p 1 -o BatchMode=yes' smoke/rs/a 127.0.0.1:x > smoke/rsa 2>&1; grep -c 'Connection refused' smoke/rsa {R}", "1\n"),
     # A program's file builtins follow cd and take the app's absolute paths. They used the
     # process's directory, with no error. Each directory has its own copy of each name, so
     # vmshow tells which copies were read, written, renamed and erased.

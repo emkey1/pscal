@@ -480,6 +480,52 @@ static void assertKillEndsATaskAndWaitReturns(void) {
     vprocDestroy(vp);
 }
 
+static void assertExecCaughtSignalHandler(int signo) {
+    (void)signo;
+}
+
+/* As exec does: a handler the parent caught a signal with is gone, so the default action ends the
+ * child. It stayed in the host's connect() or poll() before, where nothing ran the handler. */
+static void assertExecResetsACaughtSignal(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+    struct sigaction caught;
+    memset(&caught, 0, sizeof(caught));
+    sigemptyset(&caught.sa_mask);
+    caught.sa_handler = assertExecCaughtSignalHandler;
+    assert(vprocSigaction(vprocPid(vp), SIGINT, &caught, NULL) == 0);
+
+    gScpStubRunning = 0;
+    sigjmp_buf env;
+    if (sigsetjmp(env, 1) == 0) {
+        assert(vprocSimulatedForkWithEnv("fork-int", true, &env) == 0);
+        pscal_ios_execvp("scp", (char *const[]){"scp", NULL});
+        assert(!"exec should resume the parent");
+    }
+    pid_t child = vprocSimulatedForkParentResume();
+    assert(child > 0);
+    for (int i = 0; i < 500 && !gScpStubRunning; ++i) {
+        usleep(10000);
+    }
+    assert(gScpStubRunning);
+
+    assert(pscal_ios_kill(child, SIGINT) == 0);
+    int status = 0;
+    pid_t waited = 0;
+    for (int i = 0; i < 100 && waited == 0; ++i) {
+        waited = pscal_ios_waitpid(child, &status, WNOHANG);
+        if (waited == 0) {
+            usleep(10000);
+        }
+    }
+    assert(waited == child);
+    assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGINT);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
 /* A real child is the host's to wait for, and kill never reaches it: its number isn't a task's. */
 static void assertKillStaysOffTheHost(void) {
     char *const argv[] = {"sleep", "1", NULL};
@@ -542,6 +588,9 @@ int main(void) {
 
     fprintf(stderr, "TEST pscal_ios_kill_ends_a_task_and_wait_returns\n");
     assertKillEndsATaskAndWaitReturns();
+
+    fprintf(stderr, "TEST pscal_ios_exec_resets_a_caught_signal\n");
+    assertExecResetsACaughtSignal();
 
     fprintf(stderr, "TEST pscal_ios_kill_stays_off_the_host\n");
     assertKillStaysOffTheHost();

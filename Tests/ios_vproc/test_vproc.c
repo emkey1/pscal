@@ -5336,6 +5336,53 @@ static void assert_location_read_returns_full_line_and_eof(void) {
     vprocDestroy(vp);
 }
 
+static void assert_poll_interrupted_handler(int signo) {
+    (void)signo;
+}
+
+static void *assert_poll_interrupted_killer(void *arg) {
+    usleep(200000);
+    (void)vprocKillShim((pid_t)(intptr_t)arg, SIGINT);
+    return NULL;
+}
+
+/* On host descriptors alone there's no wake pipe. It waited out its whole timeout, or for ever. */
+static void assert_poll_on_host_fd_returns_eintr_for_a_signal(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+    struct sigaction caught;
+    memset(&caught, 0, sizeof(caught));
+    sigemptyset(&caught.sa_mask);
+    caught.sa_handler = assert_poll_interrupted_handler;
+    assert(vprocSigaction(vprocPid(vp), SIGINT, &caught, NULL) == 0);
+
+    int sv[2];
+    assert(vprocSocketpairShim(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    assert(vprocTranslateFd(vp, sv[0]) >= 0);
+
+    pthread_t killer;
+    assert(vprocHostPthreadCreate(&killer, NULL, assert_poll_interrupted_killer,
+                                  (void *)(intptr_t)vprocPid(vp)) == 0);
+    struct pollfd pfd = { .fd = sv[0], .events = POLLIN, .revents = 0 };
+    long long start_ms = monotonic_ms();
+    errno = 0;
+    int ready = vprocPollShim(&pfd, 1, 10000);
+    int poll_errno = errno;
+    long long waited_ms = monotonic_ms() - start_ms;
+    pthread_join(killer, NULL);
+    assert(ready == -1);
+    assert(poll_errno == EINTR);
+    /* A wait that runs out returns EINTR as well, so only the time shows it was ended. */
+    assert(waited_ms < 5000);
+
+    assert(vprocCloseShim(sv[0]) == 0);
+    assert(vprocCloseShim(sv[1]) == 0);
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
 static void assert_location_poll_wakes_on_payload(void) {
     VProc *vp = vprocCreate(NULL);
     assert(vp);
@@ -10260,6 +10307,8 @@ int main(void) {
     assert_two_pollers_on_a_pipe_keep_moving();
     fprintf(stderr, "TEST kernel_mounts_from_fstab_at_startup\n");
     assert_kernel_mounts_from_fstab_at_startup();
+    fprintf(stderr, "TEST poll_on_host_fd_returns_eintr_for_a_signal\n");
+    assert_poll_on_host_fd_returns_eintr_for_a_signal();
     fprintf(stderr, "TEST empty_path_names_nothing\n");
     assert_empty_path_names_nothing();
     fprintf(stderr, "TEST vproc_stack_has_no_limit\n");
