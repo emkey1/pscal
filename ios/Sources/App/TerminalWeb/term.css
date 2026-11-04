@@ -1,0 +1,20 @@
+/* Copyright 2026 Mike Miller */
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/* This styles the outer document only. hterm draws inside an iframe that these rules
+   can't reach; what it needs in there is set through a preference in term.js. */
+
+html,
+body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+#terminal {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
