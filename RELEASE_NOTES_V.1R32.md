@@ -48,6 +48,7 @@ Status: Not yet uploaded. Not yet run on a physical device.
 - What exsh starts sees only exported variables, as in bash: `x=1; env` no longer lists `x`, and a big variable no longer makes later commands fail with `Argument list too long`. On iOS the same goes for applets, frontends and scripts, `X=1 cmd | ...` shows `X` only to `cmd`, and a background `X=1 cmd &` sees it. What a program sets stays with that program.
 - `y=$(echo "$v")`, `( ... )`, `{ ...; } | cat` and `&` inside a function see the function's locals. A substitution came back empty on every platform.
 - `wait` finds any job this shell started, however long ago it ended, in any order and as often as asked. `( exit 3 ) & a=$!; ( exit 4 ) & b=$!; sleep 0.2; wait $a` gave 127 and printed `invalid job` twice. A number is now a pid and `%n` a job, several operands work, and `wait` with no operands gives 0 and forgets every job. As in bash, a prompt reports what has ended: its `%n` goes and `wait -n` skips it, and its pid still works.
+- A line typed while a command runs now runs at the next prompt, and lines pasted together all run. On a plain build the typed line was lost, and of three pasted lines only the first ran. Input a program leaves unread reaches the prompt too, as in bash.
 
 ## Known Issues
 - A failed redirection's message says `exec:` even when no `exec` was involved.
