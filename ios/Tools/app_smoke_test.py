@@ -296,6 +296,15 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("shebang_frontend_sub", f"x=$(Examples/clike/base/hello); echo \"got $x\" {R}", "got Hello World!\n"),
     ("shebang_frontend_pipe", f"Examples/clike/base/hello | cat {R}", "Hello World!\n"),
     ("shebang_frontend_time", f"time Examples/clike/base/hello | head -1 {R}", "Hello World!\n"),
+    # time is a keyword, so it times a function too, and the applet stays one quote away.
+    ("time_function", f"tj() {{ echo in; return 3; }}; {{ {{ time tj; }} 2>/dev/null; echo $?; }} {R}", "in\n3\n"),
+    ("time_applet_quoted", f"\\time Examples/clike/base/hello 2>/dev/null | head -1 {R}", "Hello World!\n"),
+    # return in a trap's text ends the function it broke into, and a later eval does not end anything.
+    ("return_err_trap", f"rt() {{ trap 'return 1' ERR; false; echo no; }}; {{ rt; echo $?; trap - ERR; eval 'echo later'; }} {R}", "1\nlater\n"),
+    # This file is sourced, so a return here would end the whole run. Each shell or file here has its own.
+    ("return_outside", f"exsh -c 'eval return 2>/dev/null; echo after' {R}", "after\n"),
+    ("return_in_source", f"printf 'eval return\\necho no\\n' > smoke/rs.sh; {{ . smoke/rs.sh; echo after; }} {R}", "after\n"),
+    ("exit_trap_redirected", f"( trap 'echo in-trap' EXIT; {{ exit 3; }} > smoke/et.txt; echo no ) {R}; echo \"rc=$?\" {A}; cat smoke/et.txt {A}", "rc=3\nin-trap\n"),
     # Slots used as host descriptors: fchdir left find in the first directory, and
     # fopen on a device read whatever host descriptor had the slot's number.
     ("find_execdir", f"find smoke/sub smoke/sub2 -type f -execdir pwd \\; {R}", "/home/smoke/sub\n/home/smoke/sub2\n"),

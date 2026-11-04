@@ -115,6 +115,7 @@ RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_posixly_correct_aliases
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_return_in_loop
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_read_write_redirect
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_return_trap
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only fstat_regular_file_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only who_file_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only jobspec
