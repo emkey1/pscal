@@ -525,9 +525,11 @@ final class TerminalKeyInputView: UITextView {
         super.pressesCancelled(presses, with: event)
     }
 
+    /// The xterm cursor-key sequence for `direction` ("A" up, "B" down,
+    /// "C" right, "D" left): SS3 form while the application has set DECCKM,
+    /// CSI form otherwise.
     private func arrowSequence(_ direction: String) -> String {
-        let prefix = applicationCursorEnabled ? "\u{1B}O" : "\u{1B}["
-        return prefix + direction
+        return (applicationCursorEnabled ? "\u{1B}O" : "\u{1B}[") + direction
     }
 
     @objc private func handleRepeatCommand(_ command: UIKeyCommand) {
