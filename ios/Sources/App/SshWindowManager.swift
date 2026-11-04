@@ -64,6 +64,8 @@ final class TerminalTabManager: ObservableObject {
     private var pendingStartupCommandsBySessionId: [UInt64: String] = [:]
     private var activeSdlTabId: UInt64?
     private var selectedAppearanceObserver: AnyCancellable?
+    /// Set while Workspace is on screen. It decides what the window-level keys do.
+    weak var keyRouter: TerminalKeyRouting?
     private func scheduleFocusDance(primary: UInt64, secondary: UInt64) {
         // Avoid tab switching; just reassert focus on the selected tab a few times.
         let base: TimeInterval = 0.50
@@ -1032,6 +1034,22 @@ private struct TerminalTabBar: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("App Diagnostics")
                 .accessibilityHint("Runs local diagnostics for the iOS and iPadOS app")
+
+                Button(action: { TerminalRootViewController.activeInstance?.enterWorkspace() }) {
+                    Image(systemName: "macwindow.on.rectangle")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Workspace")
+                .accessibilityHint("Shows your sessions as movable windows on a desktop")
+                .accessibilityIdentifier("workspace.enter")
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
@@ -1085,7 +1103,7 @@ private struct TerminalTabButton: View {
     }
 }
 
-private struct SdlTabView: View {
+struct SdlTabView: View {
     let onReturn: () -> Void
     let onPromote: () -> Void
 

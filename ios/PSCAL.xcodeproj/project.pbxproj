@@ -42,6 +42,10 @@
 		5FFFD00C3FFAA00000AAA001 /* TerminalSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */; };
 		5FFFD00E3FFAA00000AAA001 /* TerminalUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */; };
 		5FFFD0103FFAA00000AAA001 /* TerminalRootViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */; };
+		5FFFD2013FFAA00000AAA001 /* WorkspaceWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD2003FFAA00000AAA001 /* WorkspaceWindowView.swift */; };
+		5FFFD2033FFAA00000AAA001 /* WorkspaceTerminalTabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD2023FFAA00000AAA001 /* WorkspaceTerminalTabs.swift */; };
+		5FFFD2053FFAA00000AAA001 /* WorkspaceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD2043FFAA00000AAA001 /* WorkspaceViewController.swift */; };
+		5FFFD2073FFAA00000AAA001 /* WorkspaceTestHooks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD2063FFAA00000AAA001 /* WorkspaceTestHooks.swift */; };
 		5FFFD0123FFAA00000AAA001 /* TerminalSessionMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0113FFAA00000AAA001 /* TerminalSessionMetrics.swift */; };
 		6A0D10023A00000100ABC001 /* AppDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A0D10013A00000100ABC001 /* AppDiagnosticsView.swift */; };
 /* End PBXBuildFile section */
@@ -87,6 +91,10 @@
 		5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSettingsView.swift; sourceTree = "<group>"; };
 		5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalUtils.swift; sourceTree = "<group>"; };
 		5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalRootViewController.swift; sourceTree = "<group>"; };
+		5FFFD2003FFAA00000AAA001 /* WorkspaceWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceWindowView.swift; sourceTree = "<group>"; };
+		5FFFD2023FFAA00000AAA001 /* WorkspaceTerminalTabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceTerminalTabs.swift; sourceTree = "<group>"; };
+		5FFFD2043FFAA00000AAA001 /* WorkspaceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceViewController.swift; sourceTree = "<group>"; };
+		5FFFD2063FFAA00000AAA001 /* WorkspaceTestHooks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceTestHooks.swift; sourceTree = "<group>"; };
 		5FFFD0113FFAA00000AAA001 /* TerminalSessionMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionMetrics.swift; sourceTree = "<group>"; };
 		6A0D10013A00000100ABC001 /* AppDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDiagnosticsView.swift; sourceTree = "<group>"; };
 		DEAD00012C0FF00D00DEAD00 /* src */ = {isa = PBXFileReference; lastKnownFileType = folder; name = src; path = ../src; sourceTree = "<group>"; };
@@ -170,6 +178,10 @@
 				5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */,
 				5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */,
 				5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */,
+				5FFFD2003FFAA00000AAA001 /* WorkspaceWindowView.swift */,
+				5FFFD2023FFAA00000AAA001 /* WorkspaceTerminalTabs.swift */,
+				5FFFD2043FFAA00000AAA001 /* WorkspaceViewController.swift */,
+				5FFFD2063FFAA00000AAA001 /* WorkspaceTestHooks.swift */,
 				5FFFD0113FFAA00000AAA001 /* TerminalSessionMetrics.swift */,
 				14F2C4F72BE1B12300DE9FD9 /* TerminalInputBridge.swift */,
 				14A5C5F32BE13E6500CEF0B9 /* TerminalBuffer.swift */,
@@ -369,6 +381,10 @@
 				5FFFD00C3FFAA00000AAA001 /* TerminalSettingsView.swift in Sources */,
 				5FFFD00E3FFAA00000AAA001 /* TerminalUtils.swift in Sources */,
 				5FFFD0103FFAA00000AAA001 /* TerminalRootViewController.swift in Sources */,
+				5FFFD2013FFAA00000AAA001 /* WorkspaceWindowView.swift in Sources */,
+				5FFFD2033FFAA00000AAA001 /* WorkspaceTerminalTabs.swift in Sources */,
+				5FFFD2053FFAA00000AAA001 /* WorkspaceViewController.swift in Sources */,
+				5FFFD2073FFAA00000AAA001 /* WorkspaceTestHooks.swift in Sources */,
 				5FFFD0123FFAA00000AAA001 /* TerminalSessionMetrics.swift in Sources */,
 				5F9A00322F00000100ABC001 /* HtermTerminalView.swift in Sources */,
 				6A0D10023A00000100ABC001 /* AppDiagnosticsView.swift in Sources */,

@@ -85,10 +85,15 @@ final class TerminalWindow: UIWindow {
 
     override func sendEvent(_ event: UIEvent) {
         if let pressesEvent = event as? UIPressesEvent {
-            if !terminalInputHasFirstResponder(), handleTerminalControlKey(pressesEvent) {
+            let router = TerminalTabManager.shared.keyRouter
+            if let router, router.handleWindowPresses(pressesEvent) {
                 return
             }
-            if handleCommandKey(pressesEvent) {
+            let controlKeysGoToSelected = router?.terminalControlKeysGoToSelected ?? true
+            if controlKeysGoToSelected, !terminalInputHasFirstResponder(), handleTerminalControlKey(pressesEvent) {
+                return
+            }
+            if router == nil, handleCommandKey(pressesEvent) {
                 return
             }
         }
@@ -217,9 +222,21 @@ final class TerminalWindow: UIWindow {
 /// UIKit shell that hosts the SwiftUI TerminalView and relies on keyboardLayoutGuide
 /// to keep the terminal aligned with the on-screen keyboard.
 final class TerminalRootViewController: UIViewController {
+    /// A second iPad scene shares the one `TerminalTabManager`, and a session has one
+    /// terminal view, so one scene at a time holds Workspace.
+    private static weak var workspaceOwner: TerminalRootViewController?
+    private static let instances = NSHashTable<TerminalRootViewController>.weakObjects()
+
     private let hostingController = UIHostingController(rootView: TerminalTabsRootView())
     private var keyboardObservers: [NSObjectProtocol] = []
     private var lastKeyboardOverlap: CGFloat = 0
+    private(set) var workspace: WorkspaceViewController?
+
+    /// The root the person is looking at.
+    static var activeInstance: TerminalRootViewController? {
+        let all = instances.allObjects
+        return all.first { $0.view.window?.isKeyWindow == true } ?? all.first
+    }
 
     override var shouldAutorotate: Bool { return true }
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
@@ -252,7 +269,20 @@ final class TerminalRootViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        Self.instances.add(self)
+        installTabBar()
+        installKeyboardObservers()
+        WorkspaceTestHooks.installIfEnabled()
+        if ProcessInfo.processInfo.environment["PSCALI_WORKSPACE_START"] == "1" {
+            enterWorkspace()
+        }
+    }
 
+    deinit {
+        keyboardObservers.forEach { NotificationCenter.default.removeObserver($0) }
+    }
+
+    private func installTabBar() {
         addChild(hostingController)
         hostingController.view.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(hostingController.view)
@@ -266,11 +296,56 @@ final class TerminalRootViewController: UIViewController {
         ])
 
         hostingController.didMove(toParent: self)
-        installKeyboardObservers()
     }
 
-    deinit {
-        keyboardObservers.forEach { NotificationCenter.default.removeObserver($0) }
+    /// Workspace is another way of showing the same sessions, so moving between it and the
+    /// tab bar ends nothing.
+    func enterWorkspace() {
+        guard workspace == nil, Self.workspaceOwner == nil else { return }
+        Self.workspaceOwner = self
+        // Workspace handles the keyboard per window, and doesn't shrink as a whole.
+        additionalSafeAreaInsets.bottom = 0
+        lastKeyboardOverlap = 0
+        hostingController.willMove(toParent: nil)
+        hostingController.view.removeFromSuperview()
+        hostingController.removeFromParent()
+
+        let controller = WorkspaceViewController()
+        controller.leaveHandler = { [weak self] in
+            self?.leaveWorkspace()
+        }
+        addChild(controller)
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(controller.view)
+        NSLayoutConstraint.activate([
+            controller.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            controller.view.topAnchor.constraint(equalTo: view.topAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        controller.didMove(toParent: self)
+        workspace = controller
+        TerminalTabManager.shared.keyRouter = controller
+    }
+
+    func leaveWorkspace() {
+        guard let controller = workspace else { return }
+        TerminalTabManager.shared.keyRouter = nil
+        controller.tearDownWindows()
+        controller.willMove(toParent: nil)
+        controller.view.removeFromSuperview()
+        controller.removeFromParent()
+        workspace = nil
+        if Self.workspaceOwner === self {
+            Self.workspaceOwner = nil
+        }
+        // Next turn: the windows' terminal views are still leaving, and a session can only
+        // be attached to one terminal view.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.installTabBar()
+            NotificationCenter.default.post(name: .terminalInputFocusRequested, object: nil)
+        }
     }
 
     private func installKeyboardObservers() {
@@ -304,6 +379,7 @@ final class TerminalRootViewController: UIViewController {
     }
 
     private func updateKeyboardInset(overlap: CGFloat) {
+        guard workspace == nil else { return }
         // The safe area already includes the inset set here, and a repeated notification mustn't count it twice.
         let baseBottomInset = view.safeAreaInsets.bottom - additionalSafeAreaInsets.bottom
         let extra = max(0, overlap - baseBottomInset)
