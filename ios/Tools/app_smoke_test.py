@@ -1120,6 +1120,49 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("vm_tiny_cd", f'cd smoke; tiny p.tiny p3.pbc > {O} 2>&1; cd "$HOME"; ls smoke/p3.pbc {A}', "smoke/p3.pbc\n"),
     # Paths that are not plain files in the app's tree keep working.
     ("vm_devices_home", f'vmfiles; cd smoke/v2; pascal ../vmdev.pas > {O} 2>&1; cd "$HOME"', "urandom 0\nzero 0\nnull 0\ntty 0\nhome in1\n"),
+    # A program's imports follow cd too. They used the process's directory, which here is $HOME,
+    # so with a copy of each name there CLike, Rea, Aether and Pascal all compiled that copy with
+    # no error. Each row prints which copy it compiled: H is $HOME's, 1 and 2 are smoke/i1 and i2.
+    ("im_clike", f'imfiles; cd smoke/i1; clike --no-cache ../imp.clike > {O} 2>&1; cd "$HOME"', "clike 1\n"),
+    ("im_clike_other_dir", f'imfiles; cd smoke/i2; clike --no-cache ../imp.clike > {O} 2>&1; cd "$HOME"', "clike 2\n"),
+    ("im_clike_include", f'imfiles; cd smoke/i1; clike --no-cache inc.clike > {O} 2>&1; cd "$HOME"', "include 1\n"),
+    ("im_rea", f'imfiles; cd smoke/i1; rea --no-cache ../imp.rea > {O} 2>&1; cd "$HOME"', "rea 1\n"),
+    ("im_rea_other_dir", f'imfiles; cd smoke/i2; rea --no-cache ../imp.rea > {O} 2>&1; cd "$HOME"', "rea 2\n"),
+    ("im_aether", f'imfiles; cd smoke/i1; aether --no-cache ../imp.aether > {O} 2>&1; cd "$HOME"', "aether 1\n"),
+    ("im_aether_other_dir", f'imfiles; cd smoke/i2; aether --no-cache ../imp.aether > {O} 2>&1; cd "$HOME"', "aether 2\n"),
+    # Pascal searches no directory by itself; a relative library directory starts from cd.
+    ("im_pascal", f'imfiles; cd smoke/i1; PASCAL_LIB_DIR=plib pascal --no-cache ../imp.pas > {O} 2>&1; cd "$HOME"', "pascal 1\n"),
+    ("im_pascal_other_dir", f'imfiles; cd smoke/i2; PASCAL_LIB_DIR=plib pascal --no-cache ../imp.pas > {O} 2>&1; cd "$HOME"', "pascal 2\n"),
+    # An absolute path is under the app's root, as it is to a redirection, whatever cd said.
+    ("im_abs_clike", f'imfiles; cd smoke/i2; clike --no-cache ../abs.clike > {O} 2>&1; cd "$HOME"', "clike 1\n"),
+    ("im_abs_rea", f'imfiles; cd smoke/i2; rea --no-cache ../abs.rea > {O} 2>&1; cd "$HOME"', "rea 1\n"),
+    ("im_abs_aether", f'imfiles; cd smoke/i2; aether --no-cache ../abs.aether > {O} 2>&1; cd "$HOME"', "aether 1\n"),
+    ("im_abs_pascal", f'imfiles; cd smoke/i2; PASCAL_LIB_DIR=/home/smoke/i1/plib pascal --no-cache ../imp.pas > {O} 2>&1; cd "$HOME"', "pascal 1\n"),
+    # The routes a frontend starts by: pascal, clike and rea on a worker thread, aether on the shell's.
+    ("im_subshell", f'imfiles; ( cd smoke/i1; clike --no-cache ../imp.clike > {O} 2>&1 )', "clike 1\n"),
+    ("im_pipeline_first", f'imfiles; cd smoke/i1; clike --no-cache ../imp.clike | cat > {O} 2>&1; cd "$HOME"', "clike 1\n"),
+    ("im_pipeline_last", f'imfiles; cd smoke/i1; echo x | rea --no-cache ../imp.rea > {O} 2>&1; cd "$HOME"', "rea 1\n"),
+    ("im_background", f'imfiles; cd smoke/i1; clike --no-cache ../imp.clike > {O} 2>/dev/null & wait $!; cd "$HOME"', "clike 1\n"),
+    ("im_substitution", f'imfiles; cd smoke/i1; x=$(aether --no-cache ../imp.aether); cd "$HOME"; echo "$x" {R}', "aether 1\n"),
+    ("im_sh_c_clike", f"imfiles; sh -c 'cd smoke/i1; clike --no-cache ../imp.clike' {R}", "clike 1\n"),
+    ("im_sh_c_rea", f"imfiles; sh -c 'cd smoke/i1; rea --no-cache ../imp.rea' {R}", "rea 1\n"),
+    ("im_sh_c_aether", f"imfiles; sh -c 'cd smoke/i1; aether --no-cache ../imp.aether' {R}", "aether 1\n"),
+    ("im_sh_c_pascal", f"imfiles; sh -c 'cd smoke/i1; PASCAL_LIB_DIR=plib pascal --no-cache ../imp.pas' {R}", "pascal 1\n"),
+    ("im_exsh_script", f"imfiles; printf 'cd smoke/i1\\nclike --no-cache ../imp.clike\\n' > smoke/ic1.sh; exsh smoke/ic1.sh {R}", "clike 1\n"),
+    ("im_script_shebang", f"imfiles; printf '#!/bin/exsh\\ncd smoke/i1\\nrea --no-cache ../imp.rea\\n' > smoke/ic2.sh; chmod +x smoke/ic2.sh; smoke/ic2.sh {R}", "rea 1\n"),
+    ("im_sourced", f"imfiles; printf 'cd smoke/i1\\nclike --no-cache ../imp.clike\\ncd \"$HOME\"\\n' > smoke/ic3.sh; . smoke/ic3.sh {R}", "clike 1\n"),
+    # With the cache on. The same source run from two directories, each reading its own import,
+    # and an edit: nothing here may print a copy other than the one the row's directory holds.
+    ("im_cache_two_dirs", f'imfiles; sleep 1; cd smoke/i1; clike ../imp.clike > {O} 2>&1; sleep 1; cd ../i2; clike ../imp.clike >> {O} 2>&1; cd "$HOME"', "clike 1\nclike 2\n"),
+    ("im_cache_two_dirs_rea", f'imfiles; sleep 1; cd smoke/i1; REA_CACHE=1 rea ../imp.rea > {O} 2>&1; sleep 1; cd ../i2; REA_CACHE=1 rea ../imp.rea >> {O} 2>&1; cd "$HOME"', "rea 1\nrea 2\n"),
+    ("im_cache_two_dirs_aether", f'imfiles; sleep 1; cd smoke/i1; REA_CACHE=1 aether ../imp.aether > {O} 2>&1; sleep 1; cd ../i2; REA_CACHE=1 aether ../imp.aether >> {O} 2>&1; cd "$HOME"', "aether 1\naether 2\n"),
+    ("im_cache_edit", f"imfiles; sleep 1; cd smoke/i1; clike ../imp.clike > {O} 2>&1; sleep 1; printf 'str who() {{ return \"clike 1b\"; }}\\n' > imx.clike; clike ../imp.clike >> {O} 2>&1; cd \"$HOME\"", "clike 1\nclike 1b\n"),
+    # The program itself: $HOME's entry must not run for a same-named program after cd.
+    ("im_cache_program", f"imfiles; clike same.clike > {O} 2>&1; sleep 1; clike same.clike >> {O} 2>&1; sleep 1; cd smoke/i1; clike same.clike >> {O} 2>&1; sleep 1; clike same.clike >> {O} 2>&1; cd \"$HOME\"; clike same.clike >> {O} 2>&1", "program H\nprogram H\nprogram 1\nprogram 1\nprogram H\n"),
+    ("im_cache_script", f"imfiles; exsh same.sh > {O} 2>&1; sleep 1; exsh same.sh >> {O} 2>&1; sleep 1; cd smoke/i1; exsh same.sh >> {O} 2>&1; sleep 1; exsh same.sh >> {O} 2>&1; cd \"$HOME\"; exsh same.sh >> {O} 2>&1", "script H\nscript H\nscript 1\nscript 1\nscript H\n"),
+    # The cache only loads when it can find the frontend's binary to compare with, so an old empty file stands in for it on PATH.
+    ("im_cache_loads", f"imfiles; mkdir -p bin; : > bin/clike; chmod +x bin/clike; sleep 1; cd smoke/i1; clike ../imp.clike > {O} 2>&1; sleep 1; clike --verbose ../imp.clike 2>&1 | grep -c 'Loaded cached' >> {O}; cd ../i2; clike ../imp.clike >> {O} 2>&1; cd \"$HOME\"; rm -f bin/clike", "clike 1\n1\nclike 2\n"),
+    ("im_cleanup", f"rm -rf imx.* inc.h same.* plib smoke/i1 smoke/i2; ls imx.clike 2>/dev/null | wc -l {R}", "0\n"),
     ("urandom_applet", f"head -c 4 /dev/urandom | wc -c {R}", "4\n"),
     # /dev/stdin, /dev/stdout, /dev/stderr, /dev/fd/N and /proc/self/fd/N act as on Linux: the links lead to
     # the command's own descriptors, and opening one opens the file again, with its own offset.
@@ -1522,6 +1565,14 @@ begin
   assign(f, 'vm.del'); erase(f); writeln('erase ', ioresult);
 end.
 """,
+    "imp.clike": "import \"imx.clike\";\nint main() { printf(\"%s\\n\", who()); return 0; }\n",
+    "inc.clike": "#include \"inc.h\"\nint main() { printf(\"%s\\n\", whoinc()); return 0; }\n",
+    "imp.rea": "#import \"imx.rea\";\nwriteln(who());\n",
+    "imp.aether": "use \"imx.aether\";\nfn main() -> Void { fx { println(who()); } ret; }\n",
+    "imp.pas": "program Imp;\nuses imxu;\nbegin\n  who;\nend.\n",
+    "abs.clike": "import \"/home/smoke/i1/imx.clike\";\nint main() { printf(\"%s\\n\", who()); return 0; }\n",
+    "abs.rea": "#import \"/home/smoke/i1/imx.rea\";\nwriteln(who());\n",
+    "abs.aether": "use \"/home/smoke/i1/imx.aether\";\nfn main() -> Void { fx { println(who()); } ret; }\n",
     "vmio.clike": """int main() {
     text f;
     str s;
@@ -1756,6 +1807,8 @@ SETUP = [
     # A tab's login is its own thread's work: wait for it, and a tab that never comes shows in the result.
     'waitusers() { i=0; while [ "$(users | wc -w)" -ne "$1" ] && [ $i -lt 150 ]; do sleep 0.1; i=$((i+1)); done; }',
     'waitfile() { i=0; while [ ! -s "$1" ] && [ $i -lt 150 ]; do sleep 0.1; i=$((i+1)); done; }',
+    # The same imported names in two directories and the start directory, for the im_ tests.
+    "imfiles() { rm -rf smoke/i1 smoke/i2 plib; rm -f imx.* inc.h same.*; for t in 1 2 H; do if [ $t = H ]; then d=.; else d=smoke/i$t; mkdir -p $d; fi; mkdir -p $d/plib; printf \"str who() { return \\\"clike $t\\\"; }\\n\" > $d/imx.clike; printf \"str whoinc() { return \\\"include $t\\\"; }\\n\" > $d/inc.h; printf \"module Imx { export str who() { return \\\"rea $t\\\"; } }\\n\" > $d/imx.rea; printf \"mod Imx { export fn who() -> Text { ret \\\"aether $t\\\"; } }\\n\" > $d/imx.aether; printf \"unit imxu;\\ninterface\\nprocedure who;\\nimplementation\\nprocedure who;\\nbegin\\n  writeln('pascal $t');\\nend;\\nend.\\n\" > $d/plib/imxu.pl; printf \"int main() { printf(\\\"program $t\\\\\\\\n\\\"); return 0; }\\n\" > $d/same.clike; printf 'echo script %s\\n' $t > $d/same.sh; done; cp smoke/inc.clike smoke/i1/inc.clike; }",
 ]
 
 
