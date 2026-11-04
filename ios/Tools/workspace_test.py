@@ -1038,6 +1038,25 @@ def run_terminal_tests(app, results):
     results.check("the suspend key stops a foreground command", bool(text) and "Stopped" in text, text)
     app.send("type", "%s kill %%1\\n" % root)
 
+    # A turn of the device settles on the size the view measures, and back again. In a tab the
+    # terminal fills the screen, so its grid must change shape. A size left behind fails here.
+    app.send("tabs")
+    wait_for(app, lambda d: d.get("mode") == "tabs")
+    time.sleep(1)
+    upright = size_of(app, root, "wt_rot_up")
+    app.send("rotate", "landscape")
+    time.sleep(2)
+    turned = size_of(app, root, "wt_rot_side")
+    results.check("a rotation gives the terminal a wider, shorter grid",
+                  upright and turned and turned[1] > upright[1] and turned[0] < upright[0], (upright, turned))
+    app.screenshot("terminal-landscape")
+    app.send("rotate", "portrait")
+    time.sleep(2)
+    back = size_of(app, root, "wt_rot_back")
+    results.check("rotating back restores the grid", back == upright, (upright, back))
+    app.send("workspace")
+    wait_for(app, lambda d: d.get("mode") == "workspace")
+
 
 def run_inert_control(app, results):
     """A launch without the variable must not answer. SIMCTL_CHILD_ variables stay in the

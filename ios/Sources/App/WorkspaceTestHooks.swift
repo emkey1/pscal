@@ -46,6 +46,7 @@ import UIKit
 ///   fm-refresh <id>                list its folder again
 ///   motepad-insert <id> <text>     type into that MotePad
 ///   motepad-save <id>              Save
+///   rotate <landscape|portrait>    turn the device
 ///   interrupt <tab>                what the app's own Ctrl-C does for that session
 ///   suspend <tab>                  what the app's own Ctrl-Z does for that session
 ///   music-play                     Music's play button
@@ -201,6 +202,11 @@ enum WorkspaceTestHooks {
             case .sdl:
                 return ["ok": false, "error": "not a terminal"]
             }
+        case "rotate":
+            guard #available(iOS 16.0, *), let scene = root.view.window?.windowScene else {
+                return ["ok": false, "error": "can't rotate here"]
+            }
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: args.first == "landscape" ? .landscapeRight : .portrait))
         case "interrupt", "suspend":
             guard let text = args.first, let tabID = UInt64(text), manager.tabs.contains(where: { $0.id == tabID }) else {
                 return ["ok": false, "error": "no such tab"]
