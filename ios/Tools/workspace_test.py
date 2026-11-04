@@ -979,6 +979,66 @@ def run_media_tests(app, results):
     results.check("the app answers after all of that", app.dump() is not None)
 
 
+def run_terminal_tests(app, results):
+    """What a program sees of its terminal from inside the app, as it would on Linux."""
+    dump = wait_for(app, lambda d: d.get("mode") == "workspace")
+    root = [t["id"] for t in dump["tabs"] if t["root"]][0]
+    window = next((w for w in dump["windows"] if hosted_info(w, root)), None)
+    results.check("the root window is found", window is not None, dump)
+    if not window:
+        return
+    app.send("focus", str(window["id"]))
+    app.send("frame", "%d 0.05 0.1 0.8 0.5" % window["id"])
+    time.sleep(1)
+
+    # A resize reaches the program in the foreground, not only the size it would read next.
+    app.clear_file("wt_winch")
+    app.clear_file("wt_winch_ready")
+    script = os.path.join(app.home, "wt_winch.sh")
+    with open(script, "w") as handle:
+        handle.write("trap 'stty size > ~/wt_winch; exit 0' WINCH\n"
+                     "echo up > ~/wt_winch_ready\n"
+                     "i=0\nwhile [ $i -lt 300 ]; do sleep 0.1; i=$((i + 1)); done\n")
+    ready = app.wait_file("wt_winch_ready", root, "exsh ~/wt_winch.sh")
+    results.check("a foreground script is running", ready == "up", ready)
+    app.send("frame", "%d 0.05 0.1 0.6 0.4" % window["id"])
+    text = app.wait_file("wt_winch", timeout=15)
+    results.check("a resize signals the foreground program", bool(text), text)
+    size = text.split() if text else []
+    results.check("the program reads the new size", len(size) == 2 and int(size[0]) > 0 and int(size[1]) > 0, text)
+    time.sleep(1)
+
+    # Resizing to the size it already has sends nothing, as on Linux.
+    app.clear_file("wt_winch_same")
+    with open(script, "w") as handle:
+        handle.write("trap 'echo extra >> ~/wt_winch_same' WINCH\n"
+                     "echo up > ~/wt_winch_ready2\ni=0\nwhile [ $i -lt 30 ]; do sleep 0.1; i=$((i + 1)); done\n"
+                     "echo done >> ~/wt_winch_same\n")
+    app.clear_file("wt_winch_ready2")
+    ready = app.wait_file("wt_winch_ready2", root, "exsh ~/wt_winch.sh")
+    frame = window_info(app.dump(), window["id"])["frame"]
+    surface = app.dump()["surface"]
+    app.send("frame", "%d %f %f %f %f" % (window["id"], frame[0] / surface[0], frame[1] / surface[1], frame[2] / surface[0], frame[3] / surface[1]))
+    text = app.wait_file("wt_winch_same", timeout=15)
+    results.check("a resize to the same size sends no signal", ready == "up" and text == "done", text)
+
+    # Ctrl-Z and Ctrl-C through the host's own calls, which now send key bytes.
+    app.clear_file("wt_ctrl_c")
+    app.send("type", "%s sleep 20; echo $? > ~/wt_ctrl_c\\n" % root)
+    time.sleep(2)
+    app.send("interrupt", root)
+    text = app.wait_file("wt_ctrl_c", timeout=10)
+    results.check("the interrupt key ends a foreground command", text == "130", text)
+    app.clear_file("wt_ctrl_z")
+    app.send("type", "%s sleep 20\\n" % root)
+    time.sleep(2)
+    app.send("suspend", root)
+    time.sleep(1)
+    text = app.wait_file("wt_ctrl_z", root, "jobs > ~/wt_ctrl_z", timeout=15)
+    results.check("the suspend key stops a foreground command", bool(text) and "Stopped" in text, text)
+    app.send("type", "%s kill %%1\\n" % root)
+
+
 def run_inert_control(app, results):
     """A launch without the variable must not answer. SIMCTL_CHILD_ variables stay in the
     environment until the simulator shuts down, so this needs a shutdown first."""
@@ -1012,6 +1072,7 @@ def main():
         run_tests(app, results)
         run_file_tests(app, results)
         run_media_tests(app, results)
+        run_terminal_tests(app, results)
         run_inert_control(app, results)
     finally:
         app.terminate()

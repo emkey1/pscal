@@ -389,6 +389,13 @@ struct TerminalContentView: View {
         let font = fontSettings.currentFont
         let showingStatus = exitStatus != nil
 
+        // A view with no size yet isn't a terminal of 1 by 1. The runtime keeps the size it has,
+        // so a shell starting now doesn't see its window shrink and grow back.
+        guard availableSize.width > 0, availableSize.height > 0 else {
+            hasMeasuredGeometry = true
+            return
+        }
+
         // Calculate usable height for the terminal text area.
         // availableSize.height is the total space from GeometryReader (including padding area).
         var usableHeight = availableSize.height

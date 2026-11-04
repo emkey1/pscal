@@ -46,6 +46,8 @@ import UIKit
 ///   fm-refresh <id>                list its folder again
 ///   motepad-insert <id> <text>     type into that MotePad
 ///   motepad-save <id>              Save
+///   interrupt <tab>                what the app's own Ctrl-C does for that session
+///   suspend <tab>                  what the app's own Ctrl-Z does for that session
 ///   music-play                     Music's play button
 ///   music-config-change            what the audio hardware changing does to the engine
 ///   file-op <token> <op> [path]    call the file service directly; see the dump's fileResult
@@ -198,6 +200,16 @@ enum WorkspaceTestHooks {
                 session.send(text)
             case .sdl:
                 return ["ok": false, "error": "not a terminal"]
+            }
+        case "interrupt", "suspend":
+            guard let text = args.first, let tabID = UInt64(text), manager.tabs.contains(where: { $0.id == tabID }) else {
+                return ["ok": false, "error": "no such tab"]
+            }
+            manager.selectedId = tabID
+            if verb == "interrupt" {
+                manager.sendInterruptToSelected()
+            } else {
+                manager.sendSuspendToSelected()
             }
         case "select-session":
             guard let text = args.first, let tabID = UInt64(text) else { return ["ok": false, "error": "no such tab"] }

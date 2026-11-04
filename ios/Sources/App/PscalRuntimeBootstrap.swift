@@ -887,14 +887,8 @@ final class PscalRuntimeBootstrap: ObservableObject, @unchecked Sendable {
     func sendSuspend() {
         let activeSession = resolveActiveSessionId()
         if activeSession != 0 {
-            let delivered = withRuntimeContext {
-                PSCALRuntimeSendSignalForSession(activeSession, SIGTSTP) != 0
-            }
-            if !delivered {
-                // Fallback keeps local semantics working if foreground signal
-                // routing is temporarily unresolved.
-                sendControlByteToSession(0x1A, sessionId: activeSession)
-            }
+            // As a key, like the interrupt: what it means is the terminal's to decide.
+            sendControlByteToSession(0x1A, sessionId: activeSession)
             return
         }
         withRuntimeContext {
