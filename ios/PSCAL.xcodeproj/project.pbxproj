@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5FFFD2333FFAA00000AAA001 /* WorkspaceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD2323FFAA00000AAA001 /* WorkspaceUITests.swift */; };
 		145F4FC72BE071D600603B3F /* PscalApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 145F4FC62BE071D600603B3F /* PscalApp.swift */; };
 		145F4FC92BE071D600603B3F /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 145F4FC82BE071D600603B3F /* TerminalView.swift */; };
 		145F4FCB2BE071F400603B3F /* PscalRuntimeBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 145F4FCA2BE071F400603B3F /* PscalRuntimeBootstrap.swift */; };
@@ -71,7 +72,19 @@
 		6A0D10023A00000100ABC001 /* AppDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A0D10013A00000100ABC001 /* AppDiagnosticsView.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		5FFFD2393FFAA00000AAA001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 145F4FB62BE0719A00603B3F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 145F4FBD2BE0719A00603B3F;
+			remoteInfo = PSCALApp;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		5FFFD2323FFAA00000AAA001 /* WorkspaceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceUITests.swift; sourceTree = "<group>"; };
+		5FFFD2343FFAA00000AAA001 /* PscalAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PscalAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		145F4FBE2BE0719A00603B3F /* PSCAL.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PSCAL.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		145F4FC62BE071D600603B3F /* PscalApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PscalApp.swift; sourceTree = "<group>"; };
 		145F4FC82BE071D600603B3F /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
@@ -152,13 +165,29 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5FFFD2363FFAA00000AAA001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		5FFFD2373FFAA00000AAA001 /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				5FFFD2323FFAA00000AAA001 /* WorkspaceUITests.swift */,
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
 		145F4FB52BE0719A00603B3F /* PSCAL */ = {
 			isa = PBXGroup;
 			children = (
 				145F4FC02BE0719A00603B3F /* Sources */,
+				5FFFD2373FFAA00000AAA001 /* UITests */,
 				14E9F2042BE2B8D400A1E3C0 /* Examples */,
 				5F1AA0012EC6F00100000001 /* lib */,
 				5F1AA0022EC6F00100000001 /* fonts */,
@@ -167,6 +196,7 @@
 				5F1AA0052EC6F00100000001 /* TestsLibs */,
 				DEAD00012C0FF00D00DEAD00 /* src */,
 				145F4FBE2BE0719A00603B3F /* PSCAL.app */,
+				5FFFD2343FFAA00000AAA001 /* PscalAppUITests.xctest */,
 				145F4FD12BE0727A00603B3F /* SwiftUI.framework */,
 				145F4FD32BE0727A00603B3F /* UIKit.framework */,
 				5DFF9B112EC3E8CC004DFE5A /* PSCALIOS-LinkerWorkaround.xcconfig */,
@@ -286,6 +316,23 @@
 			productReference = 145F4FBE2BE0719A00603B3F /* PSCAL.app */;
 			productType = "com.apple.product-type.application";
 		};
+		5FFFD2383FFAA00000AAA001 /* PscalAppUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5FFFD23B3FFAA00000AAA001 /* Build configuration list for PBXNativeTarget "PscalAppUITests" */;
+			buildPhases = (
+				5FFFD2353FFAA00000AAA001 /* Sources */,
+				5FFFD2363FFAA00000AAA001 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				5FFFD23A3FFAA00000AAA001 /* PBXTargetDependency */,
+			);
+			name = PscalAppUITests;
+			productName = PscalAppUITests;
+			productReference = 5FFFD2343FFAA00000AAA001 /* PscalAppUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -298,6 +345,10 @@
 				TargetAttributes = {
 					145F4FBD2BE0719A00603B3F = {
 						CreatedOnToolsVersion = 15.0;
+					};
+					5FFFD2383FFAA00000AAA001 = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = 145F4FBD2BE0719A00603B3F;
 					};
 				};
 			};
@@ -315,6 +366,7 @@
 			projectRoot = "";
 			targets = (
 				145F4FBD2BE0719A00603B3F /* PSCALApp */,
+				5FFFD2383FFAA00000AAA001 /* PscalAppUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -475,7 +527,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5FFFD2353FFAA00000AAA001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5FFFD2333FFAA00000AAA001 /* WorkspaceUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		5FFFD23A3FFAA00000AAA001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 145F4FBD2BE0719A00603B3F /* PSCALApp */;
+			targetProxy = 5FFFD2393FFAA00000AAA001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		145F4FD62BE0729000603B3F /* Debug */ = {
@@ -1056,6 +1124,48 @@
 			};
 			name = Release;
 		};
+		5FFFD23C3FFAA00000AAA001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.6;
+				LIBRARY_SEARCH_PATHS = "";
+				"LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" = "";
+				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" = "";
+				OTHER_LDFLAGS = "";
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = "";
+				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = "";
+				OTHER_SWIFT_FLAGS = "";
+				PRODUCT_BUNDLE_IDENTIFIER = com.pscal.PscalAppUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_OBJC_BRIDGING_HEADER = "";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PSCALApp;
+			};
+			name = Debug;
+		};
+		5FFFD23D3FFAA00000AAA001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.6;
+				LIBRARY_SEARCH_PATHS = "";
+				"LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" = "";
+				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" = "";
+				OTHER_LDFLAGS = "";
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = "";
+				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = "";
+				OTHER_SWIFT_FLAGS = "";
+				PRODUCT_BUNDLE_IDENTIFIER = com.pscal.PscalAppUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_OBJC_BRIDGING_HEADER = "";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PSCALApp;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1073,6 +1183,15 @@
 			buildConfigurations = (
 				145F4FD82BE0729000603B3F /* Debug */,
 				145F4FD92BE0729000603B3F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5FFFD23B3FFAA00000AAA001 /* Build configuration list for PBXNativeTarget "PscalAppUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5FFFD23C3FFAA00000AAA001 /* Debug */,
+				5FFFD23D3FFAA00000AAA001 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
