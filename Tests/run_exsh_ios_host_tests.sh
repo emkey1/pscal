@@ -91,6 +91,7 @@ RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_alias_option_lookup
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_posixly_correct_aliases
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_return_in_loop
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_read_write_redirect
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only fstat_regular_file_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only who_file_ios
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only jobspec
@@ -130,6 +131,7 @@ RUN_VPROC_TESTS=1 RUN_IOS_FRONTEND_STDIN_TESTS=1 python3 "${HARNESS}" --executab
 
 # Runs under its own throwaway roots, not the harness: a regression here removes files.
 bash "${ROOT}/Tests/ios_vproc/test_empty_path.sh" "${EXE}"
+bash "${ROOT}/Tests/ios_vproc/test_kill_blocked.sh" "${EXE}"
 
 # Optional interactive PTY signal regressions. Enable explicitly while
 # debugging local Ctrl-C/Ctrl-Z behavior:

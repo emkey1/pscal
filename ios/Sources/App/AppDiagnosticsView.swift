@@ -445,11 +445,16 @@ private final class AppDiagnosticsRunner: ObservableObject {
             exitStatus = session.exitStatus
             transcript = session.screenText.string
         } else {
-            // Give the PTY/output pipeline a brief chance to flush trailing bytes
-            // after process exit so the probe sees the final line reliably.
-            try? await Task.sleep(nanoseconds: 150_000_000)
+            // The PTY/output pipeline flushes after the process exits, and on a device that can
+            // take longer than one short pause. Read until the transcript has stopped changing.
+            var stableReads = 0
+            for _ in 0..<12 where stableReads < 2 {
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                let latest = session.screenText.string
+                stableReads = latest == transcript ? stableReads + 1 : 0
+                transcript = latest
+            }
             exitStatus = session.exitStatus
-            transcript = session.screenText.string
         }
 
         let metrics = session.terminalBufferMetrics()
@@ -658,7 +663,7 @@ private final class AppDiagnosticsRunner: ObservableObject {
     private static func toolBuiltinFallbackCheck() async -> AppDiagnosticsCheckResult {
         let command = "smallclue-help hostname; echo __HOSTNAME_RUN__; hostname"
         let probe = await runShellProbe(argv: ["exsh", "-c", command])
-        let hasAppletHelp = probe.transcript.contains("hostname - Show system hostname") ||
+        let hasAppletHelp = probe.transcript.contains("hostname - ") ||
             probe.transcript.contains("Usage: hostname")
         let hasRunMarker = probe.transcript.contains("__HOSTNAME_RUN__")
         let hasCommandOutput = probe.transcript

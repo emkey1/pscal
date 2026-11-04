@@ -550,6 +550,9 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("return_in_loop_stage", f"rl() {{ while :; do return; done; }}; c=0; for x in 1 2; do c=$((c+1)); [ $c -gt 9 ] && break; rl; echo \"x $x\"; done | cat {R}; unset -f rl", "x 1\nx 2\n"),
     ("return_in_loop_background", f"rl() {{ while :; do return; done; }}; c=0; {{ for x in 1 2; do c=$((c+1)); [ $c -gt 9 ] && break; rl; echo \"x $x\"; done; }} {R} & wait $!; unset -f rl", "x 1\nx 2\n"),
     ("return_in_loop_redirect", f"rl() {{ while :; do echo in; return; done > smoke/rl.out; }}; {{ rl; echo back; }} {R}; unset -f rl", "back\n"),
+    # <> was parsed as <, so a write through it failed and it never made the file.
+    ("read_write_makes", f"exec 3<> smoke/rw.txt; echo written >&3; exec 3>&-; cat smoke/rw.txt {R}", "written\n"),
+    ("read_write_keeps", f"printf 'one\\ntwo\\n' > smoke/rk.txt; exec 3<> smoke/rk.txt; read a <&3; echo TWO >&3; exec 3>&-; {{ echo \"$a\"; cat smoke/rk.txt; }} {R}", "one\none\nTWO\n"),
     # A finished frontend flushed every stream in the app, other stages' included. It
     # waited for a reader that was waiting for its end of the pipe, or for a writer on a
     # full pipe, and wrote another stage's buffered output to its own stdout.
