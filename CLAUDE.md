@@ -21,7 +21,7 @@ lives in the auto-memory files (this file wins if they disagree).
   `components/aether/external/`. When pscal-core or rea change, those pins go
   stale and break the *standalone* aether build while PBuild stays green.
   Bump them as part of shipping (see Ship flow).
-- All 12 submodules declare a tracking branch in `.gitmodules` (`main`, except
+- All 11 submodules declare a tracking branch in `.gitmodules` (`main`, except
   dvtm/micro/openrsync which use `master`), so **`git submodule update
   --remote`** advances every one to its branch tip; commit the resulting
   gitlinks. Git has no branch-tip gitlink mode — the superproject always
@@ -33,6 +33,10 @@ lives in the auto-memory files (this file wins if they disagree).
   Each of those frontend repos keeps a copy in its own `lib/<language>`, so a clone
   of it works alone. After editing one here, run `tools/sync_frontend_units.sh`,
   commit in the frontend and bump its gitlink; CI fails if a copy differs.
+- `third-party/libgit2` is upstream's, not a fork: GPLv2 with a linking exception,
+  linked unmodified, with what PSCAL needs done from `CMakeLists.txt`. Never patch
+  its files. `--remote` moves it to upstream's tip, so don't commit that move with
+  the first-party bumps; moving it is a separate, tested change.
 - **Active development branch is `main`.** Commit and push there directly.
   (`AetherLang` was the active branch early on, with `main` synced from it by
   fast-forward; that's no longer the case — as of 2026-07-03 `main` is

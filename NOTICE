@@ -10,3 +10,5 @@ NOTICE files.
 This product includes third-party software under its own license, in the license
 file in each directory: third-party/ (SDL2, curl, dvtm, elvis, hterm, libgit2,
 micro, openrsync, OpenSSH, OpenSSL), fonts/ and tools/shellbench_cacheable.
+
+libgit2 is licensed under GPLv2 with a linking exception, and is linked unmodified.

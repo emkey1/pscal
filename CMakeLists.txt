@@ -1256,7 +1256,32 @@ if(PSCAL_USE_BUNDLED_LIBGIT2)
     set_property(DIRECTORY PROPERTY COMPILE_DEFINITIONS "")
     set_property(DIRECTORY PROPERTY INCLUDE_DIRECTORIES "")
     set_property(DIRECTORY PROPERTY COMPILE_OPTIONS "")
+    # libgit2 is kept unmodified, under its linking exception, so what it needs from
+    # this build is done from out here. It rewrites its generated git2.h on every
+    # configure, and every source in the library includes that, so a reconfigure would
+    # rebuild all of it. Put the old file back, with its old time, if nothing changed.
+    set(_pscal_git2_header "${CMAKE_CURRENT_BINARY_DIR}/third-party/libgit2/include/git2.h")
+    if(EXISTS "${_pscal_git2_header}")
+        file(RENAME "${_pscal_git2_header}" "${_pscal_git2_header}.keep")
+    endif()
     add_subdirectory(third-party/libgit2 EXCLUDE_FROM_ALL)
+    if(EXISTS "${_pscal_git2_header}.keep")
+        file(SHA256 "${_pscal_git2_header}" _pscal_git2_header_new)
+        file(SHA256 "${_pscal_git2_header}.keep" _pscal_git2_header_old)
+        if(_pscal_git2_header_new STREQUAL _pscal_git2_header_old)
+            file(RENAME "${_pscal_git2_header}.keep" "${_pscal_git2_header}")
+        else()
+            file(REMOVE "${_pscal_git2_header}.keep")
+        endif()
+    endif()
+    unset(_pscal_git2_header)
+    # On hosts libgit2's SHA code comes from OpenSSL, but it only adds OpenSSL's headers
+    # and libraries when it also picks OpenSSL for HTTPS, and macOS picks SecureTransport.
+    if(NOT PSCAL_PLATFORM_IOS)
+        target_include_directories(util SYSTEM PRIVATE ${OPENSSL_INCLUDE_DIR})
+        target_include_directories(libgit2 SYSTEM PRIVATE ${OPENSSL_INCLUDE_DIR})
+        target_link_libraries(libgit2package ${OPENSSL_LIBRARIES})
+    endif()
     set_property(DIRECTORY PROPERTY COMPILE_DEFINITIONS "${_pscal_saved_compile_definitions}")
     set_property(DIRECTORY PROPERTY INCLUDE_DIRECTORIES "${_pscal_saved_include_directories}")
     set_property(DIRECTORY PROPERTY COMPILE_OPTIONS "${_pscal_saved_compile_options}")

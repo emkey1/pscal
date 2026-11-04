@@ -12,7 +12,7 @@
 	branch = master
 [submodule "third-party/libgit2"]
 	path = third-party/libgit2
-	url = https://github.com/emkey1/libgit2.git
+	url = https://github.com/libgit2/libgit2.git
 	branch = main
 [submodule "third-party/openrsync"]
 	path = third-party/openrsync
