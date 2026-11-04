@@ -48,6 +48,7 @@ Status: Not yet uploaded. Not yet run on a physical device.
 - `wait` gives a killed background job's status. `( sleep 30 ) & p=$!; kill $p; wait $p` could give 0, and now gives 143 every time. Killing a job also harms nothing else. A job killed in `wait` used to hang the shell, a job killed in `$(...)` left the app's stdout on its pipe, a loop that made no calls ran on after its status was reported, and what the job had started stayed in `lps` holding its pipes, so a reader of them never finished.
 - A background job's `$(...)` takes stdout from that job alone. It used to move the app's own, so beside a job the shell's output could vanish or land in the job's variable, and the shell could end. A job's `$(echo hi)` could also come back empty with `hi` on the screen. `sh x | cat` now returns when `x` killed a job inside `$(...)`; it used to hang with its output complete.
 - `lps` could crash the app. Finding the CPU time of a task whose thread had ended used the name that thread's Mach port used to have. By then the name could belong to something else, so the app could die at once or release a right it still needed.
+- A job that ended while a `$(...)` ran no longer hangs `wait`: `true & x=$(echo e); wait` almost never returned. `x=$(sleep 1 & echo bg)` at a prompt no longer captures the `[1] pid` line.
 
 ## Fixed in exsh on every platform
 - `{ ...; } > file`, `if ...; fi > file`, `case ... esac > file` and a redirection on a function definition now cover the whole body, including input redirections, and they close when the body leaves early through `return`, `break` or `exit`. They used to be dropped: the output went to the terminal and the file was never created.
@@ -56,6 +57,8 @@ Status: Not yet uploaded. Not yet run on a physical device.
 - `y=$(echo "$v")`, `( ... )`, `{ ...; } | cat` and `&` inside a function see the function's locals. A substitution came back empty on every platform.
 - `wait` finds any job this shell started, however long ago it ended, in any order and as often as asked. `( exit 3 ) & a=$!; ( exit 4 ) & b=$!; sleep 0.2; wait $a` gave 127 and printed `invalid job` twice. A number is now a pid and `%n` a job, several operands work, and `wait` with no operands gives 0 and forgets every job. As in bash, a prompt reports what has ended: its `%n` goes and `wait -n` skips it, and its pid still works.
 - A line typed while a command runs now runs at the next prompt, and lines pasted together all run. On a plain build the typed line was lost, and of three pasted lines only the first ran. Input a program leaves unread reaches the prompt too, as in bash.
+- `$(...)` acts as a subshell in more ways. `x=$(exec cmd)` ends only the substitution, where on a host it replaced the whole shell, and `exec 3> f` in one ends with it. `z=$( { sleep 0.2; echo late; } & echo early )` gets both lines, because it reads to end of file, so it waits for a job that still holds its output and not for one whose output goes elsewhere. On a host `w=$(exec 4> f; exec 5> g; echo hi)` no longer loses all stdout for the rest of the script, and a job started in one no longer holds the outer stdout.
+- `printf` no longer cuts a number or `%c` at 255 characters: `printf '%300d' 7` prints all 300.
 
 ## Known Issues
 - A failed redirection's message says `exec:` even when no `exec` was involved.

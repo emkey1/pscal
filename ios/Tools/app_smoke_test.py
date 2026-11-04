@@ -495,6 +495,20 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("sub_fd3_exec", f'x=$(exec 3> smoke/s3; echo out); echo "[$x]" {R}; unset x', "[out]\n"),
     ("sub_fd3_cmd", f'x=$(echo hi 3> smoke/s3); echo "[$x]" {R}; unset x', "[hi]\n"),
     ("sub_bg_holds", f"printf 'x=$(sleep 1 & echo bg)\\necho \"[$x]\"\\n' > smoke/bh.sh; exsh smoke/bh.sh {R}", "[bg]\n"),
+    # In here the shell counts as interactive, and bash prints no job number in a substitution.
+    ("sub_bg_no_job_message", f'x=$(sleep 0.1 & echo bg); echo "[$x]" {R}; unset x', "[bg]\n"),
+    ("sub_late_output", f'z=$( {{ sleep 0.2; echo late; }} & echo early ); echo "[$z]" {R}; unset z', "[early\nlate]\n"),
+    ("sub_job_gone_after", f'x=$(sleep 0.1 & echo bg); jobs {R}; wait; echo "rc $?" {A}; unset x', "rc 0\n"),
+    ("sub_bg_elsewhere", f's=$(date +%s); x=$(sleep 5 > /dev/null 2>&1 & echo early); e=$(date +%s); [ "$((e-s))" -lt 3 ] && echo "quick [$x]" {R}; unset s e x', "quick [early]\n"),
+    ("sub_job_ends_during", f'true & x=$(echo e); wait; echo "rc $? [$x]" {R}; unset x', "rc 0 [e]\n"),
+    ("sub_exec", f'x=$(exec echo hi; echo no); echo "[$x]" {R}; unset x', "[hi]\n"),
+    ("sub_exec_status", f'x=$(exec false); echo "rc $?" {R}; unset x', "rc 1\n"),
+    ("sub_exec_function", f'smf() {{ exec echo in-f; echo no; }}; x=$(smf); echo "[$x]" {R}; unset x; unset -f smf', "[in-f]\n"),
+    ("sub_exec_fd_ends", f'x=$(exec 7>&1; echo out); echo "[$x]" {R}; echo probe 2>/dev/null >&7; echo "rc $?" {A}; unset x', "[out]\nrc 1\n"),
+    ("sub_exec_away", f'x=$(exec > /dev/null; echo gone); echo "[$x]" {R}; unset x', "[]\n"),
+    ("subshell_exec", f'( exec echo in-sub; echo no ) {R}', "in-sub\n"),
+    ("printf_wide_number", f'x=$(printf "%300d|" 7); echo "${{#x}}" {R}; unset x', "301\n"),
+    ("printf_wide_char", f'x=$(printf "%300c|" a); echo "${{#x}}" {R}; unset x', "301\n"),
     # Killing a body that is inside a substitution leaves that substitution's reader with no
     # one to join it. The next substitution still has to work.
     ("sub_body_killed", f'( x=$(sleep 30); echo no ) & p=$!; sleep 1; kill $p; wait $p; s=$?; y=$(echo next); echo "$s $y" {R}; unset s y', "143 next\n"),
