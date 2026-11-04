@@ -1,0 +1,16 @@
+
+== L19 TIOCSCTTY with force
+victim: TIOCGSID: 0
+victim: the session: self
+robber: TIOCSCTTY: EPERM
+robber: TIOCSCTTY force: 0
+robber: TIOCGSID: 0
+robber: the session: self
+robber: TIOCGPGRP: 0
+robber: the group: self
+robber: open /dev/tty: 0
+victim, robbed: TIOCGSID: ENOTTY
+victim, robbed: TIOCGPGRP: ENOTTY
+victim, robbed: open /dev/tty: ENXIO
+victim: exited 0
+robber: exited 0

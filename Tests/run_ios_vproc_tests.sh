@@ -155,8 +155,22 @@ cc -pthread \
    "${CORE}/src/runtime/vproc/tty/pscal_tty_host.c" \
    -o "${OUT_TTY_CONTRACT}"
 
+# What a program sees on a terminal, held to what it sees on Linux. See tty_diff.c for how
+# the reference is made. A hang here would be the terminal's, so it has a limit.
+OUT_TTY_DIFF="${BUILD_DIR}/ios_vproc_tty_diff"
+cc -DVPROC_ENABLE_STUBS_FOR_TESTS=1 -DPSCAL_TARGET_IOS=1 \
+   -pthread \
+   "${INCLUDE_DIRS[@]}" \
+   "${ROOT}/Tests/ios_vproc/tty_diff.c" \
+   "${VPROC_SOURCES[@]}" \
+   -o "${OUT_TTY_DIFF}"
+
 echo "Running ios_vproc tests..."
 "${OUT_TTY_CONTRACT}"
+/usr/bin/perl -e 'alarm shift; exec @ARGV' 300 "${OUT_TTY_DIFF}" > "${OUT_TTY_DIFF}.out"
+diff -u "${ROOT}/Tests/ios_vproc/tty_diff.linux.out" "${OUT_TTY_DIFF}.out"
+/usr/bin/perl -e 'alarm shift; exec @ARGV' 60 "${OUT_TTY_DIFF}" root > "${OUT_TTY_DIFF}.root.out"
+diff -u "${ROOT}/Tests/ios_vproc/tty_diff.root.linux.out" "${OUT_TTY_DIFF}.root.out"
 "${OUT}"
 "${OUT_PGID}"
 "${OUT_TERMINAL}"

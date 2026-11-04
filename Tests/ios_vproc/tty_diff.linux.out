@@ -1,0 +1,1966 @@
+
+== L1 a new terminal
+slave: i=500 o=5 c=bf l=8a3b line=0 cc=031c7f150400010011131a00120f1716000000
+master: i=500 o=5 c=bf l=8a3b line=0 cc=031c7f150400010011131a00120f1716000000
+TIOCGWINSZ: 0
+winsize: 0 0 0 0
+
+== L1 L5 L7 L16 through the host's own numbers
+speed is 38400: yes yes
+cs8 1 cread 1
+ICRNL 1
+IXON 1
+ISTRIP 0
+IUTF8 0
+OPOST 1
+ONLCR 1
+ISIG 1
+ICANON 1
+ECHO 1
+ECHOE 1
+ECHOK 1
+ECHONL 0
+NOFLSH 0
+TOSTOP 0
+ECHOCTL 1
+ECHOPRT 0
+ECHOKE 1
+IEXTEN 1
+ISTRIP set: 1
+ISTRIP clear: 0
+IUTF8 set: 1
+IUTF8 clear: 0
+IGNBRK set: 1
+IGNBRK clear: 0
+BRKINT set: 1
+BRKINT clear: 0
+IGNPAR set: 1
+IGNPAR clear: 0
+PARMRK set: 1
+PARMRK clear: 0
+INPCK set: 1
+INPCK clear: 0
+IMAXBEL set: 1
+IMAXBEL clear: 0
+TAB3 set: 1
+TAB3 clear: 0
+ECHONL set: 1
+ECHONL clear: 0
+TOSTOP set: 1
+TOSTOP clear: 0
+ECHOPRT set: 1
+ECHOPRT clear: 0
+ECHOKE set: 1
+ECHOKE clear: 0
+CSTOPB set: 1
+CSTOPB clear: 0
+PARENB set: 0
+PARENB clear: 0
+cs7: size 30
+9600: d
+9600 reads back: 1
+typed: keys "one\n" echo "one\r\n"
+tcflush: 0
+tcflush: read EAGAIN
+tcdrain: 0
+TIOCOUTQ: 0
+value 0
+TIOCEXCL: 0
+open: EBUSY
+TIOCNXCL: 0
+open: 0
+TIOCNOTTY: ENOTTY
+TIOCSTI: EIO
+
+== L3 VWERASE
+plain: keys "foo bar\x17" echo "foo bar\b \b\b \b\b \b"
+plain: keys "\n" echo "\r\n"
+plain: read "foo \n" EAGAIN
+twice: keys "foo bar\x17\x17" echo "foo bar\b \b\b \b\b \b\b \b\b \b\b \b\b \b"
+twice: keys "\n" echo "\r\n"
+twice: read "\n" EAGAIN
+trailing space: keys "foo bar   \x17" echo "foo bar   \b \b\b \b\b \b\b \b\b \b\b \b"
+trailing space: keys "\n" echo "\r\n"
+trailing space: read "foo \n" EAGAIN
+punctuation: keys "foo-bar\x17" echo "foo-bar\b \b\b \b\b \b"
+punctuation: keys "\n" echo "\r\n"
+punctuation: read "foo-\n" EAGAIN
+punctuation twice: keys "foo-bar\x17\x17" echo "foo-bar\b \b\b \b\b \b\b \b\b \b\b \b\b \b"
+punctuation twice: keys "\n" echo "\r\n"
+punctuation twice: read "\n" EAGAIN
+underscore: keys "foo_bar baz\x17\x17" echo "foo_bar baz\b \b\b \b\b \b\b \b\b \b\b \b\b \b\b \b\b \b\b \b\b \b"
+underscore: keys "\n" echo "\r\n"
+underscore: read "\n" EAGAIN
+digits: keys "a1 b2\x17" echo "a1 b2\b \b\b \b"
+digits: keys "\n" echo "\r\n"
+digits: read "a1 \n" EAGAIN
+tab: keys "one\ttwo\x17" echo "one\ttwo\b \b\b \b\b \b"
+tab: keys "\n" echo "\r\n"
+tab: read "one\t\n" EAGAIN
+tab twice: keys "one\ttwo\x17\x17" echo "one\ttwo\b \b\b \b\b \b\b\b\b\b\b\b \b\b \b\b \b"
+tab twice: keys "\n" echo "\r\n"
+tab twice: read "\n" EAGAIN
+control: keys "ab\x01cd\x17" echo "ab^Acd\b \b\b \b"
+control: keys "\n" echo "\r\n"
+control: read "ab\x01\n" EAGAIN
+high bytes: keys "ab\xc3\xa9cd\x17" echo "ab\xc3\xa9cd\b \b\b \b"
+high bytes: keys "\n" echo "\r\n"
+high bytes: read "ab\xc3\xa9\n" EAGAIN
+all space: keys "    \x17" echo "    \b \b\b \b\b \b\b \b"
+all space: keys "\n" echo "\r\n"
+all space: read "\n" EAGAIN
+nothing: keys "\x17" echo ""
+nothing: keys "\n" echo "\r\n"
+nothing: read "\n" EAGAIN
+other line: keys "one\n\x17" echo "one\r\n"
+other line: keys "\n" echo "\r\n"
+other line: read "one\n" "\n" EAGAIN
+no echoe: keys "foo bar\x17" echo "foo bar\b \b\b \b\b \b"
+no echoe: keys "\n" echo "\r\n"
+no echoe: read "foo \n" EAGAIN
+no echo: keys "foo bar\x17" echo ""
+no echo: keys "\n" echo ""
+no echo: read "foo \n" EAGAIN
+no iexten: keys "foo bar\x17" echo "foo bar^W"
+no iexten: keys "\n" echo "\r\n"
+no iexten: read "foo bar\x17\n" EAGAIN
+
+== L3 VREPRINT
+plain: keys "abc\x12" echo "abc^R\r\nabc"
+plain: keys "\n" echo "\r\n"
+plain: read "abc\n" EAGAIN
+then more: keys "abc\x12d" echo "abc^R\r\nabcd"
+then more: keys "\n" echo "\r\n"
+then more: read "abcd\n" EAGAIN
+empty: keys "\x12" echo "^R\r\n"
+empty: keys "\n" echo "\r\n"
+empty: read "\n" EAGAIN
+after a line: keys "one\nab\x12" echo "one\r\nab^R\r\nab"
+after a line: keys "\n" echo "\r\n"
+after a line: read "one\n" "ab\n" EAGAIN
+after a line, empty: keys "one\n\x12" echo "one\r\n^R\r\n"
+after a line, empty: keys "\n" echo "\r\n"
+after a line, empty: read "one\n" "\n" EAGAIN
+control in line: keys "a\x01b\x12" echo "a^Ab^R\r\na^Ab"
+control in line: keys "\n" echo "\r\n"
+control in line: read "a\x01b\n" EAGAIN
+tab in line: keys "a\tb\x12" echo "a\tb^R\r\na\tb"
+tab in line: keys "\n" echo "\r\n"
+tab in line: read "a\tb\n" EAGAIN
+no echo: keys "abc\x12" echo ""
+no echo: keys "\n" echo ""
+no echo: read "abc\x12\n" EAGAIN
+no echoctl: keys "abc\x12" echo "abc\x12\r\nabc"
+no echoctl: keys "\n" echo "\r\n"
+no echoctl: read "abc\n" EAGAIN
+no iexten: keys "abc\x12" echo "abc^R"
+no iexten: keys "\n" echo "\r\n"
+no iexten: read "abc\x12\n" EAGAIN
+
+== L3 VLNEXT
+control: keys "\x16\x01" echo "^\b^A"
+control: keys "\n" echo "\r\n"
+control: read "\x01\n" EAGAIN
+interrupt: keys "\x16\x03" echo "^\b^C"
+interrupt: keys "\n" echo "\r\n"
+interrupt: read "\x03\n" EAGAIN
+eof: keys "a\x16\x04" echo "a^\b^D"
+eof: keys "\n" echo "\r\n"
+eof: read "a\x04\n" EAGAIN
+erase: keys "ab\x16\x7f" echo "ab^\b^?"
+erase: keys "\n" echo "\r\n"
+erase: read "ab\x7f\n" EAGAIN
+kill: keys "ab\x16\x15" echo "ab^\b^U"
+kill: keys "\n" echo "\r\n"
+kill: read "ab\x15\n" EAGAIN
+newline: keys "a\x16\nb" echo "a^\b^Jb"
+newline: keys "\n" echo "\r\n"
+newline: read "a\nb\n" EAGAIN
+return: keys "a\x16\rb" echo "a^\b^Mb"
+return: keys "\n" echo "\r\n"
+return: read "a\rb\n" EAGAIN
+itself: keys "\x16\x16" echo "^\b^V"
+itself: keys "\n" echo "\r\n"
+itself: read "\x16\n" EAGAIN
+werase: keys "ab\x16\x17" echo "ab^\b^W"
+werase: keys "\n" echo "\r\n"
+werase: read "ab\x17\n" EAGAIN
+reprint: keys "ab\x16\x12" echo "ab^\b^R"
+reprint: keys "\n" echo "\r\n"
+reprint: read "ab\x12\n" EAGAIN
+erased: keys "ab\x16\x01\x7f" echo "ab^\b^A\b \b\b \b"
+erased: keys "\n" echo "\r\n"
+erased: read "ab\n" EAGAIN
+erased before next: keys "ab\x16\x7f" echo "ab^\b^?"
+erased before next: keys "\n" echo "\r\n"
+erased before next: read "ab\x7f\n" EAGAIN
+plain letter: keys "\x16q" echo "^\bq"
+plain letter: keys "\n" echo "\r\n"
+plain letter: read "q\n" EAGAIN
+no echo: keys "\x16\x03" echo ""
+no echo: keys "\n" echo ""
+no echo: read "\x03\n" EAGAIN
+no echoctl: keys "\x16\x03" echo "\x03"
+no echoctl: keys "\n" echo "\r\n"
+no echoctl: read "\x03\n" EAGAIN
+no iexten: keys "a\x16\x7f" echo "a^V\b \b\b \b"
+no iexten: keys "\n" echo "\r\n"
+no iexten: read "a\n" EAGAIN
+no isig: keys "\x16\x03" echo "^\b^C"
+no isig: keys "\n" echo "\r\n"
+no isig: read "\x03\n" EAGAIN
+reprint with literal: keys "a\x16\x01b\x12" echo "a^\b^Ab^R\r\na^Ab"
+reprint with literal: keys "\n" echo "\r\n"
+reprint with literal: read "a\x01b\n" EAGAIN
+
+== L3 not implemented by Linux
+VDISCARD: keys "ab\x0fcd" echo "ab^Ocd"
+VDISCARD: keys "\n" echo "\r\n"
+VDISCARD: read "ab\x0fcd\n" EAGAIN
+VDISCARD no iexten: keys "ab\x0fcd" echo "ab^Ocd"
+VDISCARD no iexten: keys "\n" echo "\r\n"
+VDISCARD no iexten: read "ab\x0fcd\n" EAGAIN
+VSWTC: keys "ab!cd\n" echo "ab!cd\r\n"
+VSWTC: read "ab!cd\n" EAGAIN
+
+== L3 VEOL2
+iexten: keys "pc%rest\n" echo "pc%rest\r\n"
+iexten: read "pc%" "rest\n" EAGAIN
+iexten: keys "ctl\x18" echo "ctl^X"
+iexten: read "ctl\x18" EAGAIN
+no iexten: keys "pc%rest\n" echo "pc%rest\r\n"
+no iexten: read "pc%rest\n" EAGAIN
+no iexten: keys "ctl\x18" echo "ctl^X"
+no iexten: read EAGAIN
+no echo: keys "pc%rest\n" echo ""
+no echo: read "pc%" "rest\n" EAGAIN
+no echo: keys "ctl\x18" echo ""
+no echo: read "ctl\x18" EAGAIN
+
+== L3 VEOL
+iexten: keys "pc%rest\n" echo "pc%rest\r\n"
+iexten: read "pc%" "rest\n" EAGAIN
+iexten: keys "ctl\x18" echo "ctl^X"
+iexten: read "ctl\x18" EAGAIN
+no iexten: keys "pc%rest\n" echo "pc%rest\r\n"
+no iexten: read "pc%" "rest\n" EAGAIN
+no iexten: keys "ctl\x18" echo "ctl^X"
+no iexten: read "ctl\x18" EAGAIN
+no echo: keys "pc%rest\n" echo ""
+no echo: read "pc%" "rest\n" EAGAIN
+no echo: keys "ctl\x18" echo ""
+no echo: read "ctl\x18" EAGAIN
+
+== L5 erase and kill, every combination
+none: keys "abc\x7f\x7fd" echo "abc\x7f\x7fd"
+none: keys "\x15" echo "\x15"
+none: keys "ef\x01\x7f" echo "ef\x01\x7f"
+none: keys "\x15" echo "\x15"
+none: keys "\x7f" echo ""
+none: keys "g\x7f\n" echo "g\x7f\r\n"
+none: read "\n" EAGAIN
+none: keys "x y\x17\x17z" echo "x y\b \b\b \b\b \bz"
+none: keys "\x12" echo "\x12\r\nz"
+none: keys "\n" echo "\r\n"
+none: read "z\n" EAGAIN
+echoe: keys "abc\x7f\x7fd" echo "abc\b \b\b \bd"
+echoe: keys "\x15" echo "\x15"
+echoe: keys "ef\x01\x7f" echo "ef\x01"
+echoe: keys "\x15" echo "\x15"
+echoe: keys "\x7f" echo ""
+echoe: keys "g\x7f\n" echo "g\b \b\r\n"
+echoe: read "\n" EAGAIN
+echoe: keys "x y\x17\x17z" echo "x y\b \b\b \b\b \bz"
+echoe: keys "\x12" echo "\x12\r\nz"
+echoe: keys "\n" echo "\r\n"
+echoe: read "z\n" EAGAIN
+echok: keys "abc\x7f\x7fd" echo "abc\x7f\x7fd"
+echok: keys "\x15" echo "\x15\r\n"
+echok: keys "ef\x01\x7f" echo "ef\x01\x7f"
+echok: keys "\x15" echo "\x15\r\n"
+echok: keys "\x7f" echo ""
+echok: keys "g\x7f\n" echo "g\x7f\r\n"
+echok: read "\n" EAGAIN
+echok: keys "x y\x17\x17z" echo "x y\b \b\b \b\b \bz"
+echok: keys "\x12" echo "\x12\r\nz"
+echok: keys "\n" echo "\r\n"
+echok: read "z\n" EAGAIN
+echoe echok: keys "abc\x7f\x7fd" echo "abc\b \b\b \bd"
+echoe echok: keys "\x15" echo "\x15\r\n"
+echoe echok: keys "ef\x01\x7f" echo "ef\x01"
+echoe echok: keys "\x15" echo "\x15\r\n"
+echoe echok: keys "\x7f" echo ""
+echoe echok: keys "g\x7f\n" echo "g\b \b\r\n"
+echoe echok: read "\n" EAGAIN
+echoe echok: keys "x y\x17\x17z" echo "x y\b \b\b \b\b \bz"
+echoe echok: keys "\x12" echo "\x12\r\nz"
+echoe echok: keys "\n" echo "\r\n"
+echoe echok: read "z\n" EAGAIN
+echoke: keys "abc\x7f\x7fd" echo "abc\x7f\x7fd"
+echoke: keys "\x15" echo "\x15"
+echoke: keys "ef\x01\x7f" echo "ef\x01\x7f"
+echoke: keys "\x15" echo "\x15"
+echoke: keys "\x7f" echo ""
+echoke: keys "g\x7f\n" echo "g\x7f\r\n"
+echoke: read "\n" EAGAIN
+echoke: keys "x y\x17\x17z" echo "x y\b \b\b \b\b \bz"
+echoke: keys "\x12" echo "\x12\r\nz"
+echoke: keys "\n" echo "\r\n"
+echoke: read "z\n" EAGAIN
+echoe echoke: keys "abc\x7f\x7fd" echo "abc\b \b\b \bd"
+echoe echoke: keys "\x15" echo "\x15"
+echoe echoke: keys "ef\x01\x7f" echo "ef\x01"
+echoe echoke: keys "\x15" echo "\x15"
+echoe echoke: keys "\x7f" echo ""
+echoe echoke: keys "g\x7f\n" echo "g\b \b\r\n"
+echoe echoke: read "\n" EAGAIN
+echoe echoke: keys "x y\x17\x17z" echo "x y\b \b\b \b\b \bz"
+echoe echoke: keys "\x12" echo "\x12\r\nz"
+echoe echoke: keys "\n" echo "\r\n"
+echoe echoke: read "z\n" EAGAIN
+echok echoke: keys "abc\x7f\x7fd" echo "abc\x7f\x7fd"
+echok echoke: keys "\x15" echo "\x15\r\n"
+echok echoke: keys "ef\x01\x7f" echo "ef\x01\x7f"
+echok echoke: keys "\x15" echo "\x15\r\n"
+echok echoke: keys "\x7f" echo ""
+echok echoke: keys "g\x7f\n" echo "g\x7f\r\n"
+echok echoke: read "\n" EAGAIN
+echok echoke: keys "x y\x17\x17z" echo "x y\b \b\b \b\b \bz"
+echok echoke: keys "\x12" echo "\x12\r\nz"
+echok echoke: keys "\n" echo "\r\n"
+echok echoke: read "z\n" EAGAIN
+echoe echok echoke: keys "abc\x7f\x7fd" echo "abc\b \b\b \bd"
+echoe echok echoke: keys "\x15" echo "\b \b\b \b"
+echoe echok echoke: keys "ef\x01\x7f" echo "ef\x01"
+echoe echok echoke: keys "\x15" echo "\b \b\b \b"
+echoe echok echoke: keys "\x7f" echo ""
+echoe echok echoke: keys "g\x7f\n" echo "g\b \b\r\n"
+echoe echok echoke: read "\n" EAGAIN
+echoe echok echoke: keys "x y\x17\x17z" echo "x y\b \b\b \b\b \bz"
+echoe echok echoke: keys "\x12" echo "\x12\r\nz"
+echoe echok echoke: keys "\n" echo "\r\n"
+echoe echok echoke: read "z\n" EAGAIN
+echoprt: keys "abc\x7f\x7fd" echo "abc\\cb/d"
+echoprt: keys "\x15" echo "\x15"
+echoprt: keys "ef\x01\x7f" echo "ef\x01\\\x01"
+echoprt: keys "\x15" echo "/\x15"
+echoprt: keys "\x7f" echo ""
+echoprt: keys "g\x7f\n" echo "g\\g/\r\n"
+echoprt: read "\n" EAGAIN
+echoprt: keys "x y\x17\x17z" echo "x y\\y x/z"
+echoprt: keys "\x12" echo "\x12\r\nz"
+echoprt: keys "\n" echo "\r\n"
+echoprt: read "z\n" EAGAIN
+echoe echoprt: keys "abc\x7f\x7fd" echo "abc\\cb/d"
+echoe echoprt: keys "\x15" echo "\x15"
+echoe echoprt: keys "ef\x01\x7f" echo "ef\x01\\\x01"
+echoe echoprt: keys "\x15" echo "/\x15"
+echoe echoprt: keys "\x7f" echo ""
+echoe echoprt: keys "g\x7f\n" echo "g\\g/\r\n"
+echoe echoprt: read "\n" EAGAIN
+echoe echoprt: keys "x y\x17\x17z" echo "x y\\y x/z"
+echoe echoprt: keys "\x12" echo "\x12\r\nz"
+echoe echoprt: keys "\n" echo "\r\n"
+echoe echoprt: read "z\n" EAGAIN
+echok echoprt: keys "abc\x7f\x7fd" echo "abc\\cb/d"
+echok echoprt: keys "\x15" echo "\x15\r\n"
+echok echoprt: keys "ef\x01\x7f" echo "ef\x01\\\x01"
+echok echoprt: keys "\x15" echo "/\x15\r\n"
+echok echoprt: keys "\x7f" echo ""
+echok echoprt: keys "g\x7f\n" echo "g\\g/\r\n"
+echok echoprt: read "\n" EAGAIN
+echok echoprt: keys "x y\x17\x17z" echo "x y\\y x/z"
+echok echoprt: keys "\x12" echo "\x12\r\nz"
+echok echoprt: keys "\n" echo "\r\n"
+echok echoprt: read "z\n" EAGAIN
+echoe echok echoprt: keys "abc\x7f\x7fd" echo "abc\\cb/d"
+echoe echok echoprt: keys "\x15" echo "\x15\r\n"
+echoe echok echoprt: keys "ef\x01\x7f" echo "ef\x01\\\x01"
+echoe echok echoprt: keys "\x15" echo "/\x15\r\n"
+echoe echok echoprt: keys "\x7f" echo ""
+echoe echok echoprt: keys "g\x7f\n" echo "g\\g/\r\n"
+echoe echok echoprt: read "\n" EAGAIN
+echoe echok echoprt: keys "x y\x17\x17z" echo "x y\\y x/z"
+echoe echok echoprt: keys "\x12" echo "\x12\r\nz"
+echoe echok echoprt: keys "\n" echo "\r\n"
+echoe echok echoprt: read "z\n" EAGAIN
+echoke echoprt: keys "abc\x7f\x7fd" echo "abc\\cb/d"
+echoke echoprt: keys "\x15" echo "\x15"
+echoke echoprt: keys "ef\x01\x7f" echo "ef\x01\\\x01"
+echoke echoprt: keys "\x15" echo "/\x15"
+echoke echoprt: keys "\x7f" echo ""
+echoke echoprt: keys "g\x7f\n" echo "g\\g/\r\n"
+echoke echoprt: read "\n" EAGAIN
+echoke echoprt: keys "x y\x17\x17z" echo "x y\\y x/z"
+echoke echoprt: keys "\x12" echo "\x12\r\nz"
+echoke echoprt: keys "\n" echo "\r\n"
+echoke echoprt: read "z\n" EAGAIN
+echoe echoke echoprt: keys "abc\x7f\x7fd" echo "abc\\cb/d"
+echoe echoke echoprt: keys "\x15" echo "\x15"
+echoe echoke echoprt: keys "ef\x01\x7f" echo "ef\x01\\\x01"
+echoe echoke echoprt: keys "\x15" echo "/\x15"
+echoe echoke echoprt: keys "\x7f" echo ""
+echoe echoke echoprt: keys "g\x7f\n" echo "g\\g/\r\n"
+echoe echoke echoprt: read "\n" EAGAIN
+echoe echoke echoprt: keys "x y\x17\x17z" echo "x y\\y x/z"
+echoe echoke echoprt: keys "\x12" echo "\x12\r\nz"
+echoe echoke echoprt: keys "\n" echo "\r\n"
+echoe echoke echoprt: read "z\n" EAGAIN
+echok echoke echoprt: keys "abc\x7f\x7fd" echo "abc\\cb/d"
+echok echoke echoprt: keys "\x15" echo "\x15\r\n"
+echok echoke echoprt: keys "ef\x01\x7f" echo "ef\x01\\\x01"
+echok echoke echoprt: keys "\x15" echo "/\x15\r\n"
+echok echoke echoprt: keys "\x7f" echo ""
+echok echoke echoprt: keys "g\x7f\n" echo "g\\g/\r\n"
+echok echoke echoprt: read "\n" EAGAIN
+echok echoke echoprt: keys "x y\x17\x17z" echo "x y\\y x/z"
+echok echoke echoprt: keys "\x12" echo "\x12\r\nz"
+echok echoke echoprt: keys "\n" echo "\r\n"
+echok echoke echoprt: read "z\n" EAGAIN
+echoe echok echoke echoprt: keys "abc\x7f\x7fd" echo "abc\\cb/d"
+echoe echok echoke echoprt: keys "\x15" echo "\\da/"
+echoe echok echoke echoprt: keys "ef\x01\x7f" echo "ef\x01\\\x01"
+echoe echok echoke echoprt: keys "\x15" echo "fe/"
+echoe echok echoke echoprt: keys "\x7f" echo ""
+echoe echok echoke echoprt: keys "g\x7f\n" echo "g\\g/\r\n"
+echoe echok echoke echoprt: read "\n" EAGAIN
+echoe echok echoke echoprt: keys "x y\x17\x17z" echo "x y\\y x/z"
+echoe echok echoke echoprt: keys "\x12" echo "\x12\r\nz"
+echoe echok echoke echoprt: keys "\n" echo "\r\n"
+echoe echok echoke echoprt: read "z\n" EAGAIN
+echoctl: keys "abc\x7f\x7fd" echo "abc^?^?d"
+echoctl: keys "\x15" echo "^U"
+echoctl: keys "ef\x01\x7f" echo "ef^A^?"
+echoctl: keys "\x15" echo "^U"
+echoctl: keys "\x7f" echo ""
+echoctl: keys "g\x7f\n" echo "g^?\r\n"
+echoctl: read "\n" EAGAIN
+echoctl: keys "x y\x17\x17z" echo "x y\b \b\b \b\b \bz"
+echoctl: keys "\x12" echo "^R\r\nz"
+echoctl: keys "\n" echo "\r\n"
+echoctl: read "z\n" EAGAIN
+echoe echoctl: keys "abc\x7f\x7fd" echo "abc\b \b\b \bd"
+echoe echoctl: keys "\x15" echo "^U"
+echoe echoctl: keys "ef\x01\x7f" echo "ef^A\b \b\b \b"
+echoe echoctl: keys "\x15" echo "^U"
+echoe echoctl: keys "\x7f" echo ""
+echoe echoctl: keys "g\x7f\n" echo "g\b \b\r\n"
+echoe echoctl: read "\n" EAGAIN
+echoe echoctl: keys "x y\x17\x17z" echo "x y\b \b\b \b\b \bz"
+echoe echoctl: keys "\x12" echo "^R\r\nz"
+echoe echoctl: keys "\n" echo "\r\n"
+echoe echoctl: read "z\n" EAGAIN
+echok echoctl: keys "abc\x7f\x7fd" echo "abc^?^?d"
+echok echoctl: keys "\x15" echo "^U\r\n"
+echok echoctl: keys "ef\x01\x7f" echo "ef^A^?"
+echok echoctl: keys "\x15" echo "^U\r\n"
+echok echoctl: keys "\x7f" echo ""
+echok echoctl: keys "g\x7f\n" echo "g^?\r\n"
+echok echoctl: read "\n" EAGAIN
+echok echoctl: keys "x y\x17\x17z" echo "x y\b \b\b \b\b \bz"
+echok echoctl: keys "\x12" echo "^R\r\nz"
+echok echoctl: keys "\n" echo "\r\n"
+echok echoctl: read "z\n" EAGAIN
+echoe echok echoctl: keys "abc\x7f\x7fd" echo "abc\b \b\b \bd"
+echoe echok echoctl: keys "\x15" echo "^U\r\n"
+echoe echok echoctl: keys "ef\x01\x7f" echo "ef^A\b \b\b \b"
+echoe echok echoctl: keys "\x15" echo "^U\r\n"
+echoe echok echoctl: keys "\x7f" echo ""
+echoe echok echoctl: keys "g\x7f\n" echo "g\b \b\r\n"
+echoe echok echoctl: read "\n" EAGAIN
+echoe echok echoctl: keys "x y\x17\x17z" echo "x y\b \b\b \b\b \bz"
+echoe echok echoctl: keys "\x12" echo "^R\r\nz"
+echoe echok echoctl: keys "\n" echo "\r\n"
+echoe echok echoctl: read "z\n" EAGAIN
+echoke echoctl: keys "abc\x7f\x7fd" echo "abc^?^?d"
+echoke echoctl: keys "\x15" echo "^U"
+echoke echoctl: keys "ef\x01\x7f" echo "ef^A^?"
+echoke echoctl: keys "\x15" echo "^U"
+echoke echoctl: keys "\x7f" echo ""
+echoke echoctl: keys "g\x7f\n" echo "g^?\r\n"
+echoke echoctl: read "\n" EAGAIN
+echoke echoctl: keys "x y\x17\x17z" echo "x y\b \b\b \b\b \bz"
+echoke echoctl: keys "\x12" echo "^R\r\nz"
+echoke echoctl: keys "\n" echo "\r\n"
+echoke echoctl: read "z\n" EAGAIN
+echoe echoke echoctl: keys "abc\x7f\x7fd" echo "abc\b \b\b \bd"
+echoe echoke echoctl: keys "\x15" echo "^U"
+echoe echoke echoctl: keys "ef\x01\x7f" echo "ef^A\b \b\b \b"
+echoe echoke echoctl: keys "\x15" echo "^U"
+echoe echoke echoctl: keys "\x7f" echo ""
+echoe echoke echoctl: keys "g\x7f\n" echo "g\b \b\r\n"
+echoe echoke echoctl: read "\n" EAGAIN
+echoe echoke echoctl: keys "x y\x17\x17z" echo "x y\b \b\b \b\b \bz"
+echoe echoke echoctl: keys "\x12" echo "^R\r\nz"
+echoe echoke echoctl: keys "\n" echo "\r\n"
+echoe echoke echoctl: read "z\n" EAGAIN
+echok echoke echoctl: keys "abc\x7f\x7fd" echo "abc^?^?d"
+echok echoke echoctl: keys "\x15" echo "^U\r\n"
+echok echoke echoctl: keys "ef\x01\x7f" echo "ef^A^?"
+echok echoke echoctl: keys "\x15" echo "^U\r\n"
+echok echoke echoctl: keys "\x7f" echo ""
+echok echoke echoctl: keys "g\x7f\n" echo "g^?\r\n"
+echok echoke echoctl: read "\n" EAGAIN
+echok echoke echoctl: keys "x y\x17\x17z" echo "x y\b \b\b \b\b \bz"
+echok echoke echoctl: keys "\x12" echo "^R\r\nz"
+echok echoke echoctl: keys "\n" echo "\r\n"
+echok echoke echoctl: read "z\n" EAGAIN
+echoe echok echoke echoctl: keys "abc\x7f\x7fd" echo "abc\b \b\b \bd"
+echoe echok echoke echoctl: keys "\x15" echo "\b \b\b \b"
+echoe echok echoke echoctl: keys "ef\x01\x7f" echo "ef^A\b \b\b \b"
+echoe echok echoke echoctl: keys "\x15" echo "\b \b\b \b"
+echoe echok echoke echoctl: keys "\x7f" echo ""
+echoe echok echoke echoctl: keys "g\x7f\n" echo "g\b \b\r\n"
+echoe echok echoke echoctl: read "\n" EAGAIN
+echoe echok echoke echoctl: keys "x y\x17\x17z" echo "x y\b \b\b \b\b \bz"
+echoe echok echoke echoctl: keys "\x12" echo "^R\r\nz"
+echoe echok echoke echoctl: keys "\n" echo "\r\n"
+echoe echok echoke echoctl: read "z\n" EAGAIN
+echoprt echoctl: keys "abc\x7f\x7fd" echo "abc\\cb/d"
+echoprt echoctl: keys "\x15" echo "^U"
+echoprt echoctl: keys "ef\x01\x7f" echo "ef^A\\^A"
+echoprt echoctl: keys "\x15" echo "/^U"
+echoprt echoctl: keys "\x7f" echo ""
+echoprt echoctl: keys "g\x7f\n" echo "g\\g/\r\n"
+echoprt echoctl: read "\n" EAGAIN
+echoprt echoctl: keys "x y\x17\x17z" echo "x y\\y x/z"
+echoprt echoctl: keys "\x12" echo "^R\r\nz"
+echoprt echoctl: keys "\n" echo "\r\n"
+echoprt echoctl: read "z\n" EAGAIN
+echoe echoprt echoctl: keys "abc\x7f\x7fd" echo "abc\\cb/d"
+echoe echoprt echoctl: keys "\x15" echo "^U"
+echoe echoprt echoctl: keys "ef\x01\x7f" echo "ef^A\\^A"
+echoe echoprt echoctl: keys "\x15" echo "/^U"
+echoe echoprt echoctl: keys "\x7f" echo ""
+echoe echoprt echoctl: keys "g\x7f\n" echo "g\\g/\r\n"
+echoe echoprt echoctl: read "\n" EAGAIN
+echoe echoprt echoctl: keys "x y\x17\x17z" echo "x y\\y x/z"
+echoe echoprt echoctl: keys "\x12" echo "^R\r\nz"
+echoe echoprt echoctl: keys "\n" echo "\r\n"
+echoe echoprt echoctl: read "z\n" EAGAIN
+echok echoprt echoctl: keys "abc\x7f\x7fd" echo "abc\\cb/d"
+echok echoprt echoctl: keys "\x15" echo "^U\r\n"
+echok echoprt echoctl: keys "ef\x01\x7f" echo "ef^A\\^A"
+echok echoprt echoctl: keys "\x15" echo "/^U\r\n"
+echok echoprt echoctl: keys "\x7f" echo ""
+echok echoprt echoctl: keys "g\x7f\n" echo "g\\g/\r\n"
+echok echoprt echoctl: read "\n" EAGAIN
+echok echoprt echoctl: keys "x y\x17\x17z" echo "x y\\y x/z"
+echok echoprt echoctl: keys "\x12" echo "^R\r\nz"
+echok echoprt echoctl: keys "\n" echo "\r\n"
+echok echoprt echoctl: read "z\n" EAGAIN
+echoe echok echoprt echoctl: keys "abc\x7f\x7fd" echo "abc\\cb/d"
+echoe echok echoprt echoctl: keys "\x15" echo "^U\r\n"
+echoe echok echoprt echoctl: keys "ef\x01\x7f" echo "ef^A\\^A"
+echoe echok echoprt echoctl: keys "\x15" echo "/^U\r\n"
+echoe echok echoprt echoctl: keys "\x7f" echo ""
+echoe echok echoprt echoctl: keys "g\x7f\n" echo "g\\g/\r\n"
+echoe echok echoprt echoctl: read "\n" EAGAIN
+echoe echok echoprt echoctl: keys "x y\x17\x17z" echo "x y\\y x/z"
+echoe echok echoprt echoctl: keys "\x12" echo "^R\r\nz"
+echoe echok echoprt echoctl: keys "\n" echo "\r\n"
+echoe echok echoprt echoctl: read "z\n" EAGAIN
+echoke echoprt echoctl: keys "abc\x7f\x7fd" echo "abc\\cb/d"
+echoke echoprt echoctl: keys "\x15" echo "^U"
+echoke echoprt echoctl: keys "ef\x01\x7f" echo "ef^A\\^A"
+echoke echoprt echoctl: keys "\x15" echo "/^U"
+echoke echoprt echoctl: keys "\x7f" echo ""
+echoke echoprt echoctl: keys "g\x7f\n" echo "g\\g/\r\n"
+echoke echoprt echoctl: read "\n" EAGAIN
+echoke echoprt echoctl: keys "x y\x17\x17z" echo "x y\\y x/z"
+echoke echoprt echoctl: keys "\x12" echo "^R\r\nz"
+echoke echoprt echoctl: keys "\n" echo "\r\n"
+echoke echoprt echoctl: read "z\n" EAGAIN
+echoe echoke echoprt echoctl: keys "abc\x7f\x7fd" echo "abc\\cb/d"
+echoe echoke echoprt echoctl: keys "\x15" echo "^U"
+echoe echoke echoprt echoctl: keys "ef\x01\x7f" echo "ef^A\\^A"
+echoe echoke echoprt echoctl: keys "\x15" echo "/^U"
+echoe echoke echoprt echoctl: keys "\x7f" echo ""
+echoe echoke echoprt echoctl: keys "g\x7f\n" echo "g\\g/\r\n"
+echoe echoke echoprt echoctl: read "\n" EAGAIN
+echoe echoke echoprt echoctl: keys "x y\x17\x17z" echo "x y\\y x/z"
+echoe echoke echoprt echoctl: keys "\x12" echo "^R\r\nz"
+echoe echoke echoprt echoctl: keys "\n" echo "\r\n"
+echoe echoke echoprt echoctl: read "z\n" EAGAIN
+echok echoke echoprt echoctl: keys "abc\x7f\x7fd" echo "abc\\cb/d"
+echok echoke echoprt echoctl: keys "\x15" echo "^U\r\n"
+echok echoke echoprt echoctl: keys "ef\x01\x7f" echo "ef^A\\^A"
+echok echoke echoprt echoctl: keys "\x15" echo "/^U\r\n"
+echok echoke echoprt echoctl: keys "\x7f" echo ""
+echok echoke echoprt echoctl: keys "g\x7f\n" echo "g\\g/\r\n"
+echok echoke echoprt echoctl: read "\n" EAGAIN
+echok echoke echoprt echoctl: keys "x y\x17\x17z" echo "x y\\y x/z"
+echok echoke echoprt echoctl: keys "\x12" echo "^R\r\nz"
+echok echoke echoprt echoctl: keys "\n" echo "\r\n"
+echok echoke echoprt echoctl: read "z\n" EAGAIN
+echoe echok echoke echoprt echoctl: keys "abc\x7f\x7fd" echo "abc\\cb/d"
+echoe echok echoke echoprt echoctl: keys "\x15" echo "\\da/"
+echoe echok echoke echoprt echoctl: keys "ef\x01\x7f" echo "ef^A\\^A"
+echoe echok echoke echoprt echoctl: keys "\x15" echo "fe/"
+echoe echok echoke echoprt echoctl: keys "\x7f" echo ""
+echoe echok echoke echoprt echoctl: keys "g\x7f\n" echo "g\\g/\r\n"
+echoe echok echoke echoprt echoctl: read "\n" EAGAIN
+echoe echok echoke echoprt echoctl: keys "x y\x17\x17z" echo "x y\\y x/z"
+echoe echok echoke echoprt echoctl: keys "\x12" echo "^R\r\nz"
+echoe echok echoke echoprt echoctl: keys "\n" echo "\r\n"
+echoe echok echoke echoprt echoctl: read "z\n" EAGAIN
+
+== L5 ECHONL
+echonl, no echo: keys "ab\n" echo "\r\n"
+echonl, no echo: read "ab\n" EAGAIN
+echonl, echo: keys "ab\n" echo "ab\r\n"
+echonl, echo: read "ab\n" EAGAIN
+
+== L5 echo goes through output processing
+defaults: keys "ab\n" echo "ab\r\n"
+defaults: keys "\rcd\r\r" echo "^Mcd^M^M"
+defaults: keys "\n" echo "\r\n"
+defaults: keys "x%" echo "x%"
+defaults: keys "\ty\t" echo "\ty\t"
+defaults: keys "\n" echo "\r\n"
+defaults: read "ab\n" "\rcd\r\r\n" "x%" "\ty\t\n" EAGAIN
+no opost: keys "ab\n" echo "ab\n"
+no opost: keys "\rcd\r\r" echo "^Mcd^M^M"
+no opost: keys "\n" echo "\n"
+no opost: keys "x%" echo "x%"
+no opost: keys "\ty\t" echo "\ty\t"
+no opost: keys "\n" echo "\n"
+no opost: read "ab\n" "\rcd\r\r\n" "x%" "\ty\t\n" EAGAIN
+no onlcr: keys "ab\n" echo "ab\n"
+no onlcr: keys "\rcd\r\r" echo "^Mcd^M^M"
+no onlcr: keys "\n" echo "\n"
+no onlcr: keys "x%" echo "x%"
+no onlcr: keys "\ty\t" echo "\ty\t"
+no onlcr: keys "\n" echo "\n"
+no onlcr: read "ab\n" "\rcd\r\r\n" "x%" "\ty\t\n" EAGAIN
+ocrnl: keys "ab\n" echo "ab\r\n"
+ocrnl: keys "\rcd\r\r" echo "^Mcd^M^M"
+ocrnl: keys "\n" echo "\r\n"
+ocrnl: keys "x%" echo "x%"
+ocrnl: keys "\ty\t" echo "\ty\t"
+ocrnl: keys "\n" echo "\r\n"
+ocrnl: read "ab\n" "\rcd\r\r\n" "x%" "\ty\t\n" EAGAIN
+onocr: keys "ab\n" echo "ab\r\n"
+onocr: keys "\rcd\r\r" echo "^Mcd^M^M"
+onocr: keys "\n" echo "\r\n"
+onocr: keys "x%" echo "x%"
+onocr: keys "\ty\t" echo "\ty\t"
+onocr: keys "\n" echo "\r\n"
+onocr: read "ab\n" "\rcd\r\r\n" "x%" "\ty\t\n" EAGAIN
+onlret: keys "ab\n" echo "ab\r\n"
+onlret: keys "\rcd\r\r" echo "^Mcd^M^M"
+onlret: keys "\n" echo "\r\n"
+onlret: keys "x%" echo "x%"
+onlret: keys "\ty\t" echo "\ty\t"
+onlret: keys "\n" echo "\r\n"
+onlret: read "ab\n" "\rcd\r\r\n" "x%" "\ty\t\n" EAGAIN
+olcuc: keys "ab\n" echo "AB\r\n"
+olcuc: keys "\rcd\r\r" echo "^MCD^M^M"
+olcuc: keys "\n" echo "\r\n"
+olcuc: keys "x%" echo "X%"
+olcuc: keys "\ty\t" echo "\tY\t"
+olcuc: keys "\n" echo "\r\n"
+olcuc: read "ab\n" "\rcd\r\r\n" "x%" "\ty\t\n" EAGAIN
+tab3: keys "ab\n" echo "ab\r\n"
+tab3: keys "\rcd\r\r" echo "^Mcd^M^M"
+tab3: keys "\n" echo "\r\n"
+tab3: keys "x%" echo "x%"
+tab3: keys "\ty\t" echo "      y       "
+tab3: keys "\n" echo "\r\n"
+tab3: read "ab\n" "\rcd\r\r\n" "x%" "\ty\t\n" EAGAIN
+onlret no onlcr: keys "ab\n" echo "ab\n"
+onlret no onlcr: keys "\rcd\r\r" echo "^Mcd^M^M"
+onlret no onlcr: keys "\n" echo "\n"
+onlret no onlcr: keys "x%" echo "x%"
+onlret no onlcr: keys "\ty\t" echo "\ty\t"
+onlret no onlcr: keys "\n" echo "\n"
+onlret no onlcr: read "ab\n" "\rcd\r\r\n" "x%" "\ty\t\n" EAGAIN
+
+== L5 control bytes
+isig off: keys "\x01\x1b\x1c\x1a\x03\x7f" echo "^A^[^\\^Z^C\b \b\b \b"
+keys: keys "\x15" echo "\b \b\b \b\b \b\b \b\b \b\b \b\b \b\b \b"
+nul and high: keys "\x00a\x80\x9f\xc3\xa9\xff\x11\x13" echo "^@a\x80\x9f\xc3\xa9\xff^Q^S"
+keys: keys "\n" echo "\r\n"
+nul and high: read "\x00a\x80\x9f\xc3\xa9\xff\x11\x13\n" EAGAIN
+no echoctl: keys "\x01\x1b\x11\x13\n" echo "\x01\x1b\x11\x13\r\n"
+no echoctl: read "\x01\x1b\x11\x13\n" EAGAIN
+
+== L5 the end-of-file key
+alone: keys "\x04" echo ""
+alone: read EOF EAGAIN
+after text: keys "abc\x04" echo "abc"
+after text: read "abc" EAGAIN
+after a line: keys "one\n\x04two\n" echo "one\r\ntwo\r\n"
+after a line: read "one\n" EOF "two\n" EAGAIN
+no echoctl: keys "\x04" echo ""
+no echoctl: read EOF EAGAIN
+
+== L5 ECHOPRT in steps
+all gone, then more: keys "a" echo "a"
+all gone, then more: keys "\x7f" echo "\\a/"
+all gone, then more: keys "\x7f" echo ""
+all gone, then more: keys "b" echo "b"
+all gone, then more: keys "\n" echo "\r\n"
+all gone, then more: read "b\n" EAGAIN
+two gone, then more: keys "ab" echo "ab"
+two gone, then more: keys "\x7f" echo "\\b"
+two gone, then more: keys "\x7f" echo "a/"
+two gone, then more: keys "c" echo "c"
+two gone, then more: keys "\n" echo "\r\n"
+two gone, then more: read "c\n" EAGAIN
+one gone, then more: keys "ab" echo "ab"
+one gone, then more: keys "\x7f" echo "\\b"
+one gone, then more: keys "c" echo "/c"
+one gone, then more: keys "\n" echo "\r\n"
+one gone, then more: read "ac\n" EAGAIN
+newline while open: keys "ab" echo "ab"
+newline while open: keys "\x7f" echo "\\b"
+newline while open: keys "\n" echo "\r\n"
+newline while open: read "a\n" EAGAIN
+eof while open: keys "ab" echo "ab"
+eof while open: keys "\x7f" echo "\\b"
+eof while open: keys "\x04" echo ""
+eof while open: keys "\n" echo "\r\n"
+eof while open: read "a" "\n" EAGAIN
+kill while open: keys "ab" echo "ab"
+kill while open: keys "\x7f" echo "\\b"
+kill while open: keys "\x15" echo "a/"
+kill while open: keys "c\n" echo "c\r\n"
+kill while open: read "c\n" EAGAIN
+kill while open, echoke: keys "abc" echo "abc"
+kill while open, echoke: keys "\x7f" echo "\\c"
+kill while open, echoke: keys "\x15" echo "ba/"
+kill while open, echoke: keys "c\n" echo "c\r\n"
+kill while open, echoke: read "c\n" EAGAIN
+werase while open: keys "x yz" echo "x yz"
+werase while open: keys "\x7f" echo "\\z"
+werase while open: keys "\x17" echo "y"
+werase while open: keys "c\n" echo "/c\r\n"
+werase while open: read "x c\n" EAGAIN
+reprint while open: keys "abc" echo "abc"
+reprint while open: keys "\x7f" echo "\\c"
+reprint while open: keys "\x12" echo "/^R\r\nab"
+reprint while open: keys "c\n" echo "c\r\n"
+reprint while open: read "abc\n" EAGAIN
+lnext while open: keys "abc" echo "abc"
+lnext while open: keys "\x7f" echo "\\c"
+lnext while open: keys "\x16" echo "/^\b"
+lnext while open: keys "\x7f" echo "^?"
+lnext while open: keys "\n" echo "\r\n"
+lnext while open: read "ab\x7f\n" EAGAIN
+a tab: keys "a\tb" echo "a\tb"
+a tab: keys "\x7f" echo "\\b"
+a tab: keys "\x7f" echo "\t"
+a tab: keys "\x7f" echo "a/"
+a tab: keys "c\n" echo "c\r\n"
+a tab: read "c\n" EAGAIN
+control, echoctl: keys "a\x01b" echo "a^Ab"
+control, echoctl: keys "\x7f" echo "\\b"
+control, echoctl: keys "\x7f" echo "^A"
+control, echoctl: keys "\x7f" echo "a/"
+control, echoctl: keys "c\n" echo "c\r\n"
+control, echoctl: read "c\n" EAGAIN
+control, no echoctl: keys "a\x01b" echo "a\x01b"
+control, no echoctl: keys "\x7f" echo "\\b"
+control, no echoctl: keys "\x7f" echo "\x01"
+control, no echoctl: keys "\x7f" echo "a/"
+control, no echoctl: keys "c\n" echo "c\r\n"
+control, no echoctl: read "c\n" EAGAIN
+multibyte: keys "a\xc3\xa9b" echo "a\xc3\xa9b"
+multibyte: keys "\x7f" echo "\\b"
+multibyte: keys "\x7f" echo "\xc3\xa9"
+multibyte: keys "\x7f" echo "a/"
+multibyte: keys "c\n" echo "c\r\n"
+multibyte: read "c\n" EAGAIN
+multibyte, off: keys "a\xc3\xa9b" echo "a\xc3\xa9b"
+multibyte, off: keys "\x7f" echo "\\b"
+multibyte, off: keys "\x7f" echo "\xa9"
+multibyte, off: keys "\x7f" echo "\xc3"
+multibyte, off: keys "\x7f" echo "a/"
+multibyte, off: keys "c\n" echo "c\r\n"
+multibyte, off: read "c\n" EAGAIN
+no echo: keys "ab" echo ""
+no echo: keys "\x7f" echo ""
+no echo: keys "c\n" echo ""
+no echo: read "ac\n" EAGAIN
+echoctl key closing: keys "ab" echo "ab"
+echoctl key closing: keys "\x7f" echo "\\b"
+echoctl key closing: keys "\x01" echo "/^A"
+echoctl key closing: keys "\n" echo "\r\n"
+echoctl key closing: read "a\x01\n" EAGAIN
+newline while open, then more: keys "ab" echo "ab"
+newline while open, then more: keys "\x7f" echo "\\b"
+newline while open, then more: keys "\n" echo "\r\n"
+newline while open, then more: keys "c" echo "/c"
+newline while open, then more: keys "\n" echo "\r\n"
+newline while open, then more: read "a\n" "c\n" EAGAIN
+eof while open, then more: keys "ab" echo "ab"
+eof while open, then more: keys "\x7f" echo "\\b"
+eof while open, then more: keys "\x04" echo ""
+eof while open, then more: keys "c" echo "/c"
+eof while open, then more: keys "\n" echo "\r\n"
+eof while open, then more: read "a" "c\n" EAGAIN
+VEOL while open: keys "ab" echo "ab"
+VEOL while open: keys "\x7f" echo "\\b"
+VEOL while open: keys "%" echo "%"
+VEOL while open: keys "c" echo "/c"
+VEOL while open: keys "\x7f" echo "\\c/"
+VEOL while open: keys "&" echo "&"
+VEOL while open: keys "d" echo "d"
+VEOL while open: keys "\n" echo "\r\n"
+VEOL while open: read "a%" "&" "d\n" EAGAIN
+
+== L5 the kill key with nothing to kill
+no echok: keys "\x15" echo ""
+no echok: keys "\n" echo "\r\n"
+no echok: read "\n" EAGAIN
+echok: keys "\x15" echo ""
+echok: keys "\n" echo "\r\n"
+echok: read "\n" EAGAIN
+echok echoke: keys "\x15" echo ""
+echok echoke: keys "\n" echo "\r\n"
+echok echoke: read "\n" EAGAIN
+echoprt: keys "\x15" echo ""
+echoprt: keys "\n" echo "\r\n"
+echoprt: read "\n" EAGAIN
+
+== L5 the column with OPOST clear
+letters: keys "ab" echo "ab"
+letters: then a tab: "        |"
+a control: keys "\x01" echo "^A"
+a control: then a tab: "      |"
+a tab: keys "\t" echo "\t"
+a tab: then a tab: "        |"
+a letter erased: keys "ab\x7f" echo "ab\b \b"
+a letter erased: then a tab: "        |"
+a tab erased: keys "a\t\x7f" echo "a\t\b\b\b\b\b\b\b"
+a tab erased: then a tab: "        |"
+a control erased: keys "a\x01\x7f" echo "a^A\b \b\b \b"
+a control erased: then a tab: "      |"
+a letter, then a line: keys "ab\n" echo "ab\n"
+a letter, then a line: then a tab: "        |"
+
+== L5 a mode with the column kept
+a key, then raw: keys "ab" echo "ab"
+then a tab: "      |"
+
+== L3 L5 VLNEXT and the column
+tab after a literal letter: keys "\x16q\t" echo "^\bq\t"
+tab after a literal letter: keys "\x7f" echo "\b\b\b\b\b\b\b"
+tab after a literal letter: keys "\x7f" echo "\b \b"
+tab after a literal letter: keys "\n" echo "\r\n"
+tab after a literal letter: read "\n" EAGAIN
+tab after a literal control: keys "\x16\x01\t" echo "^\b^A\t"
+tab after a literal control: keys "\x7f" echo "\b\b\b\b\b\b"
+tab after a literal control: keys "\x7f" echo "\b \b\b \b"
+tab after a literal control: keys "\n" echo "\r\n"
+tab after a literal control: read "\n" EAGAIN
+a literal tab: keys "\x16\t" echo "^\b\t"
+a literal tab: keys "\x7f" echo "\b\b\b\b\b\b\b\b"
+a literal tab: keys "\n" echo "\r\n"
+a literal tab: read "\n" EAGAIN
+a literal erase erased: keys "ab\x16\x7f" echo "ab^\b^?"
+a literal erase erased: keys "\x7f" echo "\b \b\b \b"
+a literal erase erased: keys "\n" echo "\r\n"
+a literal erase erased: read "ab\n" EAGAIN
+erase of a next that's pending: keys "ab\x16" echo "ab^\b"
+erase of a next that's pending: keys "\x7f" echo "^?"
+erase of a next that's pending: keys "\x7f" echo "\b \b\b \b"
+erase of a next that's pending: keys "\n" echo "\r\n"
+erase of a next that's pending: read "ab\n" EAGAIN
+newline after next: keys "ab\x16" echo "ab^\b"
+newline after next: keys "\n" echo "^J"
+newline after next: keys "\n" echo "\r\n"
+newline after next: read "ab\n\n" EAGAIN
+no echoctl, the key: keys "ab\x16" echo "ab"
+no echoctl, the key: keys "c" echo "c"
+no echoctl, the key: keys "\n" echo "\r\n"
+no echoctl, the key: read "abc\n" EAGAIN
+literal at werase: keys "x y\x16\x01" echo "x y^\b^A"
+literal at werase: keys "\x17" echo "\b \b\b \b\b \b"
+literal at werase: keys "\n" echo "\r\n"
+literal at werase: read "x \n" EAGAIN
+literal space at werase: keys "x y\x16 " echo "x y^\b "
+literal space at werase: keys "\x17" echo "\b \b\b \b"
+literal space at werase: keys "\n" echo "\r\n"
+literal space at werase: read "x \n" EAGAIN
+
+== L5 the line's first column
+reprint with output before: keys "ab" echo "ab"
+reprint with output before: keys "\x12" echo "^R\r\nab"
+reprint with output before: keys "\t" echo "\t"
+reprint with output before: keys "\x7f" echo "\b\b\b\b\b\b"
+reprint with output before: keys "\x7f\x7f" echo "\b \b\b \b"
+reprint with output before: keys "\n" echo "\r\n"
+reprint with output before: read "\n" EAGAIN
+kill and output: keys "ab" echo "ab"
+kill and output: keys "\x15" echo "\b \b\b \b"
+kill and output: keys "c\t" echo "c\t"
+kill and output: keys "\x7f" echo "\b\b\b\b"
+kill and output: keys "\x7f" echo "\b \b"
+kill and output: keys "\n" echo "\r\n"
+kill and output: read "\n" EAGAIN
+erase and output: keys "ab" echo "ab"
+erase and output: keys "\x7f\x7f" echo "\b \b\b \b"
+erase and output: keys "c\t" echo "c\t"
+erase and output: keys "\x7f" echo "\b\b\b\b"
+erase and output: keys "\x7f" echo "\b \b"
+erase and output: keys "\n" echo "\r\n"
+erase and output: read "\n" EAGAIN
+first key unseen: keys "ab" echo ""
+first key unseen: keys "c\t" echo "c\t"
+first key unseen: keys "\x7f" echo "\b\b\b\b\b"
+first key unseen: keys "\x7f" echo "\b \b"
+first key unseen: keys "\n" echo "\r\n"
+first key unseen: read "ab\n" EAGAIN
+typed return, no echoctl: keys "\r" echo "\r"
+typed return, no echoctl: keys "\t" echo "\t"
+typed return, no echoctl: keys "\x7f" echo "\b\b\b\b\b\b\b\b"
+typed return, no echoctl: keys "\x7f" echo ""
+typed return, no echoctl: keys "\n" echo "\r\n"
+typed return, no echoctl: read "\n" EAGAIN
+typed return at column 0, onocr: keys "\r" echo ""
+typed return at column 0, onocr: keys "a\r" echo "a\r"
+typed return at column 0, onocr: keys "\n" echo "\r\n"
+typed return at column 0, onocr: read "\ra\r\n" EAGAIN
+typed return, ocrnl: keys "a\r" echo "a\n"
+typed return, ocrnl: keys "\n" echo "\r\n"
+typed return, ocrnl: read "a\r\n" EAGAIN
+
+== L3 a character set to nothing
+VERASE 0: keys "a\x00b\n" echo "a^@b\r\n"
+VERASE 0: read "a\x00b\n" EAGAIN
+VKILL 0: keys "a\x00b\n" echo "a^@b\r\n"
+VKILL 0: read "a\x00b\n" EAGAIN
+VEOF 0: keys "a\x00b\n" echo "a^@b\r\n"
+VEOF 0: read "a\x00b\n" EAGAIN
+the rest 0: keys "a\x00b\n" echo "a^@b\r\n"
+the rest 0: read "a\x00b\n" EAGAIN
+
+== L1 cflags on a pty
+set c=0 reads b0
+set c=bf reads bf
+set c=1f reads bf
+set c=10 reads b0
+set c=20 reads b0
+set c=30 reads b0
+set c=40 reads f0
+set c=100 reads b0
+set c=200 reads 2b0
+set c=400 reads 4b0
+set c=800 reads 8b0
+set c=1000 reads 10b0
+set c=1001 reads 10b1
+set c=7fffffff reads 5ffffeff
+set c=d reads bd
+set c=8d reads bd
+
+== L7 flags Linux keeps and doesn't act on
+all kept: i=ffffb817 o=fffffffe l=fffffffe
+xcase: keys "aB\\C\n" echo "AB\\C\r\n"
+xcase: read "ab\\c\n" EAGAIN
+xcase output "AB\\C"
+flusho pendin: keys "aB\n" echo "aB\r\n"
+flusho pendin: read "aB\n" EAGAIN
+flusho output "out"
+l=da3b
+
+== L5 erasing across a tab
+at the start: keys "\t" echo "\t"
+at the start: keys "\x7f" echo "\b\b\b\b\b\b\b\b"
+at the start: keys "\x7f" echo ""
+at the start: keys "\n" echo "\r\n"
+at the start: read "\n" EAGAIN
+after letters: keys "ab\t" echo "ab\t"
+after letters: keys "\x7f" echo "\b\b\b\b\b\b"
+after letters: keys "\x7f" echo "\b \b"
+after letters: keys "\n" echo "\r\n"
+after letters: read "a\n" EAGAIN
+full stop: keys "abcdefgh\t" echo "abcdefgh\t"
+full stop: keys "\x7f" echo "\b\b\b\b\b\b\b\b"
+full stop: keys "\x7f" echo "\b \b"
+full stop: keys "\n" echo "\r\n"
+full stop: read "abcdefg\n" EAGAIN
+two tabs: keys "\t\t" echo "\t\t"
+two tabs: keys "\x7f" echo "\b\b\b\b\b\b\b\b"
+two tabs: keys "\x7f" echo "\b\b\b\b\b\b\b\b"
+two tabs: keys "\n" echo "\r\n"
+two tabs: read "\n" EAGAIN
+tab between: keys "a\tb\t" echo "a\tb\t"
+tab between: keys "\x7f" echo "\b\b\b\b\b\b\b"
+tab between: keys "\x7f" echo "\b \b"
+tab between: keys "\n" echo "\r\n"
+tab between: read "a\t\n" EAGAIN
+after a control: keys "\x01\t" echo "^A\t"
+after a control: keys "\x7f" echo "\b\b\b\b\b\b"
+after a control: keys "\x7f" echo "\b \b\b \b"
+after a control: keys "\n" echo "\r\n"
+after a control: read "\n" EAGAIN
+after a control, no echoctl: keys "\x01\t" echo "\x01\t"
+after a control, no echoctl: keys "\x7f" echo "\b\b\b\b\b\b\b\b"
+after a control, no echoctl: keys "\x7f" echo ""
+after a control, no echoctl: keys "\n" echo "\r\n"
+after a control, no echoctl: read "\n" EAGAIN
+after output: keys "\t" echo "\t"
+after output: keys "\x7f" echo "\b\b\b\b\b"
+after output: keys "\x7f" echo ""
+after output: keys "\n" echo "\r\n"
+after output: read "\n" EAGAIN
+after output and letters: keys "ab\t" echo "ab\t"
+after output and letters: keys "\x7f" echo "\b\b\b"
+after output and letters: keys "\x7f" echo "\b \b"
+after output and letters: keys "\n" echo "\r\n"
+after output and letters: read "a\n" EAGAIN
+after long output: keys "\t" echo "\t"
+after long output: keys "\x7f" echo "\b\b\b\b\b\b"
+after long output: keys "\x7f" echo ""
+after long output: keys "\n" echo "\r\n"
+after long output: read "\n" EAGAIN
+after output with a line end: keys "\t" echo "\t"
+after output with a line end: keys "\x7f" echo "\b\b\b\b\b"
+after output with a line end: keys "\x7f" echo ""
+after output with a line end: keys "\n" echo "\r\n"
+after output with a line end: read "\n" EAGAIN
+after output with a return: keys "\t" echo "\t"
+after output with a return: keys "\x7f" echo "\b\b\b\b\b\b\b"
+after output with a return: keys "\x7f" echo ""
+after output with a return: keys "\n" echo "\r\n"
+after output with a return: read "\n" EAGAIN
+after output with a tab: keys "\t" echo "\t"
+after output with a tab: keys "\x7f" echo "\b\b\b\b\b\b\b"
+after output with a tab: keys "\x7f" echo ""
+after output with a tab: keys "\n" echo "\r\n"
+after output with a tab: read "\n" EAGAIN
+after output with a backspace: keys "\t" echo "\t"
+after output with a backspace: keys "\x7f" echo "\b\b\b\b\b\b"
+after output with a backspace: keys "\x7f" echo ""
+after output with a backspace: keys "\n" echo "\r\n"
+after output with a backspace: read "\n" EAGAIN
+after output, control: keys "\x01\t" echo "^A\t"
+after output, control: keys "\x7f" echo "\b\b\b"
+after output, control: keys "\x7f" echo "\b \b\b \b"
+after output, control: keys "\n" echo "\r\n"
+after output, control: read "\n" EAGAIN
+no echoe: keys "ab\t" echo "ab\t"
+no echoe: keys "\x7f" echo "^?"
+no echoe: keys "\x7f" echo "^?"
+no echoe: keys "\n" echo "\r\n"
+no echoe: read "a\n" EAGAIN
+output during a line: keys "ab" echo "ab"
+output during a line: keys "\t" echo "\t"
+output during a line: keys "\x7f" echo "\b\b\b\b\b\b"
+output during a line: keys "\x7f\x7f" echo "\b \b\b \b"
+output during a line: keys "\n" echo "\r\n"
+output during a line: read "\n" EAGAIN
+output with no opost: keys "\t" echo "\t"
+output with no opost: keys "\x7f" echo "\b\b\b\b\b\b\b\b"
+output with no opost: keys "\n" echo "\r\n"
+output with no opost: read "\n" EAGAIN
+second line: keys "abc\n" echo "abc\r\n"
+second line: keys "\t" echo "\t"
+second line: keys "\x7f" echo "\b\b\b\b\b\b\b\b"
+second line: keys "\n" echo "\r\n"
+second line: read "abc\n" "\n" EAGAIN
+second line, no onlcr: keys "abc\n" echo "abc\n"
+second line, no onlcr: keys "\t" echo "\t"
+second line, no onlcr: keys "\x7f" echo "\b\b\b\b\b"
+second line, no onlcr: keys "\n" echo "\n"
+second line, no onlcr: read "abc\n" "\n" EAGAIN
+tab3: keys "ab\t" echo "ab      "
+tab3: keys "\x7f" echo "\b\b\b\b\b\b"
+tab3: keys "\x7f\x7f" echo "\b \b\b \b"
+tab3: keys "\n" echo "\r\n"
+tab3: read "\n" EAGAIN
+
+== L5 every byte: what erasing it echoes
+echoctl 1 iutf8 0: 00:q^@\b \b\b \b 01:q^A\b \b\b \b 02:q^B\b \b\b \b 03:q^C\b \b\b \b 04:q^D\b \b\b \b 05:q^E\b \b\b \b 06:q^F\b \b\b \b 07:q^G\b \b\b \b 08:q^H\b \b\b \b 09:q\t\b\b\b\b 0b:q^K\b \b\b \b 0c:q^L\b \b\b \b 0e:q^N\b \b\b \b 0f:q^O\b \b\b \b 10:q^P\b \b\b \b 11:q^Q\b \b\b \b 12:q^R\b \b\b \b 13:q^S\b \b\b \b 14:q^T\b \b\b \b 16:q^V\b \b\b \b 18:q^X\b \b\b \b 19:q^Y\b \b\b \b 1a:q^Z\b \b\b \b 1b:q^[\b \b\b \b 1c:q^\\\b \b\b \b 1d:q^]\b \b\b \b 1e:q^^\b \b\b \b 1f:q^_\b \b\b \b 20:q \b \b 21:q!\b \b 22:q"\b \b 23:q#\b \b 24:q$\b \b 25:q%\b \b 26:q&\b \b 27:q'\b \b 28:q(\b \b 29:q)\b \b 2a:q*\b \b 2b:q+\b \b 2c:q,\b \b 2d:q-\b \b 2e:q.\b \b 2f:q/\b \b 30:q0\b \b 31:q1\b \b 32:q2\b \b 33:q3\b \b 34:q4\b \b 35:q5\b \b 36:q6\b \b 37:q7\b \b 38:q8\b \b 39:q9\b \b 3a:q:\b \b 3b:q;\b \b 3c:q<\b \b 3d:q=\b \b 3e:q>\b \b 3f:q?\b \b 40:q@\b \b 41:qA\b \b 42:qB\b \b 43:qC\b \b 44:qD\b \b 45:qE\b \b 46:qF\b \b 47:qG\b \b 48:qH\b \b 49:qI\b \b 4a:qJ\b \b 4b:qK\b \b 4c:qL\b \b 4d:qM\b \b 4e:qN\b \b 4f:qO\b \b 50:qP\b \b 51:qQ\b \b 52:qR\b \b 53:qS\b \b 54:qT\b \b 55:qU\b \b 56:qV\b \b 57:qW\b \b 58:qX\b \b 59:qY\b \b 5a:qZ\b \b 5b:q[\b \b 5c:q\\\b \b 5d:q]\b \b 5e:q^\b \b 5f:q_\b \b 60:q`\b \b 61:qa\b \b 62:qb\b \b 63:qc\b \b 64:qd\b \b 65:qe\b \b 66:qf\b \b 67:qg\b \b 68:qh\b \b 69:qi\b \b 6a:qj\b \b 6b:qk\b \b 6c:ql\b \b 6d:qm\b \b 6e:qn\b \b 6f:qo\b \b 70:qp\b \b 71:qq\b \b 72:qr\b \b 73:qs\b \b 74:qt\b \b 75:qu\b \b 76:qv\b \b 77:qw\b \b 78:qx\b \b 79:qy\b \b 7a:qz\b \b 7b:q{\b \b 7c:q|\b \b 7d:q}\b \b 7e:q~\b \b 80:q\x80\b \b 81:q\x81\b \b 82:q\x82\b \b 83:q\x83\b \b 84:q\x84\b \b 85:q\x85\b \b 86:q\x86\b \b 87:q\x87\b \b 88:q\x88\b \b 89:q\x89\b \b 8a:q\x8a\b \b 8b:q\x8b\b \b 8c:q\x8c\b \b 8d:q\x8d\b \b 8e:q\x8e\b \b 8f:q\x8f\b \b 90:q\x90\b \b 91:q\x91\b \b 92:q\x92\b \b 93:q\x93\b \b 94:q\x94\b \b 95:q\x95\b \b 96:q\x96\b \b 97:q\x97\b \b 98:q\x98\b \b 99:q\x99\b \b 9a:q\x9a\b \b 9b:q\x9b\b \b 9c:q\x9c\b \b 9d:q\x9d\b \b 9e:q\x9e\b \b 9f:q\x9f\b \b a0:q\xa0\b \b a1:q\xa1\b \b a2:q\xa2\b \b a3:q\xa3\b \b a4:q\xa4\b \b a5:q\xa5\b \b a6:q\xa6\b \b a7:q\xa7\b \b a8:q\xa8\b \b a9:q\xa9\b \b aa:q\xaa\b \b ab:q\xab\b \b ac:q\xac\b \b ad:q\xad\b \b ae:q\xae\b \b af:q\xaf\b \b b0:q\xb0\b \b b1:q\xb1\b \b b2:q\xb2\b \b b3:q\xb3\b \b b4:q\xb4\b \b b5:q\xb5\b \b b6:q\xb6\b \b b7:q\xb7\b \b b8:q\xb8\b \b b9:q\xb9\b \b ba:q\xba\b \b bb:q\xbb\b \b bc:q\xbc\b \b bd:q\xbd\b \b be:q\xbe\b \b bf:q\xbf\b \b c0:q\xc0\b \b c1:q\xc1\b \b c2:q\xc2\b \b c3:q\xc3\b \b c4:q\xc4\b \b c5:q\xc5\b \b c6:q\xc6\b \b c7:q\xc7\b \b c8:q\xc8\b \b c9:q\xc9\b \b ca:q\xca\b \b cb:q\xcb\b \b cc:q\xcc\b \b cd:q\xcd\b \b ce:q\xce\b \b cf:q\xcf\b \b d0:q\xd0\b \b d1:q\xd1\b \b d2:q\xd2\b \b d3:q\xd3\b \b d4:q\xd4\b \b d5:q\xd5\b \b d6:q\xd6\b \b d7:q\xd7\b \b d8:q\xd8\b \b d9:q\xd9\b \b da:q\xda\b \b db:q\xdb\b \b dc:q\xdc\b \b dd:q\xdd\b \b de:q\xde\b \b df:q\xdf\b \b e0:q\xe0\b \b e1:q\xe1\b \b e2:q\xe2\b \b e3:q\xe3\b \b e4:q\xe4\b \b e5:q\xe5\b \b e6:q\xe6\b \b e7:q\xe7\b \b e8:q\xe8\b \b e9:q\xe9\b \b ea:q\xea\b \b eb:q\xeb\b \b ec:q\xec\b \b ed:q\xed\b \b ee:q\xee\b \b ef:q\xef\b \b f0:q\xf0\b \b f1:q\xf1\b \b f2:q\xf2\b \b f3:q\xf3\b \b f4:q\xf4\b \b f5:q\xf5\b \b f6:q\xf6\b \b f7:q\xf7\b \b f8:q\xf8\b \b f9:q\xf9\b \b fa:q\xfa\b \b fb:q\xfb\b \b fc:q\xfc\b \b fd:q\xfd\b \b fe:q\xfe\b \b ff:q\xff\b \b 
+echoctl 1 iutf8 1: 00:q^@\b \b\b \b 01:q^A\b \b\b \b 02:q^B\b \b\b \b 03:q^C\b \b\b \b 04:q^D\b \b\b \b 05:q^E\b \b\b \b 06:q^F\b \b\b \b 07:q^G\b \b\b \b 08:q^H\b \b\b \b 09:q\t\b\b\b\b 0b:q^K\b \b\b \b 0c:q^L\b \b\b \b 0e:q^N\b \b\b \b 0f:q^O\b \b\b \b 10:q^P\b \b\b \b 11:q^Q\b \b\b \b 12:q^R\b \b\b \b 13:q^S\b \b\b \b 14:q^T\b \b\b \b 16:q^V\b \b\b \b 18:q^X\b \b\b \b 19:q^Y\b \b\b \b 1a:q^Z\b \b\b \b 1b:q^[\b \b\b \b 1c:q^\\\b \b\b \b 1d:q^]\b \b\b \b 1e:q^^\b \b\b \b 1f:q^_\b \b\b \b 20:q \b \b 21:q!\b \b 22:q"\b \b 23:q#\b \b 24:q$\b \b 25:q%\b \b 26:q&\b \b 27:q'\b \b 28:q(\b \b 29:q)\b \b 2a:q*\b \b 2b:q+\b \b 2c:q,\b \b 2d:q-\b \b 2e:q.\b \b 2f:q/\b \b 30:q0\b \b 31:q1\b \b 32:q2\b \b 33:q3\b \b 34:q4\b \b 35:q5\b \b 36:q6\b \b 37:q7\b \b 38:q8\b \b 39:q9\b \b 3a:q:\b \b 3b:q;\b \b 3c:q<\b \b 3d:q=\b \b 3e:q>\b \b 3f:q?\b \b 40:q@\b \b 41:qA\b \b 42:qB\b \b 43:qC\b \b 44:qD\b \b 45:qE\b \b 46:qF\b \b 47:qG\b \b 48:qH\b \b 49:qI\b \b 4a:qJ\b \b 4b:qK\b \b 4c:qL\b \b 4d:qM\b \b 4e:qN\b \b 4f:qO\b \b 50:qP\b \b 51:qQ\b \b 52:qR\b \b 53:qS\b \b 54:qT\b \b 55:qU\b \b 56:qV\b \b 57:qW\b \b 58:qX\b \b 59:qY\b \b 5a:qZ\b \b 5b:q[\b \b 5c:q\\\b \b 5d:q]\b \b 5e:q^\b \b 5f:q_\b \b 60:q`\b \b 61:qa\b \b 62:qb\b \b 63:qc\b \b 64:qd\b \b 65:qe\b \b 66:qf\b \b 67:qg\b \b 68:qh\b \b 69:qi\b \b 6a:qj\b \b 6b:qk\b \b 6c:ql\b \b 6d:qm\b \b 6e:qn\b \b 6f:qo\b \b 70:qp\b \b 71:qq\b \b 72:qr\b \b 73:qs\b \b 74:qt\b \b 75:qu\b \b 76:qv\b \b 77:qw\b \b 78:qx\b \b 79:qy\b \b 7a:qz\b \b 7b:q{\b \b 7c:q|\b \b 7d:q}\b \b 7e:q~\b \b 80:q\x80\b \b 81:q\x81\b \b 82:q\x82\b \b 83:q\x83\b \b 84:q\x84\b \b 85:q\x85\b \b 86:q\x86\b \b 87:q\x87\b \b 88:q\x88\b \b 89:q\x89\b \b 8a:q\x8a\b \b 8b:q\x8b\b \b 8c:q\x8c\b \b 8d:q\x8d\b \b 8e:q\x8e\b \b 8f:q\x8f\b \b 90:q\x90\b \b 91:q\x91\b \b 92:q\x92\b \b 93:q\x93\b \b 94:q\x94\b \b 95:q\x95\b \b 96:q\x96\b \b 97:q\x97\b \b 98:q\x98\b \b 99:q\x99\b \b 9a:q\x9a\b \b 9b:q\x9b\b \b 9c:q\x9c\b \b 9d:q\x9d\b \b 9e:q\x9e\b \b 9f:q\x9f\b \b a0:q\xa0\b \b a1:q\xa1\b \b a2:q\xa2\b \b a3:q\xa3\b \b a4:q\xa4\b \b a5:q\xa5\b \b a6:q\xa6\b \b a7:q\xa7\b \b a8:q\xa8\b \b a9:q\xa9\b \b aa:q\xaa\b \b ab:q\xab\b \b ac:q\xac\b \b ad:q\xad\b \b ae:q\xae\b \b af:q\xaf\b \b b0:q\xb0\b \b b1:q\xb1\b \b b2:q\xb2\b \b b3:q\xb3\b \b b4:q\xb4\b \b b5:q\xb5\b \b b6:q\xb6\b \b b7:q\xb7\b \b b8:q\xb8\b \b b9:q\xb9\b \b ba:q\xba\b \b bb:q\xbb\b \b bc:q\xbc\b \b bd:q\xbd\b \b be:q\xbe\b \b bf:q\xbf\b \b c0:q\xc0\b \b c1:q\xc1\b \b c2:q\xc2\b \b c3:q\xc3\b \b c4:q\xc4\b \b c5:q\xc5\b \b c6:q\xc6\b \b c7:q\xc7\b \b c8:q\xc8\b \b c9:q\xc9\b \b ca:q\xca\b \b cb:q\xcb\b \b cc:q\xcc\b \b cd:q\xcd\b \b ce:q\xce\b \b cf:q\xcf\b \b d0:q\xd0\b \b d1:q\xd1\b \b d2:q\xd2\b \b d3:q\xd3\b \b d4:q\xd4\b \b d5:q\xd5\b \b d6:q\xd6\b \b d7:q\xd7\b \b d8:q\xd8\b \b d9:q\xd9\b \b da:q\xda\b \b db:q\xdb\b \b dc:q\xdc\b \b dd:q\xdd\b \b de:q\xde\b \b df:q\xdf\b \b e0:q\xe0\b \b e1:q\xe1\b \b e2:q\xe2\b \b e3:q\xe3\b \b e4:q\xe4\b \b e5:q\xe5\b \b e6:q\xe6\b \b e7:q\xe7\b \b e8:q\xe8\b \b e9:q\xe9\b \b ea:q\xea\b \b eb:q\xeb\b \b ec:q\xec\b \b ed:q\xed\b \b ee:q\xee\b \b ef:q\xef\b \b f0:q\xf0\b \b f1:q\xf1\b \b f2:q\xf2\b \b f3:q\xf3\b \b f4:q\xf4\b \b f5:q\xf5\b \b f6:q\xf6\b \b f7:q\xf7\b \b f8:q\xf8\b \b f9:q\xf9\b \b fa:q\xfa\b \b fb:q\xfb\b \b fc:q\xfc\b \b fd:q\xfd\b \b fe:q\xfe\b \b ff:q\xff\b \b 
+echoctl 0 iutf8 0: 00:q\x00 01:q\x01 02:q\x02 03:q\x03 04:q\x04 05:q\x05 06:q\x06 07:q\x07 08:q\b 09:q\t\b\b\b\b\b\b\b 0b:q\x0b 0c:q\x0c 0e:q\x0e 0f:q\x0f 10:q\x10 11:q\x11 12:q\x12 13:q\x13 14:q\x14 16:q\x16 18:q\x18 19:q\x19 1a:q\x1a 1b:q\x1b 1c:q\x1c 1d:q\x1d 1e:q\x1e 1f:q\x1f 20:q \b \b 21:q!\b \b 22:q"\b \b 23:q#\b \b 24:q$\b \b 25:q%\b \b 26:q&\b \b 27:q'\b \b 28:q(\b \b 29:q)\b \b 2a:q*\b \b 2b:q+\b \b 2c:q,\b \b 2d:q-\b \b 2e:q.\b \b 2f:q/\b \b 30:q0\b \b 31:q1\b \b 32:q2\b \b 33:q3\b \b 34:q4\b \b 35:q5\b \b 36:q6\b \b 37:q7\b \b 38:q8\b \b 39:q9\b \b 3a:q:\b \b 3b:q;\b \b 3c:q<\b \b 3d:q=\b \b 3e:q>\b \b 3f:q?\b \b 40:q@\b \b 41:qA\b \b 42:qB\b \b 43:qC\b \b 44:qD\b \b 45:qE\b \b 46:qF\b \b 47:qG\b \b 48:qH\b \b 49:qI\b \b 4a:qJ\b \b 4b:qK\b \b 4c:qL\b \b 4d:qM\b \b 4e:qN\b \b 4f:qO\b \b 50:qP\b \b 51:qQ\b \b 52:qR\b \b 53:qS\b \b 54:qT\b \b 55:qU\b \b 56:qV\b \b 57:qW\b \b 58:qX\b \b 59:qY\b \b 5a:qZ\b \b 5b:q[\b \b 5c:q\\\b \b 5d:q]\b \b 5e:q^\b \b 5f:q_\b \b 60:q`\b \b 61:qa\b \b 62:qb\b \b 63:qc\b \b 64:qd\b \b 65:qe\b \b 66:qf\b \b 67:qg\b \b 68:qh\b \b 69:qi\b \b 6a:qj\b \b 6b:qk\b \b 6c:ql\b \b 6d:qm\b \b 6e:qn\b \b 6f:qo\b \b 70:qp\b \b 71:qq\b \b 72:qr\b \b 73:qs\b \b 74:qt\b \b 75:qu\b \b 76:qv\b \b 77:qw\b \b 78:qx\b \b 79:qy\b \b 7a:qz\b \b 7b:q{\b \b 7c:q|\b \b 7d:q}\b \b 7e:q~\b \b 80:q\x80\b \b 81:q\x81\b \b 82:q\x82\b \b 83:q\x83\b \b 84:q\x84\b \b 85:q\x85\b \b 86:q\x86\b \b 87:q\x87\b \b 88:q\x88\b \b 89:q\x89\b \b 8a:q\x8a\b \b 8b:q\x8b\b \b 8c:q\x8c\b \b 8d:q\x8d\b \b 8e:q\x8e\b \b 8f:q\x8f\b \b 90:q\x90\b \b 91:q\x91\b \b 92:q\x92\b \b 93:q\x93\b \b 94:q\x94\b \b 95:q\x95\b \b 96:q\x96\b \b 97:q\x97\b \b 98:q\x98\b \b 99:q\x99\b \b 9a:q\x9a\b \b 9b:q\x9b\b \b 9c:q\x9c\b \b 9d:q\x9d\b \b 9e:q\x9e\b \b 9f:q\x9f\b \b a0:q\xa0\b \b a1:q\xa1\b \b a2:q\xa2\b \b a3:q\xa3\b \b a4:q\xa4\b \b a5:q\xa5\b \b a6:q\xa6\b \b a7:q\xa7\b \b a8:q\xa8\b \b a9:q\xa9\b \b aa:q\xaa\b \b ab:q\xab\b \b ac:q\xac\b \b ad:q\xad\b \b ae:q\xae\b \b af:q\xaf\b \b b0:q\xb0\b \b b1:q\xb1\b \b b2:q\xb2\b \b b3:q\xb3\b \b b4:q\xb4\b \b b5:q\xb5\b \b b6:q\xb6\b \b b7:q\xb7\b \b b8:q\xb8\b \b b9:q\xb9\b \b ba:q\xba\b \b bb:q\xbb\b \b bc:q\xbc\b \b bd:q\xbd\b \b be:q\xbe\b \b bf:q\xbf\b \b c0:q\xc0\b \b c1:q\xc1\b \b c2:q\xc2\b \b c3:q\xc3\b \b c4:q\xc4\b \b c5:q\xc5\b \b c6:q\xc6\b \b c7:q\xc7\b \b c8:q\xc8\b \b c9:q\xc9\b \b ca:q\xca\b \b cb:q\xcb\b \b cc:q\xcc\b \b cd:q\xcd\b \b ce:q\xce\b \b cf:q\xcf\b \b d0:q\xd0\b \b d1:q\xd1\b \b d2:q\xd2\b \b d3:q\xd3\b \b d4:q\xd4\b \b d5:q\xd5\b \b d6:q\xd6\b \b d7:q\xd7\b \b d8:q\xd8\b \b d9:q\xd9\b \b da:q\xda\b \b db:q\xdb\b \b dc:q\xdc\b \b dd:q\xdd\b \b de:q\xde\b \b df:q\xdf\b \b e0:q\xe0\b \b e1:q\xe1\b \b e2:q\xe2\b \b e3:q\xe3\b \b e4:q\xe4\b \b e5:q\xe5\b \b e6:q\xe6\b \b e7:q\xe7\b \b e8:q\xe8\b \b e9:q\xe9\b \b ea:q\xea\b \b eb:q\xeb\b \b ec:q\xec\b \b ed:q\xed\b \b ee:q\xee\b \b ef:q\xef\b \b f0:q\xf0\b \b f1:q\xf1\b \b f2:q\xf2\b \b f3:q\xf3\b \b f4:q\xf4\b \b f5:q\xf5\b \b f6:q\xf6\b \b f7:q\xf7\b \b f8:q\xf8\b \b f9:q\xf9\b \b fa:q\xfa\b \b fb:q\xfb\b \b fc:q\xfc\b \b fd:q\xfd\b \b fe:q\xfe\b \b ff:q\xff\b \b 
+echoctl 0 iutf8 1: 00:q\x00 01:q\x01 02:q\x02 03:q\x03 04:q\x04 05:q\x05 06:q\x06 07:q\x07 08:q\b 09:q\t\b\b\b\b\b\b\b 0b:q\x0b 0c:q\x0c 0e:q\x0e 0f:q\x0f 10:q\x10 11:q\x11 12:q\x12 13:q\x13 14:q\x14 16:q\x16 18:q\x18 19:q\x19 1a:q\x1a 1b:q\x1b 1c:q\x1c 1d:q\x1d 1e:q\x1e 1f:q\x1f 20:q \b \b 21:q!\b \b 22:q"\b \b 23:q#\b \b 24:q$\b \b 25:q%\b \b 26:q&\b \b 27:q'\b \b 28:q(\b \b 29:q)\b \b 2a:q*\b \b 2b:q+\b \b 2c:q,\b \b 2d:q-\b \b 2e:q.\b \b 2f:q/\b \b 30:q0\b \b 31:q1\b \b 32:q2\b \b 33:q3\b \b 34:q4\b \b 35:q5\b \b 36:q6\b \b 37:q7\b \b 38:q8\b \b 39:q9\b \b 3a:q:\b \b 3b:q;\b \b 3c:q<\b \b 3d:q=\b \b 3e:q>\b \b 3f:q?\b \b 40:q@\b \b 41:qA\b \b 42:qB\b \b 43:qC\b \b 44:qD\b \b 45:qE\b \b 46:qF\b \b 47:qG\b \b 48:qH\b \b 49:qI\b \b 4a:qJ\b \b 4b:qK\b \b 4c:qL\b \b 4d:qM\b \b 4e:qN\b \b 4f:qO\b \b 50:qP\b \b 51:qQ\b \b 52:qR\b \b 53:qS\b \b 54:qT\b \b 55:qU\b \b 56:qV\b \b 57:qW\b \b 58:qX\b \b 59:qY\b \b 5a:qZ\b \b 5b:q[\b \b 5c:q\\\b \b 5d:q]\b \b 5e:q^\b \b 5f:q_\b \b 60:q`\b \b 61:qa\b \b 62:qb\b \b 63:qc\b \b 64:qd\b \b 65:qe\b \b 66:qf\b \b 67:qg\b \b 68:qh\b \b 69:qi\b \b 6a:qj\b \b 6b:qk\b \b 6c:ql\b \b 6d:qm\b \b 6e:qn\b \b 6f:qo\b \b 70:qp\b \b 71:qq\b \b 72:qr\b \b 73:qs\b \b 74:qt\b \b 75:qu\b \b 76:qv\b \b 77:qw\b \b 78:qx\b \b 79:qy\b \b 7a:qz\b \b 7b:q{\b \b 7c:q|\b \b 7d:q}\b \b 7e:q~\b \b 80:q\x80\b \b 81:q\x81\b \b 82:q\x82\b \b 83:q\x83\b \b 84:q\x84\b \b 85:q\x85\b \b 86:q\x86\b \b 87:q\x87\b \b 88:q\x88\b \b 89:q\x89\b \b 8a:q\x8a\b \b 8b:q\x8b\b \b 8c:q\x8c\b \b 8d:q\x8d\b \b 8e:q\x8e\b \b 8f:q\x8f\b \b 90:q\x90\b \b 91:q\x91\b \b 92:q\x92\b \b 93:q\x93\b \b 94:q\x94\b \b 95:q\x95\b \b 96:q\x96\b \b 97:q\x97\b \b 98:q\x98\b \b 99:q\x99\b \b 9a:q\x9a\b \b 9b:q\x9b\b \b 9c:q\x9c\b \b 9d:q\x9d\b \b 9e:q\x9e\b \b 9f:q\x9f\b \b a0:q\xa0\b \b a1:q\xa1\b \b a2:q\xa2\b \b a3:q\xa3\b \b a4:q\xa4\b \b a5:q\xa5\b \b a6:q\xa6\b \b a7:q\xa7\b \b a8:q\xa8\b \b a9:q\xa9\b \b aa:q\xaa\b \b ab:q\xab\b \b ac:q\xac\b \b ad:q\xad\b \b ae:q\xae\b \b af:q\xaf\b \b b0:q\xb0\b \b b1:q\xb1\b \b b2:q\xb2\b \b b3:q\xb3\b \b b4:q\xb4\b \b b5:q\xb5\b \b b6:q\xb6\b \b b7:q\xb7\b \b b8:q\xb8\b \b b9:q\xb9\b \b ba:q\xba\b \b bb:q\xbb\b \b bc:q\xbc\b \b bd:q\xbd\b \b be:q\xbe\b \b bf:q\xbf\b \b c0:q\xc0\b \b c1:q\xc1\b \b c2:q\xc2\b \b c3:q\xc3\b \b c4:q\xc4\b \b c5:q\xc5\b \b c6:q\xc6\b \b c7:q\xc7\b \b c8:q\xc8\b \b c9:q\xc9\b \b ca:q\xca\b \b cb:q\xcb\b \b cc:q\xcc\b \b cd:q\xcd\b \b ce:q\xce\b \b cf:q\xcf\b \b d0:q\xd0\b \b d1:q\xd1\b \b d2:q\xd2\b \b d3:q\xd3\b \b d4:q\xd4\b \b d5:q\xd5\b \b d6:q\xd6\b \b d7:q\xd7\b \b d8:q\xd8\b \b d9:q\xd9\b \b da:q\xda\b \b db:q\xdb\b \b dc:q\xdc\b \b dd:q\xdd\b \b de:q\xde\b \b df:q\xdf\b \b e0:q\xe0\b \b e1:q\xe1\b \b e2:q\xe2\b \b e3:q\xe3\b \b e4:q\xe4\b \b e5:q\xe5\b \b e6:q\xe6\b \b e7:q\xe7\b \b e8:q\xe8\b \b e9:q\xe9\b \b ea:q\xea\b \b eb:q\xeb\b \b ec:q\xec\b \b ed:q\xed\b \b ee:q\xee\b \b ef:q\xef\b \b f0:q\xf0\b \b f1:q\xf1\b \b f2:q\xf2\b \b f3:q\xf3\b \b f4:q\xf4\b \b f5:q\xf5\b \b f6:q\xf6\b \b f7:q\xf7\b \b f8:q\xf8\b \b f9:q\xf9\b \b fa:q\xfa\b \b fb:q\xfb\b \b fc:q\xfc\b \b fd:q\xfd\b \b fe:q\xfe\b \b ff:q\xff\b \b 
+
+== L5 every byte: how far it moves a tab's erase
+echoctl 1 iutf8 0: 00:6 01:6 02:6 03:6 04:6 05:6 06:6 07:6 08:6 0b:6 0c:6 0e:6 0f:6 10:6 11:6 12:6 13:6 14:6 16:6 18:6 19:6 1a:6 1b:6 1c:6 1d:6 1e:6 1f:6 20:7 21:7 22:7 23:7 24:7 25:7 26:7 27:7 28:7 29:7 2a:7 2b:7 2c:7 2d:7 2e:7 2f:7 30:7 31:7 32:7 33:7 34:7 35:7 36:7 37:7 38:7 39:7 3a:7 3b:7 3c:7 3d:7 3e:7 3f:7 40:7 41:7 42:7 43:7 44:7 45:7 46:7 47:7 48:7 49:7 4a:7 4b:7 4c:7 4d:7 4e:7 4f:7 50:7 51:7 52:7 53:7 54:7 55:7 56:7 57:7 58:7 59:7 5a:7 5b:7 5c:7 5d:7 5e:7 5f:7 60:7 61:7 62:7 63:7 64:7 65:7 66:7 67:7 68:7 69:7 6a:7 6b:7 6c:7 6d:7 6e:7 6f:7 70:7 71:7 72:7 73:7 74:7 75:7 76:7 77:7 78:7 79:7 7a:7 7b:7 7c:7 7d:7 7e:7 80:7 81:7 82:7 83:7 84:7 85:7 86:7 87:7 88:7 89:7 8a:7 8b:7 8c:7 8d:7 8e:7 8f:7 90:7 91:7 92:7 93:7 94:7 95:7 96:7 97:7 98:7 99:7 9a:7 9b:7 9c:7 9d:7 9e:7 9f:7 a0:7 a1:7 a2:7 a3:7 a4:7 a5:7 a6:7 a7:7 a8:7 a9:7 aa:7 ab:7 ac:7 ad:7 ae:7 af:7 b0:7 b1:7 b2:7 b3:7 b4:7 b5:7 b6:7 b7:7 b8:7 b9:7 ba:7 bb:7 bc:7 bd:7 be:7 bf:7 c0:7 c1:7 c2:7 c3:7 c4:7 c5:7 c6:7 c7:7 c8:7 c9:7 ca:7 cb:7 cc:7 cd:7 ce:7 cf:7 d0:7 d1:7 d2:7 d3:7 d4:7 d5:7 d6:7 d7:7 d8:7 d9:7 da:7 db:7 dc:7 dd:7 de:7 df:7 e0:7 e1:7 e2:7 e3:7 e4:7 e5:7 e6:7 e7:7 e8:7 e9:7 ea:7 eb:7 ec:7 ed:7 ee:7 ef:7 f0:7 f1:7 f2:7 f3:7 f4:7 f5:7 f6:7 f7:7 f8:7 f9:7 fa:7 fb:7 fc:7 fd:7 fe:7 ff:7 
+echoctl 1 iutf8 1: 00:6 01:6 02:6 03:6 04:6 05:6 06:6 07:6 08:6 0b:6 0c:6 0e:6 0f:6 10:6 11:6 12:6 13:6 14:6 16:6 18:6 19:6 1a:6 1b:6 1c:6 1d:6 1e:6 1f:6 20:7 21:7 22:7 23:7 24:7 25:7 26:7 27:7 28:7 29:7 2a:7 2b:7 2c:7 2d:7 2e:7 2f:7 30:7 31:7 32:7 33:7 34:7 35:7 36:7 37:7 38:7 39:7 3a:7 3b:7 3c:7 3d:7 3e:7 3f:7 40:7 41:7 42:7 43:7 44:7 45:7 46:7 47:7 48:7 49:7 4a:7 4b:7 4c:7 4d:7 4e:7 4f:7 50:7 51:7 52:7 53:7 54:7 55:7 56:7 57:7 58:7 59:7 5a:7 5b:7 5c:7 5d:7 5e:7 5f:7 60:7 61:7 62:7 63:7 64:7 65:7 66:7 67:7 68:7 69:7 6a:7 6b:7 6c:7 6d:7 6e:7 6f:7 70:7 71:7 72:7 73:7 74:7 75:7 76:7 77:7 78:7 79:7 7a:7 7b:7 7c:7 7d:7 7e:7 80:8 81:8 82:8 83:8 84:8 85:8 86:8 87:8 88:8 89:8 8a:8 8b:8 8c:8 8d:8 8e:8 8f:8 90:8 91:8 92:8 93:8 94:8 95:8 96:8 97:8 98:8 99:8 9a:8 9b:8 9c:8 9d:8 9e:8 9f:8 a0:8 a1:8 a2:8 a3:8 a4:8 a5:8 a6:8 a7:8 a8:8 a9:8 aa:8 ab:8 ac:8 ad:8 ae:8 af:8 b0:8 b1:8 b2:8 b3:8 b4:8 b5:8 b6:8 b7:8 b8:8 b9:8 ba:8 bb:8 bc:8 bd:8 be:8 bf:8 c0:7 c1:7 c2:7 c3:7 c4:7 c5:7 c6:7 c7:7 c8:7 c9:7 ca:7 cb:7 cc:7 cd:7 ce:7 cf:7 d0:7 d1:7 d2:7 d3:7 d4:7 d5:7 d6:7 d7:7 d8:7 d9:7 da:7 db:7 dc:7 dd:7 de:7 df:7 e0:7 e1:7 e2:7 e3:7 e4:7 e5:7 e6:7 e7:7 e8:7 e9:7 ea:7 eb:7 ec:7 ed:7 ee:7 ef:7 f0:7 f1:7 f2:7 f3:7 f4:7 f5:7 f6:7 f7:7 f8:7 f9:7 fa:7 fb:7 fc:7 fd:7 fe:7 ff:7 
+echoctl 0 iutf8 0: 00:8 01:8 02:8 03:8 04:8 05:8 06:8 07:8 08:9 0b:8 0c:8 0e:8 0f:8 10:8 11:8 12:8 13:8 14:8 16:8 18:8 19:8 1a:8 1b:8 1c:8 1d:8 1e:8 1f:8 20:7 21:7 22:7 23:7 24:7 25:7 26:7 27:7 28:7 29:7 2a:7 2b:7 2c:7 2d:7 2e:7 2f:7 30:7 31:7 32:7 33:7 34:7 35:7 36:7 37:7 38:7 39:7 3a:7 3b:7 3c:7 3d:7 3e:7 3f:7 40:7 41:7 42:7 43:7 44:7 45:7 46:7 47:7 48:7 49:7 4a:7 4b:7 4c:7 4d:7 4e:7 4f:7 50:7 51:7 52:7 53:7 54:7 55:7 56:7 57:7 58:7 59:7 5a:7 5b:7 5c:7 5d:7 5e:7 5f:7 60:7 61:7 62:7 63:7 64:7 65:7 66:7 67:7 68:7 69:7 6a:7 6b:7 6c:7 6d:7 6e:7 6f:7 70:7 71:7 72:7 73:7 74:7 75:7 76:7 77:7 78:7 79:7 7a:7 7b:7 7c:7 7d:7 7e:7 80:7 81:7 82:7 83:7 84:7 85:7 86:7 87:7 88:7 89:7 8a:7 8b:7 8c:7 8d:7 8e:7 8f:7 90:7 91:7 92:7 93:7 94:7 95:7 96:7 97:7 98:7 99:7 9a:7 9b:7 9c:7 9d:7 9e:7 9f:7 a0:7 a1:7 a2:7 a3:7 a4:7 a5:7 a6:7 a7:7 a8:7 a9:7 aa:7 ab:7 ac:7 ad:7 ae:7 af:7 b0:7 b1:7 b2:7 b3:7 b4:7 b5:7 b6:7 b7:7 b8:7 b9:7 ba:7 bb:7 bc:7 bd:7 be:7 bf:7 c0:7 c1:7 c2:7 c3:7 c4:7 c5:7 c6:7 c7:7 c8:7 c9:7 ca:7 cb:7 cc:7 cd:7 ce:7 cf:7 d0:7 d1:7 d2:7 d3:7 d4:7 d5:7 d6:7 d7:7 d8:7 d9:7 da:7 db:7 dc:7 dd:7 de:7 df:7 e0:7 e1:7 e2:7 e3:7 e4:7 e5:7 e6:7 e7:7 e8:7 e9:7 ea:7 eb:7 ec:7 ed:7 ee:7 ef:7 f0:7 f1:7 f2:7 f3:7 f4:7 f5:7 f6:7 f7:7 f8:7 f9:7 fa:7 fb:7 fc:7 fd:7 fe:7 ff:7 
+echoctl 0 iutf8 1: 00:8 01:8 02:8 03:8 04:8 05:8 06:8 07:8 08:9 0b:8 0c:8 0e:8 0f:8 10:8 11:8 12:8 13:8 14:8 16:8 18:8 19:8 1a:8 1b:8 1c:8 1d:8 1e:8 1f:8 20:7 21:7 22:7 23:7 24:7 25:7 26:7 27:7 28:7 29:7 2a:7 2b:7 2c:7 2d:7 2e:7 2f:7 30:7 31:7 32:7 33:7 34:7 35:7 36:7 37:7 38:7 39:7 3a:7 3b:7 3c:7 3d:7 3e:7 3f:7 40:7 41:7 42:7 43:7 44:7 45:7 46:7 47:7 48:7 49:7 4a:7 4b:7 4c:7 4d:7 4e:7 4f:7 50:7 51:7 52:7 53:7 54:7 55:7 56:7 57:7 58:7 59:7 5a:7 5b:7 5c:7 5d:7 5e:7 5f:7 60:7 61:7 62:7 63:7 64:7 65:7 66:7 67:7 68:7 69:7 6a:7 6b:7 6c:7 6d:7 6e:7 6f:7 70:7 71:7 72:7 73:7 74:7 75:7 76:7 77:7 78:7 79:7 7a:7 7b:7 7c:7 7d:7 7e:7 80:8 81:8 82:8 83:8 84:8 85:8 86:8 87:8 88:8 89:8 8a:8 8b:8 8c:8 8d:8 8e:8 8f:8 90:8 91:8 92:8 93:8 94:8 95:8 96:8 97:8 98:8 99:8 9a:8 9b:8 9c:8 9d:8 9e:8 9f:8 a0:8 a1:8 a2:8 a3:8 a4:8 a5:8 a6:8 a7:8 a8:8 a9:8 aa:8 ab:8 ac:8 ad:8 ae:8 af:8 b0:8 b1:8 b2:8 b3:8 b4:8 b5:8 b6:8 b7:8 b8:8 b9:8 ba:8 bb:8 bc:8 bd:8 be:8 bf:8 c0:7 c1:7 c2:7 c3:7 c4:7 c5:7 c6:7 c7:7 c8:7 c9:7 ca:7 cb:7 cc:7 cd:7 ce:7 cf:7 d0:7 d1:7 d2:7 d3:7 d4:7 d5:7 d6:7 d7:7 d8:7 d9:7 da:7 db:7 dc:7 dd:7 de:7 df:7 e0:7 e1:7 e2:7 e3:7 e4:7 e5:7 e6:7 e7:7 e8:7 e9:7 ea:7 eb:7 ec:7 ed:7 ee:7 ef:7 f0:7 f1:7 f2:7 f3:7 f4:7 f5:7 f6:7 f7:7 f8:7 f9:7 fa:7 fb:7 fc:7 fd:7 fe:7 ff:7 
+
+== L3 every byte: is it part of a word
+iutf8 0: 00:3 01:3 02:3 03:3 04:3 05:3 06:3 07:3 08:3 09:3 0b:3 0c:3 0e:3 0f:3 10:3 11:3 12:3 13:3 14:3 16:3 18:3 19:3 1a:3 1b:3 1c:3 1d:3 1e:3 1f:3 20:3 21:3 22:3 23:3 24:3 25:3 26:3 27:3 28:3 29:3 2a:3 2b:3 2c:3 2d:3 2e:3 2f:3 30:1 31:1 32:1 33:1 34:1 35:1 36:1 37:1 38:1 39:1 3a:3 3b:3 3c:3 3d:3 3e:3 3f:3 40:3 41:1 42:1 43:1 44:1 45:1 46:1 47:1 48:1 49:1 4a:1 4b:1 4c:1 4d:1 4e:1 4f:1 50:1 51:1 52:1 53:1 54:1 55:1 56:1 57:1 58:1 59:1 5a:1 5b:3 5c:3 5d:3 5e:3 5f:1 60:3 61:1 62:1 63:1 64:1 65:1 66:1 67:1 68:1 69:1 6a:1 6b:1 6c:1 6d:1 6e:1 6f:1 70:1 71:1 72:1 73:1 74:1 75:1 76:1 77:1 78:1 79:1 7a:1 7b:3 7c:3 7d:3 7e:3 80:3 81:3 82:3 83:3 84:3 85:3 86:3 87:3 88:3 89:3 8a:3 8b:3 8c:3 8d:3 8e:3 8f:3 90:3 91:3 92:3 93:3 94:3 95:3 96:3 97:3 98:3 99:3 9a:3 9b:3 9c:3 9d:3 9e:3 9f:3 a0:3 a1:3 a2:3 a3:3 a4:3 a5:3 a6:3 a7:3 a8:3 a9:3 aa:3 ab:3 ac:3 ad:3 ae:3 af:3 b0:3 b1:3 b2:3 b3:3 b4:3 b5:3 b6:3 b7:3 b8:3 b9:3 ba:3 bb:3 bc:3 bd:3 be:3 bf:3 c0:1 c1:1 c2:1 c3:1 c4:1 c5:1 c6:1 c7:1 c8:1 c9:1 ca:1 cb:1 cc:1 cd:1 ce:1 cf:1 d0:1 d1:1 d2:1 d3:1 d4:1 d5:1 d6:1 d7:3 d8:1 d9:1 da:1 db:1 dc:1 dd:1 de:1 df:1 e0:1 e1:1 e2:1 e3:1 e4:1 e5:1 e6:1 e7:1 e8:1 e9:1 ea:1 eb:1 ec:1 ed:1 ee:1 ef:1 f0:1 f1:1 f2:1 f3:1 f4:1 f5:1 f6:1 f7:3 f8:1 f9:1 fa:1 fb:1 fc:1 fd:1 fe:1 ff:1 
+iutf8 1: 00:3 01:3 02:3 03:3 04:3 05:3 06:3 07:3 08:3 09:3 0b:3 0c:3 0e:3 0f:3 10:3 11:3 12:3 13:3 14:3 16:3 18:3 19:3 1a:3 1b:3 1c:3 1d:3 1e:3 1f:3 20:3 21:3 22:3 23:3 24:3 25:3 26:3 27:3 28:3 29:3 2a:3 2b:3 2c:3 2d:3 2e:3 2f:3 30:1 31:1 32:1 33:1 34:1 35:1 36:1 37:1 38:1 39:1 3a:3 3b:3 3c:3 3d:3 3e:3 3f:3 40:3 41:1 42:1 43:1 44:1 45:1 46:1 47:1 48:1 49:1 4a:1 4b:1 4c:1 4d:1 4e:1 4f:1 50:1 51:1 52:1 53:1 54:1 55:1 56:1 57:1 58:1 59:1 5a:1 5b:3 5c:3 5d:3 5e:3 5f:1 60:3 61:1 62:1 63:1 64:1 65:1 66:1 67:1 68:1 69:1 6a:1 6b:1 6c:1 6d:1 6e:1 6f:1 70:1 71:1 72:1 73:1 74:1 75:1 76:1 77:1 78:1 79:1 7a:1 7b:3 7c:3 7d:3 7e:3 80:1 81:1 82:1 83:1 84:1 85:1 86:1 87:1 88:1 89:1 8a:1 8b:1 8c:1 8d:1 8e:1 8f:1 90:1 91:1 92:1 93:1 94:1 95:1 96:1 97:1 98:1 99:1 9a:1 9b:1 9c:1 9d:1 9e:1 9f:1 a0:1 a1:1 a2:1 a3:1 a4:1 a5:1 a6:1 a7:1 a8:1 a9:1 aa:1 ab:1 ac:1 ad:1 ae:1 af:1 b0:1 b1:1 b2:1 b3:1 b4:1 b5:1 b6:1 b7:1 b8:1 b9:1 ba:1 bb:1 bc:1 bd:1 be:1 bf:1 c0:1 c1:1 c2:1 c3:1 c4:1 c5:1 c6:1 c7:1 c8:1 c9:1 ca:1 cb:1 cc:1 cd:1 ce:1 cf:1 d0:1 d1:1 d2:1 d3:1 d4:1 d5:1 d6:1 d7:3 d8:1 d9:1 da:1 db:1 dc:1 dd:1 de:1 df:1 e0:1 e1:1 e2:1 e3:1 e4:1 e5:1 e6:1 e7:1 e8:1 e9:1 ea:1 eb:1 ec:1 ed:1 ee:1 ef:1 f0:1 f1:1 f2:1 f3:1 f4:1 f5:1 f6:1 f7:3 f8:1 f9:1 fa:1 fb:1 fc:1 fd:1 fe:1 ff:1 
+
+== L7 every byte: OLCUC, IUCLC
+olcuc 256: 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f604142434445464748494a4b4c4d4e4f505152535455565758595a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6f7d8d9dadbdcdddedf
+iuclc 256: 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f406162636465666768696a6b6c6d6e6f707172737475767778797a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6d7f8f9fafbfcfdfedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+
+== L7 every byte: does it move the output column
+iutf8 0: 00:7 01:7 02:7 03:7 04:7 05:7 06:7 07:7 08:8 0b:7 0c:7 0e:7 0f:7 10:7 11:7 12:7 13:7 14:7 15:7 16:7 17:7 18:7 19:7 1a:7 1b:7 1c:7 1d:7 1e:7 1f:7 20:6 21:6 22:6 23:6 24:6 25:6 26:6 27:6 28:6 29:6 2a:6 2b:6 2c:6 2d:6 2e:6 2f:6 30:6 31:6 32:6 33:6 34:6 35:6 36:6 37:6 38:6 39:6 3a:6 3b:6 3c:6 3d:6 3e:6 3f:6 40:6 41:6 42:6 43:6 44:6 45:6 46:6 47:6 48:6 49:6 4a:6 4b:6 4c:6 4d:6 4e:6 4f:6 50:6 51:6 52:6 53:6 54:6 55:6 56:6 57:6 58:6 59:6 5a:6 5b:6 5c:6 5d:6 5e:6 5f:6 60:6 61:6 62:6 63:6 64:6 65:6 66:6 67:6 68:6 69:6 6a:6 6b:6 6c:6 6d:6 6e:6 6f:6 70:6 71:6 72:6 73:6 74:6 75:6 76:6 77:6 78:6 79:6 7a:6 7b:6 7c:6 7d:6 7e:6 7f:7 80:6 81:6 82:6 83:6 84:6 85:6 86:6 87:6 88:6 89:6 8a:6 8b:6 8c:6 8d:6 8e:6 8f:6 90:6 91:6 92:6 93:6 94:6 95:6 96:6 97:6 98:6 99:6 9a:6 9b:6 9c:6 9d:6 9e:6 9f:6 a0:6 a1:6 a2:6 a3:6 a4:6 a5:6 a6:6 a7:6 a8:6 a9:6 aa:6 ab:6 ac:6 ad:6 ae:6 af:6 b0:6 b1:6 b2:6 b3:6 b4:6 b5:6 b6:6 b7:6 b8:6 b9:6 ba:6 bb:6 bc:6 bd:6 be:6 bf:6 c0:6 c1:6 c2:6 c3:6 c4:6 c5:6 c6:6 c7:6 c8:6 c9:6 ca:6 cb:6 cc:6 cd:6 ce:6 cf:6 d0:6 d1:6 d2:6 d3:6 d4:6 d5:6 d6:6 d7:6 d8:6 d9:6 da:6 db:6 dc:6 dd:6 de:6 df:6 e0:6 e1:6 e2:6 e3:6 e4:6 e5:6 e6:6 e7:6 e8:6 e9:6 ea:6 eb:6 ec:6 ed:6 ee:6 ef:6 f0:6 f1:6 f2:6 f3:6 f4:6 f5:6 f6:6 f7:6 f8:6 f9:6 fa:6 fb:6 fc:6 fd:6 fe:6 ff:6 
+iutf8 1: 00:7 01:7 02:7 03:7 04:7 05:7 06:7 07:7 08:8 0b:7 0c:7 0e:7 0f:7 10:7 11:7 12:7 13:7 14:7 15:7 16:7 17:7 18:7 19:7 1a:7 1b:7 1c:7 1d:7 1e:7 1f:7 20:6 21:6 22:6 23:6 24:6 25:6 26:6 27:6 28:6 29:6 2a:6 2b:6 2c:6 2d:6 2e:6 2f:6 30:6 31:6 32:6 33:6 34:6 35:6 36:6 37:6 38:6 39:6 3a:6 3b:6 3c:6 3d:6 3e:6 3f:6 40:6 41:6 42:6 43:6 44:6 45:6 46:6 47:6 48:6 49:6 4a:6 4b:6 4c:6 4d:6 4e:6 4f:6 50:6 51:6 52:6 53:6 54:6 55:6 56:6 57:6 58:6 59:6 5a:6 5b:6 5c:6 5d:6 5e:6 5f:6 60:6 61:6 62:6 63:6 64:6 65:6 66:6 67:6 68:6 69:6 6a:6 6b:6 6c:6 6d:6 6e:6 6f:6 70:6 71:6 72:6 73:6 74:6 75:6 76:6 77:6 78:6 79:6 7a:6 7b:6 7c:6 7d:6 7e:6 7f:7 80:7 81:7 82:7 83:7 84:7 85:7 86:7 87:7 88:7 89:7 8a:7 8b:7 8c:7 8d:7 8e:7 8f:7 90:7 91:7 92:7 93:7 94:7 95:7 96:7 97:7 98:7 99:7 9a:7 9b:7 9c:7 9d:7 9e:7 9f:7 a0:7 a1:7 a2:7 a3:7 a4:7 a5:7 a6:7 a7:7 a8:7 a9:7 aa:7 ab:7 ac:7 ad:7 ae:7 af:7 b0:7 b1:7 b2:7 b3:7 b4:7 b5:7 b6:7 b7:7 b8:7 b9:7 ba:7 bb:7 bc:7 bd:7 be:7 bf:7 c0:6 c1:6 c2:6 c3:6 c4:6 c5:6 c6:6 c7:6 c8:6 c9:6 ca:6 cb:6 cc:6 cd:6 ce:6 cf:6 d0:6 d1:6 d2:6 d3:6 d4:6 d5:6 d6:6 d7:6 d8:6 d9:6 da:6 db:6 dc:6 dd:6 de:6 df:6 e0:6 e1:6 e2:6 e3:6 e4:6 e5:6 e6:6 e7:6 e8:6 e9:6 ea:6 eb:6 ec:6 ed:6 ee:6 ef:6 f0:6 f1:6 f2:6 f3:6 f4:6 f5:6 f6:6 f7:6 f8:6 f9:6 fa:6 fb:6 fc:6 fd:6 fe:6 ff:6 
+
+== L5 IUTF8
+two bytes: keys "a\xc3\xa9\x7f" echo "a\xc3\xa9\b \b"
+two bytes: keys "\n" echo "\r\n"
+two bytes: read "a\n" EAGAIN
+three bytes: keys "a\xe6\x97\xa5\x7f" echo "a\xe6\x97\xa5\b \b"
+three bytes: keys "\n" echo "\r\n"
+three bytes: read "a\n" EAGAIN
+four bytes: keys "a\xf0\x9f\x98\x80\x7f" echo "a\xf0\x9f\x98\x80\b \b"
+four bytes: keys "\n" echo "\r\n"
+four bytes: read "a\n" EAGAIN
+erase twice: keys "a\xc3\xa9\xc3\xa8\x7f\x7f" echo "a\xc3\xa9\xc3\xa8\b \b\b \b"
+erase twice: keys "\n" echo "\r\n"
+erase twice: read "a\n" EAGAIN
+lone continuation: keys "a\xa9\x7f" echo "a\xa9\b \b"
+lone continuation: keys "\n" echo "\r\n"
+lone continuation: read "\n" EAGAIN
+off: keys "a\xc3\xa9\x7f" echo "a\xc3\xa9\b \b"
+off: keys "\n" echo "\r\n"
+off: read "a\xc3\n" EAGAIN
+off, twice: keys "a\xc3\xa9\x7f\x7f" echo "a\xc3\xa9\b \b\b \b"
+off, twice: keys "\n" echo "\r\n"
+off, twice: read "a\n" EAGAIN
+no echoe: keys "a\xc3\xa9\x7fb" echo "a\xc3\xa9^?b"
+no echoe: keys "\n" echo "\r\n"
+no echoe: read "ab\n" EAGAIN
+then more: keys "a\xc3\xa9\x7fb" echo "a\xc3\xa9\b \bb"
+then more: keys "\n" echo "\r\n"
+then more: read "ab\n" EAGAIN
+kill: keys "a\xc3\xa9b\x15" echo "a\xc3\xa9b\b \b\b \b\b \b"
+kill: keys "\n" echo "\r\n"
+kill: read "\n" EAGAIN
+werase: keys "x a\xc3\xa9b\x17" echo "x a\xc3\xa9b\b \b\b \b\b \b"
+werase: keys "\n" echo "\r\n"
+werase: read "x \n" EAGAIN
+werase, off: keys "x a\xc3\xa9b\x17" echo "x a\xc3\xa9b\b \b"
+werase, off: keys "\n" echo "\r\n"
+werase, off: read "x a\xc3\xa9\n" EAGAIN
+tab after: keys "\xc3\xa9\t\x7f" echo "\xc3\xa9\t\b\b\b\b\b\b\b"
+tab after: keys "\n" echo "\r\n"
+tab after: read "\xc3\xa9\n" EAGAIN
+tab after, off: keys "\xc3\xa9\t\x7f" echo "\xc3\xa9\t\b\b\b\b\b\b"
+tab after, off: keys "\n" echo "\r\n"
+tab after, off: read "\xc3\xa9\n" EAGAIN
+reprint: keys "\xc3\xa9b\x12" echo "\xc3\xa9b^R\r\n\xc3\xa9b"
+reprint: keys "\n" echo "\r\n"
+reprint: read "\xc3\xa9b\n" EAGAIN
+tab3 output, iutf8: "\xc3\xa9       |"
+
+== L5 L7 a long line
+echoed letters 6000, bells none, others 0
+erase at the limit: keys "\x7f" echo "\b \b"
+more at the limit: keys "y" echo "y"
+one too many: keys "z" echo "z"
+newline: keys "\n" echo "\r\n"
+read 4096, last two "y\n"
+after: read EAGAIN
+the end-of-file key at the limit: keys "\x04" echo ""
+read 4095
+after: read EAGAIN
+VEOL at the limit: keys "%" echo "%"
+read 4096
+after: read EAGAIN
+kill at the limit: keys "\x15a\n" echo ""
+after: read "a\n" EAGAIN
+
+== L7 input flags, in line mode
+istrip: keys "a\xe1\xb1" echo "aa1"
+istrip: keys "\n" echo "\r\n"
+istrip: read "aa1\n" EAGAIN
+istrip return: keys "\x8db" echo "\r\nb"
+istrip return: keys "\n" echo "\r\n"
+istrip return: read "\n" "b\n" EAGAIN
+istrip key: keys "ab\xffc" echo "ab\b \bc"
+istrip key: keys "\n" echo "\r\n"
+istrip key: read "ac\n" EAGAIN
+iuclc: keys "aBcD" echo "abcd"
+iuclc: keys "\n" echo "\r\n"
+iuclc: read "abcd\n" EAGAIN
+iuclc no iexten: keys "aBcD" echo "aBcD"
+iuclc no iexten: keys "\n" echo "\r\n"
+iuclc no iexten: read "aBcD\n" EAGAIN
+inlcr: keys "a\nb" echo "a^Mb"
+inlcr: keys "\n" echo "^M"
+inlcr: read EAGAIN
+igncr: keys "a\rb" echo "ab"
+igncr: keys "\n" echo "\r\n"
+igncr: read "ab\n" EAGAIN
+igncr no icrnl: keys "a\rb" echo "ab"
+igncr no icrnl: keys "\n" echo "\r\n"
+igncr no icrnl: read "ab\n" EAGAIN
+inlcr icrnl: keys "a\nb\rc" echo "a^Mb\r\nc"
+inlcr icrnl: keys "\n" echo "^M"
+inlcr icrnl: read "a\rb\n" EAGAIN
+inlcr igncr: keys "a\nb\rc" echo "a^Mbc"
+inlcr igncr: keys "\n" echo "^M"
+inlcr igncr: read EAGAIN
+no translation: keys "a\rb" echo "a^Mb"
+no translation: keys "\n" echo "\r\n"
+no translation: read "a\rb\n" EAGAIN
+ignbrk: keys "a" echo "a"
+ignbrk: keys "\n" echo "\r\n"
+ignbrk: read "a\n" EAGAIN
+brkint: keys "a" echo "a"
+brkint: keys "\n" echo "\r\n"
+brkint: read "a\n" EAGAIN
+inpck: keys "a\xffb" echo "a\xffb"
+inpck: keys "\n" echo "\r\n"
+inpck: read "a\xffb\n" EAGAIN
+ignpar: keys "a\xffb" echo "a\xffb"
+ignpar: keys "\n" echo "\r\n"
+ignpar: read "a\xffb\n" EAGAIN
+parmrk: keys "a\xffb" echo "a\xffb"
+parmrk: keys "\n" echo "\r\n"
+parmrk: read "a\xff\xffb\n" EAGAIN
+parmrk inpck: keys "a\xffb" echo "a\xffb"
+parmrk inpck: keys "\n" echo "\r\n"
+parmrk inpck: read "a\xff\xffb\n" EAGAIN
+parmrk istrip: keys "a\xffb" echo "a\b \bb"
+parmrk istrip: keys "\n" echo "\r\n"
+parmrk istrip: read "b\n" EAGAIN
+imaxbel: keys "a" echo "a"
+imaxbel: keys "\n" echo "\r\n"
+imaxbel: read "a\n" EAGAIN
+
+== L7 input flags, raw
+istrip: keys "a\xe1\xb1" echo ""
+istrip: read "aa1" EAGAIN
+iuclc: keys "aBcD" echo ""
+iuclc: read "abcd" EAGAIN
+iuclc no iexten: keys "aBcD" echo ""
+iuclc no iexten: read "aBcD" EAGAIN
+parmrk: keys "a\xffb" echo ""
+parmrk: read "a\xff\xffb" EAGAIN
+parmrk istrip: keys "a\xffb" echo ""
+parmrk istrip: read "a\x7fb" EAGAIN
+
+== L7 output flags
+defaults: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\r\n\tx\r\r\r\n\r\nyZ\b\tq"
+no opost: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\n\tx\r\r\n\nyZ\b\tq"
+no opost, all on: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\n\tx\r\r\n\nyZ\b\tq"
+no onlcr: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\n\tx\r\r\n\nyZ\b\tq"
+ocrnl: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\ncd\r\n\tx\n\n\r\n\r\nyZ\b\tq"
+ocrnl no onlcr: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\ncd\n\tx\n\n\n\nyZ\b\tq"
+onocr: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\r\n\tx\r\r\n\r\nyZ\b\tq"
+onocr no onlcr: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\n\tx\r\n\nyZ\b\tq"
+onlret: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\r\n\tx\r\r\r\n\r\nyZ\b\tq"
+onlret no onlcr: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\n\tx\r\r\n\nyZ\b\tq"
+onlret onocr: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\n\tx\r\n\nyZ\b\tq"
+ocrnl onlret: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\ncd\r\n\tx\n\n\r\n\r\nyZ\b\tq"
+ocrnl onlret onocr: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\ncd\r\n\tx\n\r\n\r\nyZ\b\tq"
+olcuc: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "AB\rCD\r\n\tX\r\r\r\n\r\nYZ\b\tQ"
+tab1: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\r\n\tx\r\r\r\n\r\nyZ\b\tq"
+tab2: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\r\n\tx\r\r\r\n\r\nyZ\b\tq"
+tab3: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\r\n        x\r\r\r\n\r\nyZ\b       q"
+tab3 onlret: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\n        x\r\r\n\nyZ\b       q"
+tab3 olcuc: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "AB\rCD\r\n        X\r\r\r\n\r\nYZ\b       Q"
+ofill: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\r\n\tx\r\r\r\n\r\nyZ\b\tq"
+ofill ofdel: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\r\n\tx\r\r\r\n\r\nyZ\b\tq"
+nl1: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\r\n\tx\r\r\r\n\r\nyZ\b\tq"
+cr3: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\r\n\tx\r\r\r\n\r\nyZ\b\tq"
+bs1: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\r\n\tx\r\r\r\n\r\nyZ\b\tq"
+vt1: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\r\n\tx\r\r\r\n\r\nyZ\b\tq"
+ff1: wrote 17 of "ab\rcd\n\tx\r\r\n\nyZ\b\tq" gives "ab\rcd\r\n\tx\r\r\r\n\r\nyZ\b\tq"
+tab3 columns: wrote 24 of "\t|a\t|abcdefg\t|abcdefgh\t|" gives "        |a      |abcdefg        |abcdefgh       |"
+tab3 control doesn't move: wrote 4 of "\x01\x02\t|" gives "\x01\x02        |"
+tab3 del doesn't move: wrote 3 of "\x7f\t|" gives "\x7f        |"
+tab3 high bytes: wrote 4 of "\xc3\xa9\t|" gives "\xc3\xa9      |"
+tab3 backspace at the start: wrote 3 of "\b\t|" gives "\b        |"
+tab3 backspace: wrote 7 of "abc\b\b\t|" gives "abc\b\b       |"
+tab3 return: wrote 6 of "abc\r\t|" gives "abc\r        |"
+tab3 line feed no onlcr: wrote 6 of "abc\n\t|" gives "abc\n     |"
+tab3 line feed no onlcr onlret: wrote 6 of "abc\n\t|" gives "abc\n        |"
+tab3 line feed: wrote 6 of "abc\n\t|" gives "abc\r\n        |"
+onocr after text: wrote 11 of "\rabc\r\rdef\n\r" gives "abc\rdef\r\n"
+olcuc high bytes: wrote 4 of "az\xe9{" gives "AZ\xc9{"
+column across writes: "abc     |abc       |"
+master write: 4
+master write: read "a\tb\n" EAGAIN
+master echo: 0
+
+== L8 VMIN and VTIME
+0,0 empty: 0 "" soon
+0,0 empty, non-blocking: 0 "" soon
+0,0 empty: poll 1 OUT
+0,0: keys "abc" echo ""
+0,0 bytes: poll 1 IN OUT
+0,0 bytes, asks 2: 2 "ab" soon
+0,0 rest: 1 "c" soon
+0,3 empty: 0 "" timer
+0,3 empty, non-blocking: EAGAIN "" soon
+0,3 empty: poll 1 OUT
+0,3: keys "abc" echo ""
+0,3 bytes: poll 1 IN OUT
+0,3 bytes: 3 "abc" soon
+0,3 byte after a moment: 1 "k" soon
+0,3 two after a moment: 1 "k" soon
+0,3 two after a moment: read "l" EAGAIN
+2,0 empty, non-blocking: EAGAIN "" soon
+2,0 empty: poll 1 OUT
+2,0: keys "a" echo ""
+2,0 one byte: poll 1 OUT
+2,0 one byte, non-blocking: 1 "a" soon
+2,0: keys "a" echo ""
+2,0 asks for one, one there: 1 "a" soon
+2,0: keys "a" echo ""
+2,0 second comes later: 2 "ab" timer
+2,0: keys "abcde" echo ""
+2,0 five bytes: poll 1 IN OUT
+2,0 five bytes: 3 "abc" soon
+2,0 rest: 2 "de" soon
+2,3 empty, non-blocking: EAGAIN "" soon
+2,3 empty: poll 1 OUT
+2,3 no timer before the first: 1 "a" long
+2,3: keys "a" echo ""
+2,3 one byte: poll 1 IN OUT
+2,3 one byte: 1 "a" timer
+2,3: keys "ab" echo ""
+2,3 two bytes: 2 "ab" soon
+2,3: keys "a" echo ""
+2,3 asks for one, one there: 1 "a" soon
+2,3: keys "abc" echo ""
+2,3 asks for two, three there: 2 "ab" soon
+2,3 rest: 1 "c" soon
+3,3 restart: 2 after two timers
+
+== L11 FIONREAD
+empty: FIONREAD 0
+typed: keys "abc" echo ""
+unfinished: FIONREAD 0
+typed: keys "\n" echo ""
+a line: FIONREAD 4
+typed: keys "de" echo ""
+a line and unfinished: FIONREAD 4
+first: read "abc\n" EAGAIN
+unfinished again: FIONREAD 0
+typed: keys "\x04" echo ""
+released by the key: FIONREAD 2
+released: read "de" EAGAIN
+typed: keys "\x04" echo ""
+the key alone: FIONREAD 0
+the key alone: read EOF EAGAIN
+typed: keys "one\n\x04two\n" echo ""
+a line, the key, a line: FIONREAD 8
+all: read "one\n" EOF "two\n" EAGAIN
+typed: keys "hello\n" echo ""
+part of a line read: FIONREAD 4
+rest: read "llo\n" EAGAIN
+typed: keys "abc" echo ""
+raw, was unfinished: FIONREAD 3
+raw, was unfinished: read "abc" EAGAIN
+typed: keys "xy" echo ""
+raw: FIONREAD 2
+line mode, was raw: FIONREAD 2
+typed: keys "\n" echo ""
+line mode, raw text ended: FIONREAD 3
+line mode, raw text ended: read "xy" "\n" EAGAIN
+master: FIONREAD 4
+slave, master has output: FIONREAD 0
+
+== L13 packet mode
+TIOCGPKT: 0
+packet is 0
+TIOCPKT on: 0
+TIOCGPKT: 0
+packet is 1
+TIOCPKT on slave: ENOTTY
+nothing: poll 1 OUT
+nothing: read EAGAIN
+data: poll 1 IN OUT
+data: read 3 "\x00pk"
+data, asks 2: poll 1 IN OUT
+data, asks 2: read 2 "\x00x"
+data rest: poll 1 IN OUT
+data rest: read 2 "\x00y"
+data, asks 1: poll 1 IN OUT
+data, asks 1: read 1 "\x00"
+data rest: poll 1 IN OUT
+data rest: read 2 "\x00z"
+slave TCIFLUSH: 0
+slave TCIFLUSH: poll 1 IN PRI OUT
+slave TCIFLUSH: read 1 "\x01"
+slave TCIFLUSH: poll 1 OUT
+slave TCIFLUSH: read EAGAIN
+master TCIFLUSH: 0
+master TCIFLUSH: poll 1 OUT
+master TCIFLUSH: read EAGAIN
+master TCIFLUSH: poll 1 OUT
+master TCIFLUSH: read EAGAIN
+slave TCOFLUSH: 0
+slave TCOFLUSH: poll 1 IN PRI OUT
+slave TCOFLUSH: read 1 "\x02"
+slave TCOFLUSH: poll 1 OUT
+slave TCOFLUSH: read EAGAIN
+master TCOFLUSH: 0
+master TCOFLUSH: poll 1 OUT
+master TCOFLUSH: read EAGAIN
+master TCOFLUSH: poll 1 OUT
+master TCOFLUSH: read EAGAIN
+slave TCIOFLUSH: 0
+slave TCIOFLUSH: poll 1 IN PRI OUT
+slave TCIOFLUSH: read 1 "\x03"
+slave TCIOFLUSH: poll 1 OUT
+slave TCIOFLUSH: read EAGAIN
+master TCIOFLUSH: 0
+master TCIOFLUSH: poll 1 OUT
+master TCIOFLUSH: read EAGAIN
+master TCIOFLUSH: poll 1 OUT
+master TCIOFLUSH: read EAGAIN
+slave TCIFLUSH: 0
+slave TCOFLUSH: 0
+both: poll 1 IN PRI OUT
+both: read 1 "\x03"
+both: poll 1 OUT
+both: read EAGAIN
+slave TCIFLUSH with data: 0
+status first: poll 1 IN PRI OUT
+status first: read 1 "\x01"
+then data: poll 1 IN OUT
+then data: read 5 "\x00data"
+slave TCOFLUSH with data: 0
+status first: poll 1 IN PRI OUT
+status first: read 1 "\x02"
+then data: poll 1 IN OUT
+then data: read 5 "\x00data"
+master TCIFLUSH with data: 0
+status first: poll 1 OUT
+status first: read EAGAIN
+then data: poll 1 OUT
+then data: read EAGAIN
+typed: keys "one\n" echo "\x00one\r\n"
+slave TCIFLUSH with keys: 0
+keys: poll 1 IN PRI OUT
+keys: read 1 "\x01"
+keys: poll 1 OUT
+keys: read EAGAIN
+keys: read EAGAIN
+typed: keys "one\n" echo "\x00one\r\n"
+echo: poll 1 OUT
+echo: read EAGAIN
+master TCOFLUSH with keys: 0
+keys: poll 1 OUT
+keys: read EAGAIN
+keys: read "one\n" EAGAIN
+ixon off: poll 1 IN PRI OUT
+ixon off: read 1 "\x10"
+ixon on: poll 1 IN PRI OUT
+ixon on: read 1 " "
+vstart changed: poll 1 IN PRI OUT
+vstart changed: read 1 "\x10"
+vstart back: poll 1 IN PRI OUT
+vstart back: read 1 " "
+vstop changed: poll 1 IN PRI OUT
+vstop changed: read 1 "\x10"
+ixon off, vstop back: poll 1 OUT
+ixon off, vstop back: read EAGAIN
+ixon on through the master: poll 1 IN PRI OUT
+ixon on through the master: read 1 " "
+nothing changed: poll 1 OUT
+nothing changed: read EAGAIN
+TCSETSF: 0
+TCSETSF: poll 1 IN PRI OUT
+TCSETSF: read 1 "\x01"
+TCSETSF: poll 1 OUT
+TCSETSF: read EAGAIN
+TCSETSW: 0
+TCSETSW: poll 1 OUT
+TCSETSW: read EAGAIN
+slave TCIFLUSH: 0
+TIOCPKT off: 0
+off, status waiting: poll 1 OUT
+off, status waiting: read EAGAIN
+TIOCPKT on: 0
+on again: poll 1 OUT
+on again: read EAGAIN
+slave TCIFLUSH: 0
+TIOCPKT on again: 0
+on twice: poll 1 IN PRI OUT
+on twice: read 1 "\x01"
+on twice: poll 1 OUT
+on twice: read EAGAIN
+no packet, slave TCOFLUSH: 0
+no packet: poll 1 IN OUT
+no packet: read 4 "data"
+typed: keys "keys\n" echo "keys\r\n"
+no packet, master TCOFLUSH: 0
+no packet: read "keys\n" EAGAIN
+no packet, master TCIFLUSH: 0
+no packet: poll 1 OUT
+no packet: read EAGAIN
+
+== L11 changes of mode with something queued
+to raw: keys "one\ntwo" echo ""
+line mode: FIONREAD 4
+raw: FIONREAD 7
+raw: poll 1 IN OUT
+raw: read "one\ntwo" EAGAIN
+there and back: keys "one\ntwo\nthree" echo ""
+back: FIONREAD 13
+back: poll 1 IN OUT
+back: read "one\ntwo\nthree" EAGAIN
+there and back, then more: keys "one\ntw" echo ""
+there and back, then more: keys "o\n" echo ""
+back: FIONREAD 8
+back: read "one\ntw" "o\n" EAGAIN
+raw text, to line mode: keys "a\nb" echo ""
+raw: poll 1 IN OUT
+line mode: poll 1 IN OUT
+line mode: FIONREAD 3
+raw text, to line mode: keys "\x7f" echo ""
+raw text, to line mode: keys "c" echo ""
+line mode, c: FIONREAD 3
+line mode: read "a\nb" EAGAIN
+raw text, to line mode: keys "\n" echo ""
+line mode: read "c\n" EAGAIN
+the key, to raw: keys "ab\x04cd" echo ""
+line mode: FIONREAD 2
+raw: FIONREAD 5
+raw: read "ab\x00cd" EAGAIN
+the key alone, to raw: keys "\x04" echo ""
+raw: FIONREAD 1
+raw: poll 1 IN OUT
+raw: read "\x00" EAGAIN
+the key, to raw, byte by byte: keys "ab\x04cd" echo ""
+read 1 "a"
+read 1 "b"
+read 1 "\x00"
+read 1 "c"
+read 1 "d"
+read EAGAIN ""
+the key, there and back: keys "ab\x04cd" echo ""
+back: FIONREAD 5
+back: read "ab\x00cd" EAGAIN
+the key alone, there and back: keys "\x04" echo ""
+back: FIONREAD 0
+back: read EOF EAGAIN
+line, the key, to raw, short read: keys "one\n\x04x" echo ""
+read 2
+rest: read "e\n\x00x" EAGAIN
+raw, empty, to line mode: keys "" echo ""
+line mode: poll 1 OUT
+line mode: read EAGAIN
+
+== L13 packet mode, again
+off and on, unread: poll 1 IN PRI OUT
+off and on, unread: read 1 " "
+off and on, unread: poll 1 OUT
+off and on, unread: read EAGAIN
+slave TCIFLUSH: 0
+a flush and off: poll 1 IN PRI OUT
+a flush and off: read 1 "\x11"
+TCSETSF through the master: 0
+TCSETSF through the master: poll 1 IN PRI OUT
+TCSETSF through the master: read 1 "\x01"
+TCFLSH bad: EINVAL
+TCFLSH bad: poll 1 OUT
+TCFLSH bad: read EAGAIN
+slave TCIFLUSH: 0
+asks 1: poll 1 IN PRI OUT
+asks 1: read 1 "\x01"
+asks 1: poll 1 OUT
+asks 1: read EAGAIN
+slave TCIFLUSH: 0
+asks 0: poll 1 IN PRI OUT
+asks 0: read 0 ""
+asks 16: poll 1 IN PRI OUT
+asks 16: read 1 "\x01"
+slave TCIFLUSH: 0
+status waiting: FIONREAD 0
+drain: poll 1 IN PRI OUT
+drain: read 1 "\x01"
+data waiting: FIONREAD 3
+drain: poll 1 IN OUT
+drain: read 4 "\x00abc"
+
+== L14 errors
+open a free number: ENOENT
+stat a free number: ENOENT
+chmod a free number: ENOENT
+chown a free number: ENOENT
+TIOCGPTN on a slave: ENOTTY
+TIOCSPTLCK on a slave: ENOTTY
+TIOCGPKT on a slave: ENOTTY
+unknown request: ENOTTY
+TCFLSH of nothing known: EINVAL
+TCGETS with no struct: EFAULT
+TCSETS with no struct: EFAULT
+TIOCGWINSZ with no struct: EFAULT
+TIOCSWINSZ with no struct: EFAULT
+FIONREAD with no int: EFAULT
+TIOCGPGRP with no int: EFAULT
+ioctl on a closed descriptor: EBADF
+TCGETS on a pipe: ENOTTY
+TIOCGPTN: 0
+open a locked slave: EIO
+open after the master went: ENOENT
+stat after the master went: ENOENT
+open /dev/tty: ENXIO
+no session: exited 0
+
+== L18 TIOCEXCL
+TIOCGEXCL: 0
+exclusive: 0
+open: 0
+TIOCEXCL: 0
+TIOCGEXCL: 0
+exclusive: 1
+TIOCGEXCL on the master: 0
+exclusive: 0
+open: EBUSY
+TIOCNXCL: 0
+TIOCGEXCL: 0
+exclusive: 0
+open: 0
+TIOCEXCL on the master: 0
+TIOCGEXCL on the master: 0
+exclusive: 1
+TIOCGEXCL on the slave: 0
+exclusive: 0
+open: 0
+TIOCNXCL on the master: 0
+TIOCGEXCL on the master: 0
+exclusive: 0
+
+== L18 TIOCOUTQ
+slave, empty: 0
+value 0
+master, empty: 0
+value 0
+slave, output unread: 0
+value 0
+master, output unread: 0
+value 0
+slave, keys unread: 0
+value 0
+master, keys unread: 0
+value 0
+
+== L18 TCSBRK
+TCSBRK 0 on the slave: 0
+soon
+TCSBRK 0 on the master: 0
+soon
+TCSBRK 1 on the slave: 0
+soon
+TCSBRK 1 on the master: 0
+soon
+TCSBRKP 0 on the slave: 0
+soon
+TCSBRKP 0 on the master: 0
+soon
+TCSBRKP 3 on the slave: 0
+soon
+TCSBRKP 3 on the master: 0
+soon
+output after: "abcd"
+
+== L18 TIOCSTI
+not the controlling terminal: EIO
+not the controlling terminal: read EAGAIN
+
+== sessions
+-- L15 background read, SIGTTIN by default
+leader: job stopped by SIGTTIN
+leader: job to the foreground: 0
+job: read 5 "line\n"
+job: exited 0
+leader: back: 0
+leader: exited 0
+-- L15 background read, ignored
+job: read EIO ""
+leader: job exited 0
+leader: exited 0
+-- L15 background read, blocked
+job: read EIO ""
+job: signal pending: no
+leader: job exited 0
+leader: exited 0
+-- L15 background read, a handler
+job: read EINTR ""
+job: handler ran: yes
+leader: job exited 0
+leader: exited 0
+-- L15 background read, a handler with SA_RESTART
+leader: handler has run: yes
+leader: job to the foreground: 0
+job: read 5 "line\n"
+job: handler ran: yes
+job: exited 0
+leader: back: 0
+leader: exited 0
+-- L15 background read, non-blocking
+leader: job stopped by SIGTTIN
+leader: job to the foreground: 0
+job: read 5 "line\n"
+job: exited 0
+leader: back: 0
+leader: exited 0
+-- L15 background read of nothing
+leader: job stopped by SIGTTIN
+leader: job to the foreground: 0
+job: read 0 ""
+job: exited 0
+leader: back: 0
+leader: exited 0
+-- L15 orphaned group, read
+middle: exited 0
+job: read EIO ""
+leader: master has ""
+leader: exited 0
+-- L15 orphaned group, read, ignored
+middle: exited 0
+job: read EIO ""
+leader: master has ""
+leader: exited 0
+-- L15 orphaned group, read, blocked
+middle: exited 0
+job: read EIO ""
+job: signal pending: no
+leader: master has ""
+leader: exited 0
+-- L16 background write, no TOSTOP
+job: write 3
+leader: job exited 0
+leader: master has "out"
+leader: exited 0
+-- L16 background write, TOSTOP
+leader: job stopped by SIGTTOU
+leader, stopped: master has ""
+leader: job to the foreground: 0
+job: write 3
+job: exited 0
+leader: master has "out"
+leader: back: 0
+leader: exited 0
+-- L16 background write, ignored
+job: write 3
+leader: job exited 0
+leader: master has "out"
+leader: exited 0
+-- L16 background write, blocked
+job: write 3
+job: signal pending: no
+leader: job exited 0
+leader: master has "out"
+leader: exited 0
+-- L16 background write, a handler
+job: write EINTR
+job: handler ran: yes
+leader: job exited 0
+leader: master has ""
+leader: exited 0
+-- L16 background write, a handler with SA_RESTART
+leader: handler has run: yes
+leader: job to the foreground: 0
+job: write 3
+job: handler ran: yes
+job: exited 0
+leader: master has "out"
+leader: back: 0
+leader: exited 0
+-- L16 background write of nothing
+leader: job stopped by SIGTTOU
+leader, stopped: master has ""
+leader: job to the foreground: 0
+job: write 0
+job: exited 0
+leader: master has ""
+leader: back: 0
+leader: exited 0
+-- L16 orphaned group, write
+middle: exited 0
+job: write EIO
+leader: master has ""
+leader: exited 0
+-- L16 orphaned group, write, ignored
+middle: exited 0
+job: write 3
+leader: master has "out"
+leader: exited 0
+-- L16 orphaned group, write, blocked
+middle: exited 0
+job: write 3
+job: signal pending: no
+leader: master has "out"
+leader: exited 0
+-- L15 L16 another terminal
+job: read of another terminal: EAGAIN
+job: write to another terminal: 1
+job: TIOCGPGRP on another terminal: ENOTTY
+job: exited 0
+leader: exited 0
+-- L15 L16 in the foreground
+write: 2
+leader: master has "fg"
+typed: keys "ok\n" echo ""
+leader: read "ok\n" EAGAIN
+leader: exited 0
+-- L18 foreground groups
+TIOCGPGRP: 0
+the group: self
+TIOCGPGRP on the master: 0
+the group: self
+tcgetpgrp: self
+TIOCSPGRP negative: EINVAL
+TIOCSPGRP zero: ESRCH
+TIOCSPGRP nobody: ESRCH
+TIOCSPGRP another session's: EPERM
+TIOCSPGRP its own: 0
+tcsetpgrp its own: 0
+TIOCSPGRP through the master: 0
+TIOCSPGRP a member's: 0
+foreground is the member: yes
+TIOCSPGRP back: 0
+member: exited 0
+other: exited 0
+TIOCSPGRP on another: ENOTTY
+TIOCGPGRP on another: ENOTTY
+TIOCSPGRP on another's master: ENOTTY
+TIOCGPGRP on another's master: 0
+the group: 0
+TIOCGSID on another: ENOTTY
+TIOCGSID on another's master: ENOTTY
+TIOCGSID: 0
+the session: self
+TIOCGSID on the master: 0
+the session: self
+leader: exited 0
+-- L18 TIOCNOTTY, not the leader
+TIOCNOTTY on the master: ENOTTY
+TIOCNOTTY on another: ENOTTY
+member: TIOCGPGRP: 0
+member: TIOCNOTTY: 0
+member: TIOCGPGRP after: ENOTTY
+member: TIOCGSID after: ENOTTY
+member: TIOCNOTTY again: ENOTTY
+member: open /dev/tty after: ENXIO
+member: read after: EAGAIN
+member: exited 0
+TIOCGPGRP: 0
+open /dev/tty: 0
+leader: exited 0
+-- L18 TIOCNOTTY, the leader
+TIOCNOTTY: 0
+member: TIOCGPGRP: ENOTTY
+member: open /dev/tty: ENXIO
+member: exited 0
+TIOCGPGRP: ENOTTY
+TIOCGSID: ENOTTY
+TIOCGSID on the master: ENOTTY
+open /dev/tty: ENXIO
+TIOCNOTTY again: ENOTTY
+TIOCSCTTY: 0
+TIOCGSID: 0
+the session: self
+leader: exited 0
+-- L18 TIOCEXCL and /dev/tty
+TIOCEXCL: 0
+open /dev/tty: EBUSY
+TIOCGEXCL: 0
+exclusive: 1
+TIOCNXCL: 0
+leader: exited 0
+-- L18 TIOCSTI on the controlling terminal
+TIOCSTI: EIO
+TIOCSTI: read EAGAIN
+echo 0
+leader: exited 0
+-- L19 a master never controls
+open master with no O_NOCTTY: 0
+TIOCGSID on the master: ENOTTY
+open /dev/tty: ENXIO
+TIOCGSID on the slave: ENOTTY
+TIOCSCTTY on the master: 0
+TIOCGSID on the slave: 0
+the session: self
+open /dev/tty: 0
+/dev/tty writes to "t" on the master
+leader: exited 0
+-- L19 claiming
+TIOCGPGRP before any claim: ENOTTY
+TIOCGPGRP after an open: 0
+the group: self
+TIOCSCTTY, its own: 0
+TIOCGSID on a second: ENOTTY
+TIOCSCTTY on a second: EPERM
+leader: exited 0
+-- L19 claims from outside
+not a leader: TIOCSCTTY: EPERM
+not a leader: TIOCSCTTY force: EPERM
+not a leader, after an open: TIOCGSID: 0
+member: exited 0
+another session: TIOCSCTTY: EPERM
+another session: TIOCGSID: ENOTTY
+another session, after an open: TIOCGSID: ENOTTY
+other: exited 0
+leader: exited 0
+-- L25 L26 window size
+fresh: size 0 0 0 0
+the same, zeros: ok, signals 0
+new: ok, signals 1
+slave: size 24 80 0 0
+master: size 24 80 0 0
+the same: ok, signals 0
+row: ok, signals 1
+col: ok, signals 1
+xpixel: ok, signals 1
+ypixel: ok, signals 1
+slave: size 25 81 640 480
+master: size 25 81 640 480
+the same: ok, signals 0
+through the master: ok, signals 1
+slave: size 30 90 1 2
+master: size 30 90 1 2
+the same through the master: ok, signals 0
+the same through the slave: ok, signals 0
+leader: exited 0
+-- L25 who gets it
+leader in the foreground: ok, signals 1
+job: signals 0
+job to the foreground: 0
+job in the foreground: ok, signals 0
+back: 0
+job: signals 1
+job: exited 0
+leader: exited 0
+-- the interrupt key
+a line, then the key: keys "one\ntwo\x03" echo ""
+signals 1
+read: read EAGAIN
+isig clear: keys "one\ntwo\x03\n" echo ""
+signals 1
+read: read "one\n" "two\x03\n" EAGAIN
+leader: exited 0
+-- keys that raise a signal
+a line, then the key: keys "one\ntwo\x1c" echo ""
+signals 1
+read: read EAGAIN
+the same with noflsh: keys "one\ntwo\x1c" echo ""
+signals 2
+the rest of the line: keys "\n" echo ""
+read: read "one\n" "two\n" EAGAIN
+isig clear: keys "one\ntwo\x1c\n" echo ""
+signals 2
+read: read "one\n" "two\x1c\n" EAGAIN
+a key to erase: keys "ab" echo "ab"
+erased: keys "\x7f" echo "\\b"
+the key with the erase open: keys "\x1c" echo "^\\"
+signals 3
+the next: keys "z\n" echo "z\r\n"
+read: read "z\n" EAGAIN
+leader: exited 0
+-- L13 keys that raise a signal, in packet mode
+TIOCPKT: 0
+the key: keys "\x1c" echo "\x03\x00^\\"
+signals 1
+the key with output queued: keys "\x1c" echo "\x03\x00out^\\"
+signals 2
+the key with noflsh: keys "\x1c" echo "\x00^\\"
+signals 3
+leader: exited 0
+
+== L25 L26 no foreground group
+new: ok, signals 0
+slave: size 24 80 3 4
+master: size 24 80 3 4
+through the master: ok, signals 0
+slave: size 25 81 5 6
+master: size 25 81 5 6

@@ -29,7 +29,28 @@ static struct {
 } gSent[16];
 static int gSentCount = 0;
 static int gSendResult = 0;
+static bool gKernel = false;
+static bool gRefused = false;
+static bool gOrphaned = false;
+static bool gGaveUp = false;
+static int gGroupCheck = 0;
+static int gAfterSignal = _EINTR;
+static int gAfterSignals = 0;
+static int gGroupAfterSignal = -1;
 
+bool pscalTtyCallerIsKernel(void) { return gKernel; }
+bool pscalTtySignalIgnoredOrBlocked(int sig) {
+    (void)sig;
+    return gRefused;
+}
+bool pscalTtyCurrentGroupOrphaned(void) { return gOrphaned; }
+int pscalTtyCheckGroup(int sid, int pgid) {
+    (void)sid;
+    (void)pgid;
+    return gGroupCheck;
+}
+void pscalTtyCallerGiveUpTerminal(void) { gGaveUp = true; }
+bool pscalTtyCallerGaveUpTerminal(void) { return gGaveUp; }
 int pscalTtyCurrentPid(void) { return gSid; }
 int pscalTtyCurrentPgid(void) { return gPgid; }
 int pscalTtyCurrentSid(void) { return gSid; }
@@ -50,6 +71,15 @@ int pscalTtySendGroupSignal(int pgid, int sig) {
     }
     return gSendResult;
 }
+/* What a stop and a SIGCONT come to: by the time it is over, the caller may have been moved. */
+int pscalTtyAfterJobSignal(int sig) {
+    (void)sig;
+    gAfterSignals++;
+    if (gGroupAfterSignal > 0) {
+        gPgid = gGroupAfterSignal;
+    }
+    return gAfterSignal;
+}
 static void fakeReset(void) {
     gSid = -1;
     gPgid = -1;
@@ -58,6 +88,11 @@ static void fakeReset(void) {
     gSentCount = 0;
     gSendResult = 0;
     gLastSetFgSid = gLastSetFg = 0;
+    gKernel = gRefused = gOrphaned = gGaveUp = false;
+    gGroupCheck = 0;
+    gAfterSignal = _EINTR;
+    gAfterSignals = 0;
+    gGroupAfterSignal = -1;
 }
 
 /* --- the two the layer takes from elsewhere --- */
@@ -166,8 +201,13 @@ static void test_abi(void) {
     assert(pscalCompatErrno(_EAGAIN) == EAGAIN);
     assert(pscalCompatErrno(_EBADF) == EBADF);
     assert(pscalCompatErrno(_ETIMEDOUT) == ETIMEDOUT);
-    assert(pscalCompatErrno(_ENOENT) == EIO);
-    assert(pscalCompatErrno(_EMFILE) == EIO);
+    assert(pscalCompatErrno(_ENOENT) == ENOENT);
+    assert(pscalCompatErrno(_EMFILE) == EMFILE);
+    assert(pscalCompatErrno(_ESRCH) == ESRCH);
+    assert(pscalCompatErrno(_EEXIST) == EEXIST);
+    assert(pscalCompatErrno(_EFAULT) == EFAULT);
+    assert(pscalCompatErrno(_EBUSY) == EBUSY);
+    assert(pscalCompatErrno(-999) == EIO);
     assert(POLL_READ == 1 && POLL_PRI == 2 && POLL_WRITE == 4 && POLL_ERR == 8 && POLL_HUP == 16 &&
            POLL_NVAL == 32);
     assert(pscal_tty_fd_ops.read && pscal_tty_fd_ops.write && pscal_tty_fd_ops.poll &&
@@ -185,7 +225,8 @@ static void test_defaults(void) {
     assert(p.s->ops->ioctl(p.s, TCGETS_, &t) == 0);
     assert(t.iflags == (ICRNL_ | IXON_));
     assert(t.oflags == (OPOST_ | ONLCR_));
-    assert(t.cflags == 0 && t.line == 0);
+    assert(t.cflags == (B38400_ | CS8_ | CREAD_) && t.line == 0);
+    assert(t.lflags == 0x8a3b && t.iflags == 0x500 && t.oflags == 0x5);
     assert(t.lflags == (ISIG_ | ICANON_ | ECHO_ | ECHOE_ | ECHOK_ | ECHOCTL_ | ECHOKE_ | IEXTEN_));
     assert(t.cc[VINTR_] == 3 && t.cc[VQUIT_] == 0x1c && t.cc[VERASE_] == 0x7f && t.cc[VKILL_] == 0x15);
     assert(t.cc[VEOF_] == 4 && t.cc[VTIME_] == 0 && t.cc[VMIN_] == 1 && t.cc[VSWTC_] == 0);
@@ -242,11 +283,11 @@ static void test_line_editing_and_echo(void) {
     masterDrain(&p, echo, sizeof(echo));
     expectRead(p.s, "one\n");
     expectRead(p.s, "k\n");
-    /* ECHOE and ECHOK off: the removal happens, unseen. */
+    /* ECHOE and ECHOK off: the removal happens, and the keys show as themselves. */
     setL(p.s, 0, ECHOE_ | ECHOK_);
     type(&p, "ab\x7f\x15");
     masterDrain(&p, echo, sizeof(echo));
-    assert(strcmp(echo, "ab") == 0);
+    assert(strcmp(echo, "ab^?^U") == 0);
     setL(p.s, ECHOE_ | ECHOK_, 0);
     /* ECHOCTL off: as it is. Tab, and VSTART, never show as control. */
     setL(p.s, 0, ECHOCTL_);
@@ -266,7 +307,7 @@ static void test_line_editing_and_echo(void) {
     setCc(p.s, VEOL_, '%');
     type(&p, "pc%");
     masterDrain(&p, echo, sizeof(echo));
-    assert(strcmp(echo, "pc\r\n") == 0);
+    assert(strcmp(echo, "pc%") == 0);
     expectRead(p.s, "pc%");
     setCc(p.s, VEOL_, 0);
     /* A 0 is data, though VEOL is 0. */
@@ -293,6 +334,193 @@ static void test_line_editing_and_echo(void) {
     masterDrain(&p, echo, sizeof(echo));
     assert(strcmp(echo, "bc\r\n") == 0);
     expectRead(p.s, "bc\n");
+    pairClose(&p);
+}
+
+/* The tables came from running this on a Linux machine; tty_diff.c holds that to account in
+ * full. These are the ones worth having with no vproc in the way. */
+static void test_extended_keys(void) {
+    Pair p = pairOpen();
+    char echo[512];
+    /* VWERASE: what's after the last word, and the word. */
+    type(&p, "foo-bar  \x17");
+    masterDrain(&p, echo, sizeof(echo));
+    type(&p, "\n");
+    masterDrain(&p, echo, sizeof(echo));
+    expectRead(p.s, "foo-\n");
+    /* VREPRINT. */
+    type(&p, "abc\x12");
+    masterDrain(&p, echo, sizeof(echo));
+    assert(strcmp(echo, "abc^R\r\nabc") == 0);
+    /* VLNEXT, on a key that would have erased. */
+    type(&p, "\x16\x7f");
+    masterDrain(&p, echo, sizeof(echo));
+    assert(strcmp(echo, "^\b^?") == 0);
+    type(&p, "\x7f\n");
+    masterDrain(&p, echo, sizeof(echo));
+    expectRead(p.s, "abc\n");
+    /* VEOL2. */
+    setCc(p.s, VEOL2_, '%');
+    type(&p, "pc%");
+    masterDrain(&p, echo, sizeof(echo));
+    assert(strcmp(echo, "pc%") == 0);
+    expectRead(p.s, "pc%");
+    /* All of that goes with IEXTEN, even VEOL2. */
+    setL(p.s, 0, IEXTEN_);
+    type(&p, "x%\x17\x12\x16\n");
+    masterDrain(&p, echo, sizeof(echo));
+    assert(strcmp(echo, "x%^W^R^V\r\n") == 0);
+    expectRead(p.s, "x%\x17\x12\x16\n");
+    setL(p.s, IEXTEN_, 0);
+    /* VREPRINT needs echo, or it's data. */
+    setL(p.s, 0, ECHO_);
+    type(&p, "\x12\n");
+    expectRead(p.s, "\x12\n");
+    setL(p.s, ECHO_, 0);
+    masterDrain(&p, echo, sizeof(echo));
+    pairClose(&p);
+}
+
+static void test_echo_flags(void) {
+    Pair p = pairOpen();
+    char echo[512];
+    /* ECHONL, with nothing else. */
+    setL(p.s, ECHONL_, ECHO_);
+    type(&p, "ab\n");
+    masterDrain(&p, echo, sizeof(echo));
+    assert(strcmp(echo, "\r\n") == 0);
+    expectRead(p.s, "ab\n");
+    setL(p.s, ECHO_, ECHONL_);
+    /* Echo is output: NL shows as CR NL only with OPOST and ONLCR. */
+    setO(p.s, 0, OPOST_);
+    type(&p, "ab\n");
+    masterDrain(&p, echo, sizeof(echo));
+    assert(strcmp(echo, "ab\n") == 0);
+    expectRead(p.s, "ab\n");
+    setO(p.s, OPOST_ | OLCUC_ | TAB3_, 0);
+    type(&p, "ab\t\n");
+    masterDrain(&p, echo, sizeof(echo));
+    assert(strcmp(echo, "AB      \r\n") == 0);
+    expectRead(p.s, "ab\t\n");
+    setO(p.s, 0, OLCUC_ | TAB3_);
+    /* ECHOPRT: what goes shows between a backslash and a slash. */
+    setL(p.s, ECHOPRT_, 0);
+    type(&p, "abc\x7f\x7f");
+    masterDrain(&p, echo, sizeof(echo));
+    assert(strcmp(echo, "abc\\cb") == 0);
+    type(&p, "d");
+    masterDrain(&p, echo, sizeof(echo));
+    assert(strcmp(echo, "/d") == 0);
+    type(&p, "\x15");
+    masterDrain(&p, echo, sizeof(echo));
+    assert(strcmp(echo, "\\da/") == 0);
+    setL(p.s, 0, ECHOPRT_);
+    /* A kill with ECHOK but not ECHOKE: the key and a new line. */
+    setL(p.s, 0, ECHOKE_);
+    type(&p, "ab\x15");
+    masterDrain(&p, echo, sizeof(echo));
+    assert(strcmp(echo, "ab^U\r\n") == 0);
+    setL(p.s, ECHOKE_, 0);
+    /* A tab's width comes from where the line began. */
+    assert(p.s->ops->write(p.s, "xyz", 3) == 3);
+    masterDrain(&p, echo, sizeof(echo));
+    type(&p, "\t\x7f");
+    masterDrain(&p, echo, sizeof(echo));
+    assert(strcmp(echo, "\t\b\b\b\b\b") == 0);
+    /* IUTF8: a character goes whole, and takes one column. */
+    setI(p.s, IUTF8_, 0);
+    type(&p, "\xc3\xa9\t\x7f");
+    masterDrain(&p, echo, sizeof(echo));
+    assert(strcmp(echo, "\xc3\xa9\t\b\b\b\b") == 0);
+    type(&p, "\x7f");
+    masterDrain(&p, echo, sizeof(echo));
+    assert(strcmp(echo, "\b \b") == 0);
+    setI(p.s, 0, IUTF8_);
+    type(&p, "\n");
+    masterDrain(&p, echo, sizeof(echo));
+    expectRead(p.s, "\n");
+    pairClose(&p);
+}
+
+static void test_translations(void) {
+    Pair p = pairOpen();
+    char echo[64];
+    setL(p.s, 0, ECHO_);
+    /* ISTRIP first, so that what was high can then mean something. */
+    setI(p.s, ISTRIP_, 0);
+    type(&p, "a\xff" "b\x8d");
+    expectRead(p.s, "b\n");
+    setI(p.s, 0, ISTRIP_);
+    /* IUCLC, with IEXTEN and by Latin-1. */
+    setI(p.s, IUCLC_, 0);
+    type(&p, "aB\xc9\xdf\n");
+    expectRead(p.s, "ab\xe9\xdf\n");
+    setL(p.s, 0, IEXTEN_);
+    type(&p, "B\n");
+    expectRead(p.s, "B\n");
+    setL(p.s, IEXTEN_, 0);
+    setI(p.s, 0, IUCLC_);
+    /* INLCR makes a CR that IGNCR doesn't discard. */
+    setI(p.s, INLCR_ | IGNCR_, 0);
+    type(&p, "a\nb\r");
+    setI(p.s, 0, INLCR_ | IGNCR_);
+    type(&p, "\n");
+    expectRead(p.s, "a\rb\n");
+    /* PARMRK doubles a real 0xff. */
+    setI(p.s, PARMRK_, 0);
+    type(&p, "\xff\n");
+    expectRead(p.s, "\xff\xff\n");
+    setI(p.s, 0, PARMRK_);
+    /* Raw too. */
+    setL(p.s, 0, ICANON_ | ISIG_);
+    setI(p.s, IUCLC_ | ISTRIP_, 0);
+    type(&p, "A\xc1");
+    expectRead(p.s, "aa");
+    setI(p.s, 0, IUCLC_ | ISTRIP_);
+    setI(p.s, PARMRK_, 0);
+    type(&p, "\xff");
+    expectRead(p.s, "\xff\xff");
+    masterDrain(&p, echo, sizeof(echo));
+    pairClose(&p);
+}
+
+static void test_output_flags(void) {
+    Pair p = pairOpen();
+    /* ONOCR, which goes by the column, and CR NL isn't asked. */
+    setO(p.s, ONOCR_, 0);
+    assert(p.s->ops->write(p.s, "\rab\r\r\n", 6) == 6);
+    expectRead(p.m, "ab\r\r\n");
+    setO(p.s, 0, ONOCR_);
+    /* ONLRET: a NL leaves column 0, and a CR is still a CR. */
+    setO(p.s, ONLRET_ | TAB3_, ONLCR_);
+    assert(p.s->ops->write(p.s, "ab\n\t|\r", 6) == 6);
+    expectRead(p.m, "ab\n        |\r");
+    /* Without it a NL leaves the column alone. */
+    setO(p.s, 0, ONLRET_);
+    assert(p.s->ops->write(p.s, "ab\n\t|\r", 6) == 6);
+    expectRead(p.m, "ab\n      |\r");
+    /* What doesn't take a column: controls, and with IUTF8 the rest of a character. */
+    assert(p.s->ops->write(p.s, "\x01\x7f\t|\r", 5) == 5);
+    expectRead(p.m, "\x01\x7f        |\r");
+    assert(p.s->ops->write(p.s, "\xc3\xa9\t|\r", 5) == 5);
+    expectRead(p.m, "\xc3\xa9      |\r");
+    setI(p.s, IUTF8_, 0);
+    assert(p.s->ops->write(p.s, "\xc3\xa9\t|\r", 5) == 5);
+    expectRead(p.m, "\xc3\xa9       |\r");
+    setI(p.s, 0, IUTF8_);
+    /* OLCUC, by Latin-1, 0xff and all. */
+    setO(p.s, OLCUC_, TAB3_);
+    assert(p.s->ops->write(p.s, "az{\xe9\xf7\xff\xdf", 7) == 7);
+    expectRead(p.m, "AZ{\xc9\xf7\xdf\xbf");
+    /* OPOST clear: not a thing changes, and the column doesn't follow. */
+    assert(p.s->ops->write(p.s, "\r", 1) == 1);
+    expectRead(p.m, "\r");
+    setO(p.s, TAB3_, OPOST_ | OLCUC_);
+    assert(p.s->ops->write(p.s, "ab\t\n", 4) == 4);
+    expectRead(p.m, "ab\t\n");
+    setO(p.s, OPOST_, 0);
+    assert(p.s->ops->write(p.s, "\t|", 2) == 2);
+    expectRead(p.m, "        |");
     pairClose(&p);
 }
 
@@ -328,12 +556,12 @@ static void test_end_of_file(void) {
     char got[8];
     assert(p.s->ops->read(p.s, got, 2) == 2 && memcmp(got, "he", 2) == 0);
     expectRead(p.s, "llo\n");
-    /* A mark in a non-canonical read: only a mark at the head after text goes. */
+    /* A mark in a non-canonical read is a byte 0, wherever it falls. */
     type(&p, "ab\x04");
     setL(p.s, 0, ICANON_);
     assert(p.s->ops->read(p.s, got, 2) == 2 && memcmp(got, "ab", 2) == 0);
+    assert(p.s->ops->read(p.s, got, 2) == 1 && got[0] == 0);
     expectAgain(p.s);
-    /* Inside the copied range it comes out as a byte 0. */
     setL(p.s, ICANON_, 0);
     type(&p, "ab\x04");
     setL(p.s, 0, ICANON_);
@@ -375,14 +603,23 @@ static void test_long_line(void) {
     assert(tty_input(p.s->tty, keys, sizeof(keys), false) == (ssize_t)sizeof(keys));
     type(&p, "\n");
     assert(p.s->ops->read(p.s, got, sizeof(got)) == TTY_BUF_SIZE);
-    /* Raw text filling the queue can't stall a line end after a change to line mode. */
+    /* Raw text filling the queue is a finished line after a change to line mode: a reader
+     * can make room, so a key waits for that. */
     setL(p.s, 0, ICANON_);
     assert(tty_input(p.s->tty, keys, TTY_BUF_SIZE, false) == TTY_BUF_SIZE);
     setL(p.s, ICANON_, 0);
-    assert(tty_input(p.s->tty, "z", 1, true) == 1);
-    assert(tty_input(p.s->tty, "\n", 1, true) == 1);
+    assert(tty_input(p.s->tty, "z", 1, false) == _EAGAIN);
     assert(p.s->ops->read(p.s, got, sizeof(got)) == TTY_BUF_SIZE);
-    assert(got[TTY_BUF_SIZE - 2] == 'y' && got[TTY_BUF_SIZE - 1] == '\n');
+    assert(got[TTY_BUF_SIZE - 1] == 'y');
+    type(&p, "z\n");
+    expectRead(p.s, "z\n");
+    /* A byte dropped from a line too long still shows. */
+    setL(p.s, ECHO_, 0);
+    assert(tty_input(p.s->tty, keys, TTY_BUF_SIZE - 1, false) == TTY_BUF_SIZE - 1);
+    static char echoed[TTY_BUF_SIZE + 8];
+    assert(masterDrain(&p, echoed, sizeof(echoed)) == TTY_BUF_SIZE - 1);
+    type(&p, "w");
+    assert(masterDrain(&p, echoed, sizeof(echoed)) == 1 && echoed[0] == 'w');
     pairClose(&p);
 }
 
@@ -485,15 +722,30 @@ static void test_raw_modes(void) {
     assert(p.s->ops->read(p.s, got, 1) == 0);
     assert(!pscalTtyTakeEofKey(p.s));
     setCc(p.s, VMIN_, 1);
-    /* Waits for VMIN; non-blocking says so. */
+    /* Short of VMIN a poll doesn't call it readable, and a non-blocking read takes what's
+     * there. Only with nothing there does it say so. */
     setCc(p.s, VMIN_, 3);
     type(&p, "ab");
+    assert(p.s->ops->poll(p.s) == POLL_WRITE);
+    expectRead(p.s, "ab");
     expectAgain(p.s);
-    /* With VTIME the wait ends with what there is. */
+    /* A read that asks for fewer than VMIN needs no more than that. */
+    type(&p, "a");
+    assert(p.s->ops->read(p.s, got, 1) == 1 && got[0] == 'a');
+    /* With VTIME the wait ends with what there is, and a poll goes by the first byte. */
+    type(&p, "ab");
     setCc(p.s, VTIME_, 1);
+    assert(p.s->ops->poll(p.s) == (POLL_WRITE | POLL_READ));
     assert(p.s->ops->read(p.s, got, sizeof(got)) == 2);
     type(&p, "abc");
     assert(p.s->ops->read(p.s, got, sizeof(got)) == 3);
+    /* VMIN 0 with VTIME: a read of nothing waits for the timer, or for a byte. */
+    setCc(p.s, VMIN_, 0);
+    assert(p.s->ops->read(p.s, got, sizeof(got)) == 0);
+    assert(!pscalTtyTakeEofKey(p.s));
+    expectAgain(p.s);
+    type(&p, "q");
+    assert(p.s->ops->read(p.s, got, sizeof(got)) == 1 && got[0] == 'q');
     setCc(p.s, VTIME_, 0);
     setCc(p.s, VMIN_, 1);
     /* Text from line mode is plain bytes, terminators included. */
@@ -501,12 +753,21 @@ static void test_raw_modes(void) {
     type(&p, "one\ntw");
     setL(p.s, 0, ICANON_);
     expectRead(p.s, "one\ntw");
-    /* A raw byte does not end a line afterwards. */
-    type(&p, "x\n");
+    /* A raw byte does not end a line afterwards, but what is there when the mode changes
+     * is all one line, for a reader to find. */
+    type(&p, "x\ny");
     setL(p.s, ICANON_, 0);
+    assert(p.s->ops->poll(p.s) == (POLL_WRITE | POLL_READ));
+    type(&p, "z");
+    expectRead(p.s, "x\ny");
     expectAgain(p.s);
     assert(p.s->ops->poll(p.s) == POLL_WRITE);
     assert(p.s->ops->ioctl(p.s, TCFLSH_, (void *)(intptr_t)TCIOFLUSH_) == 0);
+    /* Lines don't survive going there and back. */
+    type(&p, "a\nb\n");
+    setL(p.s, 0, ICANON_);
+    setL(p.s, ICANON_, 0);
+    expectRead(p.s, "a\nb\n");
     pairClose(&p);
 }
 
@@ -520,14 +781,14 @@ static void test_write(void) {
     expectRead(p.m, "a\n");
     setO(p.s, ONLRET_, 0);
     assert(p.s->ops->write(p.s, "a\rb", 3) == 3);
-    expectRead(p.m, "ab");
+    expectRead(p.m, "a\nb");
     setO(p.s, 0, OPOST_);
     assert(p.s->ops->write(p.s, "\r\n", 2) == 2);
     expectRead(p.m, "\r\n");
     /* A write of the master is typing. */
     assert(p.m->ops->write(p.m, "k\r", 2) == 2);
     expectRead(p.s, "k\n");
-    expectRead(p.m, "k\r\n");
+    expectRead(p.m, "k\n");
     /* More than a chunk, with every byte doubling. */
     setO(p.s, OPOST_ | ONLCR_, OCRNL_ | ONLRET_);
     static char lots[2000];
@@ -551,7 +812,47 @@ static void test_write(void) {
     assert(p.s->ops->ioctl(p.s, (int)TIOCGPKT_, &seen) == _ENOTTY);
     assert(p.s->ops->write(p.s, "pk", 2) == 2);
     assert(p.m->ops->read(p.m, got, sizeof(got)) == 3 && got[0] == 0 && got[1] == 'p' && got[2] == 'k');
+    expectAgain(p.m);
+    assert(p.s->ops->write(p.s, "q", 1) == 1);
     assert(p.m->ops->read(p.m, got, 1) == 1 && got[0] == 0);
+    assert(p.m->ops->read(p.m, got, sizeof(got)) == 2 && got[0] == 0 && got[1] == 'q');
+    /* Events come first, as one byte, and are reported until read. */
+    assert(p.m->ops->poll(p.m) == POLL_WRITE);
+    assert(p.s->ops->write(p.s, "r", 1) == 1);
+    assert(p.s->ops->ioctl(p.s, TCFLSH_, (void *)(intptr_t)TCIFLUSH_) == 0);
+    assert(p.s->ops->ioctl(p.s, TCFLSH_, (void *)(intptr_t)TCOFLUSH_) == 0);
+    assert(p.m->ops->poll(p.m) == (POLL_WRITE | POLL_READ | POLL_PRI));
+    assert(p.m->ops->read(p.m, got, sizeof(got)) == 1 && got[0] == 3);
+    assert(p.m->ops->poll(p.m) == (POLL_WRITE | POLL_READ));
+    assert(p.m->ops->read(p.m, got, sizeof(got)) == 2 && got[1] == 'r');
+    /* A flush of a master's own is nothing to tell it. */
+    assert(p.m->ops->ioctl(p.m, TCFLSH_, (void *)(intptr_t)TCIOFLUSH_) == 0);
+    expectAgain(p.m);
+    /* Flow control coming and going, of which the last word counts. */
+    struct termios_ modes;
+    assert(p.s->ops->ioctl(p.s, TCGETS_, &modes) == 0);
+    modes.iflags &= ~IXON_;
+    assert(p.s->ops->ioctl(p.s, TCSETS_, &modes) == 0);
+    assert(p.m->ops->read(p.m, got, sizeof(got)) == 1 && got[0] == TIOCPKT_NOSTOP_);
+    assert(p.s->ops->ioctl(p.s, TCSETS_, &modes) == 0);
+    expectAgain(p.m);
+    modes.iflags |= IXON_;
+    assert(p.s->ops->ioctl(p.s, TCSETS_, &modes) == 0);
+    modes.iflags &= ~IXON_;
+    assert(p.s->ops->ioctl(p.s, TCSETS_, &modes) == 0);
+    modes.iflags |= IXON_;
+    assert(p.s->ops->ioctl(p.s, TCSETSF_, &modes) == 0);
+    assert(p.m->ops->read(p.m, got, sizeof(got)) == 1 && got[0] == (TIOCPKT_DOSTOP_ | TIOCPKT_FLUSHREAD_));
+    /* A status is forgotten on the way to packet mode, not on the way out. */
+    assert(p.s->ops->ioctl(p.s, TCFLSH_, (void *)(intptr_t)TCIFLUSH_) == 0);
+    assert(p.m->ops->ioctl(p.m, TIOCPKT_, &on) == 0);
+    assert(p.m->ops->read(p.m, got, sizeof(got)) == 1 && got[0] == 1);
+    assert(p.s->ops->ioctl(p.s, TCFLSH_, (void *)(intptr_t)TCIFLUSH_) == 0);
+    on = 0;
+    assert(p.m->ops->ioctl(p.m, TIOCPKT_, &on) == 0);
+    on = 1;
+    assert(p.m->ops->ioctl(p.m, TIOCPKT_, &on) == 0);
+    expectAgain(p.m);
     on = 0;
     assert(p.m->ops->ioctl(p.m, TIOCPKT_, &on) == 0);
     assert(p.m->ops->ioctl(p.m, (int)TIOCGPKT_, &seen) == 0 && seen == 0);
@@ -569,19 +870,19 @@ static void test_ioctl(void) {
     assert(p.s->ops->ioctl(p.s, TIOCSPTLCK_, &v) == _ENOTTY);
     assert(p.s->ops->ioctl(p.s, 0x7777, &v) == _ENOTTY);
     assert(p.s->ops->ioctl(p.s, TIOCGPTPEER_, &v) == _ENOTTY);
-    /* FIONREAD counts a side's own queue, unfinished text and marks included. */
+    /* FIONREAD counts what a read of that side could return. */
     setL(p.s, 0, ECHO_);
     type(&p, "abc\x04" "d");
-    assert(p.s->ops->ioctl(p.s, FIONREAD_, &v) == 0 && v == 5);
+    assert(p.s->ops->ioctl(p.s, FIONREAD_, &v) == 0 && v == 3);
     assert(p.m->ops->ioctl(p.m, FIONREAD_, &v) == 0 && v == 0);
     assert(p.s->ops->ioctl(p.s, TCFLSH_, (void *)(intptr_t)7) == _EINVAL);
     assert(p.s->ops->ioctl(p.s, TCFLSH_, (void *)(intptr_t)TCOFLUSH_) == 0);
-    assert(p.s->ops->ioctl(p.s, FIONREAD_, &v) == 0 && v == 5);
+    assert(p.s->ops->ioctl(p.s, FIONREAD_, &v) == 0 && v == 3);
     /* TCSETSF clears; TCSETSW doesn't. Both reach the slave from the master. */
     struct termios_ t;
     assert(p.m->ops->ioctl(p.m, TCGETS_, &t) == 0);
     assert(p.m->ops->ioctl(p.m, TCSETSW_, &t) == 0);
-    assert(p.s->ops->ioctl(p.s, FIONREAD_, &v) == 0 && v == 5);
+    assert(p.s->ops->ioctl(p.s, FIONREAD_, &v) == 0 && v == 3);
     assert(p.m->ops->ioctl(p.m, TCSETSF_, &t) == 0);
     assert(p.s->ops->ioctl(p.s, FIONREAD_, &v) == 0 && v == 0);
     /* The op copies exactly its struct. */
@@ -598,6 +899,34 @@ static void test_ioctl(void) {
     assert(gSentCount == 0);
     assert(p.s->ops->ioctl(p.s, TIOCGWINSZ_, &out) == 0 && out.row == 24 && out.col == 80);
     assert(p.m->ops->ioctl(p.m, TIOCGWINSZ_, &out) == 0 && out.row == 24);
+    /* A pointer that isn't one. */
+    assert(p.s->ops->ioctl(p.s, TCGETS_, NULL) == _EFAULT);
+    assert(p.s->ops->ioctl(p.s, TCSETS_, NULL) == _EFAULT);
+    assert(p.s->ops->ioctl(p.s, TIOCSWINSZ_, NULL) == _EFAULT);
+    assert(p.s->ops->ioctl(p.s, FIONREAD_, NULL) == _EFAULT);
+    assert(p.m->ops->ioctl(p.m, TIOCGPGRP_, NULL) == _EFAULT);
+    /* A pty has no line to set up. */
+    t.cflags = 0x7fffffff;
+    assert(p.s->ops->ioctl(p.s, TCSETS_, &t) == 0);
+    assert(p.s->ops->ioctl(p.s, TCGETS_, &t) == 0 && t.cflags == 0x5ffffeff);
+    t.cflags = 0;
+    assert(p.s->ops->ioctl(p.s, TCSETS_, &t) == 0);
+    assert(p.s->ops->ioctl(p.s, TCGETS_, &t) == 0 && t.cflags == (CS8_ | CREAD_));
+    /* The rest of what Linux answers. */
+    v = 7;
+    assert(p.s->ops->ioctl(p.s, TIOCOUTQ_, &v) == 0 && v == 0);
+    assert(p.s->ops->ioctl(p.s, TCSBRK_, (void *)1) == 0);
+    assert(p.m->ops->ioctl(p.m, TCSBRKP_, NULL) == 0);
+    assert(p.s->ops->ioctl(p.s, TIOCSTI_, "k") == _EIO);
+    assert(p.s->ops->ioctl(p.s, (int)TIOCGEXCL_, &v) == 0 && v == 0);
+    assert(p.s->ops->ioctl(p.s, TIOCEXCL_, NULL) == 0);
+    assert(p.s->ops->ioctl(p.s, (int)TIOCGEXCL_, &v) == 0 && v == 1);
+    assert(p.m->ops->ioctl(p.m, (int)TIOCGEXCL_, &v) == 0 && v == 0);
+    struct pscal_fd *busy = NULL;
+    assert(pscalPtyOpenSlave(p.num, O_RDWR | O_NOCTTY, &busy) == _EBUSY && !busy);
+    assert(p.s->ops->ioctl(p.s, TIOCNXCL_, NULL) == 0);
+    assert(pscalPtyOpenSlave(p.num, O_RDWR | O_NOCTTY, &busy) == 0);
+    pscal_fd_close(busy);
     pairClose(&p);
     fakeReset();
 }
@@ -606,30 +935,32 @@ static void test_winsize_targets(void) {
     fakeReset();
     Pair p = pairOpen();
     struct winsize_ ws = {1, 2, 0, 0};
-    /* The foreground group. */
+    /* The foreground group, when there's a change. */
     p.s->tty->session = 10;
     p.s->tty->fg_group = 20;
     tty_set_winsize(p.s->tty, ws);
     assert(gSentCount == 1 && gSent[0].pgid == 20 && gSent[0].sig == SIGWINCH);
-    /* None: what vproc has recorded, which it then adopts. */
+    gSentCount = 0;
+    tty_set_winsize(p.s->tty, ws);
+    assert(gSentCount == 0);
+    /* Every field is a change. */
+    ws.xpixel = 5;
+    tty_set_winsize(p.s->tty, ws);
+    assert(gSentCount == 1);
+    /* No foreground group: nobody, whatever vproc has recorded, and no adopting it. */
     gSentCount = 0;
     p.s->tty->fg_group = 0;
     gRecordedFg = 30;
-    tty_set_winsize(p.s->tty, ws);
-    assert(gSentCount == 1 && gSent[0].pgid == 30);
-    assert(p.s->tty->fg_group == 30);
-    /* Nothing recorded: the session. */
-    gSentCount = 0;
-    p.s->tty->fg_group = 0;
-    gRecordedFg = -1;
-    tty_set_winsize(p.s->tty, ws);
-    assert(gSentCount == 1 && gSent[0].pgid == 10);
-    assert(p.s->tty->fg_group == 0);
-    /* No session: no signal. */
-    gSentCount = 0;
-    p.s->tty->session = 0;
+    ws.row = 2;
     tty_set_winsize(p.s->tty, ws);
     assert(gSentCount == 0);
+    assert(p.s->tty->fg_group == 0);
+    /* No session either: no signal, and the size is kept. */
+    p.s->tty->session = 0;
+    ws.row = 3;
+    tty_set_winsize(p.s->tty, ws);
+    assert(gSentCount == 0);
+    assert(p.s->tty->winsize.row == 3);
     pairClose(&p);
     fakeReset();
 }
@@ -695,12 +1026,16 @@ static void test_sessions(void) {
     assert(s->ops->ioctl(s, TIOCSCTTY_, NULL) == _EPERM);
     assert(s2->ops->ioctl(s2, TIOCSCTTY_, NULL) == 0);
     assert(s2->tty->session == 200 && s2->tty->fg_group == 200);
-    /* Force takes one from another session. */
+    /* Force takes one from another session, which then has none. */
     gSid = 300;
     gPgid = 301;
     assert(s->ops->ioctl(s, TIOCSCTTY_, (void *)1) == 0);
     assert(slave->session == 300 && slave->fg_group == 301);
     assert(pscalTtyIsControlling(slave));
+    gSid = 100;
+    assert(!pscalTtyIsControlling(slave));
+    assert(pscalTtySessionPtyNum(100) == -1);
+    gSid = 300;
 
     /* The foreground group, through both sides. */
     pid_t_ got = 0;
@@ -715,6 +1050,34 @@ static void test_sessions(void) {
     /* A master answers with no checks. */
     assert(m->ops->ioctl(m, TIOCGPGRP_, &got) == 0 && got == 555);
     gSid = 300;
+    /* A group has to be one, and of this session. */
+    want = (dword_t)-5;
+    assert(s->ops->ioctl(s, TIOCSPGRP_, &want) == _EINVAL);
+    want = 0;
+    assert(s->ops->ioctl(s, TIOCSPGRP_, &want) == _ESRCH);
+    want = 777;
+    gGroupCheck = _EPERM;
+    assert(s->ops->ioctl(s, TIOCSPGRP_, &want) == _EPERM);
+    gGroupCheck = _ESRCH;
+    assert(s->ops->ioctl(s, TIOCSPGRP_, &want) == _ESRCH);
+    gGroupCheck = 0;
+    assert(slave->fg_group == 555);
+    assert(s->ops->ioctl(s, TIOCSPGRP_, NULL) == _EFAULT);
+    /* Through a master, if its slave is the caller's. */
+    want = 555;
+    assert(m->ops->ioctl(m, TIOCSPGRP_, &want) == 0);
+    assert(m2->ops->ioctl(m2, TIOCSPGRP_, &want) == _ENOTTY);
+    /* No foreground group is an answer. */
+    slave->fg_group = 0;
+    got = -1;
+    assert(s->ops->ioctl(s, TIOCGPGRP_, &got) == 0 && got == 0);
+    slave->fg_group = 555;
+    /* The session, through either side. */
+    got = -1;
+    assert(s->ops->ioctl(s, TIOCGSID_, &got) == 0 && got == 300);
+    got = -1;
+    assert(m->ops->ioctl(m, TIOCGSID_, &got) == 0 && got == 300);
+    assert(s2->ops->ioctl(s2, TIOCGSID_, &got) == _ENOTTY);
 
     /* Background reads. */
     gPgid = 301;
@@ -726,15 +1089,71 @@ static void test_sessions(void) {
     gSendResult = 0;
     char c;
     assert(s->ops->read(s, &c, 1) == _EINTR);
+    /* Asking for nothing is still asking. */
+    assert(s->ops->read(s, &c, 0) == _EINTR);
+    /* Nothing would come of the signal: no signal, and the read can't go on. */
+    gSentCount = 0;
+    gRefused = true;
+    assert(s->ops->read(s, &c, 1) == _EIO);
+    gRefused = false;
+    gOrphaned = true;
+    assert(s->ops->read(s, &c, 1) == _EIO);
+    gOrphaned = false;
+    assert(gSentCount == 0);
+    /* Stopped, continued in the foreground, and the read goes on. */
+    gAfterSignal = 0;
+    gAfterSignals = 0;
+    gGroupAfterSignal = 555;
+    gSentCount = 0;
+    nb(s, true);
+    assert(s->ops->read(s, &c, 1) == _EAGAIN);
+    nb(s, false);
+    assert(gSentCount == 1 && gAfterSignals == 1);
+    gAfterSignal = _EINTR;
+    gGroupAfterSignal = -1;
+    gAfterSignals = 0;
+    /* What vproc has recorded as the foreground counts as well. */
+    gPgid = 301;
+    gRecordedFg = 301;
+    gSentCount = 0;
+    assert(pscalTtyCheckBackgroundRead(s) == 0);
+    gRecordedFg = -1;
+    /* A session's reader is no process, and is never stopped. */
+    gKernel = true;
+    assert(pscalTtyCheckBackgroundRead(s) == 0);
+    assert(gSentCount == 0);
+    gKernel = false;
     gPgid = 555;
     gSentCount = 0;
     assert(pscalTtyCheckBackgroundRead(s) == 0);
     assert(gSentCount == 0);
     assert(pscalTtyCheckBackgroundRead(NULL) == 0);
-    /* And writes are never stopped. */
+    /* Writes aren't stopped, unless TOSTOP asks for it. */
     gPgid = 1;
     assert(s->ops->write(s, "w", 1) == 1);
     expectRead(m, "w");
+    setL(s, TOSTOP_, 0);
+    assert(s->ops->write(s, "w", 1) == _EINTR);
+    assert(gSentCount == 1 && gSent[0].pgid == 1 && gSent[0].sig == SIGTTOU);
+    assert(s->ops->write(s, "w", 0) == _EINTR);
+    gOrphaned = true;
+    gSentCount = 0;
+    assert(s->ops->write(s, "w", 1) == _EIO);
+    gRefused = true;
+    assert(s->ops->write(s, "w", 1) == 1);
+    expectRead(m, "w");
+    gOrphaned = false;
+    assert(s->ops->write(s, "w", 1) == 1);
+    expectRead(m, "w");
+    gRefused = false;
+    assert(gSentCount == 0);
+    gKernel = true;
+    assert(s->ops->write(s, "w", 1) == 1);
+    expectRead(m, "w");
+    gKernel = false;
+    /* A master's writer has nothing to do with it. */
+    assert(m->ops->write(m, "", 0) == 0);
+    setL(s, 0, TOSTOP_);
     gPgid = 555;
 
     /* Opening what controls this session gives a new open of it. */
@@ -750,6 +1169,32 @@ static void test_sessions(void) {
     pscalTtySetControlling(slave);
     assert(__atomic_load_n(&slave->refs, __ATOMIC_RELAXED) == refs_before);
     gSid = 300;
+    assert(pscalTtyIsControlling(slave));
+
+    /* TIOCNOTTY: not for a master or a stranger. Someone not leading the session lets go
+     * for itself, and a leader for all of it. */
+    assert(m->ops->ioctl(m, TIOCNOTTY_, NULL) == _ENOTTY);
+    assert(s2->ops->ioctl(s2, TIOCNOTTY_, NULL) == _ENOTTY);
+    gLeader = false;
+    assert(s->ops->ioctl(s, TIOCNOTTY_, NULL) == 0);
+    assert(gGaveUp);
+    assert(!pscalTtyIsControlling(slave));
+    assert(s->ops->ioctl(s, TIOCGPGRP_, &got) == _ENOTTY);
+    assert(s->ops->ioctl(s, TIOCNOTTY_, NULL) == _ENOTTY);
+    assert(pscalTtyOpenControlling(O_RDWR, &ctl) == _ENXIO);
+    gGaveUp = false;
+    assert(pscalTtyIsControlling(slave));
+    /* Exclusive, it can't be opened as /dev/tty either. */
+    assert(s->ops->ioctl(s, TIOCEXCL_, NULL) == 0);
+    assert(pscalTtyOpenControlling(O_RDWR, &ctl) == _EBUSY);
+    assert(s->ops->ioctl(s, TIOCNXCL_, NULL) == 0);
+    gLeader = true;
+    assert(s->ops->ioctl(s, TIOCNOTTY_, NULL) == 0);
+    assert(!gGaveUp);
+    assert(!pscalTtyIsControlling(slave));
+    assert(slave->session == 0);
+    assert(__atomic_load_n(&slave->refs, __ATOMIC_RELAXED) == refs_before - 1);
+    assert(s->ops->ioctl(s, TIOCSCTTY_, NULL) == 0);
     assert(pscalTtyIsControlling(slave));
 
     /* Clear, and drop. */
@@ -770,10 +1215,26 @@ static void test_sessions(void) {
     pscal_fd_close(m2);
     pscal_fd_close(s);
     pscal_fd_close(m);
-    /* The stale entry from the forced take goes with its session. */
-    pscalTtyDropSession(100);
     pscalTtyDropSession(300);
     assert(!pscalPtyExists(num));
+
+    /* A master never controls anything, by an open with or without O_NOCTTY. */
+    gSid = 500;
+    gPgid = 500;
+    gLeader = true;
+    assert(pscalPtyOpenMaster(O_RDWR, &m, &num) == 0);
+    assert(m->tty->session == 0);
+    assert(pscalTtySessionPtyNum(500) == -1);
+    assert(pscalPtyUnlock(m) == 0);
+    /* Asked of a master, it's the slave that's claimed. */
+    assert(pscalPtyOpenSlave(num, O_RDWR | O_NOCTTY, &s) == 0);
+    assert(s->tty->session == 0);
+    assert(m->ops->ioctl(m, TIOCSCTTY_, NULL) == 0);
+    assert(s->tty->session == 500 && m->tty->session == 0);
+    assert(pscalTtyIsControlling(s->tty));
+    pscalTtyDropSession(500);
+    pscal_fd_close(s);
+    pscal_fd_close(m);
     fakeReset();
 }
 
@@ -800,9 +1261,9 @@ static void test_numbers(void) {
     assert(pscalPtyExists(num));
     assert(pscalPtyOpenSlave(num, O_RDWR, &s) == _EIO && !s);
     assert(pscalPtyOpenSlave(num, O_RDWR, NULL) == _EINVAL);
-    assert(pscalPtyOpenSlave(-1, O_RDWR, &s) == _ENXIO);
-    assert(pscalPtyOpenSlave(4096, O_RDWR, &s) == _ENXIO);
-    assert(pscalPtyOpenSlave(num + 1, O_RDWR, &s) == _ENXIO);
+    assert(pscalPtyOpenSlave(-1, O_RDWR, &s) == _ENOENT);
+    assert(pscalPtyOpenSlave(4096, O_RDWR, &s) == _ENOENT);
+    assert(pscalPtyOpenSlave(num + 1, O_RDWR, &s) == _ENOENT);
     assert(pscalPtyUnlock(NULL) == _EINVAL);
     dword_t lock_it = 1;
     assert(pscalPtyUnlock(m) == 0);
@@ -907,7 +1368,7 @@ static void test_hangup(void) {
     /* The number stays taken while the slave is held. */
     assert(pscalPtyExists(num));
     struct pscal_fd *late = NULL;
-    assert(pscalPtyOpenSlave(num, O_RDWR, &late) == _EIO && !late);
+    assert(pscalPtyOpenSlave(num, O_RDWR, &late) == _ENOENT && !late);
     pscal_fd_close(s);
     assert(!pscalPtyExists(num));
 
@@ -1190,6 +1651,10 @@ int main(void) {
     RUN(test_fd);
     RUN(test_defaults);
     RUN(test_line_editing_and_echo);
+    RUN(test_extended_keys);
+    RUN(test_echo_flags);
+    RUN(test_translations);
+    RUN(test_output_flags);
     RUN(test_end_of_file);
     RUN(test_long_line);
     RUN(test_session_reader_keys);

@@ -19,6 +19,7 @@
 #define PATH_VIRTUALIZATION_NO_MACROS 1
 #include "common/path_virtualization.h"
 #include "ios/tty/pscal_pty.h"
+#include "ios/tty/pscal_tty_host.h"
 
 #if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
 void pscalRuntimeDebugLog(const char *message) {
@@ -76,7 +77,8 @@ static void terminal_set_line(terminal *t) {
     terminal_set_lflags(t, ICANON_ | ECHO_, ISIG_);
 }
 
-static void terminal_open(terminal *t) {
+/* shell_pid, if there is one, is who the session's reader takes itself for. */
+static void terminal_open_for_shell(terminal *t, int shell_pid) {
     static uint64_t next_id = 4100;
     memset(t, 0, sizeof(*t));
     assert(pscalPtyOpenMaster(O_RDWR, &t->master, &t->pty_num) == 0);
@@ -95,10 +97,15 @@ static void terminal_open(terminal *t) {
     vprocActivate(t->vp);
     /* The reader starts as it does in the app, for the prompt, in raw mode. */
     terminal_set_raw(t);
+    t->session->shell_pid = shell_pid;
     assert(vprocSessionInputEnsureShim());
     vprocSetPipelineStage(true);
     /* Let the reader get to its read of the terminal. */
     usleep(20000);
+}
+
+static void terminal_open(terminal *t) {
+    terminal_open_for_shell(t, 0);
 }
 
 static void type_keys(terminal *t, const void *keys, size_t len) {
@@ -805,6 +812,87 @@ static void case_dev_tty_follows_each_tab(void) {
     assert(echo_has(&first, "after-close", KEY_WAIT_MS));
 }
 
+/* --- job control and the session's reader --- */
+
+/* A session whose shell is one process and whose current process, t.vp, is another, in a
+ * group of its own, with the terminal in the group named. */
+static void terminal_open_as_job(terminal *t, bool job_in_foreground) {
+    VProc *shell = vprocCreate(NULL);
+    assert(shell);
+    int shell_pid = vprocPid(shell);
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    terminal_open_for_shell(t, shell_pid);
+    int pid = vprocPid(t->vp);
+    assert(vprocSetSid(pid, shell_pid) == 0);
+    assert(vprocSetPgid(pid, pid) == 0);
+    vprocSetParent(pid, shell_pid);
+    int foreground = job_in_foreground ? pid : shell_pid;
+    assert(vprocSetForegroundPgid(shell_pid, foreground) == 0);
+    struct tty *tty = t->slave->tty;
+    pscalTtyClearControlling(tty);
+    lock(&tty->lock);
+    tty->session = shell_pid;
+    tty->fg_group = foreground;
+    unlock(&tty->lock);
+    pscalTtySetControlling(tty);
+}
+
+/* The reader has no process of its own, and goes by the shell's name. With a job in the
+ * foreground that makes it look like a background reader of the terminal: it must not
+ * stop anything, or be refused, for that. Refused is what it would be with the shell's
+ * SIGTTIN ignored, as a shell's is; with that not so, the shell would be stopped. */
+static void reader_keeps_reading(bool ignored) {
+    terminal t;
+    terminal_open_as_job(&t, true);
+    int shell_pid = t.session->shell_pid;
+    if (ignored) {
+        assert(vprocSigaction(shell_pid, SIGTTIN, &(struct sigaction){.sa_handler = SIG_IGN}, NULL) == 0);
+    }
+    for (int i = 0; i < 20; i++) {
+        char key = (char)('a' + i);
+        char got = 0;
+        type_keys(&t, &key, 1);
+        assert(read_terminal(&got, 1, KEY_WAIT_MS) == 1);
+        assert(got == key);
+    }
+    size_t capacity = vprocSnapshot(NULL, 0);
+    VProcSnapshot *snapshots = calloc(capacity ? capacity : 1, sizeof(VProcSnapshot));
+    size_t count = vprocSnapshot(snapshots, capacity);
+    for (size_t i = 0; i < count; i++) {
+        assert(!snapshots[i].stopped);
+    }
+    free(snapshots);
+}
+
+static void case_reader_is_not_a_background_process(void) {
+    reader_keeps_reading(false);
+}
+
+static void case_reader_is_not_refused_as_one(void) {
+    reader_keeps_reading(true);
+}
+
+/* A real background read of the session's terminal, through its queue. Blocked or ignored,
+ * SIGTTIN can't stop it, and the read is told so rather than handed the foreground's keys. */
+static void case_background_read_of_the_session_terminal(void) {
+    terminal t;
+    terminal_open_as_job(&t, false);
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGTTIN);
+    assert(vprocPthreadSigmaskShim(SIG_BLOCK, &set, NULL) == 0);
+    char c;
+    errno = 0;
+    assert(vprocReadShim(STDIN_FILENO, &c, 1) == -1);
+    assert(errno == EIO);
+    assert(vprocPthreadSigmaskShim(SIG_UNBLOCK, &set, NULL) == 0);
+    assert(vprocSigactionShim(SIGTTIN, &(struct sigaction){.sa_handler = SIG_IGN}, NULL) == 0);
+    errno = 0;
+    assert(vprocReadShim(STDIN_FILENO, &c, 1) == -1);
+    assert(errno == EIO);
+}
+
 typedef struct {
     const char *name;
     void (*run)(void);
@@ -840,6 +928,9 @@ int main(void) {
         CASE(case_dev_tty_follows_each_tab),
         CASE(case_dev_tty_reads_typed_lines),
         CASE(case_prompt_read_wakes_for_a_signal_that_ends_the_shell),
+        CASE(case_reader_is_not_a_background_process),
+        CASE(case_reader_is_not_refused_as_one),
+        CASE(case_background_read_of_the_session_terminal),
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
