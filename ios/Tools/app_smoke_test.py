@@ -517,6 +517,14 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("type_path_not_a_file", f"type -p echo {R}; echo \"rc $?\" {A}", "rc 0\n"),
     ("escaped_pid", f"echo \"\\$\\$\" \\$\\$ {R}", "$$ $$\n"),
     ("negated_errexit", f"( set -e; ! true; ! true | cat; ! {{ true; }}; echo survived ) {R}", "survived\n"),
+    # return from a loop in a function left the loop's frame on the stack, and the caller's
+    # loop advanced that one instead of its own. c bounds them, so a wrong build fails and does
+    # not hang.
+    ("return_in_loop", f"rl() {{ while :; do return 4; done; }}; c=0; for x in 1 2; do c=$((c+1)); [ $c -gt 9 ] && break; rl; echo \"x $x $?\"; done {R}; unset -f rl", "x 1 4\nx 2 4\n"),
+    ("return_in_loop_while", f"rl() {{ for y in 1 2 3; do return; done; }}; n=0; while [ $n -lt 2 ]; do n=$((n+1)); [ $n -gt 9 ] && break; rl; echo \"n $n\"; done {R}; unset -f rl", "n 1\nn 2\n"),
+    ("return_in_loop_stage", f"rl() {{ while :; do return; done; }}; c=0; for x in 1 2; do c=$((c+1)); [ $c -gt 9 ] && break; rl; echo \"x $x\"; done | cat {R}; unset -f rl", "x 1\nx 2\n"),
+    ("return_in_loop_background", f"rl() {{ while :; do return; done; }}; c=0; {{ for x in 1 2; do c=$((c+1)); [ $c -gt 9 ] && break; rl; echo \"x $x\"; done; }} {R} & wait $!; unset -f rl", "x 1\nx 2\n"),
+    ("return_in_loop_redirect", f"rl() {{ while :; do echo in; return; done > smoke/rl.out; }}; {{ rl; echo back; }} {R}; unset -f rl", "back\n"),
     # A finished frontend flushed every stream in the app, other stages' included. It
     # waited for a reader that was waiting for its end of the pipe, or for a writer on a
     # full pipe, and wrote another stage's buffered output to its own stdout.
