@@ -2016,7 +2016,7 @@ if(PSCAL_PLATFORM_IOS)
         components/pscal-core/src/common/frontend_symbol_wrappers.c
         components/pscal-core/src/runtime/vproc/vproc.c
         components/pscal-core/src/runtime/vproc/vproc_tree.c
-        components/pscal-core/src/runtime/vproc/tty/ish_compat.c
+        components/pscal-core/src/runtime/vproc/tty/pscal_compat.c
         components/pscal-core/src/runtime/vproc/tty/pscal_fd.c
         components/pscal-core/src/runtime/vproc/tty/pscal_tty.c
         components/pscal-core/src/runtime/vproc/tty/pscal_pty.c

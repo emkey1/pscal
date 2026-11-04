@@ -23,7 +23,7 @@ VPROC_SOURCES=(
   "${CORE}/src/common/path_truncate.c"
   "${CORE}/src/common/runtime_tty.c"
   "${ROOT}/src/ios/runtime_session_stub.c"
-  "${CORE}/src/runtime/vproc/tty/ish_compat.c"
+  "${CORE}/src/runtime/vproc/tty/pscal_compat.c"
   "${CORE}/src/runtime/vproc/tty/pscal_fd.c"
   "${CORE}/src/runtime/vproc/tty/pscal_tty.c"
   "${CORE}/src/runtime/vproc/tty/pscal_pty.c"

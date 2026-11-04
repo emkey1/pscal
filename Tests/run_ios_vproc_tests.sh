@@ -36,7 +36,7 @@ VPROC_SOURCES=(
   "${CORE}/src/common/path_truncate.c"
   "${CORE}/src/common/runtime_tty.c"
   "${ROOT}/src/ios/runtime_session_stub.c"
-  "${CORE}/src/runtime/vproc/tty/ish_compat.c"
+  "${CORE}/src/runtime/vproc/tty/pscal_compat.c"
   "${CORE}/src/runtime/vproc/tty/pscal_fd.c"
   "${CORE}/src/runtime/vproc/tty/pscal_tty.c"
   "${CORE}/src/runtime/vproc/tty/pscal_pty.c"
@@ -143,7 +143,20 @@ if grep -rnE '"kill(pg)?"|SYS_kill' "${CORE}/src/runtime/vproc"; then
   exit 1
 fi
 
+# The terminal layer on its own, with fake process hooks and no vproc.
+OUT_TTY_CONTRACT="${BUILD_DIR}/tty_contract_test"
+cc -pthread \
+   "${INCLUDE_DIRS[@]}" \
+   "${ROOT}/Tests/ios_vproc/test_tty_contract.c" \
+   "${CORE}/src/runtime/vproc/tty/pscal_compat.c" \
+   "${CORE}/src/runtime/vproc/tty/pscal_fd.c" \
+   "${CORE}/src/runtime/vproc/tty/pscal_tty.c" \
+   "${CORE}/src/runtime/vproc/tty/pscal_pty.c" \
+   "${CORE}/src/runtime/vproc/tty/pscal_tty_host.c" \
+   -o "${OUT_TTY_CONTRACT}"
+
 echo "Running ios_vproc tests..."
+"${OUT_TTY_CONTRACT}"
 "${OUT}"
 "${OUT_PGID}"
 "${OUT_TERMINAL}"
