@@ -9,6 +9,7 @@ OUT_TERMINAL="${BUILD_DIR}/ios_vproc_session_terminal_test"
 OUT_SHIMS="${BUILD_DIR}/ios_vproc_signal_shim_test"
 OUT_JOBCTRL="${BUILD_DIR}/ios_vproc_jobcontrol_shim_test"
 OUT_RESIZE="${BUILD_DIR}/ios_vproc_resize_harness_test"
+OUT_HOST_GUARDS="${BUILD_DIR}/ios_vproc_host_guards_test"
 OUT_NEXTVI_PASTE="${BUILD_DIR}/ios_nextvi_bracketed_paste_test"
 NEXTVI_OBJ="${BUILD_DIR}/nextvi_ios_regression_vi.o"
 # The vproc/tty platform layer lives in pscal-core since the components split;
@@ -80,6 +81,13 @@ cc -DVPROC_ENABLE_STUBS_FOR_TESTS=1 -DPSCAL_TARGET_IOS=1 \
    "${VPROC_SOURCES[@]}" \
    -o "${OUT_RESIZE}"
 
+cc -DVPROC_ENABLE_STUBS_FOR_TESTS=1 -DPSCAL_TARGET_IOS=1 \
+   -pthread \
+   "${INCLUDE_DIRS[@]}" \
+   "${ROOT}/Tests/ios_vproc/test_host_guards.c" \
+   "${VPROC_SOURCES[@]}" \
+   -o "${OUT_HOST_GUARDS}"
+
 cc -DPSCAL_TARGET_IOS=1 \
    -DNEXTVI_REGRESSION_TEST_HOOKS=1 \
    -Dmain=nextvi_main_entry \
@@ -102,4 +110,5 @@ echo "Running ios_vproc tests..."
 "${OUT_SHIMS}"
 "${OUT_JOBCTRL}"
 "${OUT_RESIZE}"
+"${OUT_HOST_GUARDS}"
 "${OUT_NEXTVI_PASTE}"
