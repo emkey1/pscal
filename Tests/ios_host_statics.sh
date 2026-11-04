@@ -39,7 +39,7 @@ found=$(
     list_writable "$BUILD_DIR/libpscal_clike_static.a" ""
     list_writable "$BUILD_DIR/libpscal_rea_static.a" ""
     list_writable "$BUILD_DIR/libpscal_aether_static.a" ""
-    list_writable "$BUILD_DIR/libpscal_core_static.a" " compiler.c.o globals.c.o frontend_kind.c.o diagmap.c.o "
+    list_writable "$BUILD_DIR/libpscal_core_static.a" " compiler.c.o globals.c.o frontend_kind.c.o diagmap.c.o scp.c.o sftp.c.o sftp-glob.c.o sftp-usergroup.c.o mac.c.o "
 )
 
 status=0

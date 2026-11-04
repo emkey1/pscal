@@ -36,6 +36,7 @@
 # undef HAVE_SYS_PTRACE_H
 # undef HAVE_READPASSPHRASE
 # undef HAVE_READPASSPHRASE_H
+# undef HAVE_GETOPT_OPTRESET
 # include "pscal_runtime_hooks.h"
 # define exit cleanup_exit
 # define _exit cleanup_exit

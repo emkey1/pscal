@@ -663,6 +663,14 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("scp_wait_status", f"scp -O -v -P 1 -o BatchMode=yes 127.0.0.1:x smoke/sc2 > smoke/sc2.log 2>&1; grep -c 'ended with wait status 0xff00' smoke/sc2.log {R}", "1\n"),
     # Each source connects again, after collecting the last one's ssh.
     ("scp_two_sources", f"scp -O -P 1 -o BatchMode=yes 127.0.0.1:a 127.0.0.1:b smoke/ > smoke/sc3.log 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
+    # Two clients at once keep their own arguments. libc's getopt state and scp's and sftp's variables were the whole app's,
+    # so one could take the other's host or lose its port. These depend on timing, so a wrong build fails them often, not
+    # always. The hosts can't resolve, so a wrong build can't reach a real sshd: losing -P once meant port 22.
+    ("ssh_two_at_once", f"i=0; bad=0; while [ $i -lt 10 ]; do i=$((i+1)); ssh -G a.invalid > smoke/ga 2>&1 & ssh -G b.invalid > smoke/gb 2>&1 & wait; grep -q '^hostname a.invalid' smoke/ga || bad=$((bad+1)); grep -q '^hostname b.invalid' smoke/gb || bad=$((bad+1)); done; echo \"bad=$bad\" {R}", "bad=0\n"),
+    ("scp_two_at_once", f"i=0; bad=0; while [ $i -lt 10 ]; do i=$((i+1)); scp -O -o BatchMode=yes smoke/d.txt a.invalid:x > smoke/p1 2>&1 & scp -O -o BatchMode=yes smoke/d.txt b.invalid:x > smoke/p2 2>&1 & wait; grep -q 'hostname a.invalid' smoke/p1 || bad=$((bad+1)); grep -q 'hostname b.invalid' smoke/p2 || bad=$((bad+1)); done; echo \"bad=$bad\" {R}", "bad=0\n"),
+    ("sftp_two_at_once", f"i=0; bad=0; while [ $i -lt 10 ]; do i=$((i+1)); sftp -o BatchMode=yes a.invalid < /dev/null > smoke/p1 2>&1 & sftp -o BatchMode=yes b.invalid < /dev/null > smoke/p2 2>&1 & wait; grep -q 'hostname a.invalid' smoke/p1 || bad=$((bad+1)); grep -q 'hostname b.invalid' smoke/p2 || bad=$((bad+1)); done; echo \"bad=$bad\" {R}", "bad=0\n"),
+    # scp -3 -O starts its two ssh clients with nothing between them.
+    ("scp_3_old_parses", f"i=0; while [ $i -lt 5 ]; do i=$((i+1)); scp -3 -O -o BatchMode=yes a.invalid:x b.invalid:y >> smoke/p3 2>&1; done; grep -c 'invalid characters' smoke/p3 {R}", "0\n"),
     # The child can't start a shell here, and its kill(getpid(), SIGTERM) was the host's: it ended the whole app.
     ("ssh_match_exec", f"printf 'Match exec \"true\"\\n  Port 23\\n' > smoke/mx.cfg; ssh -G -F smoke/mx.cfg 127.0.0.1 > smoke/mx.log 2>&1; echo alive {R}", "alive\n"),
     # A signal stops an ssh that waits on a server, which here never says a word. Each has 20 s

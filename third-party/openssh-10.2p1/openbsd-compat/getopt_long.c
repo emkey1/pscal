@@ -86,11 +86,25 @@ struct option {
 	int val;
 };
 
+#ifdef PSCAL_TARGET_IOS
+static PSCAL_SSH_THREAD_LOCAL int thread_opterr = 1;
+static PSCAL_SSH_THREAD_LOCAL int thread_optind = 1;
+static PSCAL_SSH_THREAD_LOCAL int thread_optopt = '?';
+static PSCAL_SSH_THREAD_LOCAL int thread_optreset;
+static PSCAL_SSH_THREAD_LOCAL char *thread_optarg;
+
+int *pscal_getopt_opterr(void) { return &thread_opterr; }
+int *pscal_getopt_optind(void) { return &thread_optind; }
+int *pscal_getopt_optopt(void) { return &thread_optopt; }
+int *pscal_getopt_optreset(void) { return &thread_optreset; }
+char **pscal_getopt_optarg(void) { return &thread_optarg; }
+#else
 int	opterr = 1;		/* if error message should be printed */
 int	optind = 1;		/* index into parent argv vector */
 int	optopt = '?';		/* character checked for validity */
 int	optreset;		/* reset getopt */
 char    *optarg;		/* argument associated with option */
+#endif
 
 #define PRINT_ERROR	((opterr) && (*options != ':'))
 
@@ -112,11 +126,11 @@ static int parse_long_options(char * const *, const char *,
 static int gcd(int, int);
 static void permute_args(int, int, int, char * const *);
 
-static char *place = EMSG; /* option letter processing */
+static PSCAL_SSH_THREAD_LOCAL char *place = EMSG; /* option letter processing */
 
 /* XXX: set optreset to 1 rather than these two */
-static int nonopt_start = -1; /* first non option argument (for permute) */
-static int nonopt_end = -1;   /* first option after non options (for permute) */
+static PSCAL_SSH_THREAD_LOCAL int nonopt_start = -1; /* first non option argument (for permute) */
+static PSCAL_SSH_THREAD_LOCAL int nonopt_end = -1;   /* first option after non options (for permute) */
 
 /* Error messages */
 static const char recargchar[] = "option requires an argument -- %c";

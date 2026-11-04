@@ -709,11 +709,29 @@ struct winsize {
 # undef optreset
 # undef optarg
 # define getopt(ac, av, o)  BSDgetopt(ac, av, o)
-# define opterr             BSDopterr
-# define optind             BSDoptind
-# define optopt             BSDoptopt
-# define optreset           BSDoptreset
-# define optarg             BSDoptarg
+# ifdef PSCAL_TARGET_IOS
+/*
+ * libc's state is the whole app's, and two commands can be parsing at once, so
+ * this is per thread. These are calls so that a source's own "extern int optind;"
+ * still compiles: it declares the function.
+ */
+int *pscal_getopt_opterr(void);
+int *pscal_getopt_optind(void);
+int *pscal_getopt_optopt(void);
+int *pscal_getopt_optreset(void);
+char **pscal_getopt_optarg(void);
+#  define opterr            (*pscal_getopt_opterr())
+#  define optind            (*pscal_getopt_optind())
+#  define optopt            (*pscal_getopt_optopt())
+#  define optreset          (*pscal_getopt_optreset())
+#  define optarg            (*pscal_getopt_optarg())
+# else
+#  define opterr            BSDopterr
+#  define optind            BSDoptind
+#  define optopt            BSDoptopt
+#  define optreset          BSDoptreset
+#  define optarg            BSDoptarg
+# endif
 #endif
 
 #if defined(BROKEN_GETADDRINFO) && defined(HAVE_GETADDRINFO)

@@ -49,8 +49,8 @@ idname_cmp(struct idname *a, struct idname *b)
 RB_HEAD(idname_tree, idname);
 RB_GENERATE_STATIC(idname_tree, idname, entry, idname_cmp)
 
-static struct idname_tree user_idname = RB_INITIALIZER(&user_idname);
-static struct idname_tree group_idname = RB_INITIALIZER(&group_idname);
+static PSCAL_SSH_THREAD_LOCAL struct idname_tree user_idname = RB_INITIALIZER(&user_idname);
+static PSCAL_SSH_THREAD_LOCAL struct idname_tree group_idname = RB_INITIALIZER(&group_idname);
 
 static void
 idname_free(struct idname *idname)

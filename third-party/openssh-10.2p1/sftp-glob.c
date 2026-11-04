@@ -38,7 +38,7 @@ struct SFTP_OPENDIR {
 	int offset;
 };
 
-static struct {
+static PSCAL_SSH_THREAD_LOCAL struct {
 	struct sftp_conn *conn;
 } cur;
 
@@ -63,7 +63,7 @@ static struct dirent *
 fudge_readdir(struct SFTP_OPENDIR *od)
 {
 	/* Solaris needs sizeof(dirent) + path length (see below) */
-	static char buf[sizeof(struct dirent) + MAXPATHLEN];
+	static PSCAL_SSH_THREAD_LOCAL char buf[sizeof(struct dirent) + MAXPATHLEN];
 	struct dirent *ret = (struct dirent *)buf;
 #ifdef __GNU_LIBRARY__
 	static int inum = 1;

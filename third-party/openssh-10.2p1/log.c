@@ -59,15 +59,15 @@
 #include "pscal_runtime_hooks.h"
 #endif
 
-static LogLevel log_level = SYSLOG_LEVEL_INFO;
-static int log_on_stderr = 1;
-static int log_stderr_fd = STDERR_FILENO;
-static int log_facility = LOG_AUTH;
-static const char *argv0;
-static log_handler_fn *log_handler;
-static void *log_handler_ctx;
-static char **log_verbose;
-static size_t nlog_verbose;
+static PSCAL_SSH_THREAD_LOCAL LogLevel log_level = SYSLOG_LEVEL_INFO;
+static PSCAL_SSH_THREAD_LOCAL int log_on_stderr = 1;
+static PSCAL_SSH_THREAD_LOCAL int log_stderr_fd = STDERR_FILENO;
+static PSCAL_SSH_THREAD_LOCAL int log_facility = LOG_AUTH;
+static PSCAL_SSH_THREAD_LOCAL const char *argv0;
+static PSCAL_SSH_THREAD_LOCAL log_handler_fn *log_handler;
+static PSCAL_SSH_THREAD_LOCAL void *log_handler_ctx;
+static PSCAL_SSH_THREAD_LOCAL char **log_verbose;
+static PSCAL_SSH_THREAD_LOCAL size_t nlog_verbose;
 
 extern char *__progname;
 

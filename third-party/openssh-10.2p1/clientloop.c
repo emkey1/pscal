@@ -644,11 +644,11 @@ static int
 obfuscate_keystroke_timing(struct ssh *ssh, struct timespec *timeout,
     int channel_did_enqueue)
 {
-	static int active;
-	static struct timespec next_interval, chaff_until;
+	static PSCAL_SSH_THREAD_LOCAL int active;
+	static PSCAL_SSH_THREAD_LOCAL struct timespec next_interval, chaff_until;
 	struct timespec now, tmp;
 	int just_started = 0, had_keystroke = 0;
-	static unsigned long long nchaff;
+	static PSCAL_SSH_THREAD_LOCAL unsigned long long nchaff;
 	char *stop_reason = NULL;
 	long long n;
 

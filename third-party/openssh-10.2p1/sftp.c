@@ -71,38 +71,36 @@ typedef void EditLine;
 #include "sftp-usergroup.h"
 
 /* File to read commands from */
-FILE* infile;
+PSCAL_SSH_THREAD_LOCAL FILE* infile;
 
 /* Are we in batchfile mode? */
-int batchmode = 0;
+PSCAL_SSH_THREAD_LOCAL int batchmode = 0;
 
 /* PID of ssh transport process */
-static volatile pid_t sshpid = -1;
+PSCAL_SSH_THREAD_LOCAL static volatile pid_t sshpid = -1;
 
 /* Suppress diagnostic messages */
-int quiet = 0;
+PSCAL_SSH_THREAD_LOCAL int quiet = 0;
 
 /* This is set to 0 if the progressmeter is not desired. */
+extern PSCAL_SSH_THREAD_LOCAL int showprogress;
 #if defined(PSCAL_TARGET_IOS)
-extern int showprogress;
 extern char **environ;
 #undef environ
 #define environ (*_NSGetEnviron())
-#else
-extern int showprogress;
 #endif
 
 /* When this option is set, we always recursively download/upload directories */
-int global_rflag = 0;
+PSCAL_SSH_THREAD_LOCAL int global_rflag = 0;
 
 /* When this option is set, we resume download or upload if possible */
-int global_aflag = 0;
+PSCAL_SSH_THREAD_LOCAL int global_aflag = 0;
 
 /* When this option is set, the file transfers will always preserve times */
-int global_pflag = 0;
+PSCAL_SSH_THREAD_LOCAL int global_pflag = 0;
 
 /* When this option is set, transfers will have fsync() called on each file */
-int global_fflag = 0;
+PSCAL_SSH_THREAD_LOCAL int global_fflag = 0;
 
 /* SIGINT received during command processing */
 #if defined(PSCAL_TARGET_IOS)
@@ -112,8 +110,8 @@ extern volatile sig_atomic_t interrupted;
 #endif
 
 /* I wish qsort() took a separate ctx for the comparison function...*/
-int sort_flag;
-glob_t *sort_glob;
+PSCAL_SSH_THREAD_LOCAL int sort_flag;
+PSCAL_SSH_THREAD_LOCAL glob_t *sort_glob;
 
 /* Context used for commandline completion */
 struct complete_ctx {
@@ -1326,8 +1324,8 @@ makeargv(const char *arg, int *argcp, int sloppy, char *lastquote,
 {
 	int argc, quot;
 	size_t i, j;
-	static char argvs[MAXARGLEN];
-	static char *argv[MAXARGS + 1];
+	static PSCAL_SSH_THREAD_LOCAL char argvs[MAXARGLEN];
+	static PSCAL_SSH_THREAD_LOCAL char *argv[MAXARGS + 1];
 	enum { MA_START, MA_SQUOTE, MA_DQUOTE, MA_UNQUOTED } state, q;
 
 	*argcp = argc = 0;

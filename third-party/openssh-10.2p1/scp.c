@@ -192,47 +192,48 @@ extern char **environ;
 #define environ (*_NSGetEnviron())
 #endif
 
+/*
+ * Two commands can run at once in the app, and each has a thread of its own.
+ * What upstream keeps for the process is per thread here.
+ */
+
 /* Struct for addargs */
-arglist args;
-arglist remote_remote_args;
+PSCAL_SSH_THREAD_LOCAL arglist args;
+PSCAL_SSH_THREAD_LOCAL arglist remote_remote_args;
 
 /* Bandwidth limit */
-long long limit_kbps = 0;
-struct bwlimit bwlimit;
+PSCAL_SSH_THREAD_LOCAL long long limit_kbps = 0;
+PSCAL_SSH_THREAD_LOCAL struct bwlimit bwlimit;
 
 /* Name of current file being transferred. */
-char *curfile;
+PSCAL_SSH_THREAD_LOCAL char *curfile;
 
 /* This is set to non-zero to enable verbose mode. */
-int verbose_mode = 0;
-LogLevel log_level = SYSLOG_LEVEL_INFO;
+PSCAL_SSH_THREAD_LOCAL int verbose_mode = 0;
+PSCAL_SSH_THREAD_LOCAL LogLevel log_level = SYSLOG_LEVEL_INFO;
 
 /* This is set to zero if the progressmeter is not desired. */
-#if defined(PSCAL_TARGET_IOS)
-extern int showprogress;
-#else
-extern int showprogress;
-#endif
+extern PSCAL_SSH_THREAD_LOCAL int showprogress;
 
 /*
  * This is set to non-zero if remote-remote copy should be piped
  * through this process.
  */
-int throughlocal = 1;
+PSCAL_SSH_THREAD_LOCAL int throughlocal = 1;
 
 /* Non-standard port to use for the ssh connection or -1. */
-int sshport = -1;
+PSCAL_SSH_THREAD_LOCAL int sshport = -1;
 
 /* This is the program to execute for the secure connection. ("ssh" or -S) */
-char *ssh_program = _PATH_SSH_PROGRAM;
+PSCAL_SSH_THREAD_LOCAL char *ssh_program = _PATH_SSH_PROGRAM;
 
 /* This is used to store the pid of ssh_program */
-pid_t do_cmd_pid = -1;
-pid_t do_cmd_pid2 = -1;
+PSCAL_SSH_THREAD_LOCAL pid_t do_cmd_pid = -1;
+PSCAL_SSH_THREAD_LOCAL pid_t do_cmd_pid2 = -1;
 
 /* SFTP copy parameters */
-size_t sftp_copy_buflen;
-size_t sftp_nrequests;
+PSCAL_SSH_THREAD_LOCAL size_t sftp_copy_buflen;
+PSCAL_SSH_THREAD_LOCAL size_t sftp_nrequests;
 
 /* Needed for sftp */
 #if defined(PSCAL_TARGET_IOS)
@@ -734,6 +735,8 @@ typedef struct {
 	char *buf;
 } BUF;
 
+static PSCAL_SSH_THREAD_LOCAL BUF source_buffer, sink_buffer;
+
 BUF *allocbuf(BUF *, int, int);
 void lostconn(int);
 int okname(char *);
@@ -744,13 +747,13 @@ int note_err(const char *,...)
     __attribute__((__format__ (printf, 1, 2)));
 void verifydir(char *);
 
-struct passwd *pwd;
-uid_t userid;
-int errs, remin, remout, remin2, remout2;
-int Tflag, pflag, iamremote, iamrecursive, targetshouldbedirectory;
+PSCAL_SSH_THREAD_LOCAL struct passwd *pwd;
+PSCAL_SSH_THREAD_LOCAL uid_t userid;
+PSCAL_SSH_THREAD_LOCAL int errs, remin, remout, remin2, remout2;
+PSCAL_SSH_THREAD_LOCAL int Tflag, pflag, iamremote, iamrecursive, targetshouldbedirectory;
 
 #define	CMDNEEDS	64
-char cmd[CMDNEEDS];		/* must hold "rcp -r -p -d\0" */
+PSCAL_SSH_THREAD_LOCAL char cmd[CMDNEEDS];		/* must hold "rcp -r -p -d\0" */
 
 enum scp_mode_e {
 	MODE_SCP,
@@ -806,6 +809,20 @@ scp_reset(void)
 	memset(cmd, 0, sizeof(cmd));
 }
 
+#ifdef PSCAL_TARGET_IOS
+/* The thread ends with the command, so the next run can't free these. */
+static void
+pscal_scp_release(void)
+{
+	freeargs(&args);
+	freeargs(&remote_remote_args);
+	free(source_buffer.buf);
+	free(sink_buffer.buf);
+	memset(&source_buffer, 0, sizeof(source_buffer));
+	memset(&sink_buffer, 0, sizeof(sink_buffer));
+}
+#endif
+
 int
 main(int argc, char **argv)
 {
@@ -814,6 +831,7 @@ main(int argc, char **argv)
 	if (setjmp(ctx.env) != 0) {
 		int exit_code = ctx.exit_code;
 		pscal_openssh_pop_exit_context(&ctx);
+		pscal_scp_release();
 		return exit_code;
 	}
 	pscal_openssh_push_exit_context(&ctx);
@@ -1802,7 +1820,6 @@ void
 source(int argc, char **argv)
 {
 	struct stat stb;
-	static BUF buffer;
 	BUF *bp;
 	off_t i, statbytes;
 	size_t amt, nr;
@@ -1862,7 +1879,7 @@ syserr:			run_err("%s: %s", name, strerror(errno));
 		(void) atomicio(vwrite, remout, buf, strlen(buf));
 		if (response() < 0)
 			goto next;
-		if ((bp = allocbuf(&buffer, fd, COPY_BUFLEN)) == NULL) {
+		if ((bp = allocbuf(&source_buffer, fd, COPY_BUFLEN)) == NULL) {
 next:			if (fd != -1) {
 				(void) close(fd);
 				fd = -1;
@@ -2077,7 +2094,6 @@ out:
 void
 sink(int argc, char **argv, const char *src)
 {
-	static BUF buffer;
 	struct stat stb;
 	BUF *bp;
 	off_t i;
@@ -2244,8 +2260,8 @@ sink(int argc, char **argv, const char *src)
 			}
 		}
 		if (targisdir) {
-			static char *namebuf;
-			static size_t cursize;
+			static PSCAL_SSH_THREAD_LOCAL char *namebuf;
+			static PSCAL_SSH_THREAD_LOCAL size_t cursize;
 			size_t need;
 
 			need = strlen(targ) + strlen(cp) + 250;
@@ -2296,7 +2312,7 @@ bad:			run_err("%s: %s", np, strerror(errno));
 			continue;
 		}
 		(void) atomicio(vwrite, remout, "", 1);
-		if ((bp = allocbuf(&buffer, ofd, COPY_BUFLEN)) == NULL) {
+		if ((bp = allocbuf(&sink_buffer, ofd, COPY_BUFLEN)) == NULL) {
 			(void) close(ofd);
 			continue;
 		}
@@ -2542,7 +2558,7 @@ usage(void)
 void
 run_err(const char *fmt,...)
 {
-	static FILE *fp;
+	static PSCAL_SSH_THREAD_LOCAL FILE *fp;
 	va_list ap;
 
 	++errs;
@@ -2572,7 +2588,7 @@ run_err(const char *fmt,...)
 int
 note_err(const char *fmt, ...)
 {
-	static char *emsg;
+	static PSCAL_SSH_THREAD_LOCAL char *emsg;
 	va_list ap;
 
 	/* Replay any previously-noted error */

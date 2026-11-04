@@ -24,7 +24,7 @@ static PSCAL_THREAD_LOCAL sigjmp_buf *g_pscal_openssh_global_exit_env = NULL;
 static PSCAL_THREAD_LOCAL volatile sig_atomic_t *g_pscal_openssh_global_exit_code = NULL;
 #ifdef PSCAL_TARGET_IOS
 volatile sig_atomic_t interrupted = 0;
-int showprogress = 1;
+PSCAL_THREAD_LOCAL int showprogress = 1;
 #else
 volatile sig_atomic_t interrupted = 0;
 int showprogress = 1;
