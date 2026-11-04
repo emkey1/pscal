@@ -176,6 +176,9 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("case_pipe", f"case x in x) echo c1; echo c2;; esac | cat {R}", "c1\nc2\n"),
     ("for_pipe", f"for i in 1 2 3; do echo $i; done | cat {R}", "1\n2\n3\n"),
     ("while_read_pipe", f"printf 'l1\\nl2\\n' | while read l; do echo \"[$l]\"; done {R}", "[l1]\n[l2]\n"),
+    # Threads that start a loop together: a mix-up shows as a `shell loop:` message, a short count or a hang.
+    ("loops_together_pipe", f": > smoke/ltp.out; n=0; while [ $n -lt 300 ]; do for f in 1 2; do echo $f; done | while read x; do echo $x >> smoke/ltp.out; done; n=$((n+1)); done {R}; wc -l < smoke/ltp.out | tr -d ' ' {A}", "600\n"),
+    ("loops_together_job", f": > smoke/ltj.out; n=0; while [ $n -lt 300 ]; do for f in 1; do echo $f >> smoke/ltj.out; done & i=0; until [ $i -ge 1 ]; do i=$((i+1)); done; n=$((n+1)); done > smoke/ltj.msg 2>&1; wait; grep -v '^\\[' smoke/ltj.msg {R}; wc -l < smoke/ltj.out | tr -d ' ' {A}", "300\n"),
     ("group_inner_pipe", f"{{ printf 'b\\na\\n' | sort; echo z; }} | head -2 {R}", "a\nb\n"),
     ("group_merge_stderr", f"{{ echo o; }} |& cat {R}", "o\n"),
     ("group_large_output", f"{{ seq 1 50000; }} | wc -l | tr -d ' ' {R}", "50000\n"),

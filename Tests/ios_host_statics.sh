@@ -50,5 +50,13 @@ while read -r obj symbol; do
         status=1
     fi
 done <<< "$found"
+# strtok keeps its place in libc's one static, which no nm of our data shows. Two loops starting
+# together read each other's metadata through it. grep reads all of nm's output, as with pipefail
+# -q could end nm early and hide a match.
+if nm -u "$BUILD_DIR/bin/exsh" 2>/dev/null | grep -x _strtok > /dev/null; then
+    echo "FAIL ios_host_statics: exsh calls strtok, whose place in a string is process-wide; use strtok_r"
+    status=1
+fi
+
 [ "$status" -eq 0 ] && echo "PASS ios_host_statics"
 exit "$status"
