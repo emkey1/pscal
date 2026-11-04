@@ -37,6 +37,8 @@
 # undef HAVE_READPASSPHRASE
 # undef HAVE_READPASSPHRASE_H
 # undef HAVE_GETOPT_OPTRESET
+/* To make room for a title it replaces environ, which is the whole app's. */
+# undef SPT_TYPE
 # include "pscal_runtime_hooks.h"
 # define exit cleanup_exit
 # define _exit cleanup_exit
