@@ -893,6 +893,115 @@ static void case_background_read_of_the_session_terminal(void) {
     assert(errno == EIO);
 }
 
+/* --- the foreground group has one record --- */
+
+typedef struct {
+    int sid;
+    int pgid;
+} foreground_word;
+
+static void *hand_over_foreground(void *arg) {
+    const foreground_word *word = (const foreground_word *)arg;
+    assert(vprocSetForegroundPgid(word->sid, word->pgid) == 0);
+    return NULL;
+}
+
+/* From a thread with no session and no process, as the shell's hand-off may be. */
+static void hand_over_from_nobody(int sid, int pgid) {
+    foreground_word word = {sid, pgid};
+    pthread_t thread;
+    assert(pthread_create(&thread, NULL, hand_over_foreground, &word) == 0);
+    pthread_join(thread, NULL);
+}
+
+static volatile sig_atomic_t g_winches = 0;
+
+static void count_winch(int sig) {
+    (void)sig;
+    g_winches++;
+}
+
+static void case_foreground_handoff_reaches_the_terminal(void) {
+    terminal t;
+    terminal_open_as_job(&t, false);
+    int shell_pid = t.session->shell_pid;
+    int pid = vprocPid(t.vp);
+    struct sigaction action;
+    memset(&action, 0, sizeof(action));
+    sigemptyset(&action.sa_mask);
+    action.sa_handler = count_winch;
+    assert(vprocSigactionShim(SIGWINCH, &action, NULL) == 0);
+
+    /* The job in the foreground. */
+    hand_over_from_nobody(shell_pid, pid);
+    int value = -1;
+    assert(vprocIoctlShim(STDIN_FILENO, TIOCGPGRP_, &value) == 0);
+    assert(value == pid);
+    assert(vprocTcgetpgrpShim(STDIN_FILENO) == pid);
+    /* A resize reaches it. */
+    assert(vprocSetSessionWinsize(t.id, 90, 30) == 0);
+    assert(g_winches == 1);
+    /* And it reads as the foreground does, its keys and no SIGTTIN. */
+    type_str(&t, "k");
+    expect_text("k");
+
+    /* Back to the shell: the job gets neither, and is a background reader again. */
+    hand_over_from_nobody(shell_pid, shell_pid);
+    assert(vprocIoctlShim(STDIN_FILENO, TIOCGPGRP_, &value) == 0);
+    assert(value == shell_pid);
+    assert(vprocSetSessionWinsize(t.id, 91, 31) == 0);
+    assert(g_winches == 1);
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGTTIN);
+    assert(vprocPthreadSigmaskShim(SIG_BLOCK, &set, NULL) == 0);
+    char c;
+    errno = 0;
+    assert(vprocReadShim(STDIN_FILENO, &c, 1) == -1);
+    assert(errno == EIO);
+}
+
+/* A tab's first thread can't say whose session the terminal is, so it leaves that for the
+ * shell, whose claim then goes through. As exsh does it. */
+static void case_shell_claims_a_terminal_nobody_took(void) {
+    struct pscal_fd *master = NULL;
+    struct pscal_fd *slave = NULL;
+    int num = -1;
+    assert(pscalPtyOpenMaster(O_RDWR, &master, &num) == 0);
+    assert(pscalPtyUnlock(master) == 0);
+    assert(pscalPtyOpenSlave(num, O_RDWR, &slave) == 0);
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    assert(vprocSessionStdioInitWithPty(session, slave, master, 4900, 0) == 0);
+    vprocSessionStdioActivate(session);
+    assert(slave->tty->session == 0);
+
+    VProc *shell = vprocCreate(NULL);
+    assert(shell);
+    int shell_pid = vprocPid(shell);
+    vprocRegisterThread(shell, pthread_self());
+    vprocSetShellSelfPid(shell_pid);
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, shell_pid) == 0);
+    vprocActivate(shell);
+    assert(slave->ops->ioctl(slave, TIOCSCTTY_, NULL) == 0);
+    assert(slave->tty->session == shell_pid);
+    assert(slave->tty->fg_group == shell_pid);
+
+    /* Now the hand-off has somewhere to go. */
+    VProc *job = vprocCreate(NULL);
+    assert(job);
+    int job_pid = vprocPid(job);
+    assert(vprocSetPgid(job_pid, job_pid) == 0);
+    hand_over_from_nobody(shell_pid, job_pid);
+    assert(slave->tty->fg_group == job_pid);
+    /* And a later thread of the tab leaves the terminal where it is. */
+    vprocSessionStdioActivate(session);
+    assert(slave->tty->session == shell_pid);
+    assert(slave->tty->fg_group == job_pid);
+}
+
 typedef struct {
     const char *name;
     void (*run)(void);
@@ -931,6 +1040,8 @@ int main(void) {
         CASE(case_reader_is_not_a_background_process),
         CASE(case_reader_is_not_refused_as_one),
         CASE(case_background_read_of_the_session_terminal),
+        CASE(case_foreground_handoff_reaches_the_terminal),
+        CASE(case_shell_claims_a_terminal_nobody_took),
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {

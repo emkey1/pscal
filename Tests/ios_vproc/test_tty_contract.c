@@ -1112,13 +1112,9 @@ static void test_sessions(void) {
     gAfterSignal = _EINTR;
     gGroupAfterSignal = -1;
     gAfterSignals = 0;
-    /* What vproc has recorded as the foreground counts as well. */
-    gPgid = 301;
-    gRecordedFg = 301;
-    gSentCount = 0;
-    assert(pscalTtyCheckBackgroundRead(s) == 0);
-    gRecordedFg = -1;
     /* A session's reader is no process, and is never stopped. */
+    gPgid = 301;
+    gSentCount = 0;
     gKernel = true;
     assert(pscalTtyCheckBackgroundRead(s) == 0);
     assert(gSentCount == 0);
@@ -1235,6 +1231,92 @@ static void test_sessions(void) {
     pscalTtyDropSession(500);
     pscal_fd_close(s);
     pscal_fd_close(m);
+    fakeReset();
+}
+
+typedef struct {
+    pid_t_ sid, pgid;
+} ForegroundWord;
+
+static void *foregroundWordMain(void *arg) {
+    const ForegroundWord *word = (const ForegroundWord *)arg;
+    pscalTtySetSessionForeground(word->sid, word->pgid);
+    return NULL;
+}
+
+/* vproc's word on the foreground, from a thread that is nobody: the one record there is. */
+static void test_session_foreground(void) {
+    fakeReset();
+    gSid = 600;
+    gPgid = 600;
+    gLeader = true;
+    struct pscal_fd *m = NULL, *s = NULL;
+    int num = -1;
+    assert(pscalPtyOpenMaster(O_RDWR | O_NOCTTY, &m, &num) == 0);
+    assert(pscalPtyUnlock(m) == 0);
+    assert(pscalPtyOpenSlave(num, O_RDWR, &s) == 0);
+    assert(s->tty->session == 600 && s->tty->fg_group == 600);
+    gLastSetFgSid = gLastSetFg = 0;
+    gSentCount = 0;
+
+    /* Nothing is asked of the caller, who is in no session at all here. */
+    gSid = -1;
+    gPgid = -1;
+    gLeader = false;
+    ForegroundWord word = {600, 601};
+    pthread_t thread;
+    assert(pthread_create(&thread, NULL, foregroundWordMain, &word) == 0);
+    pthread_join(thread, NULL);
+    assert(s->tty->fg_group == 601);
+    /* No signal, and nothing back to vproc, whose record this is. */
+    assert(gSentCount == 0);
+    assert(gLastSetFgSid == 0 && gLastSetFg == 0);
+
+    /* A program of the session agrees, through either side. */
+    gSid = 600;
+    gPgid = 600;
+    pid_t_ got = 0;
+    assert(s->ops->ioctl(s, TIOCGPGRP_, &got) == 0 && got == 601);
+    got = 0;
+    assert(m->ops->ioctl(m, TIOCGPGRP_, &got) == 0 && got == 601);
+
+    /* A resize reaches the new group, and only that. */
+    struct winsize_ ws = {30, 100, 0, 0};
+    tty_set_winsize(s->tty, ws);
+    assert(gSentCount == 1 && gSent[0].pgid == 601 && gSent[0].sig == SIGWINCH);
+
+    /* The new group reads as the foreground and the old one as the background. What vproc
+     * recorded apart from this is no second opinion. */
+    gSentCount = 0;
+    gPgid = 601;
+    assert(pscalTtyCheckBackgroundRead(s) == 0);
+    assert(gSentCount == 0);
+    gPgid = 600;
+    gRecordedFg = 600;
+    assert(pscalTtyCheckBackgroundRead(s) == _EINTR);
+    assert(gSentCount == 1 && gSent[0].pgid == 600 && gSent[0].sig == SIGTTIN);
+    gRecordedFg = -1;
+
+    /* A program's own request still has its checks. */
+    dword_t want = (dword_t)-1;
+    assert(s->ops->ioctl(s, TIOCSPGRP_, &want) == _EINVAL);
+    gSid = 999;
+    want = 600;
+    assert(s->ops->ioctl(s, TIOCSPGRP_, &want) == _ENOTTY);
+    gSid = 600;
+    assert(s->tty->fg_group == 601);
+
+    /* A session with no terminal has nothing to say it to. */
+    pscalTtySetSessionForeground(0, 5);
+    pscalTtySetSessionForeground(-1, 5);
+    pscalTtySetSessionForeground(12345, 5);
+    assert(s->tty->fg_group == 601);
+    pscalTtyDropSession(600);
+    pscalTtySetSessionForeground(600, 5);
+    assert(s->tty->session == 0 && s->tty->fg_group == 0);
+    pscal_fd_close(s);
+    pscal_fd_close(m);
+    assert(!pscalPtyExists(num));
     fakeReset();
 }
 
@@ -1664,6 +1746,7 @@ int main(void) {
     RUN(test_ioctl);
     RUN(test_winsize_targets);
     RUN(test_sessions);
+    RUN(test_session_foreground);
     RUN(test_numbers);
     RUN(test_hangup);
     RUN(test_waiting);
