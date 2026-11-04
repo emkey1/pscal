@@ -20,6 +20,9 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <time.h>
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#endif
 #define PATH_VIRTUALIZATION_NO_MACROS 1
 #include "common/path_truncate.h"
 #include "common/path_virtualization.h"
@@ -2584,6 +2587,78 @@ static void *vproc_scope_thread(void *arg) {
 
 /* A killed thread never reaches the end of a command scope it made, and what the scope holds
  * would stay open. The vproc it was started under has an owner, which ends that. */
+#if defined(__APPLE__)
+static void *vproc_ended_thread(void *arg) {
+    return arg;
+}
+
+static mach_port_t vproc_new_port_right(void) {
+    mach_port_t right = MACH_PORT_NULL;
+    assert(mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &right) == KERN_SUCCESS);
+    assert(mach_port_insert_right(mach_task_self(), right, right, MACH_MSG_TYPE_MAKE_SEND) == KERN_SUCCESS);
+    return right;
+}
+
+static void vproc_drop_port_right(mach_port_t right) {
+    mach_port_mod_refs(mach_task_self(), right, MACH_PORT_RIGHT_SEND, -1);
+    mach_port_mod_refs(mach_task_self(), right, MACH_PORT_RIGHT_RECEIVE, -1);
+}
+
+/* A thread that ended and wasn't joined still gives its port's old name, and the name comes back
+ * for another right. A snapshot looked the thread up by that name: thread_info ended the process
+ * for a right like this one, and the release after it took a right someone else owned. */
+static void assert_snapshot_leaves_an_ended_threads_port_name_alone(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    pthread_t ended;
+    assert(pthread_create(&ended, NULL, vproc_ended_thread, NULL) == 0);
+    vprocRegisterThread(vp, ended);
+    while (pthread_kill(ended, 0) == 0) {
+        sched_yield();
+    }
+    mach_port_t name = pthread_mach_thread_np(ended);
+    assert(name != MACH_PORT_NULL);
+    /* Held until the kernel's free list reaches the name's slot, then taken and dropped there:
+     * each new owner of a slot gets the next generation of its name, and they come round. */
+    enum { HELD_MAX = 65536 };
+    mach_port_t *held = (mach_port_t *)calloc(HELD_MAX, sizeof(mach_port_t));
+    assert(held);
+    size_t held_count = 0;
+    mach_port_t right = vproc_new_port_right();
+    while (MACH_PORT_INDEX(right) != MACH_PORT_INDEX(name)) {
+        assert(held_count < HELD_MAX);
+        held[held_count++] = right;
+        right = vproc_new_port_right();
+    }
+    for (int i = 0; i < 1000000 && right != name; ++i) {
+        vproc_drop_port_right(right);
+        right = vproc_new_port_right();
+    }
+    assert(right == name);
+
+    size_t cap = vprocSnapshot(NULL, 0);
+    VProcSnapshot *snaps = (VProcSnapshot *)calloc(cap, sizeof(VProcSnapshot));
+    assert(snaps);
+    (void)vprocSnapshot(snaps, cap);
+    free(snaps);
+
+    mach_port_urefs_t refs = 0;
+    assert(mach_port_get_refs(mach_task_self(), right, MACH_PORT_RIGHT_SEND, &refs) == KERN_SUCCESS);
+    assert(refs == 1);
+    vproc_drop_port_right(right);
+    while (held_count > 0) {
+        vproc_drop_port_right(held[--held_count]);
+    }
+    free(held);
+    vprocUnregisterThread(vp, ended);
+    pthread_join(ended, NULL);
+    int pid = vprocPid(vp);
+    vprocMarkExit(vp, 0);
+    vprocDiscard(pid);
+    vprocDestroy(vp);
+}
+#endif
+
 static void assert_kill_ends_what_the_thread_made(void) {
     VProc *shell = vprocCreate(NULL);
     assert(shell);
@@ -8370,6 +8445,10 @@ int main(void) {
     assert_cancel_pending_lets_go_of_vproc_lock();
     fprintf(stderr, "TEST reaped_job_stays_gone\n");
     assert_reaped_job_stays_gone();
+#if defined(__APPLE__)
+    fprintf(stderr, "TEST snapshot_leaves_an_ended_threads_port_name_alone\n");
+    assert_snapshot_leaves_an_ended_threads_port_name_alone();
+#endif
     fprintf(stderr, "TEST kill_ends_what_the_thread_made\n");
     assert_kill_ends_what_the_thread_made();
     fprintf(stderr, "TEST cancelled_read_lets_go_of_its_descriptor\n");
