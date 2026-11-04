@@ -396,6 +396,14 @@ struct TerminalContentView: View {
             return
         }
 
+        // This is only an estimate, for a runtime starting before the page has measured. After
+        // that the page's grid is the terminal's size, and an estimate that differs by a column
+        // would be a resize of nothing.
+        if (htermController ?? runtime.htermControllerIfCreated())?.hasMeasuredGrid == true {
+            hasMeasuredGeometry = true
+            return
+        }
+
         // Calculate usable height for the terminal text area.
         // availableSize.height is the total space from GeometryReader (including padding area).
         var usableHeight = availableSize.height

@@ -194,8 +194,18 @@ private struct ShellTerminalContentView: View {
         guard isVisible else {
             return
         }
+        // This is only an estimate, for a session starting before the page has measured. After
+        // that the page's grid is the terminal's size, and an estimate that differs by a column
+        // would be a resize of nothing.
+        guard !session.htermController.hasMeasuredGrid else {
+            return
+        }
         let font = fontSettings.currentFont
         let usableHeight = availableSize.height - topPadding
+        // A view with no size yet isn't a terminal of 10 by 4. The session keeps the size it has.
+        guard availableSize.width > 0, usableHeight > 0 else {
+            return
+        }
         let usableSize = CGSize(width: availableSize.width, height: usableHeight)
         let grid = TerminalGeometryCalculator.calculateCapacity(
             for: usableSize,

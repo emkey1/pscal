@@ -108,9 +108,8 @@ final class ShellRuntimeSession: ObservableObject {
                                     dsrResponder: { [weak self] data in
             self?.sendData(data)
         })
-        buffer.setResizeHandler { [weak self] columns, rows in
-            self?.updateTerminalSize(columns: columns, rows: rows)
-        }
+        // No resize handler: a program asking for a window size with CSI 8 t doesn't get one,
+        // here or on the main tab. hterm ignores it too, and the grid comes from the view.
         buffer.onMouseModeChange = { [weak self] mode, encoding in
             self?.mouseMode = mode
             self?.mouseEncoding = encoding
@@ -358,6 +357,10 @@ final class ShellRuntimeSession: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             self?.htermController.noteRuntimeSize(columns: clampedColumns, rows: clampedRows)
             self?.htermController.forceGridSize(columns: clampedColumns, rows: clampedRows)
+        }
+        // When this is the page's own measurement, the controller has already passed it on.
+        guard !htermController.runtimeHasSize(columns: clampedColumns, rows: clampedRows) else {
+            return
         }
         withRuntimeContext {
             PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(clampedColumns), Int32(clampedRows))

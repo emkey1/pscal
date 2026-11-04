@@ -121,10 +121,39 @@ x-row {
       return [finiteOrZero(term.screenSize.width), finiteOrZero(term.screenSize.height)];
     }
 
+    // The size of the native view, which is what the grid comes from. hterm would otherwise
+    // read its own screen element, and that only catches up with the view once WebKit has
+    // laid out again, and means nothing at all while the web view is out of the hierarchy.
+    // Until native has a size, the screen element is all there is.
+    let hostSize = null;
+    const screenSizeFromLayout = port.getScreenSize;
+
+    // hterm's own sums, on native's numbers.
+    function screenSizeInside(host) {
+      const rightPadding = Math.max(port.screenPaddingSize, port.currentScrollbarWidthPx);
+      return {
+        height: host.height - (2 * port.screenPaddingSize),
+        width: host.width - port.screenPaddingSize - rightPadding,
+      };
+    }
+
+    port.getScreenSize = function () {
+      return hostSize ? screenSizeInside(hostSize) : screenSizeFromLayout.call(this);
+    };
+
+    function holdsACell(host) {
+      const usable = screenSizeInside(host);
+      const cell = port.characterSize;
+      return cell.width > 0 && cell.height > 0 &&
+             usable.width >= cell.width && usable.height >= cell.height;
+    }
+
     function reflow() {
-      // This also recomputes the viewport. hterm works out the new grid a moment later on
-      // a timer, and if the grid changed that arrives through onTerminalResize.
+      // This also recomputes the viewport. hterm only works out the grid from that a moment
+      // later on a timer, too late for the answer here, so it's asked now. When its timer
+      // comes round it finds nothing left to change.
       port.syncCharacterSize();
+      term.onResize_();
       const grid = currentGrid();
       reportGrid(grid[0], grid[1]);
       return grid;
@@ -235,6 +264,21 @@ x-row {
         reportScrollState();
       },
 
+      // The grid's one source: native's measurement of its view, in points. A size that won't
+      // hold a single cell measures nothing and changes nothing, and [0, 0] says so.
+      measureGrid(width, height) {
+        if (!Number.isFinite(width) || !Number.isFinite(height) ||
+            !holdsACell({width: width, height: height})) {
+          return [0, 0];
+        }
+        hostSize = {width: width, height: height};
+        if (debugging) {
+          const laidOut = screen.getBoundingClientRect();
+          debugLog(`measure: view ${width}x${height}, screen ${laidOut.width}x${laidOut.height}`);
+        }
+        return reflow();
+      },
+
       reflowAndGetSize() {
         return reflow();
       },
@@ -243,6 +287,8 @@ x-row {
         return currentGrid();
       },
 
+      // Native has stopped calling this, because the grid comes from the view. What it sets
+      // lasts until the next measurement.
       setGridSize(columns, rows) {
         if (!Number.isFinite(columns) || !Number.isFinite(rows)) {
           return;
@@ -390,6 +436,13 @@ x-row {
     // stays alive as DOM nodes, and without a cap the system eventually kills the app.
     term.reset();
     term.setScrollbackLimit(5000);
+
+    // A reset re-measures, whether it came from native or from a program's ESC c.
+    const resetTerminal = term.reset;
+    term.reset = function () {
+      resetTerminal.apply(this, arguments);
+      reflow();
+    };
 
     // hterm offers no callback for this and trimming scrollback goes through it too, so
     // wrapping it sees every change to the scroll area.

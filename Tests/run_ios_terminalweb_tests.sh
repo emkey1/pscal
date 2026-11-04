@@ -93,6 +93,18 @@ else
     fail "term.js no longer calls term.setScrollbackLimit()"
 fi
 
+# 6. The page's grid comes from the native view's measurement, and the wrong size can't stick.
+#    This does run term.js, against hterm's real sums, with stand-ins for what needs layout.
+if command -v node >/dev/null 2>&1; then
+    if node "${SCRIPT_DIR}/ios_terminalweb_page_test.js" "${WEB_DIR}"; then
+        pass "the page's grid follows the view"
+    else
+        fail "the page's grid rules"
+    fi
+else
+    printf 'skip: node not available, not running the page grid tests\n'
+fi
+
 if [ "${failures}" -ne 0 ]; then
     printf '\n%d terminal-web check(s) failed\n' "${failures}" >&2
     exit 1

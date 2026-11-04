@@ -144,7 +144,11 @@ final class HtermTerminalController: NSObject {
     private static let maxBacklogBytes = 2 * 1024 * 1024
     private static let maxChunkBytes = 128 * 1024
     private static let reloadDelay: TimeInterval = 1.15
-    private static let styleSettleDelay: TimeInterval = 0.06
+    /// How long layout has to stay quiet before a measurement counts.
+    fileprivate static let gridSettleDelay: TimeInterval = 0.12
+    /// The same after the window itself changes size, which is most often a rotation: long
+    /// enough to see its animation out.
+    fileprivate static let rotationSettleDelay: TimeInterval = 0.5
     private static var lastInstanceId = 0
 
     let instanceId: Int
@@ -153,13 +157,26 @@ final class HtermTerminalController: NSObject {
 
     var isLoaded: Bool { readShared().isLoaded }
 
+    /// Whether a view has ever given this terminal a measured grid. Until then a session's
+    /// estimate from SwiftUI's geometry is the best there is, and afterwards it's only noise.
+    var hasMeasuredGrid: Bool { readShared().gridMeasured }
+
+    /// Whether the runtime already has this size, so that telling it again would be a resize
+    /// that changes nothing.
+    func runtimeHasSize(columns: Int, rows: Int) -> Bool {
+        readShared().runtimeGrid == TerminalGrid(columns: columns, rows: rows)
+    }
+
     /// The few facts other threads ask about. Metrics and an attaching runtime read them from
     /// their own queues, and those queues can have the main thread waiting on them, so
     /// reading must never wait for the main thread in turn.
     private struct SharedState {
         var pendingBytes = 0
         var isLoaded = false
+        /// The page's grid has been measured since it loaded, so output can land on it.
         var hostSizeReady = false
+        var gridMeasured = false
+        var runtimeGrid: TerminalGrid?
         var trimCount = 0
         var reloadCount = 0
         var discardCount = 0
@@ -189,12 +206,13 @@ final class HtermTerminalController: NSObject {
     private var firstChunkLogged = false
 
     private var lastHostSize: CGSize?
-    private var pageGrid: TerminalGrid?
-    private var forcedGrid: TerminalGrid?
-    private var runtimeGrid: TerminalGrid?
+    private var measuredGrid: TerminalGrid?
     private var gridAwaitingSession: TerminalGrid?
     private var resizeSessionId: UInt64 = 0
+    private var lastBoundSessionId: UInt64 = 0
     private var lastGridQuery = 0
+    private var measureWork: DispatchWorkItem?
+    private var measureDeadline: DispatchTime?
 
     private var styleScript: String?
     private var wantsPageFocus = false
@@ -242,6 +260,7 @@ final class HtermTerminalController: NSObject {
 
     deinit {
         memorySource?.cancel()
+        measureWork?.cancel()
         NotificationCenter.default.removeObserver(self)
         let content = userContent
         let web = webView
@@ -329,6 +348,7 @@ final class HtermTerminalController: NSObject {
             // A page that isn't up yet gets this epoch when it says it has loaded.
             if self.isLoaded {
                 self.callPage("exports.resetForEpoch(\(self.epoch))")
+                self.scheduleGridMeasure()
             }
             self.deliverOutput()
         }
@@ -430,7 +450,12 @@ final class HtermTerminalController: NSObject {
             NSLog("%@", "Hterm[\(instanceId)] load message")
         }
         let wasLoaded = isLoaded
-        updateShared { $0.isLoaded = true }
+        // A new page has no grid yet, whatever the last one had. Output waits for its own.
+        measuredGrid = nil
+        updateShared {
+            $0.isLoaded = true
+            $0.hostSizeReady = false
+        }
         writeInFlight = nil
 
         // A page starts at epoch 1 and ours only goes up, and the page drops any write stamped
@@ -449,9 +474,8 @@ final class HtermTerminalController: NSObject {
         // and until now the page's colours are transparent placeholders.
         sendStyle()
         sendPageFocus()
-        deliverOutput()
-        queryGrid(reason: "load")
-        applyForcedGrid()
+        // Held output goes out when this answers, or when a view first has a size.
+        measureGrid(reason: "load")
     }
 
     @MainActor
@@ -466,8 +490,12 @@ final class HtermTerminalController: NSObject {
         logAlways("page lost (\(reason)), reloading")
         tabInitLog("Hterm[\(instanceId)] page lost: \(reason)")
         let wasLoaded = isLoaded
-        updateShared { $0.isLoaded = false }
-        pageGrid = nil
+        updateShared {
+            $0.isLoaded = false
+            $0.hostSizeReady = false
+        }
+        measuredGrid = nil
+        cancelGridMeasure()
         // WebKit may never answer a write sent to a dead process.
         writeInFlight = nil
         if wasLoaded {
@@ -541,53 +569,102 @@ final class HtermTerminalController: NSObject {
 
     // MARK: Grid
 
-    /// A container's usable size. Output waits for the first of these, because until then the
-    /// web view is still at its enormous starting size.
+    // The grid has one source: the size of the view, measured. The page works it out from that
+    // size and its cell size, and nothing else has a say. Layout comes in bursts and can pass
+    // through sizes that never last, so the page follows the view at once and the runtime only
+    // hears when things have gone quiet. Anything that disagrees with the measurement (what
+    // hterm reports, what a session told the runtime) can do no more than ask for a new one.
+    // A measurement never starts another, which is what stops all this feeding itself.
+
+    /// A view's size. The container reports only a view that is really showing and has a size:
+    /// one that's hidden, detached or empty isn't a resize, and the terminal keeps what it has.
     fileprivate func noteHostSize(_ size: CGSize) {
-        let usable = CGSize(width: size.width > 0 ? size.width : 1,
-                            height: size.height > 0 ? size.height : 1)
-        let changed = usable != lastHostSize
-        lastHostSize = usable
-        if !readShared().hostSizeReady {
-            updateShared { $0.hostSizeReady = true }
+        guard size != lastHostSize else { return }
+        lastHostSize = size
+        tabInitLog("Hterm[\(instanceId)] host size \(size.width)x\(size.height)")
+        if Self.debugEnabled {
+            NSLog("%@", "Hterm[\(instanceId)] host size \(size.width)x\(size.height)")
         }
-        if changed {
-            tabInitLog("Hterm[\(instanceId)] host size \(usable.width)x\(usable.height)")
-            if Self.debugEnabled {
-                NSLog("%@", "Hterm[\(instanceId)] host size \(usable.width)x\(usable.height)")
-            }
-            if isLoaded {
-                queryGrid(reason: "host size")
-            }
-        }
-        deliverOutput()
+        // A page still loading measures when it says it has loaded.
+        guard isLoaded else { return }
+        // Any answer still on its way is now out of date.
+        lastGridQuery += 1
+        webView.evaluateJavaScript(Self.measureScript(for: size), completionHandler: nil)
+        scheduleGridMeasure()
     }
 
-    private func queryGrid(reason: String) {
+    private static func measureScript(for size: CGSize) -> String {
+        "exports.measureGrid(\(Double(size.width)), \(Double(size.height)))"
+    }
+
+    /// Measures once layout has stayed quiet this long. Asking again pushes it back, never
+    /// forward, and nothing is left running once it has fired.
+    fileprivate func scheduleGridMeasure(after delay: TimeInterval = HtermTerminalController.gridSettleDelay) {
+        guard isLoaded, lastHostSize != nil else { return }
+        let requested = DispatchTime.now() + delay
+        let deadline = max(measureDeadline ?? requested, requested)
+        measureDeadline = deadline
+        measureWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.measureWork = nil
+            self.measureDeadline = nil
+            if self.isLoaded {
+                self.measureGrid(reason: "settled")
+            }
+        }
+        measureWork = work
+        DispatchQueue.main.asyncAfter(deadline: deadline, execute: work)
+    }
+
+    private func cancelGridMeasure() {
+        measureWork?.cancel()
+        measureWork = nil
+        measureDeadline = nil
+    }
+
+    /// Asks the page for the grid that fits the view now. Without a usable size so far there's
+    /// nothing to ask: the page is still at its enormous starting size.
+    private func measureGrid(reason: String) {
+        guard let size = lastHostSize else { return }
         lastGridQuery += 1
         let query = lastGridQuery
-        sshResizeLog("[ssh-resize] hterm[\(instanceId)] query (\(reason))")
-        webView.evaluateJavaScript("exports.reflowAndGetSize ? exports.reflowAndGetSize() : exports.getSize()") { [weak self] result, error in
+        sshResizeLog("[ssh-resize] hterm[\(instanceId)] measure (\(reason)) \(size.width)x\(size.height)")
+        webView.evaluateJavaScript(Self.measureScript(for: size)) { [weak self] result, error in
             guard let self, query == self.lastGridQuery else { return }
             if let error {
-                self.logAlways("size query failed: \(error.localizedDescription)")
+                self.logAlways("measuring the grid failed: \(error.localizedDescription)")
+                // Better output on a doubtful grid than none at all.
+                self.updateShared { $0.hostSizeReady = true }
+                self.deliverOutput()
                 return
             }
+            // A view too small for one cell answers with nothing, and the next size decides.
             guard result is [Any], let grid = TerminalGrid(pageValue: result) else { return }
-            sshResizeLog("[ssh-resize] hterm[\(self.instanceId)] query result \(grid.columns)x\(grid.rows)")
-            self.callbackHost?.deliverResize(columns: grid.columns, rows: grid.rows)
+            self.adoptMeasuredGrid(grid)
         }
     }
 
     @MainActor
-    private func pageReportedGrid(_ body: Any) {
-        guard let grid = TerminalGrid(pageValue: body) else {
-            queryGrid(reason: "rejected resize")
-            return
+    private func adoptMeasuredGrid(_ grid: TerminalGrid) {
+        sshResizeLog("[ssh-resize] hterm[\(instanceId)] measured \(grid.columns)x\(grid.rows)")
+        measuredGrid = grid
+        updateShared {
+            $0.hostSizeReady = true
+            $0.gridMeasured = true
         }
-        pageGrid = grid
         forwardToRuntime(grid)
         callbackHost?.deliverResize(columns: grid.columns, rows: grid.rows)
+        deliverOutput()
+    }
+
+    /// hterm reports whatever it has just worked out, or was just told, and on its own that
+    /// goes nowhere. If it isn't what was measured, then the next measurement settles it.
+    @MainActor
+    private func pageReportedGrid(_ body: Any) {
+        if TerminalGrid(pageValue: body) != measuredGrid {
+            scheduleGridMeasure()
+        }
     }
 
     private func forwardToRuntime(_ grid: TerminalGrid) {
@@ -596,53 +673,52 @@ final class HtermTerminalController: NSObject {
             gridAwaitingSession = grid
             return
         }
+        // Re-attaching a view or switching tabs measures again, and that's not a resize.
+        guard grid != readShared().runtimeGrid else { return }
         sshResizeLog("[ssh-resize] hterm[\(instanceId)] forwarding \(grid.columns)x\(grid.rows) to session \(resizeSessionId)")
         PSCALRuntimeUpdateSessionWindowSize(resizeSessionId, Int32(grid.columns), Int32(grid.rows))
-        runtimeGrid = grid
+        updateShared { $0.runtimeGrid = grid }
     }
 
     func setResizeSessionId(_ sessionId: UInt64) {
         sshResizeLog("[ssh-resize] hterm[\(instanceId)] session \(sessionId)")
         resizeSessionId = sessionId
         guard sessionId != 0 else { return }
+        // A different session starts knowing nothing of what the last one was told.
+        if lastBoundSessionId != 0 && lastBoundSessionId != sessionId {
+            updateShared { $0.runtimeGrid = nil }
+        }
+        lastBoundSessionId = sessionId
         if let waiting = gridAwaitingSession {
             gridAwaitingSession = nil
             // If the runtime has been told something else since, that's the newer word.
-            if runtimeGrid == nil || runtimeGrid == waiting {
+            let known = readShared().runtimeGrid
+            if known == nil || known == waiting {
                 forwardToRuntime(waiting)
             }
         }
         // A session that binds late still has to learn the true size.
-        if isLoaded {
-            queryGrid(reason: "session bound")
-        }
+        scheduleGridMeasure()
     }
 
+    /// What a session has told the runtime for itself. If that's not what the view measured,
+    /// the measurement has the last word.
     func noteRuntimeSize(columns: Int, rows: Int) {
         guard columns > 0, rows > 0 else { return }
-        runtimeGrid = TerminalGrid(columns: columns, rows: rows)
+        let grid = TerminalGrid(columns: columns, rows: rows)
+        updateShared { $0.runtimeGrid = grid }
+        if grid != measuredGrid {
+            scheduleGridMeasure()
+        }
     }
 
+    /// Sessions pass on here what they've settled on. The page doesn't take orders on its grid
+    /// any more, so a request that disagrees with the view only prompts a new measurement.
     func forceGridSize(columns: Int, rows: Int) {
         let request = TerminalGrid(columns: max(1, columns), rows: max(1, rows))
-        guard request != forcedGrid else { return }
-        forcedGrid = request
-        sshResizeLog("[ssh-resize] hterm[\(instanceId)] forced grid \(request.columns)x\(request.rows)")
-        if isLoaded {
-            applyForcedGrid()
-        }
-    }
-
-    private func applyForcedGrid() {
-        guard let request = forcedGrid, request != pageGrid else { return }
-        webView.evaluateJavaScript("exports.setGridSize(\(request.columns), \(request.rows))") { [weak self] _, error in
-            guard let self else { return }
-            if let error {
-                self.logAlways("setGridSize failed: \(error.localizedDescription)")
-                return
-            }
-            self.pageGrid = request
-        }
+        guard request != measuredGrid else { return }
+        sshResizeLog("[ssh-resize] hterm[\(instanceId)] grid request \(request.columns)x\(request.rows)")
+        scheduleGridMeasure()
     }
 
     // MARK: Style and focus
@@ -657,11 +733,15 @@ final class HtermTerminalController: NSObject {
             "blinkCursor": false,
             "cursorShape": "BLOCK",
         ]
-        guard let json = try? JSONSerialization.data(withJSONObject: style),
+        guard let json = try? JSONSerialization.data(withJSONObject: style, options: [.sortedKeys]),
               let text = String(data: json, encoding: .utf8) else {
             return
         }
-        styleScript = "exports.updateStyle(\(text))"
+        // SwiftUI updates far more often than the style changes, and each application has the
+        // page re-measure and report three times, which can itself bring on another update.
+        let script = "exports.updateStyle(\(text))"
+        guard script != styleScript else { return }
+        styleScript = script
         if isLoaded {
             sendStyle()
         }
@@ -687,13 +767,8 @@ final class HtermTerminalController: NSObject {
             if let error {
                 self.logAlways("updateStyle failed: \(error.localizedDescription)")
             }
-            // Early grid reports can be stale while the new font settles, so ask again. hterm
-            // also measures its own grid, so a forced one has to be put back.
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.styleSettleDelay) { [weak self] in
-                guard let self, self.isLoaded else { return }
-                self.queryGrid(reason: "style")
-                self.applyForcedGrid()
-            }
+            // Early grid reports can be stale while the new font settles.
+            self.scheduleGridMeasure()
         }
     }
 
@@ -1054,6 +1129,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate, UIGestureR
     private var movingScrollForPage = false
     private var lastSelectionRect: CGRect?
     private var showedSelectionMenu = false
+    private var lastWindowSize: CGSize?
 
     init(controller: HtermTerminalController) {
         self.controller = controller
@@ -1072,6 +1148,8 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate, UIGestureR
                            name: UIWindow.didBecomeKeyNotification, object: nil)
         center.addObserver(self, selector: #selector(windowKeyStatusChanged(_:)),
                            name: UIWindow.didResignKeyNotification, object: nil)
+        center.addObserver(self, selector: #selector(applicationBecameActive),
+                           name: UIApplication.didBecomeActiveNotification, object: nil)
     }
 
     @available(*, unavailable)
@@ -1197,6 +1275,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate, UIGestureR
         }
         if visibleChanged {
             refreshDisplayedState()
+            reportHostSize()
         }
     }
 
@@ -1232,17 +1311,29 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate, UIGestureR
         if displayed && !isHostingWebView {
             installWebView()
         }
-        reportHostSizeOnceSized()
+        reportHostSize()
         honourFocusRequest()
     }
 
-    /// For the reports that don't come from a layout pass. Before the first layout there is no
-    /// size to report, and calling that a size would release held output too early. The layout
-    /// pass will report it.
-    private func reportHostSizeOnceSized() {
-        if !scrollHost.bounds.isEmpty {
-            controller.noteHostSize(scrollHost.bounds.size)
+    /// Tells the controller this view's size, if it has one that counts. A real terminal keeps
+    /// its size while its window is hidden, and so does this one: a view that's off screen, in
+    /// no window or a hidden one, or without a size yet says nothing at all. Nor does a view in
+    /// a backgrounded app, which the system lays out at other sizes to take its snapshots.
+    private func reportHostSize() {
+        guard onScreen, let window, !window.isHidden, !scrollHost.bounds.isEmpty,
+              UIApplication.shared.applicationState != .background else {
+            return
         }
+        controller.noteHostSize(scrollHost.bounds.size)
+        let windowSize = window.bounds.size
+        if let lastWindowSize, lastWindowSize != windowSize {
+            controller.scheduleGridMeasure(after: HtermTerminalController.rotationSettleDelay)
+        }
+        lastWindowSize = windowSize
+    }
+
+    @objc private func applicationBecameActive() {
+        reportHostSize()
     }
 
     // MARK: Showing the web view
@@ -1292,7 +1383,9 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate, UIGestureR
         // Underneath, so that it can't cover the scroll indicator.
         scrollHost.insertSubview(web, at: 0)
         scrollHost.pinContentView()
-        reportHostSizeOnceSized()
+        reportHostSize()
+        // The way back from behind another window, an SDL one say, is one more thing to settle.
+        controller.scheduleGridMeasure()
     }
 
     private func removeWebView() {
@@ -1308,7 +1401,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate, UIGestureR
             controller.webView.frame.size = scrollHost.bounds.size
             scrollHost.pinContentView()
         }
-        controller.noteHostSize(scrollHost.bounds.size)
+        reportHostSize()
         clampScrollOffset()
         refreshDisplayedState()
         trace("layout bounds=\(scrollHost.bounds) content=\(scrollHost.contentSize)")
@@ -1329,6 +1422,8 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate, UIGestureR
         }
         refreshPageFocus()
         refreshDisplayedState()
+        // Layout while it was out of a window said nothing, and none may follow now.
+        reportHostSize()
         honourFocusRequest()
     }
 
@@ -1404,6 +1499,8 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate, UIGestureR
         }
         refreshPageFocus()
         refreshDisplayedState()
+        // A window coming back from being hidden needn't lay out again to have changed size.
+        reportHostSize()
     }
 
     @objc private func handleTap() {
