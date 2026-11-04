@@ -1154,11 +1154,14 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
             desktopCount = max(desktopCount, index + 1)
         }
 
-        var wanted = Set<String>()
+        // Two MotePad windows come back as two. A global applet only ever has the one.
+        var restoredApplets = Set<Int>()
         for descriptor in toolDescriptors {
-            guard let identifier = descriptor["toolIdentifier"] as? String, !identifier.isEmpty,
-                  wanted.insert(identifier).inserted else { continue }
-            guard let window = window(forTool: identifier) ?? openTool(identifier) else { continue }
+            guard let identifier = descriptor["toolIdentifier"] as? String, !identifier.isEmpty else { continue }
+            let open = desktopWindows.first { $0.toolIdentifier == identifier && !restoredApplets.contains($0.serial) }
+            if open == nil, WorkspaceToolRegistry.isGlobal(identifier), self.window(forTool: identifier) != nil { continue }
+            guard let window = open ?? openTool(identifier) else { continue }
+            restoredApplets.insert(window.serial)
             if let applet = appletByWindow[window.serial] {
                 applet.workspaceTextScale = CGFloat((descriptor["textScale"] as? NSNumber)?.doubleValue ?? 1)
                 if let state = descriptor["state"] as? [String: Any] {
@@ -1168,7 +1171,7 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
             assign(window, descriptor)
         }
         for window in desktopWindows {
-            if let identifier = window.toolIdentifier, !WorkspaceToolRegistry.isGlobal(identifier), !wanted.contains(identifier) {
+            if let identifier = window.toolIdentifier, !WorkspaceToolRegistry.isGlobal(identifier), !restoredApplets.contains(window.serial) {
                 closeWindow(window)
             }
         }
@@ -1276,6 +1279,10 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
             guard let key = press.key else { continue }
             let modifiers = key.modifierFlags.intersection([.command, .shift, .alternate, .control])
             let input = key.charactersIgnoringModifiers.lowercased()
+            if let window = focusedWindow, let applet = appletByWindow[window.serial] as? WorkspaceKeyClaiming,
+               applet.workspaceClaimsKey(input: input, keyCode: key.keyCode, modifiers: modifiers) {
+                return false
+            }
             if key.keyCode == .keyboardTab {
                 if modifiers == .control {
                     cycleWindows(step: 1)

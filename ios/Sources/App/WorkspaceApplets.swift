@@ -36,6 +36,11 @@ enum WorkspaceToolRegistry {
         identifier == desktops || identifier == launcher
     }
 
+    /// Applets that take a path, each in a window of its own. Any other keeps to one window.
+    static func opensFiles(_ identifier: String) -> Bool {
+        [fileManager, motePad, markdown, imageViewer, videoPlayer].contains(identifier)
+    }
+
     static func isAvailable(_ identifier: String) -> Bool {
         factories[identifier] != nil
     }
@@ -52,6 +57,11 @@ enum WorkspaceToolRegistry {
         logs: { WorkspaceLogsAppletViewController() },
         settings: { WorkspaceSettingsAppletViewController() },
         diagnostics: { WorkspaceDiagnosticsAppletViewController() },
+        fileManager: { WorkspaceFileManagerAppletViewController() },
+        motePad: { WorkspaceMotePadAppletViewController() },
+        markdown: { WorkspaceMarkdownAppletViewController() },
+        imageViewer: { WorkspaceImageViewerAppletViewController() },
+        storage: { WorkspaceStorageAppletViewController() },
     ]
 
     static var availableTools: [String] {
@@ -91,6 +101,11 @@ enum WorkspaceToolRegistry {
         case logs: return "Logs"
         case settings: return "Settings"
         case diagnostics: return "Diagnostics"
+        case fileManager: return "File Manager"
+        case motePad: return "MotePad"
+        case markdown: return "Markdown"
+        case imageViewer: return "Image Viewer"
+        case storage: return "Storage"
         default: return identifier
         }
     }
@@ -105,7 +120,7 @@ enum WorkspaceToolRegistry {
         case launcher:
             return WorkspaceLauncherMetrics.contentSize(itemCount: WorkspaceLauncherStore.shortcuts.count, showsBackRow: false, textScale: 1)
         case quickActions:
-            return phone ? CGSize(width: 312, height: 300) : CGSize(width: 400, height: 320)
+            return phone ? CGSize(width: 312, height: 300) : CGSize(width: 400, height: 296)
         case sessions:
             return phone ? CGSize(width: 332, height: 300) : CGSize(width: 460, height: 340)
         case themes:
@@ -122,6 +137,16 @@ enum WorkspaceToolRegistry {
             return phone ? CGSize(width: 376, height: 620) : CGSize(width: 560, height: 620)
         case diagnostics:
             return phone ? CGSize(width: 352, height: 620) : CGSize(width: 620, height: 640)
+        case fileManager:
+            return phone ? CGSize(width: 340, height: 460) : CGSize(width: 720, height: 480)
+        case motePad:
+            return phone ? CGSize(width: 340, height: 460) : CGSize(width: 620, height: 560)
+        case markdown:
+            return phone ? CGSize(width: 340, height: 460) : CGSize(width: 620, height: 640)
+        case imageViewer:
+            return phone ? CGSize(width: 340, height: 420) : CGSize(width: 620, height: 520)
+        case storage:
+            return phone ? CGSize(width: 336, height: 420) : CGSize(width: 520, height: 500)
         default:
             return phone ? CGSize(width: 320, height: 300) : CGSize(width: 460, height: 420)
         }
@@ -151,6 +176,16 @@ enum WorkspaceToolRegistry {
             return phone ? CGSize(width: 300, height: 220) : CGSize(width: 360, height: 220)
         case settings, diagnostics:
             return CGSize(width: 320, height: 420)
+        case fileManager:
+            return phone ? CGSize(width: 280, height: 300) : CGSize(width: 420, height: 320)
+        case motePad:
+            return phone ? CGSize(width: 280, height: 300) : CGSize(width: 360, height: 300)
+        case markdown:
+            return phone ? CGSize(width: 260, height: 260) : CGSize(width: 360, height: 320)
+        case imageViewer:
+            return phone ? CGSize(width: 240, height: 240) : CGSize(width: 320, height: 280)
+        case storage:
+            return phone ? CGSize(width: 288, height: 188) : CGSize(width: 360, height: 220)
         default:
             return CGSize(width: 220, height: 160)
         }

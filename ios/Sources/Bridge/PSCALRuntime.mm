@@ -46,6 +46,7 @@
 #else
 #include <pty.h>
 #endif
+#include "common/path_truncate.h"
 #include "common/runtime_tty.h"
 #include "ios/vproc.h"
 #include "ios/tty/pscal_fd.h"
@@ -2390,6 +2391,22 @@ char *pscalRuntimeCopyMarketingVersion(void) {
         }
         return strdup(utf8);
     }
+}
+
+char *pscalRuntimeCopyMountTargets(void) {
+    std::string list;
+    size_t count = pathTruncateMountSnapshot(NULL, 0);
+    PathTruncateMountEntry *entries = count > 0 ? (PathTruncateMountEntry *)calloc(count, sizeof(*entries)) : NULL;
+    if (entries) {
+        // The table may have changed since it was counted.
+        size_t total = pathTruncateMountSnapshot(entries, count);
+        for (size_t i = 0; i < count && i < total; i++) {
+            list += entries[i].target;
+            list += '\n';
+        }
+        free(entries);
+    }
+    return strdup(list.c_str());
 }
 
 int PSCALRuntimeSendSignalForSession(uint64_t session_id, int signo) {

@@ -182,6 +182,9 @@ int pscalRuntimeWorkspaceOpen(const char *tool, const char *path);
 char *pscalRuntimeWorkspaceStatus(void);
 /// `ws applets`: a malloc-allocated list, one applet window per line. Caller must free().
 char *pscalRuntimeWorkspaceApplets(void);
+/// Where the mount command put folders, as the shell sees them: a malloc-allocated list, one
+/// per line. Caller must free().
+char *pscalRuntimeCopyMountTargets(void);
 /// Opens an interactive iOS folder picker and returns a malloc-allocated path.
 /// Caller must free() the returned string; NULL indicates cancel/error with errno set.
 char *pscalRuntimePickMountSourceDirectory(void);

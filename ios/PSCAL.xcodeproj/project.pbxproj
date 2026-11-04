@@ -42,6 +42,13 @@
 		5FFFD00C3FFAA00000AAA001 /* TerminalSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */; };
 		5FFFD00E3FFAA00000AAA001 /* TerminalUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */; };
 		5FFFD0103FFAA00000AAA001 /* TerminalRootViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */; };
+		5FFFD2193FFAA00000AAA001 /* WorkspaceFileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD2183FFAA00000AAA001 /* WorkspaceFileService.swift */; };
+		5FFFD21B3FFAA00000AAA001 /* WorkspaceFileManagerApplet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD21A3FFAA00000AAA001 /* WorkspaceFileManagerApplet.swift */; };
+		5FFFD21D3FFAA00000AAA001 /* WorkspaceMotePadApplet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD21C3FFAA00000AAA001 /* WorkspaceMotePadApplet.swift */; };
+		5FFFD21F3FFAA00000AAA001 /* WorkspaceMotePadStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD21E3FFAA00000AAA001 /* WorkspaceMotePadStore.swift */; };
+		5FFFD2213FFAA00000AAA001 /* WorkspaceMarkdownApplet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD2203FFAA00000AAA001 /* WorkspaceMarkdownApplet.swift */; };
+		5FFFD2233FFAA00000AAA001 /* WorkspaceImageViewerApplet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD2223FFAA00000AAA001 /* WorkspaceImageViewerApplet.swift */; };
+		5FFFD2253FFAA00000AAA001 /* WorkspaceStorageApplet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD2243FFAA00000AAA001 /* WorkspaceStorageApplet.swift */; };
 		5FFFD2173FFAA00000AAA001 /* WorkspaceBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD2163FFAA00000AAA001 /* WorkspaceBridge.swift */; };
 		5FFFD20B3FFAA00000AAA001 /* WorkspaceTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD20A3FFAA00000AAA001 /* WorkspaceTheme.swift */; };
 		5FFFD20D3FFAA00000AAA001 /* WorkspaceAppletKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD20C3FFAA00000AAA001 /* WorkspaceAppletKit.swift */; };
@@ -99,6 +106,13 @@
 		5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSettingsView.swift; sourceTree = "<group>"; };
 		5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalUtils.swift; sourceTree = "<group>"; };
 		5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalRootViewController.swift; sourceTree = "<group>"; };
+		5FFFD2183FFAA00000AAA001 /* WorkspaceFileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceFileService.swift; sourceTree = "<group>"; };
+		5FFFD21A3FFAA00000AAA001 /* WorkspaceFileManagerApplet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceFileManagerApplet.swift; sourceTree = "<group>"; };
+		5FFFD21C3FFAA00000AAA001 /* WorkspaceMotePadApplet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceMotePadApplet.swift; sourceTree = "<group>"; };
+		5FFFD21E3FFAA00000AAA001 /* WorkspaceMotePadStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceMotePadStore.swift; sourceTree = "<group>"; };
+		5FFFD2203FFAA00000AAA001 /* WorkspaceMarkdownApplet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceMarkdownApplet.swift; sourceTree = "<group>"; };
+		5FFFD2223FFAA00000AAA001 /* WorkspaceImageViewerApplet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceImageViewerApplet.swift; sourceTree = "<group>"; };
+		5FFFD2243FFAA00000AAA001 /* WorkspaceStorageApplet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceStorageApplet.swift; sourceTree = "<group>"; };
 		5FFFD2163FFAA00000AAA001 /* WorkspaceBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceBridge.swift; sourceTree = "<group>"; };
 		5FFFD20A3FFAA00000AAA001 /* WorkspaceTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceTheme.swift; sourceTree = "<group>"; };
 		5FFFD20C3FFAA00000AAA001 /* WorkspaceAppletKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceAppletKit.swift; sourceTree = "<group>"; };
@@ -194,6 +208,13 @@
 				5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */,
 				5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */,
 				5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */,
+				5FFFD2183FFAA00000AAA001 /* WorkspaceFileService.swift */,
+				5FFFD21A3FFAA00000AAA001 /* WorkspaceFileManagerApplet.swift */,
+				5FFFD21C3FFAA00000AAA001 /* WorkspaceMotePadApplet.swift */,
+				5FFFD21E3FFAA00000AAA001 /* WorkspaceMotePadStore.swift */,
+				5FFFD2203FFAA00000AAA001 /* WorkspaceMarkdownApplet.swift */,
+				5FFFD2223FFAA00000AAA001 /* WorkspaceImageViewerApplet.swift */,
+				5FFFD2243FFAA00000AAA001 /* WorkspaceStorageApplet.swift */,
 				5FFFD2163FFAA00000AAA001 /* WorkspaceBridge.swift */,
 				5FFFD20A3FFAA00000AAA001 /* WorkspaceTheme.swift */,
 				5FFFD20C3FFAA00000AAA001 /* WorkspaceAppletKit.swift */,
@@ -405,6 +426,13 @@
 				5FFFD00C3FFAA00000AAA001 /* TerminalSettingsView.swift in Sources */,
 				5FFFD00E3FFAA00000AAA001 /* TerminalUtils.swift in Sources */,
 				5FFFD0103FFAA00000AAA001 /* TerminalRootViewController.swift in Sources */,
+				5FFFD2193FFAA00000AAA001 /* WorkspaceFileService.swift in Sources */,
+				5FFFD21B3FFAA00000AAA001 /* WorkspaceFileManagerApplet.swift in Sources */,
+				5FFFD21D3FFAA00000AAA001 /* WorkspaceMotePadApplet.swift in Sources */,
+				5FFFD21F3FFAA00000AAA001 /* WorkspaceMotePadStore.swift in Sources */,
+				5FFFD2213FFAA00000AAA001 /* WorkspaceMarkdownApplet.swift in Sources */,
+				5FFFD2233FFAA00000AAA001 /* WorkspaceImageViewerApplet.swift in Sources */,
+				5FFFD2253FFAA00000AAA001 /* WorkspaceStorageApplet.swift in Sources */,
 				5FFFD2173FFAA00000AAA001 /* WorkspaceBridge.swift in Sources */,
 				5FFFD20B3FFAA00000AAA001 /* WorkspaceTheme.swift in Sources */,
 				5FFFD20D3FFAA00000AAA001 /* WorkspaceAppletKit.swift in Sources */,

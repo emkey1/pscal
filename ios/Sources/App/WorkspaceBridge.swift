@@ -106,7 +106,7 @@ extension WorkspaceViewController {
     /// `ws open`. A path goes to the applet, in its own window if it can show one; without a
     /// path, a menu's rule applies and an open applet comes forward.
     func open(tool: String, path: String?) {
-        guard let path else {
+        guard let path, WorkspaceToolRegistry.opensFiles(tool) else {
             openOrFocusTool(tool)
             return
         }

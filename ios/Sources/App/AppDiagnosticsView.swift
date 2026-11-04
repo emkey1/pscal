@@ -934,5 +934,7 @@ struct AppDiagnosticsView: View {
                 }
             }
         }
+        // A wide window would otherwise get a sidebar and an empty detail column.
+        .navigationViewStyle(.stack)
     }
 }

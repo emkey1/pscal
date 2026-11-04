@@ -1,6 +1,20 @@
 import SwiftUI
 import UIKit
 
+/// A navigation view, unless the page is pushed onto one that already has a bar.
+private struct SettingsNavigation<Content: View>: View {
+    let pushed: Bool
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        if pushed {
+            content()
+        } else {
+            NavigationView { content() }
+        }
+    }
+}
+
 struct TerminalSettingsView: View {
     @ObservedObject private var appearanceSettings: TerminalTabAppearanceSettings
     @ObservedObject private var tabManager = TerminalTabManager.shared
@@ -28,7 +42,7 @@ struct TerminalSettingsView: View {
 
     @ViewBuilder
     private var content: some View {
-        NavigationView {
+        SettingsNavigation(pushed: !showsDoneButton) {
             Form {
                 Section(header: Text("Font")) {
                     Picker("Font",

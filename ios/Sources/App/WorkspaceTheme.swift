@@ -69,6 +69,11 @@ enum WorkspaceTheme {
 
     static var desktopBackground: UIColor { current.backgroundBottom }
 
+    /// Whether screens the system draws, hosted in a window, should be dark on this theme.
+    static var prefersDarkInterface: Bool {
+        contrastRatio(current.backgroundBottom, .white) >= contrastRatio(current.backgroundBottom, .black)
+    }
+
     private static func themeDidChange() {
         cachedColors = nil
         NotificationCenter.default.post(name: .workspaceThemeDidChange, object: nil)

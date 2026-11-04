@@ -39,6 +39,14 @@ import UIKit
 ///   restore-arrangement            the Desktops applet's Restore
 ///   open-or-focus <identifier>     what a menu does with an applet
 ///   text-scale <id> <step>         Cmd+= (1), Cmd+- (-1) or Cmd+0 (0) for that window's applet
+///   opens-at-launch <0|1>          Settings' Open at Launch
+///   dismiss-presented              dismiss whatever sheet or alert is on top
+///   open-file <tool> <path>        what `ws open` does with a path
+///   fm-navigate <id> <path>        go to a folder in that File Manager
+///   fm-refresh <id>                list its folder again
+///   motepad-insert <id> <text>     type into that MotePad
+///   motepad-save <id>              Save
+///   file-op <token> <op> [path]    call the file service directly; see the dump's fileResult
 ///   theme <identifier>             choose a theme
 ///   gauge <ring|bar>               choose the gauge style
 ///   density <0..1>                 set the density
@@ -244,10 +252,100 @@ enum WorkspaceTestHooks {
             guard let name = pieces.first, !name.isEmpty else { return ["ok": false, "error": "usage: add-shortcut <name> <command>"] }
             let command = pieces.count > 1 ? decode(pieces[1]) : ""
             WorkspaceLauncherStore.mutate(atPath: []) { $0.append(["name": name, "command": command]) }
+        case "opens-at-launch":
+            WorkspaceSettings.opensAtLaunch = args.first == "1"
+        case "dismiss-presented":
+            // An applet's message, so the next one can show.
+            var top = root.presentedViewController
+            while let next = top?.presentedViewController {
+                top = next
+            }
+            top?.dismiss(animated: false)
+        case "open-file":
+            let pieces = rest.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            guard let workspace, pieces.count == 2, WorkspaceToolRegistry.isAvailable(pieces[0]) else {
+                return ["ok": false, "error": "usage: open-file <tool> <path>"]
+            }
+            workspace.open(tool: pieces[0], path: decode(pieces[1]))
+        case "fm-navigate":
+            let pieces = rest.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            guard pieces.count == 2, let target = window(pieces[0]),
+                  let files = workspace?.applet(of: target) as? WorkspaceFileManagerAppletViewController else {
+                return ["ok": false, "error": "no File Manager in that window"]
+            }
+            files.navigate(toPath: decode(pieces[1]))
+        case "fm-refresh":
+            guard let target = window(args.first), let files = workspace?.applet(of: target) as? WorkspaceFileManagerAppletViewController else {
+                return ["ok": false, "error": "no File Manager in that window"]
+            }
+            files.refresh()
+        case "motepad-insert":
+            let pieces = rest.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            guard pieces.count == 2, let target = window(pieces[0]),
+                  let pad = workspace?.applet(of: target) as? WorkspaceMotePadAppletViewController else {
+                return ["ok": false, "error": "no MotePad in that window"]
+            }
+            pad.textViewForTesting.insertText(decode(pieces[1]))
+        case "motepad-save":
+            guard let target = window(args.first), let pad = workspace?.applet(of: target) as? WorkspaceMotePadAppletViewController else {
+                return ["ok": false, "error": "no MotePad in that window"]
+            }
+            pad.saveDocument()
+        case "file-op":
+            // file-op <token> <remove|remove-tree|list> [path]. The answer lands in the dump's
+            // fileResult under that token, since the service's own answer comes later. An
+            // empty path is one of the things being tested.
+            let pieces = rest.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+            guard pieces.count >= 2 else { return ["ok": false, "error": "usage: file-op <token> <op> [path]"] }
+            runFileOperation(token: pieces[0], operation: pieces[1], path: pieces.count > 2 ? decode(pieces[2]) : "")
         default:
             return ["ok": false, "error": "unknown verb \(verb)"]
         }
         return ["ok": true]
+    }
+
+    private static var lastFileResult: [String: Any] = [:]
+
+    private static func runFileOperation(token: String, operation: String, path: String) {
+        func finish(_ error: Error?, count: Int = 0) {
+            lastFileResult = ["token": token, "ok": error == nil, "error": error?.localizedDescription ?? "", "count": count]
+        }
+        switch operation {
+        case "remove", "remove-tree":
+            WorkspaceFileService.shared.remove(path, recursive: operation == "remove-tree") { result in
+                if case .failure(let error) = result { finish(error) } else { finish(nil) }
+            }
+        case "list":
+            _ = WorkspaceFileService.shared.listDirectory(path) { result in
+                switch result {
+                case .success(let items): finish(nil, count: items.count)
+                case .failure(let error): finish(error)
+                }
+            }
+        default:
+            finish(WorkspaceFileError.notRegularFile)
+        }
+    }
+
+    /// What a test can't see from the window itself.
+    private static func appletState(_ applet: WorkspaceAppletViewController?) -> [String: Any] {
+        switch applet {
+        case let files as WorkspaceFileManagerAppletViewController:
+            return ["path": files.currentPath, "loading": files.isLoading, "count": files.shownNames.count,
+                    "names": Array(files.shownNames.prefix(64))]
+        case let pad as WorkspaceMotePadAppletViewController:
+            let text = pad.textViewForTesting.text ?? ""
+            return ["path": pad.documentPathForTesting ?? "", "dirty": pad.isDirtyForTesting, "length": text.count,
+                    "text": String(text.prefix(256))]
+        case let markdown as WorkspaceMarkdownAppletViewController:
+            return ["path": markdown.currentPath ?? "", "message": markdown.statusMessage ?? "", "length": markdown.renderedLengthForTesting]
+        case let image as WorkspaceImageViewerAppletViewController:
+            return ["path": image.currentPath ?? "", "message": image.statusMessage ?? "", "hasImage": image.hasImageForTesting]
+        case let storage as WorkspaceStorageAppletViewController:
+            return ["scanning": storage.isScanning]
+        default:
+            return [:]
+        }
     }
 
     private static func htermController(_ tab: TerminalTabManager.Tab) -> HtermTerminalController? {
@@ -303,10 +401,12 @@ enum WorkspaceTestHooks {
         result["theme"] = WorkspaceTheme.currentIdentifier
         result["hasWallpaper"] = workspace.hasWallpaperForTesting
         result["shortcuts"] = WorkspaceLauncherStore.shortcuts.count
+        result["fileResult"] = lastFileResult
         result["windows"] = workspace.desktopWindows.map { window -> [String: Any] in
             let content = workspace.content(of: window)
             return [
                 "id": window.serial,
+                "applet": appletState(workspace.applet(of: window)),
                 "textScale": Double(workspace.applet(of: window)?.workspaceTextScale ?? 1),
                 "title": window.titleLabel.text ?? "",
                 "tool": window.toolIdentifier ?? "",

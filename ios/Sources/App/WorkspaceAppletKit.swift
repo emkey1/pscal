@@ -36,6 +36,13 @@ protocol WorkspaceFileOpenable: AnyObject {
     func workspaceOpenFile(atPath path: String)
 }
 
+/// An applet that keeps some of Workspace's window-level keys for itself while it's focused.
+/// A claimed key goes on through the responder chain to the applet's own key commands.
+@MainActor
+protocol WorkspaceKeyClaiming: AnyObject {
+    func workspaceClaimsKey(input: String, keyCode: UIKeyboardHIDUsage, modifiers: UIKeyModifierFlags) -> Bool
+}
+
 enum WorkspaceTextScale {
     /// Each step is big enough to see, on small text as on large.
     private static let steps: [CGFloat] = [0.5, 0.75, 0.85, 1, 1.15, 1.25, 1.5, 1.75, 2, 2.5, 3]
@@ -203,6 +210,7 @@ class WorkspaceAppletViewController: UIViewController {
     private let trackedIcons = NSHashTable<UIImageView>.weakObjects()
     private let trackedGauges = NSHashTable<WorkspaceGaugeView>.weakObjects()
     private let trackedTwoLineButtons = NSHashTable<WorkspaceTwoLineButton>.weakObjects()
+    private let trackedTileCaptions = NSHashTable<UILabel>.weakObjects()
     private var scaleBaseFonts = NSMapTable<UILabel, UIFont>.weakToStrongObjects()
     private var scaleAppliedFonts = NSMapTable<UILabel, UIFont>.weakToStrongObjects()
     private var themeObserver: NSObjectProtocol?
@@ -315,6 +323,7 @@ class WorkspaceAppletViewController: UIViewController {
         for button in trackedTwoLineButtons.allObjects {
             drawTwoLineButton(button)
         }
+        trackedTileCaptions.allObjects.forEach(scaleLabel)
     }
 
     /// Scales a label from the font it was given, which is remembered, so calling this again
@@ -418,6 +427,7 @@ class WorkspaceAppletViewController: UIViewController {
         let captionLabel = themeSecondaryLabel(style: .caption1)
         captionLabel.text = caption
         captionLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        trackedTileCaptions.add(captionLabel)
         header.addArrangedSubview(icon)
         header.addArrangedSubview(captionLabel)
         guard trailing else { return (header, nil) }

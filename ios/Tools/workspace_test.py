@@ -17,10 +17,12 @@ import argparse
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
 import time
+import zlib
 
 BUNDLE = "com.pscal.PSCAL"
 NOTIFY = "com.pscal.PSCAL.workspace-test"
@@ -445,7 +447,8 @@ def run_desktop_tests(app, results, root_tab, root_win):
     run_applet_tests(app, results)
 
 
-APPLETS = ["clock", "monitor", "networks", "status", "launcher", "shortcuts", "sessions", "themes", "settings", "diagnostics"]
+APPLETS = ["clock", "monitor", "networks", "status", "launcher", "shortcuts", "sessions", "themes", "settings", "diagnostics",
+           "filemanager", "motepad", "markdown", "imageviewer", "storage"]
 
 
 def inside(frame, surface):
@@ -579,6 +582,259 @@ def run_applet_tests(app, results):
     app.screenshot("after-applet-relaunch")
 
 
+UNICODE_NAME = "héllo wörld ☃ 日本語.txt"
+
+
+def tiny_png(width=64, height=48):
+    def chunk(tag, data):
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff)
+    row = b"\x00" + bytes(x % 256 for x in range(width * 3))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(row * height)) + chunk(b"IEND", b""))
+
+
+def make_file_tree(base):
+    """Everything the file applets must survive, made from outside the app."""
+    if os.path.isdir(base):
+        shutil.rmtree(base)
+    os.makedirs(base)
+
+    def put(name, data):
+        path = os.path.join(base, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(data)
+
+    put("plain.txt", b"hello\n")
+    put("other.txt", b"other\n")
+    put(UNICODE_NAME, "snow ☃\n".encode())
+    put("gone-soon.txt", b"keep me\n")
+    put("note.md", b"# Title\n\nSome *text* and a [link](plain.txt).\n")
+    put("pic.png", tiny_png())
+    put("zero.png", b"")
+    put("corrupt.png", b"\x89PNG\r\n\x1a\n" + b"not an image" * 64)
+    put("latin1.txt", b"caf\xe9\n")
+    put("large.txt", b"a" * (9 * 1024 * 1024))
+    put("doomed/inside.txt", b"x")
+    put("mntsrc/held.txt", b"held\n")
+    os.symlink("plain.txt", os.path.join(base, "link.txt"))
+    os.symlink("nowhere", os.path.join(base, "broken"))
+    os.symlink("loop", os.path.join(base, "loop"))
+    os.makedirs(os.path.join(base, "big"))
+    for index in range(10000):
+        open(os.path.join(base, "big", "f%05d" % index), "w").close()
+    deep = "/".join(["d" * 38] * 20)
+    put(deep + "/leaf.txt", b"leaf\n")
+    return deep
+
+
+def applet_windows(dump, tool):
+    return [w for w in (dump or {}).get("windows", []) if w["tool"] == tool]
+
+
+def applet_window(dump, serial):
+    return next((w for w in (dump or {}).get("windows", []) if w["id"] == serial), None)
+
+
+def open_file(app, tool, path):
+    """Opens a path in a new window of the tool, and returns that window."""
+    before = {w["id"] for w in applet_windows(app.dump(), tool)}
+    app.send("open-file", "%s %s" % (tool, path))
+    dump = wait_for(app, lambda d: any(w["id"] not in before for w in applet_windows(d, tool)))
+    return next((w for w in applet_windows(dump, tool) if w["id"] not in before), None)
+
+
+def wait_applet(app, serial, predicate, timeout=20):
+    dump = wait_for(app, lambda d: applet_window(d, serial) and predicate(applet_window(d, serial)["applet"]), timeout)
+    window = applet_window(dump, serial)
+    return window["applet"] if window else None
+
+
+def file_op(app, token, operation, path=""):
+    app.send("file-op", "%s %s %s" % (token, operation, path))
+    dump = wait_for(app, lambda d: d.get("fileResult", {}).get("token") == token, 30)
+    return (dump or {}).get("fileResult", {})
+
+
+def close_tools(app, *tools):
+    for tool in tools:
+        for window in applet_windows(app.dump(), tool):
+            app.send("close", str(window["id"]))
+
+
+def run_file_tests(app, results):
+    """The file applets on what makes file code fail, and the service's refusals."""
+    base = os.path.join(app.home, "wt_files")
+    deep = make_file_tree(base)
+    dump = wait_for(app, lambda d: d.get("mode") == "workspace")
+    root = [t["id"] for t in dump["tabs"] if t["root"]][0]
+    app.clear_file("wt_home")
+    home = app.wait_file("wt_home", root, 'echo "$HOME" > ~/wt_home')
+    results.check("the shell says where home is", bool(home), home)
+    shown = "%s/wt_files" % home
+
+    # File Manager.
+    close_tools(app, "filemanager")
+    wait_for(app, lambda d: not applet_windows(d, "filemanager"))
+    app.send("open-or-focus", "filemanager")
+    dump = wait_for(app, lambda d: applet_windows(d, "filemanager") and not applet_windows(d, "filemanager")[0]["applet"].get("loading"))
+    files = applet_windows(dump, "filemanager")[0]
+    results.check("File Manager starts at home", files["applet"]["path"] == home, files["applet"])
+    fm = files["id"]
+
+    def go(path, predicate=lambda state: True, timeout=30):
+        app.send("fm-navigate", "%d %s" % (fm, path))
+        return wait_applet(app, fm, lambda s: s["path"] == path and not s["loading"] and predicate(s), timeout)
+
+    state = go(shown)
+    names = set((state or {}).get("names", []))
+    for name in ["plain.txt", UNICODE_NAME, "link.txt", "broken", "loop", "big", "doomed"]:
+        results.check("the listing shows %s" % name, name in names, sorted(names))
+    app.screenshot("files-listing")
+    began = time.time()
+    state = go("%s/big" % shown, lambda s: s["count"] == 10000)
+    results.check("10,000 entries list in time", state and state["count"] == 10000, state)
+    print("  10,000 entries: %.1f s" % (time.time() - began), flush=True)
+    results.check("the app answers while they're shown", app.dump() is not None)
+    app.screenshot("files-big")
+    state = go("%s/%s" % (shown, deep), lambda s: s["count"] == 1)
+    results.check("a deep path lists", state and state["names"] == ["leaf.txt"], state)
+    state = go("%s/doomed" % shown, lambda s: s["count"] == 1)
+    results.check("a folder about to go lists", state and state["count"] == 1, state)
+    shutil.rmtree(os.path.join(base, "doomed"))
+    app.send("fm-refresh", str(fm))
+    state = wait_applet(app, fm, lambda s: not s["loading"] and s["count"] == 0)
+    results.check("a folder deleted while shown empties", state and state["count"] == 0, state)
+    app.send("dismiss-presented")
+    state = go(shown)
+    results.check("File Manager goes on after that", state and "plain.txt" in state["names"], state)
+
+    # MotePad, from a real shell for one and the hook for the name a shell would need quoted.
+    before = {w["id"] for w in applet_windows(app.dump(), "motepad")}
+    app.send("focus", str([w["id"] for w in app.dump()["windows"] if hosted_info(w, root)][0]))
+    app.send("type", "%s ws open motepad %s/plain.txt\\n" % (root, shown))
+    dump = wait_for(app, lambda d: any(w["id"] not in before for w in applet_windows(d, "motepad")))
+    pad = next((w for w in applet_windows(dump, "motepad") if w["id"] not in before), None)
+    results.check("ws open hands a path to MotePad", pad is not None, dump)
+    if pad:
+        state = wait_applet(app, pad["id"], lambda s: s["length"] > 0)
+        results.check("MotePad reads the file", state and state["text"] == "hello\n" and not state["dirty"], state)
+        app.send("motepad-insert", "%d more\\n" % pad["id"])
+        state = wait_applet(app, pad["id"], lambda s: s["dirty"])
+        results.check("typing marks it changed", state and state["dirty"], state)
+        app.screenshot("motepad-typed")
+        app.send("motepad-save", str(pad["id"]))
+        state = wait_applet(app, pad["id"], lambda s: not s["dirty"])
+        results.check("Save clears the mark", state and not state["dirty"], state)
+        with open(os.path.join(base, "plain.txt")) as handle:
+            text = handle.read()
+        results.check("Save reaches the disk", "more" in text and "hello" in text, text)
+    window = open_file(app, "motepad", "%s/%s" % (shown, UNICODE_NAME))
+    state = wait_applet(app, window["id"], lambda s: s["length"] > 0) if window else None
+    results.check("MotePad opens a Unicode name", state and state["text"] == "snow ☃\n", state)
+    for name in ["latin1.txt", "large.txt"]:
+        with open(os.path.join(base, name), "rb") as handle:
+            before_bytes = handle.read()
+        window = open_file(app, "motepad", "%s/%s" % (shown, name))
+        time.sleep(2)
+        state = applet_window(app.dump(), window["id"])["applet"] if window else None
+        results.check("MotePad refuses %s" % name, state and state["length"] == 0 and not state["dirty"], state)
+        app.screenshot("motepad-refuses-%s" % name.split(".")[0])
+        app.send("dismiss-presented")
+        with open(os.path.join(base, name), "rb") as handle:
+            results.check("%s is unchanged" % name, handle.read() == before_bytes)
+    window = open_file(app, "motepad", "%s/gone-soon.txt" % shown)
+    if window:
+        wait_applet(app, window["id"], lambda s: s["length"] > 0)
+        os.remove(os.path.join(base, "gone-soon.txt"))
+        time.sleep(5)
+        state = applet_window(app.dump(), window["id"])["applet"]
+        results.check("a file deleted while open keeps its text", state["text"] == "keep me\n", state)
+        app.screenshot("motepad-file-gone")
+        app.send("dismiss-presented")
+    close_tools(app, "motepad")
+    wait_for(app, lambda d: not applet_windows(d, "motepad"))
+    app.send("dismiss-presented")
+
+    # The viewers.
+    window = open_file(app, "markdown", "%s/note.md" % shown)
+    state = wait_applet(app, window["id"], lambda s: s["length"] > 0) if window else None
+    results.check("Markdown renders a file", state and not state["message"], state)
+    app.screenshot("markdown-note")
+    window = open_file(app, "markdown", "%s/missing.md" % shown)
+    state = wait_applet(app, window["id"], lambda s: s["message"]) if window else None
+    results.check("Markdown says a file is missing", state and state["message"], state)
+    window = open_file(app, "imageviewer", "%s/pic.png" % shown)
+    state = wait_applet(app, window["id"], lambda s: s["hasImage"]) if window else None
+    results.check("Image Viewer shows an image", state and state["hasImage"], state)
+    app.screenshot("image-viewer")
+    for name in ["zero.png", "corrupt.png"]:
+        window = open_file(app, "imageviewer", "%s/%s" % (shown, name))
+        state = wait_applet(app, window["id"], lambda s: s["message"]) if window else None
+        results.check("Image Viewer says %s is unreadable" % name, state and state["message"] and not state["hasImage"], state)
+    close_tools(app, "markdown", "imageviewer")
+
+    # Storage over the whole tree, the big folder included.
+    close_tools(app, "storage")
+    wait_for(app, lambda d: not applet_windows(d, "storage"))
+    app.send("open-or-focus", "storage")
+    dump = wait_for(app, lambda d: applet_windows(d, "storage") and not applet_windows(d, "storage")[0]["applet"].get("scanning"), 60)
+    results.check("Storage finishes its scan", bool(dump), dump)
+    app.screenshot("storage-scanned")
+    close_tools(app, "storage")
+
+    # What the service must refuse, whatever an applet asks.
+    for token, path in [("r-home", home), ("r-root", "/"), ("r-empty", "")]:
+        result = file_op(app, token, "remove-tree", path)
+        results.check("the service refuses removing %r" % path, result.get("token") == token and not result.get("ok"), result)
+    results.check("home is still there", os.path.isdir(app.home))
+    result = file_op(app, "l-big", "list", "%s/big" % shown)
+    results.check("the service lists a big folder", result.get("count") == 10000, result)
+    result = file_op(app, "l-loop", "list", "%s/loop" % shown)
+    results.check("a symlink loop is an error, not a hang", result.get("token") == "l-loop" and not result.get("ok"), result)
+    app.clear_file("wt_mount_ok")
+    app.send("focus", str([w["id"] for w in app.dump()["windows"] if hosted_info(w, root)][0]))
+    mounted = app.wait_file("wt_mount_ok", root, "mkdir -p ~/wt_mnt && mount --bind ~/wt_files/mntsrc ~/wt_mnt && echo ok > ~/wt_mount_ok")
+    results.check("mount --bind works", mounted == "ok", mounted)
+    result = file_op(app, "r-mount", "remove-tree", "%s/wt_mnt" % home)
+    results.check("the service refuses removing a mount target", not result.get("ok") and "mount" in result.get("error", ""), result)
+    results.check("the mounted folder's own files stay", os.path.exists(os.path.join(base, "mntsrc", "held.txt")))
+    result = file_op(app, "l-mount", "list", "%s/wt_mnt" % home)
+    results.check("a mount target lists its source", result.get("count") == 1, result)
+    app.clear_file("wt_umount_ok")
+    text = app.wait_file("wt_umount_ok", root, "umount ~/wt_mnt; echo $? > ~/wt_umount_ok")
+    results.check("umount works", text == "0", text)
+
+    # Two windows of one applet and a folder come back, on a launch straight into Workspace,
+    # when the runtime may not have set its paths up yet.
+    first = open_file(app, "motepad", "%s/plain.txt" % shown)
+    second = open_file(app, "motepad", "%s/other.txt" % shown)
+    results.check("two MotePad windows open", first is not None and second is not None and first["id"] != second["id"])
+    app.send("fm-navigate", "%d %s" % (fm, shown))
+    wait_applet(app, fm, lambda s: s["path"] == shown and not s["loading"])
+    app.send("save-arrangement")
+    wait_for(app, lambda d: d.get("saved"))
+    app.send("opens-at-launch", "1")
+    app.terminate()
+    time.sleep(2)
+    app.launch()
+    time.sleep(1)
+    results.check("hooks answer after the file relaunch", app.wait_ready(), "no ready.json")
+    dump = wait_for(app, lambda d: d.get("mode") == "workspace" and len(applet_windows(d, "motepad")) == 2, 30)
+    results.check("a launch into Workspace restores both MotePads", bool(dump), app.dump())
+    if dump:
+        wait_for(app, lambda d: all(w["applet"]["length"] > 0 for w in applet_windows(d, "motepad")))
+        paths = sorted(w["applet"]["path"] for w in applet_windows(app.dump(), "motepad"))
+        results.check("each keeps its file", paths == ["%s/other.txt" % shown, "%s/plain.txt" % shown], paths)
+        window = next(iter(applet_windows(dump, "filemanager")), None)
+        results.check("File Manager comes back", window is not None, dump)
+        if window:
+            state = wait_applet(app, window["id"], lambda s: not s["loading"] and s["path"] == shown)
+            results.check("its folder resolves at launch", state and "plain.txt" in state["names"], state)
+    app.screenshot("after-file-relaunch")
+    app.send("opens-at-launch", "0")
+
+
 def run_inert_control(app, results):
     """A launch without the variable must not answer. SIMCTL_CHILD_ variables stay in the
     environment until the simulator shuts down, so this needs a shutdown first."""
@@ -610,6 +866,7 @@ def main():
     try:
         app.install()
         run_tests(app, results)
+        run_file_tests(app, results)
         run_inert_control(app, results)
     finally:
         app.terminate()

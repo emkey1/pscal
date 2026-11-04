@@ -226,8 +226,19 @@ final class WorkspaceSessionsAppletViewController: WorkspaceAppletViewController
 /// A SwiftUI screen filling an applet's window.
 @MainActor
 class WorkspaceHostedAppletViewController: WorkspaceAppletViewController {
+    private weak var hostedController: UIViewController?
+
+    override func applyTheme() {
+        super.applyTheme()
+        hostedController?.overrideUserInterfaceStyle = WorkspaceTheme.prefersDarkInterface ? .dark : .light
+        hostedController?.view.tintColor = WorkspaceTheme.accent
+    }
+
     func embed<Content: View>(_ rootView: Content) {
         let hosting = UIHostingController(rootView: rootView)
+        hostedController = hosting
+        hosting.overrideUserInterfaceStyle = WorkspaceTheme.prefersDarkInterface ? .dark : .light
+        hosting.view.tintColor = WorkspaceTheme.accent
         addChild(hosting)
         hosting.view.translatesAutoresizingMaskIntoConstraints = false
         toolContentView.addSubview(hosting.view)

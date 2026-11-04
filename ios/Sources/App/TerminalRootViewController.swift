@@ -80,7 +80,9 @@ final class TerminalWindow: UIWindow {
     }()
 
     override var keyCommands: [UIKeyCommand]? {
-        commandKeyCommands + controlKeyCommands
+        // With an applet in front, Ctrl-C and Ctrl-Z belong to it, not to a terminal behind it.
+        let controlKeysGoToSelected = TerminalTabManager.shared.keyRouter?.terminalControlKeysGoToSelected ?? true
+        return controlKeysGoToSelected ? commandKeyCommands + controlKeyCommands : commandKeyCommands
     }
 
     override func sendEvent(_ event: UIEvent) {
