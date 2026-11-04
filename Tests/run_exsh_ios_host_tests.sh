@@ -50,6 +50,7 @@ RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_background_release
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_loops_start_together
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_path_names_together
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_options_together
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_background_starter
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_background_redirect
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_wait_killed

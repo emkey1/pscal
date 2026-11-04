@@ -65,6 +65,13 @@ for name in _basename _dirname _hcreate _hsearch _hdestroy; do
         status=1
     fi
 done
+# libc's getopt keeps its place for the whole process. An applet gets the per-thread one through thread_getopt.h.
+for name in _getopt _getopt_long _optarg _opterr _optind _optopt _optreset; do
+    if nm -u "$BUILD_DIR/bin/exsh" 2>/dev/null | grep -x "$name" > /dev/null; then
+        echo "FAIL ios_host_statics: exsh uses libc's ${name#_}, whose state is process-wide; include thread_getopt.h"
+        status=1
+    fi
+done
 
 [ "$status" -eq 0 ] && echo "PASS ios_host_statics"
 exit "$status"

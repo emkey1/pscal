@@ -529,6 +529,20 @@ getopt(int nargc, char * const *nargv, const char *options)
 	return (getopt_internal(nargc, nargv, options, NULL, NULL, 0));
 }
 
+#ifdef PSCAL_TARGET_IOS
+/*
+ * For rsync, whose parsing has to be per thread like everything's here.
+ */
+int
+BSDgetopt_long(int nargc, char * const *nargv, const char *options,
+    const struct option *long_options, int *idx)
+{
+
+	return (getopt_internal(nargc, nargv, options, long_options, idx,
+	    FLAG_PERMUTE));
+}
+#endif
+
 #if 0
 /*
  * getopt_long --

@@ -181,6 +181,11 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("loops_together_job", f": > smoke/ltj.out; n=0; while [ $n -lt 300 ]; do for f in 1; do echo $f >> smoke/ltj.out; done & i=0; until [ $i -ge 1 ]; do i=$((i+1)); done; n=$((n+1)); done > smoke/ltj.msg 2>&1; wait; grep -v '^\\[' smoke/ltj.msg {R}; wc -l < smoke/ltj.out | tr -d ' ' {A}", "300\n"),
     # libc answers dirname in one buffer for the whole process, so one could print another's answer.
     ("dirname_together", f": > smoke/dn1; : > smoke/dn2; : > smoke/dn3; : > smoke/dn4; n=0; while [ $n -lt 300 ]; do dirname /aaa/one >> smoke/dn1 & dirname /bbb/two >> smoke/dn2 & dirname /ccc/three >> smoke/dn3 & dirname /ddd/four >> smoke/dn4 & wait; n=$((n+1)); done > smoke/dn.msg 2>&1; echo \"$(grep -c -x /aaa smoke/dn1) $(grep -c -x /bbb smoke/dn2) $(grep -c -x /ccc smoke/dn3) $(grep -c -x /ddd smoke/dn4)\" {R}", "300 300 300 300\n"),
+    # libc's getopt keeps its place for the whole process: tee lost its -a, made a file named -a or read past its arguments.
+    ("tee_together", f"rm -rf smoke/tt; mkdir -p smoke/tt; a=\"-a -a -a -a -a -a -a -a -a -a -a -a -a -a -a -a -a -a -a -a -a -a -a -a\"; n=0; while [ $n -lt 300 ]; do echo x | tee $a smoke/tt/t1 > /dev/null & echo x | tee $a smoke/tt/t2 > /dev/null & echo x | tee $a smoke/tt/t3 > /dev/null & echo x | tee $a smoke/tt/t4 > /dev/null & wait; n=$((n+1)); done > smoke/tt.msg 2>&1; echo \"$(wc -l < smoke/tt/t1 | tr -d ' ') $(wc -l < smoke/tt/t2 | tr -d ' ') $(wc -l < smoke/tt/t3 | tr -d ' ') $(wc -l < smoke/tt/t4 | tr -d ' ')\" {R}; ls -A | grep -c -x -- -a {A}", "300 300 300 300\n0\n"),
+    ("applet_bad_option", f"tee -z < /dev/null 2>&1 | head -1 {R}", "tee: invalid option -- 'z'\n"),
+    ("applet_missing_arg", f"mknod -m 2>&1 | head -1 {R}", "mknod: option requires an argument -- 'm'\n"),
+    ("rsync_bad_option", f"rsync --nosuch 2>&1 | head -1 {R}", "rsync: bad option '--nosuch'\n"),
     ("group_inner_pipe", f"{{ printf 'b\\na\\n' | sort; echo z; }} | head -2 {R}", "a\nb\n"),
     ("group_merge_stderr", f"{{ echo o; }} |& cat {R}", "o\n"),
     ("group_large_output", f"{{ seq 1 50000; }} | wc -l | tr -d ' ' {R}", "50000\n"),
