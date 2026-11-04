@@ -122,5 +122,5 @@ suites.
 * Tests/: Regression suite
 
 ## License
-Pscal is released under the MIT License. PSCAL releases prior to 2.22 were distributed
-under the Unlicense.
+Pscal is released under the Apache License 2.0. Earlier releases were distributed under
+the MIT License, and releases prior to 2.22 under the Unlicense.

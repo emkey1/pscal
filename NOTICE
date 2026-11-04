@@ -1,0 +1,12 @@
+PSCAL
+Copyright 2024-2026 Mike Miller
+
+PSCAL was released under the MIT License until 2026-11-04. Versions from before
+that date remain available under those terms.
+
+The components in components/ and src/smallclue carry their own LICENSE and
+NOTICE files.
+
+This product includes third-party software under its own license, in the license
+file in each directory: third-party/ (SDL2, curl, dvtm, elvis, hterm, libgit2,
+micro, openrsync, OpenSSH, OpenSSL), fonts/ and tools/shellbench_cacheable.
