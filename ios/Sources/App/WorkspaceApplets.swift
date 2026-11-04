@@ -36,7 +36,7 @@ enum WorkspaceToolRegistry {
         identifier == desktops || identifier == launcher
     }
 
-    /// Applets that take a path, each in a window of its own. Any other keeps to one window.
+    /// Applets where each path gets a window of its own. Any other keeps to one window.
     static func opensFiles(_ identifier: String) -> Bool {
         [fileManager, motePad, markdown, imageViewer, videoPlayer].contains(identifier)
     }
@@ -62,6 +62,10 @@ enum WorkspaceToolRegistry {
         markdown: { WorkspaceMarkdownAppletViewController() },
         imageViewer: { WorkspaceImageViewerAppletViewController() },
         storage: { WorkspaceStorageAppletViewController() },
+        browser: { WorkspaceBrowserAppletViewController() },
+        videoPlayer: { WorkspaceVideoPlayerAppletViewController() },
+        music: { WorkspaceMusicAppletViewController() },
+        equalizer: { WorkspaceEqualizerAppletViewController() },
     ]
 
     static var availableTools: [String] {
@@ -106,6 +110,10 @@ enum WorkspaceToolRegistry {
         case markdown: return "Markdown"
         case imageViewer: return "Image Viewer"
         case storage: return "Storage"
+        case browser: return "Browser"
+        case videoPlayer: return "Video Player"
+        case music: return "Music"
+        case equalizer: return "Equalizer"
         default: return identifier
         }
     }
@@ -147,6 +155,14 @@ enum WorkspaceToolRegistry {
             return phone ? CGSize(width: 340, height: 420) : CGSize(width: 620, height: 520)
         case storage:
             return phone ? CGSize(width: 336, height: 420) : CGSize(width: 520, height: 500)
+        case browser:
+            return phone ? CGSize(width: 352, height: 520) : CGSize(width: 620, height: 420)
+        case videoPlayer:
+            return phone ? CGSize(width: 340, height: 260) : CGSize(width: 720, height: 460)
+        case music:
+            return phone ? CGSize(width: 252, height: 510) : CGSize(width: 212, height: 470)
+        case equalizer:
+            return CGSize(width: 460, height: 300)
         default:
             return phone ? CGSize(width: 320, height: 300) : CGSize(width: 460, height: 420)
         }
@@ -186,6 +202,14 @@ enum WorkspaceToolRegistry {
             return phone ? CGSize(width: 240, height: 240) : CGSize(width: 320, height: 280)
         case storage:
             return phone ? CGSize(width: 288, height: 188) : CGSize(width: 360, height: 220)
+        case browser:
+            return phone ? CGSize(width: 300, height: 184) : CGSize(width: 360, height: 240)
+        case videoPlayer:
+            return phone ? CGSize(width: 240, height: 180) : CGSize(width: 320, height: 220)
+        case music:
+            return phone ? CGSize(width: 252, height: 390) : CGSize(width: 212, height: 360)
+        case equalizer:
+            return CGSize(width: 340, height: 240)
         default:
             return CGSize(width: 220, height: 160)
         }

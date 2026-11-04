@@ -42,6 +42,12 @@
 		5FFFD00C3FFAA00000AAA001 /* TerminalSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */; };
 		5FFFD00E3FFAA00000AAA001 /* TerminalUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */; };
 		5FFFD0103FFAA00000AAA001 /* TerminalRootViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */; };
+		5FFFD2273FFAA00000AAA001 /* WorkspaceBrowserApplet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD2263FFAA00000AAA001 /* WorkspaceBrowserApplet.swift */; };
+		5FFFD2293FFAA00000AAA001 /* WorkspaceVideoPlayerApplet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD2283FFAA00000AAA001 /* WorkspaceVideoPlayerApplet.swift */; };
+		5FFFD22B3FFAA00000AAA001 /* WorkspaceMusicApplet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD22A3FFAA00000AAA001 /* WorkspaceMusicApplet.swift */; };
+		5FFFD22D3FFAA00000AAA001 /* WorkspaceAudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD22C3FFAA00000AAA001 /* WorkspaceAudioEngine.swift */; };
+		5FFFD22F3FFAA00000AAA001 /* WorkspaceAudioLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD22E3FFAA00000AAA001 /* WorkspaceAudioLibrary.swift */; };
+		5FFFD2313FFAA00000AAA001 /* WorkspaceEqualizerApplet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD2303FFAA00000AAA001 /* WorkspaceEqualizerApplet.swift */; };
 		5FFFD2193FFAA00000AAA001 /* WorkspaceFileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD2183FFAA00000AAA001 /* WorkspaceFileService.swift */; };
 		5FFFD21B3FFAA00000AAA001 /* WorkspaceFileManagerApplet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD21A3FFAA00000AAA001 /* WorkspaceFileManagerApplet.swift */; };
 		5FFFD21D3FFAA00000AAA001 /* WorkspaceMotePadApplet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD21C3FFAA00000AAA001 /* WorkspaceMotePadApplet.swift */; };
@@ -106,6 +112,12 @@
 		5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSettingsView.swift; sourceTree = "<group>"; };
 		5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalUtils.swift; sourceTree = "<group>"; };
 		5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalRootViewController.swift; sourceTree = "<group>"; };
+		5FFFD2263FFAA00000AAA001 /* WorkspaceBrowserApplet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceBrowserApplet.swift; sourceTree = "<group>"; };
+		5FFFD2283FFAA00000AAA001 /* WorkspaceVideoPlayerApplet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceVideoPlayerApplet.swift; sourceTree = "<group>"; };
+		5FFFD22A3FFAA00000AAA001 /* WorkspaceMusicApplet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceMusicApplet.swift; sourceTree = "<group>"; };
+		5FFFD22C3FFAA00000AAA001 /* WorkspaceAudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceAudioEngine.swift; sourceTree = "<group>"; };
+		5FFFD22E3FFAA00000AAA001 /* WorkspaceAudioLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceAudioLibrary.swift; sourceTree = "<group>"; };
+		5FFFD2303FFAA00000AAA001 /* WorkspaceEqualizerApplet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceEqualizerApplet.swift; sourceTree = "<group>"; };
 		5FFFD2183FFAA00000AAA001 /* WorkspaceFileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceFileService.swift; sourceTree = "<group>"; };
 		5FFFD21A3FFAA00000AAA001 /* WorkspaceFileManagerApplet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceFileManagerApplet.swift; sourceTree = "<group>"; };
 		5FFFD21C3FFAA00000AAA001 /* WorkspaceMotePadApplet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceMotePadApplet.swift; sourceTree = "<group>"; };
@@ -208,6 +220,12 @@
 				5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */,
 				5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */,
 				5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */,
+				5FFFD2263FFAA00000AAA001 /* WorkspaceBrowserApplet.swift */,
+				5FFFD2283FFAA00000AAA001 /* WorkspaceVideoPlayerApplet.swift */,
+				5FFFD22A3FFAA00000AAA001 /* WorkspaceMusicApplet.swift */,
+				5FFFD22C3FFAA00000AAA001 /* WorkspaceAudioEngine.swift */,
+				5FFFD22E3FFAA00000AAA001 /* WorkspaceAudioLibrary.swift */,
+				5FFFD2303FFAA00000AAA001 /* WorkspaceEqualizerApplet.swift */,
 				5FFFD2183FFAA00000AAA001 /* WorkspaceFileService.swift */,
 				5FFFD21A3FFAA00000AAA001 /* WorkspaceFileManagerApplet.swift */,
 				5FFFD21C3FFAA00000AAA001 /* WorkspaceMotePadApplet.swift */,
@@ -426,6 +444,12 @@
 				5FFFD00C3FFAA00000AAA001 /* TerminalSettingsView.swift in Sources */,
 				5FFFD00E3FFAA00000AAA001 /* TerminalUtils.swift in Sources */,
 				5FFFD0103FFAA00000AAA001 /* TerminalRootViewController.swift in Sources */,
+				5FFFD2273FFAA00000AAA001 /* WorkspaceBrowserApplet.swift in Sources */,
+				5FFFD2293FFAA00000AAA001 /* WorkspaceVideoPlayerApplet.swift in Sources */,
+				5FFFD22B3FFAA00000AAA001 /* WorkspaceMusicApplet.swift in Sources */,
+				5FFFD22D3FFAA00000AAA001 /* WorkspaceAudioEngine.swift in Sources */,
+				5FFFD22F3FFAA00000AAA001 /* WorkspaceAudioLibrary.swift in Sources */,
+				5FFFD2313FFAA00000AAA001 /* WorkspaceEqualizerApplet.swift in Sources */,
 				5FFFD2193FFAA00000AAA001 /* WorkspaceFileService.swift in Sources */,
 				5FFFD21B3FFAA00000AAA001 /* WorkspaceFileManagerApplet.swift in Sources */,
 				5FFFD21D3FFAA00000AAA001 /* WorkspaceMotePadApplet.swift in Sources */,

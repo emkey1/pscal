@@ -1011,6 +1011,20 @@ final class WorkspaceFileManagerAppletViewController: WorkspaceAppletViewControl
         return UISwipeActionsConfiguration(actions: [delete])
     }
 
+    private func addFolderToMusic(_ item: WorkspaceFileItem) {
+        _ = WorkspaceAudioLibrary.shared.addFolder(atPath: item.path) { [weak self] count in
+            guard let self else { return }
+            guard let count else {
+                self.presentAlert(title: "Couldn't Add “\(item.name)”", message: "The folder couldn't be read.")
+                return
+            }
+            self.workspaceHost?.openOrFocusTool(WorkspaceToolRegistry.music)
+            if count == 0 {
+                self.presentAlert(title: "No Audio Files", message: "“\(item.name)” doesn't hold any audio files.")
+            }
+        }
+    }
+
     private func contextMenu(for item: WorkspaceFileItem) -> UIMenu {
         var actions: [UIMenuElement] = []
         if Self.isOpenable(item) {
@@ -1024,6 +1038,11 @@ final class WorkspaceFileManagerAppletViewController: WorkspaceAppletViewControl
             })
             actions.append(UIAction(title: "Duplicate", image: UIImage(systemName: "plus.square.on.square")) { [weak self] _ in
                 self?.duplicate(item)
+            })
+        }
+        if item.kind == .directory {
+            actions.append(UIAction(title: "Add Folder to Music", image: UIImage(systemName: "music.note.list")) { [weak self] _ in
+                self?.addFolderToMusic(item)
             })
         }
         actions.append(UIAction(title: "Rename…", image: UIImage(systemName: "pencil")) { [weak self] _ in

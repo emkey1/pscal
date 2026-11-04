@@ -46,6 +46,8 @@ import UIKit
 ///   fm-refresh <id>                list its folder again
 ///   motepad-insert <id> <text>     type into that MotePad
 ///   motepad-save <id>              Save
+///   music-play                     Music's play button
+///   music-config-change            what the audio hardware changing does to the engine
 ///   file-op <token> <op> [path]    call the file service directly; see the dump's fileResult
 ///   theme <identifier>             choose a theme
 ///   gauge <ring|bar>               choose the gauge style
@@ -291,6 +293,10 @@ enum WorkspaceTestHooks {
                 return ["ok": false, "error": "no MotePad in that window"]
             }
             pad.saveDocument()
+        case "music-play":
+            WorkspaceAudioEngine.shared.play()
+        case "music-config-change":
+            WorkspaceAudioEngine.shared.postConfigurationChangeForTesting()
         case "file-op":
             // file-op <token> <remove|remove-tree|list> [path]. The answer lands in the dump's
             // fileResult under that token, since the service's own answer comes later. An
@@ -343,6 +349,24 @@ enum WorkspaceTestHooks {
             return ["path": image.currentPath ?? "", "message": image.statusMessage ?? "", "hasImage": image.hasImageForTesting]
         case let storage as WorkspaceStorageAppletViewController:
             return ["scanning": storage.isScanning]
+        case let browser as WorkspaceBrowserAppletViewController:
+            return ["path": browser.currentPathForTesting ?? "", "address": browser.currentAddressForTesting ?? "",
+                    "title": browser.pageTitleForTesting ?? "", "tabs": browser.tabCountForTesting,
+                    "loading": browser.isLoadingForTesting, "message": browser.statusMessageForTesting ?? "",
+                    "suspended": browser.isMediaSuspendedForTesting, "attached": browser.isWebViewAttachedForTesting]
+        case let video as WorkspaceVideoPlayerAppletViewController:
+            return ["path": video.currentPathForTesting ?? "", "url": video.currentURLForTesting ?? "",
+                    "message": video.statusMessageForTesting ?? "", "playing": video.isPlayingForTesting,
+                    "hasPlayer": video.hasPlayerForTesting, "channels": video.channelCountForTesting,
+                    "holdsSession": video.holdsAudioSessionForTesting]
+        case let music as WorkspaceMusicAppletViewController:
+            return ["playing": music.isPlayingForTesting, "path": music.currentPathForTesting ?? "",
+                    "tracks": music.trackCountForTesting, "message": music.statusMessageForTesting ?? "",
+                    "scanning": music.isScanningForTesting, "time": WorkspaceAudioEngine.shared.currentTimeForTesting,
+                    "restarts": WorkspaceAudioEngine.shared.outputRestartsForTesting]
+        case let equalizer as WorkspaceEqualizerAppletViewController:
+            return ["enabled": equalizer.isEnabledForTesting, "bands": equalizer.gainsForTesting.count,
+                    "preset": equalizer.presetNameForTesting]
         default:
             return [:]
         }

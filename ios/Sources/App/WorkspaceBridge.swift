@@ -103,14 +103,15 @@ enum WorkspaceBridge {
 }
 
 extension WorkspaceViewController {
-    /// `ws open`. A path goes to the applet, in its own window if it can show one; without a
-    /// path, a menu's rule applies and an open applet comes forward.
+    /// `ws open`. A document applet gets a window of its own for each path. Any other keeps to
+    /// a menu's rule, one window that comes forward, and takes the path there if it can.
     func open(tool: String, path: String?) {
-        guard let path, WorkspaceToolRegistry.opensFiles(tool) else {
+        guard let path else {
             openOrFocusTool(tool)
             return
         }
-        guard let window = openTool(tool), let applet = applet(of: window) as? WorkspaceFileOpenable else { return }
+        let window = WorkspaceToolRegistry.opensFiles(tool) ? openTool(tool) : openOrFocusTool(tool)
+        guard let window, let applet = applet(of: window) as? WorkspaceFileOpenable else { return }
         applet.workspaceOpenFile(atPath: path)
     }
 

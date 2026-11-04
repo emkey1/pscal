@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import wave
 import zlib
 
 BUNDLE = "com.pscal.PSCAL"
@@ -448,7 +449,8 @@ def run_desktop_tests(app, results, root_tab, root_win):
 
 
 APPLETS = ["clock", "monitor", "networks", "status", "launcher", "shortcuts", "sessions", "themes", "settings", "diagnostics",
-           "filemanager", "motepad", "markdown", "imageviewer", "storage"]
+           "filemanager", "motepad", "markdown", "imageviewer", "storage",
+           "browser", "videoplayer", "audio", "equalizer"]
 
 
 def inside(frame, surface):
@@ -669,7 +671,8 @@ def run_file_tests(app, results):
     dump = wait_for(app, lambda d: d.get("mode") == "workspace")
     root = [t["id"] for t in dump["tabs"] if t["root"]][0]
     app.clear_file("wt_home")
-    home = app.wait_file("wt_home", root, 'echo "$HOME" > ~/wt_home')
+    # pwd, not $HOME, which holds the host path: applets go by the paths programs see.
+    home = app.wait_file("wt_home", root, "(cd ~ && pwd) > ~/wt_home")
     results.check("the shell says where home is", bool(home), home)
     shown = "%s/wt_files" % home
 
@@ -794,8 +797,8 @@ def run_file_tests(app, results):
     results.check("a symlink loop is an error, not a hang", result.get("token") == "l-loop" and not result.get("ok"), result)
     app.clear_file("wt_mount_ok")
     app.send("focus", str([w["id"] for w in app.dump()["windows"] if hosted_info(w, root)][0]))
-    mounted = app.wait_file("wt_mount_ok", root, "mkdir -p ~/wt_mnt && mount --bind ~/wt_files/mntsrc ~/wt_mnt && echo ok > ~/wt_mount_ok")
-    results.check("mount --bind works", mounted == "ok", mounted)
+    mounted = app.wait_file("wt_mount_ok", root, "mkdir -p ~/wt_mnt && mount -o bind ~/wt_files/mntsrc ~/wt_mnt && echo ok > ~/wt_mount_ok")
+    results.check("mount -o bind works", mounted == "ok", mounted)
     result = file_op(app, "r-mount", "remove-tree", "%s/wt_mnt" % home)
     results.check("the service refuses removing a mount target", not result.get("ok") and "mount" in result.get("error", ""), result)
     results.check("the mounted folder's own files stay", os.path.exists(os.path.join(base, "mntsrc", "held.txt")))
@@ -835,6 +838,146 @@ def run_file_tests(app, results):
     app.send("opens-at-launch", "0")
 
 
+def make_media_tree(base):
+    """Real media where the host's tools can make it. Returns what could be made."""
+    if os.path.isdir(base):
+        shutil.rmtree(base)
+    os.makedirs(os.path.join(base, "music"))
+    os.makedirs(os.path.join(base, "web"))
+    tone = os.path.join(base, "music", "tone.wav")
+    with wave.open(tone, "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(8000)
+        handle.writeframes(struct.pack("<h", 800) * 8000 * 30)
+    made = {"wav"}
+    for suffix, fmt, codec in [("m4a", "m4af", "aac"), ("flac", "flac", "flac")]:
+        result = subprocess.run(["afconvert", "-f", fmt, "-d", codec, tone, os.path.join(base, "music", "tone." + suffix)],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if result.returncode == 0:
+            made.add(suffix)
+    with open(os.path.join(base, "music", "corrupt.mp3"), "wb") as handle:
+        handle.write(b"not audio" * 256)
+    open(os.path.join(base, "music", "zero.wav"), "w").close()
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg:
+        result = subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=duration=30:size=320x240:rate=15",
+                                 "-f", "lavfi", "-i", "sine=frequency=440:duration=30", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                                 "-c:a", "aac", os.path.join(base, "clip.mp4")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if result.returncode == 0:
+            made.add("mp4")
+    with open(os.path.join(base, "bad.mp4"), "wb") as handle:
+        handle.write(b"not a video" * 256)
+    open(os.path.join(base, "zero.mp4"), "w").close()
+    with open(os.path.join(base, "list.m3u"), "w") as handle:
+        handle.write("#EXTM3U\n#EXTINF:-1,One\nhttp://127.0.0.1:9/one\n#EXTINF:-1,Two\nhttp://127.0.0.1:9/two\n")
+    for name, title in [("page.html", "Local Page"), ("other.html", "Other Page")]:
+        with open(os.path.join(base, "web", name), "w") as handle:
+            handle.write("<!doctype html><title>%s</title><h1>%s</h1>\n" % (title, title))
+    return made
+
+
+def run_media_tests(app, results):
+    """Browser, Video, Music and Equalizer on real files, and who gets the audio."""
+    base = os.path.join(app.home, "wt_media")
+    made = make_media_tree(base)
+    print("  media made: %s" % ", ".join(sorted(made)), flush=True)
+    dump = wait_for(app, lambda d: d.get("mode") == "workspace")
+    root = [t["id"] for t in dump["tabs"] if t["root"]][0]
+    app.clear_file("wt_home")
+    home = app.wait_file("wt_home", root, "(cd ~ && pwd) > ~/wt_home")
+    shown = "%s/wt_media" % home
+
+    # Browser. A local server proves plain http reaches the page, which needs Info.plist's say.
+    server = subprocess.Popen([sys.executable, "-I", "-m", "http.server", "--bind", "127.0.0.1", "0"],
+                              cwd=os.path.join(base, "web"), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    try:
+        banner = server.stdout.readline()
+        port = banner.split(" port ")[1].split(" ")[0] if " port " in banner else None
+        results.check("the test's web server starts", bool(port), banner)
+        app.send("open-file", "browser %s/web/page.html" % shown)
+        dump = wait_for(app, lambda d: applet_windows(d, "browser") and applet_windows(d, "browser")[0]["applet"]["title"] == "Local Page", 30)
+        results.check("Browser shows a local page", bool(dump), app.dump())
+        browser = applet_windows(app.dump(), "browser")
+        browser_id = browser[0]["id"] if browser else None
+        app.screenshot("browser-local")
+        if browser_id and port:
+            app.send("open-file", "browser http://127.0.0.1:%s/other.html" % port)
+            state = wait_applet(app, browser_id, lambda s: s["title"] == "Other Page", 30)
+            results.check("Browser loads plain http", bool(state), applet_window(app.dump(), browser_id))
+            results.check("a second address stays in one window", len(applet_windows(app.dump(), "browser")) == 1, app.dump())
+            app.send("focus", str([w["id"] for w in app.dump()["windows"] if hosted_info(w, root)][0]))
+            app.send("type", "%s ws open browser http://127.0.0.1:%s/page.html\\n" % (root, port))
+            state = wait_applet(app, browser_id, lambda s: s["title"] == "Local Page", 30)
+            results.check("ws open hands an address to Browser", bool(state), applet_window(app.dump(), browser_id))
+        if browser_id:
+            desktop = applet_window(app.dump(), browser_id)["desktop"]
+            other = 0 if desktop != 0 else 1
+            app.send("desktops", "2")
+            app.send("switch", str(other))
+            state = wait_applet(app, browser_id, lambda s: s["suspended"] and not s["attached"])
+            results.check("Browser lets its page go on another Desktop", bool(state), applet_window(app.dump(), browser_id))
+            app.send("switch", str(desktop))
+            state = wait_applet(app, browser_id, lambda s: s["attached"] and not s["suspended"])
+            results.check("Browser comes back with its page", state and state["title"] == "Local Page", state)
+            app.send("open-file", "browser %s/web/missing.html" % shown)
+            state = wait_applet(app, browser_id, lambda s: s["message"])
+            results.check("Browser says a file is missing", bool(state), applet_window(app.dump(), browser_id))
+            app.send("dismiss-presented")
+        close_tools(app, "browser")
+    finally:
+        server.terminate()
+        server.wait()
+
+    # Music: the good files play, the bad ones are skipped, and nothing brings the app down.
+    close_tools(app, "audio")
+    wait_for(app, lambda d: not applet_windows(d, "audio"))
+    app.send("open-file", "audio %s/music" % shown)
+    dump = wait_for(app, lambda d: applet_windows(d, "audio") and applet_windows(d, "audio")[0]["applet"]["tracks"] >= len(made & {"wav", "m4a", "flac"}), 30)
+    results.check("Music loads a folder", bool(dump), app.dump())
+    music = applet_windows(app.dump(), "audio")
+    music_id = music[0]["id"] if music else None
+    if music_id:
+        app.send("music-play")
+        state = wait_applet(app, music_id, lambda s: s["playing"] and s["time"] > 0.2, 30)
+        results.check("Music plays, past whatever can't", bool(state), applet_window(app.dump(), music_id))
+        app.screenshot("music-playing")
+        before = (applet_window(app.dump(), music_id) or {}).get("applet", {})
+        app.send("music-config-change")
+        state = wait_applet(app, music_id, lambda s: s["restarts"] > before.get("restarts", 0) and s["playing"], 20)
+        results.check("Music restarts when the audio hardware changes", bool(state), applet_window(app.dump(), music_id))
+        app.send("open-or-focus", "equalizer")
+        dump = wait_for(app, lambda d: applet_windows(d, "equalizer"))
+        equalizer = applet_windows(dump, "equalizer")[0] if dump else None
+        results.check("Equalizer has its bands", equalizer and equalizer["applet"]["bands"] >= 5, equalizer)
+        app.screenshot("equalizer")
+        close_tools(app, "equalizer")
+
+    # Video takes the audio from Music, and bad files only cost a message.
+    if "mp4" in made:
+        window = open_file(app, "videoplayer", "%s/clip.mp4" % shown)
+        state = wait_applet(app, window["id"], lambda s: s["playing"] and s["holdsSession"], 30) if window else None
+        results.check("Video plays a real file", bool(state), window and applet_window(app.dump(), window["id"]))
+        app.screenshot("video-playing")
+        if music_id:
+            state = wait_applet(app, music_id, lambda s: not s["playing"], 10)
+            results.check("Video pauses Music rather than playing over it", bool(state), applet_window(app.dump(), music_id))
+        if window:
+            app.send("close", str(window["id"]))
+    else:
+        print("SKIP video playback: no ffmpeg to make a clip", flush=True)
+    for name in ["bad.mp4", "zero.mp4"]:
+        window = open_file(app, "videoplayer", "%s/%s" % (shown, name))
+        state = wait_applet(app, window["id"], lambda s: s["message"], 30) if window else None
+        results.check("Video says %s won't play" % name, state and not state["playing"], window and applet_window(app.dump(), window["id"]))
+    window = open_file(app, "videoplayer", "%s/list.m3u" % shown)
+    state = wait_applet(app, window["id"], lambda s: s["channels"] == 2, 20) if window else None
+    results.check("Video reads a playlist", bool(state), window and applet_window(app.dump(), window["id"]))
+    app.send("dismiss-presented")
+    close_tools(app, "videoplayer", "audio")
+    results.check("the app answers after all of that", app.dump() is not None)
+
+
 def run_inert_control(app, results):
     """A launch without the variable must not answer. SIMCTL_CHILD_ variables stay in the
     environment until the simulator shuts down, so this needs a shutdown first."""
@@ -867,6 +1010,7 @@ def main():
         app.install()
         run_tests(app, results)
         run_file_tests(app, results)
+        run_media_tests(app, results)
         run_inert_control(app, results)
     finally:
         app.terminate()
