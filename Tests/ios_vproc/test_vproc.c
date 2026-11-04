@@ -9,6 +9,8 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <sched.h>
+#include <poll.h>
+#include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
@@ -567,6 +569,80 @@ static void assert_host_stdio_untouched_after_vproc_close(void) {
 /* A slot number no host descriptor uses until a test puts an unrelated file there.
  * That is how the raw calls went wrong: they reached whichever host descriptor had
  * the slot's number, or failed EBADF when none did. */
+/* A socket's number or a pipe's is a host descriptor, and a slot can have the same number. */
+static void assert_tagged_host_fd_skips_the_slot(void) {
+    char path[] = "/tmp/vproc_tag_XXXXXX";
+    int file_host = mkstemp(path);
+    assert(file_host >= 0);
+    close(file_host);
+
+    assert(vprocTagHostFd(7) == 7);
+
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+    assert(vprocTagHostFd(-1) == -1);
+
+    int host_pipe[2];
+    assert(vprocHostPipeUnowned(host_pipe) == 0);
+    int opened = vprocOpenShim(path, O_RDWR);
+    assert(opened >= 0);
+    if (opened != host_pipe[0]) {
+        assert(vprocDup2Shim(opened, host_pipe[0]) == host_pipe[0]);
+        assert(vprocCloseShim(opened) == 0);
+    }
+
+    /* The plain number is the slot's regular file, always ready. Tagged, it is the empty pipe. */
+    struct pollfd pfd;
+    memset(&pfd, 0, sizeof(pfd));
+    pfd.fd = host_pipe[0];
+    pfd.events = POLLIN;
+    assert(vprocPollShim(&pfd, 1, 0) == 1);
+    pfd.fd = vprocTagHostFd(host_pipe[0]);
+    pfd.revents = 0;
+    assert(vprocPollShim(&pfd, 1, 0) == 0);
+    assert(vprocHostWrite(host_pipe[1], "x", 1) == 1);
+    pfd.revents = 0;
+    assert(vprocPollShim(&pfd, 1, 1000) == 1 && (pfd.revents & POLLIN));
+
+    struct stat st;
+    assert(vprocFstatShim(host_pipe[0], &st) == 0 && S_ISREG(st.st_mode));
+    assert(vprocFstatShim(vprocTagHostFd(host_pipe[0]), &st) == 0 && S_ISFIFO(st.st_mode));
+    int pending = -1;
+    assert(vprocIoctlShim(vprocTagHostFd(host_pipe[0]), FIONREAD, &pending) == 0 && pending == 1);
+
+    /* close takes the socket and leaves the slot, and only once. */
+    int sock = vprocSocketShim(AF_INET, SOCK_DGRAM, 0);
+    assert(sock >= 0);
+    opened = vprocOpenShim(path, O_RDWR);
+    assert(opened >= 0);
+    if (opened != sock) {
+        assert(vprocDup2Shim(opened, sock) == sock);
+        assert(vprocCloseShim(opened) == 0);
+    }
+    assert(vprocCloseShim(vprocTagHostFd(sock)) == 0);
+    assert(vprocFstatShim(sock, &st) == 0 && S_ISREG(st.st_mode));
+    errno = 0;
+    assert(fcntl(sock, F_GETFD) == -1 && errno == EBADF);
+    errno = 0;
+    assert(vprocCloseShim(vprocTagHostFd(sock)) == -1 && errno == EBADF);
+    assert(vprocFstatShim(sock, &st) == 0 && S_ISREG(st.st_mode));
+    assert(vprocCloseShim(sock) == 0);
+
+    /* A number this vproc does not hold stays open: a program must not close the app's. */
+    errno = 0;
+    assert(vprocCloseShim(vprocTagHostFd(host_pipe[1])) == -1 && errno == EBADF);
+    assert(fcntl(host_pipe[1], F_GETFD) >= 0);
+
+    assert(vprocCloseShim(host_pipe[0]) == 0);
+    assert(vprocHostClose(host_pipe[0]) == 0);
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocDeactivate();
+    vprocDestroy(vp);
+    unlink(path);
+}
+
 enum { SHIM_TEST_SLOT = 40 };
 
 static void assert_fcntl_pread_pwrite_take_slots(void) {
@@ -8333,6 +8409,8 @@ int main(void) {
     assert_stdin_redirected_via_dup2();
     fprintf(stderr, "TEST host_stdio_untouched\n");
     assert_host_stdio_untouched_after_vproc_close();
+    fprintf(stderr, "TEST tagged_host_fd_skips_the_slot\n");
+    assert_tagged_host_fd_skips_the_slot();
     fprintf(stderr, "TEST fcntl_pread_pwrite_take_slots\n");
     assert_fcntl_pread_pwrite_take_slots();
     fprintf(stderr, "TEST fcntl_on_inproc_pipe\n");
