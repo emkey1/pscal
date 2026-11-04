@@ -42,6 +42,7 @@
 		5FFFD00C3FFAA00000AAA001 /* TerminalSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */; };
 		5FFFD00E3FFAA00000AAA001 /* TerminalUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */; };
 		5FFFD0103FFAA00000AAA001 /* TerminalRootViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */; };
+		5FFFD2093FFAA00000AAA001 /* WorkspaceApplets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD2083FFAA00000AAA001 /* WorkspaceApplets.swift */; };
 		5FFFD2013FFAA00000AAA001 /* WorkspaceWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD2003FFAA00000AAA001 /* WorkspaceWindowView.swift */; };
 		5FFFD2033FFAA00000AAA001 /* WorkspaceTerminalTabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD2023FFAA00000AAA001 /* WorkspaceTerminalTabs.swift */; };
 		5FFFD2053FFAA00000AAA001 /* WorkspaceViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD2043FFAA00000AAA001 /* WorkspaceViewController.swift */; };
@@ -91,6 +92,7 @@
 		5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSettingsView.swift; sourceTree = "<group>"; };
 		5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalUtils.swift; sourceTree = "<group>"; };
 		5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalRootViewController.swift; sourceTree = "<group>"; };
+		5FFFD2083FFAA00000AAA001 /* WorkspaceApplets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceApplets.swift; sourceTree = "<group>"; };
 		5FFFD2003FFAA00000AAA001 /* WorkspaceWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceWindowView.swift; sourceTree = "<group>"; };
 		5FFFD2023FFAA00000AAA001 /* WorkspaceTerminalTabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceTerminalTabs.swift; sourceTree = "<group>"; };
 		5FFFD2043FFAA00000AAA001 /* WorkspaceViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceViewController.swift; sourceTree = "<group>"; };
@@ -178,6 +180,7 @@
 				5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */,
 				5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */,
 				5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */,
+				5FFFD2083FFAA00000AAA001 /* WorkspaceApplets.swift */,
 				5FFFD2003FFAA00000AAA001 /* WorkspaceWindowView.swift */,
 				5FFFD2023FFAA00000AAA001 /* WorkspaceTerminalTabs.swift */,
 				5FFFD2043FFAA00000AAA001 /* WorkspaceViewController.swift */,
@@ -381,6 +384,7 @@
 				5FFFD00C3FFAA00000AAA001 /* TerminalSettingsView.swift in Sources */,
 				5FFFD00E3FFAA00000AAA001 /* TerminalUtils.swift in Sources */,
 				5FFFD0103FFAA00000AAA001 /* TerminalRootViewController.swift in Sources */,
+				5FFFD2093FFAA00000AAA001 /* WorkspaceApplets.swift in Sources */,
 				5FFFD2013FFAA00000AAA001 /* WorkspaceWindowView.swift in Sources */,
 				5FFFD2033FFAA00000AAA001 /* WorkspaceTerminalTabs.swift in Sources */,
 				5FFFD2053FFAA00000AAA001 /* WorkspaceViewController.swift in Sources */,

@@ -117,6 +117,10 @@ final class WorkspaceWindowView: UIView, UIGestureRecognizerDelegate {
         }
     }
     var titleBarDoubleTapZoomEnabled = false
+    /// Which virtual Desktop the window is on.
+    var desktopIndex = 0
+    /// The applet it holds, if it isn't a terminal window.
+    var toolIdentifier: String?
     private(set) var zoomedToFullscreen = false
     private var restoreFrameBeforeZoom: CGRect = .null
     var minimumSize = CGSize(width: 280, height: 180)

@@ -176,6 +176,14 @@ final class WorkspaceTerminalTabsViewController: UIViewController {
         selectionHandler?(hostedTabs[index].tabID)
     }
 
+    /// For a restore, which gives focus separately.
+    func setSelectedIndexWithoutFocus(_ index: Int) {
+        guard hostedTabs.indices.contains(index), index != selectedIndex else { return }
+        selectedIndex = index
+        applyTabStates()
+        refreshStrip()
+    }
+
     func selectNextTab(step: Int) {
         guard hostedTabs.count > 1 else { return }
         selectTab(atIndex: (selectedIndex + step + hostedTabs.count) % hostedTabs.count)

@@ -30,6 +30,13 @@ import UIKit
 ///   zoom <id>                      what a double tap on the title bar does
 ///   type <tab> <text>              send text to a session (\n \r \t \\ decoded)
 ///   select-session <tab>           make that session the manager's selected one
+///   open-tool <identifier>         open an applet's window
+///   desktops <n>                   have n Desktops
+///   assign <id> <desktop>          move a window to a Desktop (from 0)
+///   switch <desktop>               show a Desktop
+///   remove-desktop <desktop>       what the Desktops applet's × does
+///   save-arrangement               the Desktops applet's Save
+///   restore-arrangement            the Desktops applet's Restore
 ///
 /// Off unless PSCALI_WORKSPACE_TEST=1 is in the app's environment.
 @MainActor
@@ -178,6 +185,30 @@ enum WorkspaceTestHooks {
         case "select-session":
             guard let text = args.first, let tabID = UInt64(text) else { return ["ok": false, "error": "no such tab"] }
             manager.selectedId = tabID
+        case "open-tool":
+            guard let workspace, let identifier = args.first, workspace.openTool(identifier) != nil else {
+                return ["ok": false, "error": "no such applet"]
+            }
+        case "desktops":
+            guard let workspace, let text = args.first, let count = Int(text) else { return ["ok": false, "error": "usage: desktops <n>"] }
+            workspace.setDesktopCountForTesting(count)
+        case "assign":
+            guard let workspace, let target = window(args.first), args.count > 1, let index = Int(args[1]) else {
+                return ["ok": false, "error": "usage: assign <id> <desktop>"]
+            }
+            workspace.assignWindow(target, toDesktop: index)
+        case "switch":
+            guard let workspace, let text = args.first, let index = Int(text) else { return ["ok": false, "error": "usage: switch <desktop>"] }
+            workspace.switchToDesktop(index)
+        case "remove-desktop":
+            guard let workspace, let text = args.first, let index = Int(text) else { return ["ok": false, "error": "usage: remove-desktop <desktop>"] }
+            workspace.removeDesktop(index)
+        case "save-arrangement":
+            guard let workspace else { return ["ok": false, "error": "not in Workspace"] }
+            workspace.saveArrangement()
+        case "restore-arrangement":
+            guard let workspace else { return ["ok": false, "error": "not in Workspace"] }
+            workspace.restoreArrangementFromButton()
         default:
             return ["ok": false, "error": "unknown verb \(verb)"]
         }
@@ -231,11 +262,17 @@ enum WorkspaceTestHooks {
         guard let workspace = root.workspace else { return result }
         let front = workspace.frontmostWindow()
         result["surface"] = [workspace.desktopSizeForTesting.width, workspace.desktopSizeForTesting.height]
+        result["activeDesktop"] = workspace.activeDesktopIndex
+        result["desktopCount"] = workspace.desktopCount
+        result["saved"] = workspace.arrangementIsSaved
         result["windows"] = workspace.desktopWindows.map { window -> [String: Any] in
             let content = workspace.content(of: window)
             return [
                 "id": window.serial,
                 "title": window.titleLabel.text ?? "",
+                "tool": window.toolIdentifier ?? "",
+                "desktop": window.desktopIndex,
+                "hidden": window.isHidden,
                 "frame": [window.frame.minX, window.frame.minY, window.frame.width, window.frame.height],
                 "front": window === front,
                 "focused": window === workspace.focusedWindowForTesting,

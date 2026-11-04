@@ -316,6 +316,132 @@ def run_tests(app, results):
         results.check("the session runs in Workspace %d" % round_number, text == "w", text)
     app.screenshot("after-round-trips")
 
+    run_desktop_tests(app, results, root_tab, root_win_after_round_trips(app, root_tab))
+
+
+def root_win_after_round_trips(app, root_tab):
+    dump = app.dump()
+    for window in dump.get("windows", []):
+        if hosted_info(window, root_tab):
+            return window["id"]
+    return None
+
+
+def run_desktop_tests(app, results, root_tab, root_win):
+    """Virtual Desktops, the Desktops applet, and an arrangement across a relaunch."""
+    app.send("desktops", "3")
+    dump = wait_for(app, lambda d: d.get("desktopCount") == 3)
+    results.check("Desktops can be added", dump and dump["desktopCount"] == 3, dump)
+    results.check("the active Desktop stays put", dump and dump["activeDesktop"] == 0, dump)
+
+    # A window on another Desktop: hidden, detached, still running.
+    app.send("open-terminal")
+    dump = wait_for(app, lambda d: len(d.get("windows", [])) == 2)
+    other_win = [w["id"] for w in dump["windows"] if w["id"] != root_win][0]
+    other_tab = window_info(dump, other_win)["selectedTab"]
+    app.send("assign", "%d 1" % other_win)
+    dump = wait_for(app, lambda d: window_info(d, other_win).get("hidden"))
+    results.check("assigning to another Desktop hides a window", dump and window_info(dump, other_win).get("hidden")
+                  and window_info(dump, other_win).get("desktop") == 1, dump)
+    results.check("focus falls back on this Desktop", dump and window_info(dump, root_win).get("focused")
+                  and dump["selectedId"] == root_tab, dump)
+    dump = wait_for(app, lambda d: not tab_info(d, other_tab).get("webAttached"))
+    results.check("a window on another Desktop detaches its terminal", dump
+                  and not tab_info(dump, other_tab).get("webAttached"), dump)
+    text = app.wait_file("wt_desk_hidden", other_tab, "echo hidden > ~/wt_desk_hidden")
+    results.check("a session on another Desktop keeps running", text == "hidden", text)
+
+    app.send("switch", "1")
+    dump = wait_for(app, lambda d: d.get("activeDesktop") == 1 and not window_info(d, other_win).get("hidden"))
+    results.check("switching shows that Desktop's windows", dump and not window_info(dump, other_win)["hidden"]
+                  and window_info(dump, root_win)["hidden"], dump)
+    results.check("switching focuses that Desktop's window", dump and window_info(dump, other_win).get("focused")
+                  and dump["selectedId"] == other_tab, dump)
+    dump = wait_for(app, lambda d: tab_info(d, other_tab).get("webAttached") and tab_info(d, other_tab).get("loaded"))
+    results.check("its terminal attaches again", dump and tab_info(dump, other_tab).get("webAttached"), dump)
+    app.screenshot("desktop-2")
+
+    app.send("switch", "2")
+    dump = wait_for(app, lambda d: d.get("activeDesktop") == 2)
+    results.check("an empty Desktop has nothing focused", dump and not any(w["focused"] for w in dump["windows"])
+                  and not dump.get("keyInputFocused"), dump)
+    app.send("select-session", root_tab)
+    dump = wait_for(app, lambda d: d.get("activeDesktop") == 0)
+    results.check("selecting a session goes to its Desktop", dump and dump["activeDesktop"] == 0
+                  and window_info(dump, root_win).get("focused"), dump)
+
+    # The Desktops applet is one window, shared by every Desktop.
+    app.send("open-tool", "workspaces")
+    dump = wait_for(app, lambda d: any(w["tool"] == "workspaces" for w in d.get("windows", [])))
+    results.check("the Desktops applet opens", dump and any(w["tool"] == "workspaces" for w in dump["windows"]), dump)
+    tool_win = [w["id"] for w in dump["windows"] if w["tool"] == "workspaces"][0]
+    results.check("an applet in front has no terminal with the keyboard", dump and not dump.get("keyInputFocused")
+                  or wait_for(app, lambda d: not d.get("keyInputFocused")), dump)
+    app.screenshot("desktops-applet")
+    app.send("switch", "1")
+    dump = wait_for(app, lambda d: d.get("activeDesktop") == 1)
+    results.check("the Desktops applet shows on every Desktop", dump and not window_info(dump, tool_win)["hidden"], dump)
+    app.send("open-tool", "workspaces")
+    dump = wait_for(app, lambda d: d.get("activeDesktop") == 1)
+    results.check("opening it again keeps one window", dump and sum(w["tool"] == "workspaces" for w in dump["windows"]) == 1, dump)
+
+    # Save and Restore: a Save is a real change, and Restore moves windows rather than ending shells.
+    dump = app.dump()
+    results.check("nothing is saved yet", dump and not dump["saved"], dump)
+    app.send("frame", "%d 0.1 0.2 0.5 0.4" % other_win)
+    time.sleep(0.5)
+    app.send("save-arrangement")
+    dump = wait_for(app, lambda d: d.get("saved"))
+    results.check("Save records the arrangement", dump and dump["saved"], dump)
+    saved_frame = window_info(dump, other_win)["frame"]
+    app.send("assign", "%d 2" % other_win)
+    dump = wait_for(app, lambda d: window_info(d, other_win).get("desktop") == 2)
+    results.check("moving a window to another Desktop reads as unsaved", dump and not dump["saved"], dump)
+    app.send("frame", "%d 0.3 0.1 0.4 0.3" % other_win)
+    time.sleep(0.5)
+    app.send("restore-arrangement")
+    dump = wait_for(app, lambda d: window_info(d, other_win).get("desktop") == 1 and d.get("saved"))
+    results.check("Restore moves the window back", dump and window_info(dump, other_win)["desktop"] == 1
+                  and window_info(dump, other_win)["frame"] == saved_frame, dump)
+    results.check("Restore keeps the session", dump and tab_info(dump, other_tab), dump)
+    pid_before = app.wait_file("wt_desk_pid1", other_tab, "echo $$ > ~/wt_desk_pid1")
+    pid_after = app.wait_file("wt_desk_pid2", other_tab, "echo $$ > ~/wt_desk_pid2")
+    results.check("the shell is the same one after Restore", pid_before and pid_before == pid_after, (pid_before, pid_after))
+
+    # A locked Desktop stays; the first always does. Removing one closes what it holds.
+    app.send("remove-desktop", "0")
+    dump = wait_for(app, lambda d: d.get("desktopCount") == 3)
+    results.check("the first Desktop can't be removed", dump and dump["desktopCount"] == 3, dump)
+    app.send("remove-desktop", "2")
+    dump = wait_for(app, lambda d: d.get("desktopCount") == 2)
+    results.check("removing a Desktop shrinks the count", dump and dump["desktopCount"] == 2, dump)
+
+    # Back to tabs and back: the arrangement stays for this run.
+    app.send("tabs")
+    wait_for(app, lambda d: d["mode"] == "tabs")
+    app.send("workspace")
+    dump = wait_for(app, lambda d: d["mode"] == "workspace" and d.get("desktopCount") == 2 and len(d.get("windows", [])) >= 2)
+    results.check("coming back from tabs keeps the arrangement", dump and dump["desktopCount"] == 2
+                  and any(hosted_info(w, other_tab) and w["desktop"] == 1 for w in dump["windows"]), dump)
+
+    # A relaunch: fresh shells where the saved ones were. Saved above with 3 Desktops.
+    app.send("save-arrangement")
+    wait_for(app, lambda d: d.get("saved"))
+    app.terminate()
+    time.sleep(2)
+    app.launch()
+    time.sleep(1)
+    results.check("hooks answer after a relaunch", app.wait_ready(), "no ready.json")
+    first = wait_for(app, lambda d: d.get("mode") == "tabs" and d["tabs"])
+    app.send("workspace")
+    dump = wait_for(app, lambda d: d.get("mode") == "workspace" and len(d.get("windows", [])) >= 2)
+    results.check("a relaunch restores the windows", dump and len([w for w in dump["windows"] if not w["tool"]]) == 2, dump)
+    results.check("a relaunch restores the Desktops", dump and dump["desktopCount"] == 2, dump)
+    results.check("a relaunch puts a fresh shell where the saved one was", dump
+                  and any(not w["tool"] and w["desktop"] == 1 for w in dump["windows"]), dump)
+    results.check("a relaunch reads as saved", dump and dump["saved"], dump)
+    app.screenshot("after-relaunch")
+
 
 def run_inert_control(app, results):
     """A launch without the variable must not answer. SIMCTL_CHILD_ variables stay in the

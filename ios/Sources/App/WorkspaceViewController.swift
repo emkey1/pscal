@@ -17,6 +17,16 @@ protocol TerminalKeyRouting: AnyObject {
     var terminalControlKeysGoToSelected: Bool { get }
 }
 
+enum WorkspaceSettings {
+    private static let openAtLaunchKey = "com.pscal.workspace.openAtLaunch"
+    static let savedDesktopsKey = "com.pscal.workspace.savedDesktops"
+
+    static var opensAtLaunch: Bool {
+        get { UserDefaults.standard.bool(forKey: openAtLaunchKey) }
+        set { UserDefaults.standard.set(newValue, forKey: openAtLaunchKey) }
+    }
+}
+
 /// A desktop of movable windows inside the one iOS window, which is why it works on
 /// iPhone: it doesn't depend on scenes or Stage Manager.
 ///
@@ -25,19 +35,33 @@ protocol TerminalKeyRouting: AnyObject {
 /// keyboard".
 @MainActor
 final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelegate, TerminalKeyRouting {
+    /// What was on screen when Workspace was last left, so coming back puts it back.
+    private static var arrangementAtLeave: [[String: Any]]?
+    private static var didApplySavedArrangement = false
+
     private let manager = TerminalTabManager.shared
     private let desktopSurfaceView = UIView()
     private let menuPip = UIButton(type: .system)
+    private let desktopToast = UILabel()
+    private var toastHide: DispatchWorkItem?
 
     private(set) var desktopWindows: [WorkspaceWindowView] = []
     private var contentByWindow: [Int: WorkspaceTerminalTabsViewController] = [:]
+    private var appletByWindow: [Int: WorkspaceAppletViewController] = [:]
     private var cascadeIndex = 0
     private weak var focusedWindow: WorkspaceWindowView?
     private var desktopHasFocus = false
 
+    private(set) var activeDesktopIndex = 0
+    private(set) var desktopCount = 1
+    private var lockedDesktops = Set<Int>()
+    private var desktopNames: [String] = []
+    private var savedSignature: String?
+
     private var managerObserver: AnyCancellable?
     private var syncScheduled = false
     private var didInitialSync = false
+    private var lastSeenSelectedId: UInt64 = 0
     /// Where a new session goes when it was asked for as a tab of a window.
     private weak var pendingTabWindow: WorkspaceWindowView?
 
@@ -80,7 +104,16 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         twoFinger.numberOfTouchesRequired = 2
         view.addGestureRecognizer(twoFinger)
 
+        // A two-finger horizontal swipe moves between Desktops.
+        for direction: UISwipeGestureRecognizer.Direction in [.left, .right] {
+            let swipe = UISwipeGestureRecognizer(target: self, action: #selector(handleDesktopSwipe(_:)))
+            swipe.direction = direction
+            swipe.numberOfTouchesRequired = 2
+            view.addGestureRecognizer(swipe)
+        }
+
         buildMenuPip()
+        buildToast()
         NSLayoutConstraint.activate([
             desktopSurfaceView.topAnchor.constraint(equalTo: view.topAnchor),
             desktopSurfaceView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -88,6 +121,7 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
             desktopSurfaceView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         installKeyboardObservers()
+        lastSeenSelectedId = manager.selectedId
         managerObserver = manager.objectWillChange.sink { [weak self] _ in
             self?.scheduleSync()
         }
@@ -122,6 +156,38 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         ])
     }
 
+    private func buildToast() {
+        desktopToast.translatesAutoresizingMaskIntoConstraints = false
+        desktopToast.font = .systemFont(ofSize: 15, weight: .semibold)
+        desktopToast.textColor = .white
+        desktopToast.backgroundColor = UIColor(white: 0, alpha: 0.72)
+        desktopToast.textAlignment = .center
+        desktopToast.layer.cornerRadius = 10
+        desktopToast.layer.masksToBounds = true
+        desktopToast.alpha = 0
+        desktopToast.isUserInteractionEnabled = false
+        view.addSubview(desktopToast)
+        NSLayoutConstraint.activate([
+            desktopToast.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            desktopToast.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            desktopToast.heightAnchor.constraint(equalToConstant: 32),
+        ])
+    }
+
+    private func showDesktopToast() {
+        let name = nameForDesktop(activeDesktopIndex)
+        desktopToast.text = "  \(name)  (\(activeDesktopIndex + 1) / \(desktopCount))  "
+        toastHide?.cancel()
+        desktopToast.alpha = 1
+        let hide = DispatchWorkItem { [weak self] in
+            UIView.animate(withDuration: 0.25) {
+                self?.desktopToast.alpha = 0
+            }
+        }
+        toastHide = hide
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: hide)
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         guard desktopSurfaceView.bounds.width > 0, desktopSurfaceView.bounds.height > 0 else { return }
@@ -130,7 +196,7 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
             // Next turn: the tab bar's views are still leaving, and a session can only be
             // attached to one terminal view. Detaching after attaching would stop its output.
             DispatchQueue.main.async { [weak self] in
-                self?.syncFromManager()
+                self?.firstSync()
             }
         }
         for window in desktopWindows {
@@ -139,23 +205,43 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         }
     }
 
+    private func firstSync() {
+        syncFromManager()
+        if let arrangement = Self.arrangementAtLeave {
+            Self.arrangementAtLeave = nil
+            applyArrangement(arrangement)
+        } else if !Self.didApplySavedArrangement {
+            Self.didApplySavedArrangement = true
+            if let saved = savedArrangement() {
+                applyArrangement(saved)
+            }
+        }
+    }
+
     override var canBecomeFirstResponder: Bool { true }
 
     /// Takes every window down without touching a session, on the way back to tabs.
     func tearDownWindows() {
+        Self.arrangementAtLeave = arrangementDescriptors()
         managerObserver = nil
         for window in desktopWindows {
-            contentByWindow[window.serial]?.setWindowState(visible: false, focused: false)
             if let content = contentByWindow[window.serial] {
+                content.setWindowState(visible: false, focused: false)
                 content.hostedTabs.map(\.tabID).forEach { content.removeTab(tabID: $0) }
                 content.willMove(toParent: nil)
                 content.view.removeFromSuperview()
                 content.removeFromParent()
             }
+            if let applet = appletByWindow[window.serial] {
+                applet.willMove(toParent: nil)
+                applet.view.removeFromSuperview()
+                applet.removeFromParent()
+            }
             window.removeFromSuperview()
         }
         desktopWindows.removeAll()
         contentByWindow.removeAll()
+        appletByWindow.removeAll()
         focusedWindow = nil
     }
 
@@ -201,26 +287,29 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         }
         pendingTabWindow = nil
 
-        if addedAny || !removedAny {
-            followManagerSelection()
-        } else if let window = focusedBefore, desktopWindows.contains(where: { $0 === window }) {
+        if removedAny && !addedAny {
             // The manager picks the first shell when a selected tab goes. Stay in the window
             // the person was working in.
-            focus(window: window)
-        } else if let top = frontmostWindow() {
-            focus(window: top)
+            if let window = focusedBefore, desktopWindows.contains(where: { $0 === window }) {
+                focus(window: window)
+            } else if let top = frontmostWindow() {
+                focus(window: top)
+            } else {
+                focusDesktop()
+            }
+        } else if addedAny || manager.selectedId != lastSeenSelectedId {
+            followManagerSelection()
         }
+        lastSeenSelectedId = manager.selectedId
         refreshTitles()
         applyStates()
+        postDesktopsDidChange()
     }
 
     private func followManagerSelection() {
-        guard !desktopHasFocus || focusedWindow == nil else {
-            return
-        }
         guard let window = windowHosting(tabID: manager.selectedId) else { return }
         contentByWindow[window.serial]?.select(tabID: manager.selectedId)
-        if focusedWindow !== window {
+        if focusedWindow !== window || desktopHasFocus {
             focus(window: window)
         }
     }
@@ -242,6 +331,10 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
 
     func content(of window: WorkspaceWindowView) -> WorkspaceTerminalTabsViewController? {
         contentByWindow[window.serial]
+    }
+
+    func applet(of window: WorkspaceWindowView) -> WorkspaceAppletViewController? {
+        appletByWindow[window.serial]
     }
 
     // MARK: - Windows
@@ -346,44 +439,7 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
             : CGSize(width: usable.width, height: usable.height / 4)
     }
 
-    @discardableResult
-    private func openWindow(for tab: TerminalTabManager.Tab) -> WorkspaceWindowView {
-        let window = WorkspaceWindowView(title: tab.title, showsCloseButton: true)
-        window.preferredSize = defaultTerminalWindowSize()
-        window.resizable = true
-        window.titleBarDoubleTapZoomEnabled = true
-        window.minimumSize = WorkspaceMetrics.minimumTerminalSize
-        window.frame = CGRect(origin: .zero, size: window.preferredSize)
-        desktopSurfaceView.addSubview(window)
-        desktopWindows.append(window)
-
-        let content = WorkspaceTerminalTabsViewController()
-        content.windowView = window
-        contentByWindow[window.serial] = content
-        addChild(content)
-        content.view.translatesAutoresizingMaskIntoConstraints = false
-        window.contentContainerView.addSubview(content.view)
-        NSLayoutConstraint.activate([
-            content.view.topAnchor.constraint(equalTo: window.contentContainerView.topAnchor),
-            content.view.leadingAnchor.constraint(equalTo: window.contentContainerView.leadingAnchor),
-            content.view.trailingAnchor.constraint(equalTo: window.contentContainerView.trailingAnchor),
-            content.view.bottomAnchor.constraint(equalTo: window.contentContainerView.bottomAnchor),
-        ])
-        content.didMove(toParent: self)
-        content.addTab(tab, select: true)
-
-        content.newTabHandler = { [weak self, weak window] in
-            guard let self, let window else { return }
-            self.openNewTab(in: window)
-        }
-        content.closeTabHandler = { [weak self] tabID in
-            self?.manager.closeTab(id: tabID)
-            self?.syncFromManager()
-        }
-        content.selectionHandler = { [weak self, weak window] _ in
-            guard let self, let window else { return }
-            self.focus(window: window)
-        }
+    private func installCommonHandlers(on window: WorkspaceWindowView) {
         window.closeHandler = { [weak self, weak window] in
             guard let self, let window else { return }
             self.closeWindow(window)
@@ -405,10 +461,119 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
             guard let self, let window else { return }
             self.presentRootMenu(from: window.utilityButton, sourceRect: window.utilityButton.bounds)
         }
+    }
+
+    private func embed(_ child: UIViewController, in window: WorkspaceWindowView) {
+        addChild(child)
+        child.view.translatesAutoresizingMaskIntoConstraints = false
+        window.contentContainerView.addSubview(child.view)
+        NSLayoutConstraint.activate([
+            child.view.topAnchor.constraint(equalTo: window.contentContainerView.topAnchor),
+            child.view.leadingAnchor.constraint(equalTo: window.contentContainerView.leadingAnchor),
+            child.view.trailingAnchor.constraint(equalTo: window.contentContainerView.trailingAnchor),
+            child.view.bottomAnchor.constraint(equalTo: window.contentContainerView.bottomAnchor),
+        ])
+        child.didMove(toParent: self)
+    }
+
+    @discardableResult
+    private func openWindow(for tab: TerminalTabManager.Tab) -> WorkspaceWindowView {
+        let window = WorkspaceWindowView(title: tab.title, showsCloseButton: true)
+        window.preferredSize = defaultTerminalWindowSize()
+        window.resizable = true
+        window.titleBarDoubleTapZoomEnabled = true
+        window.minimumSize = WorkspaceMetrics.minimumTerminalSize
+        window.frame = CGRect(origin: .zero, size: window.preferredSize)
+        window.desktopIndex = activeDesktopIndex
+        desktopSurfaceView.addSubview(window)
+        desktopWindows.append(window)
+
+        let content = WorkspaceTerminalTabsViewController()
+        content.windowView = window
+        contentByWindow[window.serial] = content
+        embed(content, in: window)
+        content.addTab(tab, select: true)
+
+        content.newTabHandler = { [weak self, weak window] in
+            guard let self, let window else { return }
+            self.openNewTab(in: window)
+        }
+        content.closeTabHandler = { [weak self] tabID in
+            self?.manager.closeTab(id: tabID)
+            self?.syncFromManager()
+        }
+        content.selectionHandler = { [weak self, weak window] _ in
+            guard let self, let window else { return }
+            self.focus(window: window)
+        }
+        installCommonHandlers(on: window)
         applyInitialFrameIfNeeded(window)
         desktopSurfaceView.bringSubviewToFront(window)
         window.applyChrome(active: false)
         return window
+    }
+
+    /// Opens an applet's window, or brings forward the one a global applet already has.
+    @discardableResult
+    func openTool(_ identifier: String) -> WorkspaceWindowView? {
+        if WorkspaceToolRegistry.isGlobal(identifier), let existing = window(forTool: identifier) {
+            focus(window: existing)
+            return existing
+        }
+        guard let applet = WorkspaceToolRegistry.makeViewController(for: identifier) else { return nil }
+        applet.workspaceHost = self
+        let window = WorkspaceWindowView(title: WorkspaceToolRegistry.title(for: identifier), showsCloseButton: true)
+        window.toolIdentifier = identifier
+        window.preferredSize = WorkspaceToolRegistry.preferredSize(for: identifier)
+        window.resizable = true
+        window.minimumSize = WorkspaceToolRegistry.minimumSize(for: identifier)
+        window.frame = CGRect(origin: .zero, size: window.preferredSize)
+        window.desktopIndex = activeDesktopIndex
+        desktopSurfaceView.addSubview(window)
+        desktopWindows.append(window)
+        appletByWindow[window.serial] = applet
+        embed(applet, in: window)
+        installCommonHandlers(on: window)
+        window.applyChrome(active: false)
+        if identifier == WorkspaceToolRegistry.desktops {
+            placeAtTopRight(window)
+        } else {
+            applyInitialFrameIfNeeded(window)
+        }
+        focus(window: window)
+        postDesktopsDidChange()
+        return window
+    }
+
+    func window(forTool identifier: String) -> WorkspaceWindowView? {
+        desktopWindows.first { $0.toolIdentifier == identifier }
+    }
+
+    private func placeAtTopRight(_ window: WorkspaceWindowView) {
+        let usable = desktopUsableBounds()
+        guard usable.width > 0 else {
+            applyInitialFrameIfNeeded(window)
+            return
+        }
+        let inset: CGFloat = WorkspaceMetrics.usesPhoneLayout ? 8 : 12
+        var frame = window.frame
+        frame.origin.x = usable.maxX - frame.width - inset
+        frame.origin.y = usable.minY + inset
+        window.frame = clampedFrame(frame, for: window)
+        window.didApplyInitialFrame = true
+    }
+
+    /// The Desktops applet's window follows how many Desktops it lists.
+    func autosizeDesktopsWindow(contentHeight: CGFloat) {
+        guard let window = window(forTool: WorkspaceToolRegistry.desktops), !window.zoomedToFullscreen else { return }
+        let usable = desktopUsableBounds()
+        let wanted = contentHeight + WorkspaceMetrics.titleBarHeight
+        let height = min(max(wanted, window.minimumSize.height), usable.height > 0 ? usable.height : wanted)
+        guard abs(window.frame.height - height) > 0.5 else { return }
+        var frame = window.frame
+        frame.size.height = height
+        window.frame = clampedFrame(frame, for: window)
+        window.preferredSize = window.frame.size
     }
 
     private func removeWindow(_ window: WorkspaceWindowView) {
@@ -416,6 +581,11 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
             content.willMove(toParent: nil)
             content.view.removeFromSuperview()
             content.removeFromParent()
+        }
+        if let applet = appletByWindow.removeValue(forKey: window.serial) {
+            applet.willMove(toParent: nil)
+            applet.view.removeFromSuperview()
+            applet.removeFromParent()
         }
         if raisedWindow === window {
             raisedWindow = nil
@@ -428,9 +598,22 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         }
     }
 
-    /// Closing a window ends its sessions, and an exiting shell closes its tab, both by way
-    /// of the manager.
+    /// Closing a terminal window ends its sessions, and an exiting shell closes its tab, both
+    /// by way of the manager. Closing an applet ends nothing else.
     func closeWindow(_ window: WorkspaceWindowView) {
+        if appletByWindow[window.serial] != nil {
+            let wasFocused = focusedWindow === window
+            removeWindow(window)
+            if wasFocused {
+                if let top = frontmostWindow() {
+                    focus(window: top)
+                } else {
+                    focusDesktop()
+                }
+            }
+            postDesktopsDidChange()
+            return
+        }
         guard let content = contentByWindow[window.serial] else { return }
         for hosted in content.hostedTabs where !manager.isRootTab(hosted.tabID) {
             manager.closeTab(id: hosted.tabID)
@@ -450,8 +633,15 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         syncFromManager()
     }
 
+    /// The top window on the Desktop being looked at.
     func frontmostWindow() -> WorkspaceWindowView? {
-        desktopSurfaceView.subviews.reversed().compactMap { $0 as? WorkspaceWindowView }.first
+        desktopSurfaceView.subviews.reversed()
+            .compactMap { $0 as? WorkspaceWindowView }
+            .first { isOnActiveDesktop($0) }
+    }
+
+    private func isOnActiveDesktop(_ window: WorkspaceWindowView) -> Bool {
+        window.desktopIndex == activeDesktopIndex || window.toolIdentifier.map(WorkspaceToolRegistry.isGlobal) == true
     }
 
     var focusedWindowForTesting: WorkspaceWindowView? { focusedWindow }
@@ -468,17 +658,40 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         window.frameDidChangeHandler?()
     }
 
+    func assignWindow(_ window: WorkspaceWindowView, toDesktop index: Int) {
+        guard window.toolIdentifier.map(WorkspaceToolRegistry.isGlobal) != true else { return }
+        window.desktopIndex = max(0, min(index, desktopCount - 1))
+        applyDesktopVisibility()
+        if focusedWindow === window, !isOnActiveDesktop(window) {
+            focusTopOrDesktop()
+        }
+        postDesktopsDidChange()
+    }
+
     // MARK: - Focus
 
-    /// Brings a window forward and gives its selected terminal the keyboard.
+    /// Brings a window forward and gives it the keyboard, going to its Desktop if it is on
+    /// another.
     func focus(window: WorkspaceWindowView) {
+        if !isOnActiveDesktop(window) {
+            activeDesktopIndex = window.desktopIndex
+            showDesktopToast()
+            postDesktopsDidChange()
+        }
         desktopHasFocus = false
         desktopSurfaceView.bringSubviewToFront(window)
         focusedWindow = window
-        if let tabID = contentByWindow[window.serial]?.selectedTabID, manager.selectedId != tabID {
-            manager.selectedId = tabID
+        if let tabID = contentByWindow[window.serial]?.selectedTabID {
+            if manager.selectedId != tabID {
+                manager.selectedId = tabID
+            }
+            lastSeenSelectedId = tabID
+        } else {
+            // An applet with no typing of its own takes the keyboard away from whatever
+            // terminal had it.
+            becomeFirstResponder()
         }
-        applyStates()
+        applyDesktopVisibility()
         applyKeyboardToFocusedWindow()
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .terminalInputFocusRequested, object: nil)
@@ -497,16 +710,27 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         focusDesktop()
     }
 
+    private func focusTopOrDesktop() {
+        if let top = frontmostWindow() {
+            focus(window: top)
+        } else {
+            focusDesktop()
+        }
+    }
+
     private func applyStates() {
         for window in desktopWindows {
-            let active = !desktopHasFocus && window === focusedWindow
+            let onDesktop = isOnActiveDesktop(window)
+            let active = !desktopHasFocus && window === focusedWindow && onDesktop
             window.isChromeActive = active
-            contentByWindow[window.serial]?.setWindowState(visible: true, focused: active)
+            contentByWindow[window.serial]?.setWindowState(visible: onDesktop, focused: active)
         }
     }
 
     private func cycleWindows(step: Int) {
-        let ordered = desktopSurfaceView.subviews.compactMap { $0 as? WorkspaceWindowView }
+        let ordered = desktopSurfaceView.subviews
+            .compactMap { $0 as? WorkspaceWindowView }
+            .filter { isOnActiveDesktop($0) }
         guard ordered.count > 1, let current = focusedWindow, let index = ordered.firstIndex(where: { $0 === current }) else {
             if let top = frontmostWindow() {
                 focus(window: top)
@@ -516,6 +740,339 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         // The frontmost is last, so going forward means the one at the bottom.
         let next = step > 0 ? ordered[0] : ordered[(index + ordered.count - 1) % ordered.count]
         focus(window: next)
+    }
+
+    // MARK: - Desktops
+
+    private func applyDesktopVisibility() {
+        for window in desktopWindows {
+            window.isHidden = !isOnActiveDesktop(window)
+            if window.toolIdentifier.map(WorkspaceToolRegistry.isGlobal) == true {
+                // Global chrome appears on every Desktop, in front so it isn't covered, but
+                // not over the window that was just given focus.
+                if focusedWindow !== window, let top = focusedWindow {
+                    desktopSurfaceView.bringSubviewToFront(window)
+                    desktopSurfaceView.bringSubviewToFront(top)
+                }
+            }
+        }
+        applyStates()
+    }
+
+    private func postDesktopsDidChange() {
+        NotificationCenter.default.post(name: .workspaceDesktopsDidChange, object: self)
+    }
+
+    func switchToDesktop(_ requested: Int) {
+        let index = max(0, min(requested, desktopCount - 1))
+        guard index != activeDesktopIndex else { return }
+        activeDesktopIndex = index
+        focusedWindow = focusedWindow.flatMap { isOnActiveDesktop($0) ? $0 : nil }
+        applyDesktopVisibility()
+        showDesktopToast()
+        focusTopOrDesktop()
+        postDesktopsDidChange()
+    }
+
+    func createNewDesktop() {
+        desktopCount += 1
+        switchToDesktop(desktopCount - 1)
+        postDesktopsDidChange()
+    }
+
+    /// Closes the Desktop's windows and shifts the higher Desktops down. A locked Desktop
+    /// can't be removed. A window whose session can't end, the root shell's, moves to the
+    /// first Desktop instead.
+    func removeDesktop(_ requested: Int) {
+        guard desktopCount > 1 else { return }
+        let index = max(0, min(requested, desktopCount - 1))
+        guard !isDesktopLocked(index) else { return }
+        for window in desktopWindows {
+            if window.toolIdentifier.map(WorkspaceToolRegistry.isGlobal) == true { continue }
+            if window.desktopIndex == index {
+                let holdsRoot = contentByWindow[window.serial]?.hostedTabs.contains { manager.isRootTab($0.tabID) } == true
+                if holdsRoot {
+                    window.desktopIndex = 0
+                }
+                closeWindow(window)
+            } else if window.desktopIndex > index {
+                window.desktopIndex -= 1
+            }
+        }
+        lockedDesktops = Set(lockedDesktops.compactMap { $0 > index ? $0 - 1 : ($0 < index ? $0 : nil) })
+        if index < desktopNames.count {
+            desktopNames.remove(at: index)
+        }
+        trimDesktopNames()
+        desktopCount -= 1
+        if activeDesktopIndex >= desktopCount {
+            activeDesktopIndex = desktopCount - 1
+        } else if activeDesktopIndex > index {
+            activeDesktopIndex -= 1
+        }
+        applyDesktopVisibility()
+        focusTopOrDesktop()
+        postDesktopsDidChange()
+    }
+
+    func isDesktopLocked(_ index: Int) -> Bool {
+        // The first Desktop is permanently protected.
+        index == 0 || lockedDesktops.contains(index)
+    }
+
+    func toggleDesktopLock(_ index: Int) {
+        guard index > 0, index < desktopCount else { return }
+        if lockedDesktops.contains(index) {
+            lockedDesktops.remove(index)
+        } else {
+            lockedDesktops.insert(index)
+        }
+        postDesktopsDidChange()
+    }
+
+    func customNameForDesktop(_ index: Int) -> String? {
+        guard desktopNames.indices.contains(index), !desktopNames[index].isEmpty else { return nil }
+        return desktopNames[index]
+    }
+
+    /// A Desktop without a name is named for its position, so removing one renumbers the
+    /// unnamed ones after it.
+    func nameForDesktop(_ index: Int) -> String {
+        customNameForDesktop(index) ?? "Desktop \(index + 1)"
+    }
+
+    func setName(_ name: String, forDesktop index: Int) {
+        guard index >= 0, index < desktopCount else { return }
+        while desktopNames.count <= index {
+            desktopNames.append("")
+        }
+        desktopNames[index] = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        trimDesktopNames()
+        postDesktopsDidChange()
+    }
+
+    private func trimDesktopNames() {
+        while desktopNames.last?.isEmpty == true {
+            desktopNames.removeLast()
+        }
+    }
+
+    func setDesktopCountForTesting(_ count: Int) {
+        desktopCount = max(1, count)
+        if activeDesktopIndex >= desktopCount {
+            activeDesktopIndex = desktopCount - 1
+        }
+        applyDesktopVisibility()
+        postDesktopsDidChange()
+    }
+
+    // MARK: - Saved arrangements
+
+    private func normalizedFrame(_ frame: CGRect) -> [String: Double]? {
+        let usable = desktopUsableBounds()
+        guard usable.width > 0, usable.height > 0 else { return nil }
+        return [
+            "x": Double((frame.minX - usable.minX) / usable.width),
+            "y": Double((frame.minY - usable.minY) / usable.height),
+            "width": Double(frame.width / usable.width),
+            "height": Double(frame.height / usable.height),
+        ]
+    }
+
+    private func applyNormalizedFrame(_ descriptor: [String: Any]?, to window: WorkspaceWindowView) {
+        guard let descriptor else { return }
+        let usable = desktopUsableBounds()
+        guard usable.width > 0, usable.height > 0 else { return }
+        func value(_ key: String) -> CGFloat {
+            CGFloat((descriptor[key] as? NSNumber)?.doubleValue ?? 0)
+        }
+        let width = min(max(value("width") > 0 ? value("width") * usable.width : window.preferredSize.width, 1), usable.width)
+        let height = min(max(value("height") > 0 ? value("height") * usable.height : window.preferredSize.height, 1), usable.height)
+        let originX = min(max(usable.minX + value("x") * usable.width, usable.minX), usable.maxX - width)
+        let originY = min(max(usable.minY + value("y") * usable.height, usable.minY), usable.maxY - height)
+        let frame = CGRect(x: originX, y: originY, width: width, height: height).integral
+        window.frame = frame
+        window.preferredSize = frame.size
+        window.didApplyInitialFrame = true
+        clampToVisibleBounds(window)
+    }
+
+    /// An arrangement is how many Desktops there are, which window is on which, and where
+    /// they sit. Nothing live: a shell, its scrollback, an applet's contents.
+    func arrangementDescriptors() -> [[String: Any]] {
+        var layout: [[String: Any]] = []
+        var desktops: [String: Any] = ["kind": "desktops", "count": desktopCount, "active": activeDesktopIndex]
+        if !desktopNames.isEmpty {
+            desktops["names"] = desktopNames
+        }
+        layout.append(desktops)
+        for window in desktopSurfaceView.subviews.compactMap({ $0 as? WorkspaceWindowView }) {
+            var descriptor: [String: Any] = ["desktopIndex": window.desktopIndex]
+            if let frame = normalizedFrame(window.frame) {
+                descriptor["frame"] = frame
+            }
+            if let identifier = window.toolIdentifier {
+                descriptor["kind"] = "tool"
+                descriptor["toolIdentifier"] = identifier
+            } else if let content = contentByWindow[window.serial] {
+                descriptor["kind"] = "terminal"
+                descriptor["tabCount"] = content.hostedTabs.count
+                descriptor["selectedTab"] = content.selectedIndex
+                // These last for this run only. They let a restore move the window that holds
+                // the sessions instead of opening another; after a relaunch none match.
+                descriptor["tabIDs"] = content.hostedTabs.map { String($0.tabID) }
+                descriptor["root"] = content.hostedTabs.contains { manager.isRootTab($0.tabID) }
+            } else {
+                continue
+            }
+            layout.append(descriptor)
+        }
+        return layout
+    }
+
+    /// Structure, not pixels: how many Desktops, and which window is on which. Frames are
+    /// saved but left out of this, or nudging a window would light up "unsaved" mid-drag.
+    private func signature(of layout: [[String: Any]]) -> String {
+        var count = 1
+        var names: [String] = []
+        var parts: [String] = []
+        for descriptor in layout {
+            switch descriptor["kind"] as? String {
+            case "desktops":
+                count = max(1, (descriptor["count"] as? NSNumber)?.intValue ?? 1)
+                names = descriptor["names"] as? [String] ?? []
+            case "tool":
+                parts.append("\(descriptor["toolIdentifier"] as? String ?? "")@\((descriptor["desktopIndex"] as? NSNumber)?.intValue ?? 0)")
+            case "terminal":
+                parts.append("terminal@\((descriptor["desktopIndex"] as? NSNumber)?.intValue ?? 0)")
+            default:
+                break
+            }
+        }
+        return "\(count)|\(parts.sorted().joined(separator: ","))|\(names.joined(separator: "\u{1e}"))"
+    }
+
+    private func savedArrangement() -> [[String: Any]]? {
+        UserDefaults.standard.array(forKey: WorkspaceSettings.savedDesktopsKey) as? [[String: Any]]
+    }
+
+    var arrangementIsSaved: Bool {
+        if savedSignature == nil, let saved = savedArrangement() {
+            savedSignature = signature(of: saved)
+        }
+        return savedSignature != nil && savedSignature == signature(of: arrangementDescriptors())
+    }
+
+    func saveArrangement() {
+        let layout = arrangementDescriptors()
+        UserDefaults.standard.set(layout, forKey: WorkspaceSettings.savedDesktopsKey)
+        // Now rather than at the system's leisure: the next thing this has to survive is the
+        // app being killed.
+        UserDefaults.standard.synchronize()
+        savedSignature = signature(of: layout)
+        postDesktopsDidChange()
+    }
+
+    func restoreArrangementFromButton() {
+        guard let layout = savedArrangement(), !layout.isEmpty else {
+            let alert = UIAlertController(title: "No Saved Desktops",
+                                          message: "Press Save first, then Restore brings that arrangement back.",
+                                          preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+            return
+        }
+        applyArrangement(layout)
+        savedSignature = signature(of: arrangementDescriptors())
+        postDesktopsDidChange()
+    }
+
+    /// Puts the windows back where they were and does nothing else. A terminal is moved, or
+    /// opened fresh if its window is gone, every one after a relaunch. It is never closed,
+    /// because closing one ends a shell. An applet the layout doesn't mention was opened after
+    /// the save, so it goes.
+    func applyArrangement(_ layout: [[String: Any]]) {
+        var toolDescriptors: [[String: Any]] = []
+        var terminalDescriptors: [[String: Any]] = []
+        var desktopsDescriptor: [String: Any]?
+        for descriptor in layout {
+            switch descriptor["kind"] as? String {
+            case "desktops": desktopsDescriptor = descriptor
+            case "tool": toolDescriptors.append(descriptor)
+            case "terminal": terminalDescriptors.append(descriptor)
+            default: break
+            }
+        }
+
+        // Desktops first: a window can't go on one that doesn't exist yet. Never shrink past
+        // one that holds something: Restore isn't a licence to throw work away.
+        let highestLive = desktopWindows.map(\.desktopIndex).max() ?? 0
+        let savedCount = max(1, (desktopsDescriptor?["count"] as? NSNumber)?.intValue ?? 1)
+        desktopCount = max(savedCount, highestLive + 1)
+        desktopNames = (desktopsDescriptor?["names"] as? [String]) ?? []
+        trimDesktopNames()
+
+        func assign(_ window: WorkspaceWindowView, _ descriptor: [String: Any]) {
+            applyNormalizedFrame(descriptor["frame"] as? [String: Any], to: window)
+            if window.toolIdentifier.map(WorkspaceToolRegistry.isGlobal) == true {
+                window.desktopIndex = 0
+                return
+            }
+            let index = max(0, (descriptor["desktopIndex"] as? NSNumber)?.intValue ?? 0)
+            window.desktopIndex = index
+            desktopCount = max(desktopCount, index + 1)
+        }
+
+        var wanted = Set<String>()
+        for descriptor in toolDescriptors {
+            guard let identifier = descriptor["toolIdentifier"] as? String, !identifier.isEmpty,
+                  wanted.insert(identifier).inserted else { continue }
+            guard let window = window(forTool: identifier) ?? openTool(identifier) else { continue }
+            assign(window, descriptor)
+        }
+        for window in desktopWindows {
+            if let identifier = window.toolIdentifier, !WorkspaceToolRegistry.isGlobal(identifier), !wanted.contains(identifier) {
+                closeWindow(window)
+            }
+        }
+
+        var claimed = Set<Int>()
+        for descriptor in terminalDescriptors {
+            let tabIDs = (descriptor["tabIDs"] as? [String] ?? []).compactMap(UInt64.init)
+            var window = tabIDs.lazy.compactMap { self.windowHosting(tabID: $0) }.first
+            if window == nil, (descriptor["root"] as? NSNumber)?.boolValue == true {
+                window = manager.tabs.first { self.manager.isRootTab($0.id) }.flatMap { self.windowHosting(tabID: $0.id) }
+            }
+            if let found = window, claimed.contains(found.serial) {
+                window = nil
+            }
+            if window == nil {
+                // After a relaunch: a fresh shell where the saved one was, with as many tabs.
+                openNewTerminalWindow()
+                window = windowHosting(tabID: manager.selectedId)
+                let tabCount = max(1, (descriptor["tabCount"] as? NSNumber)?.intValue ?? 1)
+                if let opened = window, tabCount > 1 {
+                    for _ in 1..<tabCount {
+                        openNewTab(in: opened)
+                    }
+                }
+            }
+            guard let target = window else { continue }
+            claimed.insert(target.serial)
+            assign(target, descriptor)
+            if let selected = (descriptor["selectedTab"] as? NSNumber)?.intValue {
+                contentByWindow[target.serial]?.setSelectedIndexWithoutFocus(selected)
+            }
+        }
+
+        if let saved = (desktopsDescriptor?["active"] as? NSNumber)?.intValue, saved >= 0, saved < desktopCount {
+            activeDesktopIndex = saved
+        }
+        focusedWindow = focusedWindow.flatMap { isOnActiveDesktop($0) ? $0 : nil }
+        applyDesktopVisibility()
+        focusTopOrDesktop()
+        refreshTitles()
+        postDesktopsDidChange()
     }
 
     // MARK: - Keyboard
@@ -592,9 +1149,25 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
                     return true
                 }
             }
+            // Cmd and Ctrl-Option, not Ctrl alone: a terminal claims Ctrl, Shift and Alt with
+            // the arrows for its own sequences, and a shell uses them to jump words.
+            if modifiers == .command || modifiers == [.control, .alternate] {
+                if key.keyCode == .keyboardLeftArrow {
+                    switchToDesktop(activeDesktopIndex - 1)
+                    return true
+                }
+                if key.keyCode == .keyboardRightArrow {
+                    switchToDesktop(activeDesktopIndex + 1)
+                    return true
+                }
+            }
+            if modifiers == [.control, .alternate], let number = Int(input), number >= 1 {
+                switchToDesktop(number - 1)
+                return true
+            }
             if modifiers == .command {
                 if input == "t" {
-                    if let window = focusedWindow {
+                    if let window = focusedWindow, contentByWindow[window.serial] != nil {
                         openNewTab(in: window)
                     } else {
                         openNewTerminalWindow()
@@ -606,7 +1179,7 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
                     return true
                 }
                 if input == "w" {
-                    closeFocusedTab()
+                    closeFocused()
                     return true
                 }
                 if let number = Int(input), number >= 1 {
@@ -631,11 +1204,17 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
     }
 
     var terminalControlKeysGoToSelected: Bool {
-        !desktopHasFocus && focusedWindow != nil
+        guard !desktopHasFocus, let window = focusedWindow else { return false }
+        return contentByWindow[window.serial] != nil
     }
 
-    private func closeFocusedTab() {
-        guard let window = focusedWindow, let tabID = contentByWindow[window.serial]?.selectedTabID else { return }
+    private func closeFocused() {
+        guard let window = focusedWindow else { return }
+        if appletByWindow[window.serial] != nil {
+            closeWindow(window)
+            return
+        }
+        guard let tabID = contentByWindow[window.serial]?.selectedTabID else { return }
         manager.closeTab(id: tabID)
         syncFromManager()
     }
@@ -665,6 +1244,10 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         guard recognizer.state == .began else { return }
         let point = recognizer.location(in: desktopSurfaceView)
         presentRootMenu(from: desktopSurfaceView, sourceRect: CGRect(origin: point, size: CGSize(width: 1, height: 1)))
+    }
+
+    @objc private func handleDesktopSwipe(_ recognizer: UISwipeGestureRecognizer) {
+        switchToDesktop(activeDesktopIndex + (recognizer.direction == .left ? 1 : -1))
     }
 
     @objc private func menuPipTapped(_ sender: UIButton) {
@@ -712,7 +1295,7 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
             self?.openNewTerminalWindow()
         })
         let menuWindow = window(containing: sourceView)
-        if let menuWindow {
+        if let menuWindow, contentByWindow[menuWindow.serial] != nil {
             actions.append(UIAlertAction(title: "New Tab", style: .default) { [weak self, weak menuWindow] _ in
                 guard let self, let menuWindow else { return }
                 self.openNewTab(in: menuWindow)
@@ -721,6 +1304,17 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         actions.append(UIAlertAction(title: "Windows", style: .default, handler: deferred { [weak self] in
             self?.presentWindowList(from: sourceView, sourceRect: sourceRect)
         }))
+        actions.append(UIAlertAction(title: "Desktops", style: .default) { [weak self] _ in
+            self?.openTool(WorkspaceToolRegistry.desktops)
+        })
+        actions.append(UIAlertAction(title: "New Desktop", style: .default) { [weak self] _ in
+            self?.createNewDesktop()
+        })
+        if let menuWindow, desktopCount > 1, menuWindow.toolIdentifier.map(WorkspaceToolRegistry.isGlobal) != true {
+            actions.append(UIAlertAction(title: "Move to Desktop…", style: .default, handler: deferred { [weak self] in
+                self?.presentMoveToDesktop(menuWindow, from: sourceView, sourceRect: sourceRect)
+            }))
+        }
         if let tabID = (menuWindow ?? focusedWindow).flatMap({ contentByWindow[$0.serial]?.selectedTabID }) {
             actions.append(UIAlertAction(title: "Terminal Settings", style: .default, handler: deferred { [weak self] in
                 self?.presentTerminalSettings(tabID: tabID)
@@ -729,6 +1323,10 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         actions.append(UIAlertAction(title: "App Diagnostics", style: .default, handler: deferred { [weak self] in
             self?.present(UIHostingController(rootView: AppDiagnosticsView()), animated: true)
         }))
+        let opensAtLaunch = WorkspaceSettings.opensAtLaunch
+        actions.append(UIAlertAction(title: "Open at Launch: \(opensAtLaunch ? "On" : "Off")", style: .default) { _ in
+            WorkspaceSettings.opensAtLaunch = !opensAtLaunch
+        })
         actions.append(UIAlertAction(title: "Back to Tabs", style: .default, handler: deferred { [weak self] in
             self?.leaveHandler?()
         }))
@@ -737,13 +1335,25 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
 
     private func presentWindowList(from sourceView: UIView, sourceRect: CGRect) {
         let ordered = desktopSurfaceView.subviews.reversed().compactMap { $0 as? WorkspaceWindowView }
-        let actions = ordered.map { window in
-            UIAlertAction(title: window.titleLabel.text ?? "Window", style: .default) { [weak self, weak window] _ in
+        let actions = ordered.map { window -> UIAlertAction in
+            let title = window.titleLabel.text ?? "Window"
+            let label = desktopCount > 1 ? "\(title) (\(nameForDesktop(window.desktopIndex)))" : title
+            return UIAlertAction(title: label, style: .default) { [weak self, weak window] _ in
                 guard let self, let window else { return }
                 self.focus(window: window)
             }
         }
         presentSheet(title: "Windows", actions: actions, from: sourceView, sourceRect: sourceRect)
+    }
+
+    private func presentMoveToDesktop(_ window: WorkspaceWindowView, from sourceView: UIView, sourceRect: CGRect) {
+        let actions = (0..<desktopCount).filter { $0 != window.desktopIndex }.map { index -> UIAlertAction in
+            UIAlertAction(title: nameForDesktop(index), style: .default) { [weak self, weak window] _ in
+                guard let self, let window else { return }
+                self.assignWindow(window, toDesktop: index)
+            }
+        }
+        presentSheet(title: "Move to Desktop", actions: actions, from: sourceView, sourceRect: sourceRect)
     }
 
     private func presentTerminalSettings(tabID: UInt64) {

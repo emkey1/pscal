@@ -273,7 +273,7 @@ final class TerminalRootViewController: UIViewController {
         installTabBar()
         installKeyboardObservers()
         WorkspaceTestHooks.installIfEnabled()
-        if ProcessInfo.processInfo.environment["PSCALI_WORKSPACE_START"] == "1" {
+        if ProcessInfo.processInfo.environment["PSCALI_WORKSPACE_START"] == "1" || WorkspaceSettings.opensAtLaunch {
             enterWorkspace()
         }
     }
