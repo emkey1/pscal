@@ -42,8 +42,13 @@ Base: `V.1R32`
 - A report of arithmetic in `for`, `case` and a plain `while [ ]` gives their own line, not the line of the command before. A long expression is reported whole, and an assignment to a name over 255 characters works.
 - `break` and `continue` in `$(...)` inside a loop end the substitution, quietly, and the loop goes on: `x=$(break; echo not)` is empty, as in bash. They used to warn and run the next command.
 - `FUNCNAME`, `BASH_SOURCE`, `BASH_LINENO` and `caller` read one list, as in bash. A function names the file that defined it, wherever it is called from, a sourced file has an entry of its own, and the script is under them as `main`. `BASH_LINENO` is new. A bare `caller` at the top of a script prints `0 NULL` with status 0; `caller 0` prints the name as well as the line and file.
-- `jobs | wc -l` lists the shell's jobs, on hosts too, and nothing else in a stage sees them. `jobs` takes `-p`, `-l`, `-r`, `-s` and job specs. It ignored them all, so `kill $(jobs -p)` could not work.
+- `jobs | wc -l` lists the shell's jobs, on hosts too, and nothing else in a stage sees them. `jobs` takes `-l`, `-n`, `-p`, `-r`, `-s`, `-x` and job specs. It ignored them all, so `kill $(jobs -p)` could not work.
+- `jobs` prints bash's line, with `+`, `-`, the padding and what the command was written as: `[1]+  Running                 sleep 9 | cat > f &`. It said `[1] Running cat`. A job that has ended is listed once, as `Done`, `Exit 3` or `Terminated`, and a prompt reports it. It was never reported anywhere.
+- `%%`, `%+`, `%`, `%-`, `%name` and `%?text` work in `jobs`, `kill`, `wait`, `disown`, `fg` and `bg`, which knew only `%N`, and an ambiguous one says so. What has ended can still be named.
+- A new job gets one past the highest number still known, where it took the lowest free one. `wait %1` can ask again until the next fork or `jobs`, as in bash.
+- `fg` and `bg` need job control, at a prompt or under `set -m`, and say `no job control` anywhere else. `fg` prints the command it resumes, and `bg` says when a job is already in the background.
 - `disown` takes `-a`, `-r` and `-h`, and says `no such job` in bash's words. `wait` and `kill` say where in the script their errors are, as other builtins do.
+- At a prompt on a host, `[1] 1234` is printed for a job, as on iOS, and `( cmd ) &`, `{ cmd; } &`, a function and `a && b &` no longer stop for good on the terminal.
 - `ulimit` is a builtin, on every platform. A file named `ulimit` on PATH could not change the shell, and Linux has none. It reads and sets `-c -d -f -l -m -n -p -s -t -u -v`, with `-S`, `-H` and `-a`. What a subshell, stage, job, substitution or nested shell sets ends with it.
 - A script with no `#!` is read by exsh itself on a host, as bash reads it. It went to the system's `sh`, where a bashism failed and on Linux an array or `caller` was not there. A file with a NUL on its first line says `cannot execute binary file` and gives 126, where it was run as a script.
 
@@ -57,6 +62,7 @@ Base: `V.1R32`
 - A launch of the app is its boot. `who -b` and `who -r` answer, and `/var/run/utmp` starts empty, so a run iOS ended leaves no logins behind. `/var/log/wtmp` moves to `/var/log/wtmp.1` at a launch once it reaches 1 MB.
 - `lps` no longer keeps an `exited` row for a task whose parent ended first. It stayed until the app restarted: `timeout 1 pascal x.pas` left one, and so did `( sleep 1 & )` and `sh -c 'sleep 1 &'`. A task like that shows as `running` while it runs, and its row goes when it ends, as init reaps one on Linux. Its end no longer runs the CHLD trap of the shell that took it in.
 - `mkfifo` is a command, and a FIFO goes where the task's directory says, with the task's mask. `tar` and `cp` making a FIFO, and `mknod`, went to the host's directory.
+- A file run with `.` at a prompt no longer announces its background jobs, as under bash.
 - `ulimit` keeps each task's limits in the VM, and the open files limit holds its descriptors: a new task may have 1024 of them. Nothing else is enforced yet.
 - `sftp`'s `lumask`, and `ssh` and `scp -p`, set the task's file mask, not the whole app's.
 - In a shell run as a command, `caller`, `FUNCNAME` and `BASH_SOURCE` show that script. They showed its caller's as well, since it runs on the caller's thread.
@@ -65,7 +71,9 @@ Base: `V.1R32`
 
 
 ## Differs from bash
-- `jobs` does not list a job that has ended, and its line lacks the marker, the padding and the ` &`. `jobs -n` and `jobs -x` are not there.
+- A job's text is as it was written, where bash prints a compound command back on several lines in its own layout. `jobs -l` gives a pipeline one line, where bash gives each stage one. The padding is bash's on Linux; bash 5.3 on macOS pads further.
+- `jobs` right after `kill %1` says the job is terminated, where bash, which has not yet heard, says `Running`. At a prompt a job that ends during a line waits for the prompt to be reported, where bash reports it when the next command ends. `-` on a job that had already ended when the next one started can differ, since bash decides that by timing. At a prompt, `fg` still clears the screen and says `continued`.
+- `jobs -x` puts in a job's first pid, where bash in a script puts in the shell's group. In a script without `set -m`, a stopped job is listed as `Stopped`, where bash does not notice and says `Running`.
 - A hard limit set inside `$(...)` on a host sets only the soft one, as the substitution runs in the shell's process and a hard limit could not come back up.
 
 - Unquoted parentheses among a command's words are plain words: `find . ( -name a )` runs, and `f(x) { :; }` reports `}` where bash reports `x`. The owner chose to keep this.

@@ -1313,6 +1313,18 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("jobs_group_none", f"( sleep 1 & {{ jobs; }} | wc -l; wait ) {R}", "0\n"),
     ("jobs_pid", f"( sleep 2 & jp=$!; [ \"$(jobs -p)\" = \"$jp\" ] && echo same; kill $jp; wait $jp 2>/dev/null ) {R}", "same\n"),
     ("disown_all", f"( sleep 1 & disown -a; jobs | wc -l ) {R}", "0\n"),
+    # What `jobs` prints: bash's line, what was written, a job that has ended, once. Every builtin takes the same job specs.
+    ("jobs_line", f"( sleep 2 & jp=$!; jobs | sed -E 's/  +/ /g'; kill $jp; wait $jp 2>/dev/null ) {R}", "[1]+ Running sleep 2 &\n"),
+    ("jobs_text", f"( sleep 2 | cat > /dev/null & jp=$!; jobs | sed -E 's/  +/ /g'; kill %1; wait 2>/dev/null ) {R}", "[1]+ Running sleep 2 | cat > /dev/null &\n"),
+    ("jobs_ended_once", f"( ( exit 3 ) & jp=$!; while kill -0 $jp 2>/dev/null; do sleep 0.05; done; jobs > smoke/je; sed -E 's/  +/ /g' smoke/je; jobs > smoke/je; wc -l < smoke/je ) {R}", "[1]+ Exit 3 ( exit 3 )\n0\n"),
+    ("jobs_changed_only", f"( sleep 2 & jp=$!; jobs -n | wc -l; jobs > /dev/null; jobs -n > smoke/je; wc -l < smoke/je; kill $jp; wait $jp 2>/dev/null ) {R}", "1\n0\n"),
+    ("job_specs", f"( sleep 2 & a=$!; sleep 2.1 & b=$!; jobs %% | cut -c1-3; jobs %- | cut -c1-3; jobs %?2.1 | cut -c1-3; kill %-; kill %+; wait $a $b 2>/dev/null; echo gone ) {R}", "[2]\n[1]\n[2]\ngone\n"),
+    ("job_spec_name", f"( sleep 2 & kill %sleep; wait 2>/dev/null; echo $?; jobs %cat > /dev/null 2>&1; echo $? ) {R}", "0\n1\n"),
+    ("job_spec_wait", f"( ( exit 3 ) & wait %?exit; echo $?; wait %1; echo $? ) {R}", "3\n3\n"),
+    ("job_spec_ambiguous", f"( sleep 2 & a=$!; sleep 2 & b=$!; kill %sleep 2> smoke/je; sed 's/.*kill: //' smoke/je; kill $a $b; wait 2>/dev/null ) {R}", "sleep: ambiguous job spec\n"),
+    ("jobs_x", f"( sleep 2 & jp=$!; [ \"$(jobs -x echo %1)\" = \"$jp\" ] && echo same; kill $jp; wait $jp 2>/dev/null ) {R}", "same\n"),
+    ("fg_in_a_subshell", f"( sleep 1 & fg 2>&1 | sed 's/.*fg: //'; wait ) {R}", "no job control\n"),
+    ("job_number_past_highest", f"( sleep 2 & a=$!; sleep 2 & b=$!; disown %1; sleep 2 & c=$!; jobs | cut -c1-3; kill $a $b $c; wait 2>/dev/null ) {R}", "[2]\n[3]\n"),
     # mkfifo is a command, in the task's directory, by the task's mask. So is what tar and cp make: they reached the host's directory.
     ("mkfifo_found", f"command -v mkfifo {R}", "mkfifo\n"),
     ("mkfifo_through", f"rm -f smoke/ff; mkfifo smoke/ff; [ -p smoke/ff ] && echo fifo {R}; ( echo through > smoke/ff ) & cat smoke/ff {A}; wait; rm -f smoke/ff", "fifo\nthrough\n"),
