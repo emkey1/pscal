@@ -600,6 +600,12 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("subshell_exec", f'( exec echo in-sub; echo no ) {R}', "in-sub\n"),
     ("printf_wide_number", f'x=$(printf "%300d|" 7); echo "${{#x}}" {R}; unset x', "301\n"),
     ("printf_wide_char", f'x=$(printf "%300c|" a); echo "${{#x}}" {R}; unset x', "301\n"),
+    # %n has no conversion in libc behind it: Darwin's aborted, which ended the whole app.
+    ("printf_count", f'printf "ab%n|\\n" pn {R}; echo "[$pn] $?" {A}; unset pn', "ab|\n[2] 0\n"),
+    ("printf_count_command", f'command printf "abc%n|" pn {R}; echo "[$pn]" {A}; unset pn', "abc|[3]\n"),
+    ("printf_count_substitution", f'x=$(printf "abc%nd" pn); echo "[$x]" {R}; unset x', "[abcd]\n"),
+    ("printf_count_bad_name", f'printf "%n" 1a 2>/dev/null; echo "$?" {R}', "1\n"),
+    ("printf_unknown_letter", f'{{ printf "cd%Dgh" abc 2>/dev/null; echo " $?"; }} {R}', "cd 1\n"),
     # Killing a body that is inside a substitution leaves that substitution's reader with no
     # one to join it. The next substitution still has to work.
     ("sub_body_killed", f'( x=$(sleep 30); echo no ) & p=$!; sleep 1; kill $p; wait $p; s=$?; y=$(echo next); echo "$s $y" {R}; unset s y', "143 next\n"),
