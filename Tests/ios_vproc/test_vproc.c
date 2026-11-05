@@ -2495,6 +2495,274 @@ static void assert_kill_does_not_self_cancel(void) {
     assert(ctx.completed == 1);
 }
 
+/* A task with a thread of its own, parked until the test says what it should do next. */
+typedef struct {
+    VProc *vp;
+    int pid;
+    int stage_pid;
+    bool unwinds_itself;
+    bool with_stage;
+    volatile int step;
+    volatile int delivered_fatal;
+    volatile int hits_after_delivery;
+    volatile uint32_t caught;
+    volatile int done;
+} vproc_task_thread_ctx;
+
+static volatile sig_atomic_t g_noted_task = 0;
+
+static void noting_handler(int signo) {
+    g_handler_hits++;
+    g_noted_task = vprocHandlerTaskPid();
+    vprocNoteCaughtSignal(vprocHandlerTaskPid(), signo);
+}
+
+static void task_ctx_await(vproc_task_thread_ctx *ctx, int step) {
+    while (__atomic_load_n(&ctx->step, __ATOMIC_ACQUIRE) < step) {
+        usleep(1000);
+    }
+}
+
+static void task_ctx_advance(vproc_task_thread_ctx *ctx, int step) {
+    __atomic_store_n(&ctx->step, step, __ATOMIC_RELEASE);
+}
+
+static void *vproc_task_thread(void *arg) {
+    vproc_task_thread_ctx *ctx = (vproc_task_thread_ctx *)arg;
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    ctx->vp = vp;
+    ctx->pid = vprocPid(vp);
+    vprocSetUnwindsItself(ctx->pid, ctx->unwinds_itself);
+    struct sigaction sa = {0};
+    sa.sa_handler = noting_handler;
+    assert(vprocSigaction(ctx->pid, SIGUSR1, &sa, NULL) == 0);
+    VProc *stage = NULL;
+    if (ctx->with_stage) {
+        stage = vprocCreate(NULL);
+        assert(stage);
+        vprocRegisterThread(stage, pthread_self());
+        ctx->stage_pid = vprocPid(stage);
+    }
+    task_ctx_advance(ctx, 1);
+    task_ctx_await(ctx, 2);
+    pthread_testcancel();
+    ctx->delivered_fatal = vprocDeliverTaskSignals(ctx->pid);
+    ctx->hits_after_delivery = g_handler_hits;
+    ctx->caught = vprocCaughtSignals(ctx->pid);
+    if (ctx->caught & (1u << SIGUSR1)) {
+        assert(vprocTakeCaughtSignal(ctx->pid, SIGUSR1));
+        assert(!vprocTakeCaughtSignal(ctx->pid, SIGUSR1));
+    }
+    if (stage) {
+        vprocUnregisterThread(stage, pthread_self());
+    }
+    ctx->done = 1;
+    task_ctx_await(ctx, 3);
+    return NULL;
+}
+
+/* A signal for a task that is another thread's waits for that thread, and a child ending on this
+ * thread does not run it here. The task's own thread runs it and finds the note, on that task. */
+static void assert_handler_waits_for_its_task(void) {
+    g_handler_hits = 0;
+    g_noted_task = 0;
+    vproc_task_thread_ctx ctx = {0};
+    pthread_t tid;
+    assert(pthread_create(&tid, NULL, vproc_task_thread, &ctx) == 0);
+    task_ctx_await(&ctx, 1);
+
+    assert(vprocKillShim(ctx.pid, SIGUSR1) == 0);
+    assert(g_handler_hits == 0);
+    VProc *child = vprocCreate(NULL);
+    assert(child);
+    vprocSetParent(vprocPid(child), ctx.pid);
+    vprocMarkExit(child, 0);
+    assert(g_handler_hits == 0);
+    assert(vprocCaughtSignals(ctx.pid) == 0);
+    vprocDestroy(child);
+
+    task_ctx_advance(&ctx, 2);
+    while (!ctx.done) {
+        usleep(1000);
+    }
+    assert(ctx.hits_after_delivery == 1);
+    assert(g_noted_task == ctx.pid);
+    assert(ctx.delivered_fatal == 0);
+    assert(ctx.caught & (1u << SIGUSR1));
+    /* The note can be read only by the task's thread. */
+    assert(vprocCaughtSignals(ctx.pid) == 0);
+    task_ctx_advance(&ctx, 3);
+    assert(pthread_join(tid, NULL) == 0);
+    vprocMarkExit(ctx.vp, 0);
+    vprocDiscard(ctx.pid);
+    vprocDestroy(ctx.vp);
+}
+
+/* A shell is not cancelled: what would end it waits for it to look, and it stays a live task. */
+static void assert_unwinding_task_is_not_cancelled(void) {
+    vproc_task_thread_ctx ctx = {0};
+    ctx.unwinds_itself = true;
+    ctx.with_stage = true;
+    pthread_t tid;
+    assert(pthread_create(&tid, NULL, vproc_task_thread, &ctx) == 0);
+    task_ctx_await(&ctx, 1);
+
+    assert(vprocKillShim(ctx.pid, SIGTERM) == 0);
+    assert(vprocKillShim(ctx.pid, 0) == 0);
+    /* Nor is a stage cancelled that runs on the shell's thread: pthread_testcancel below would
+     * end the thread with no result. */
+    assert(vprocKillShim(ctx.stage_pid, SIGTERM) == 0);
+    /* It counts as ended once its thread has unwound, or after a grace period. */
+    int status = 0;
+    pid_t waited = vprocWaitPidShim(ctx.stage_pid, &status, WNOHANG);
+    assert(waited <= 0 || WIFSIGNALED(status));
+
+    task_ctx_advance(&ctx, 2);
+    while (!ctx.done) {
+        usleep(1000);
+    }
+    assert(ctx.delivered_fatal == SIGTERM);
+    task_ctx_advance(&ctx, 3);
+    void *ret = NULL;
+    assert(pthread_join(tid, &ret) == 0);
+    assert(ret != PTHREAD_CANCELED);
+    vprocMarkExit(ctx.vp, 0);
+    vprocDiscard(ctx.pid);
+    vprocDestroy(ctx.vp);
+}
+
+/* SIGCONT continues whatever its disposition; a handler or a block only delays the handler. And
+ * pending, a stop and a continue cancel each other. */
+static void assert_sigcont_continues_whatever_its_disposition(void) {
+    int parent = current_waiter_pid();
+    VProc *child = vprocCreate(NULL);
+    assert(child);
+    int cpid = vprocPid(child);
+    vprocSetParent(cpid, parent);
+    int status = 0;
+
+    struct sigaction sa = {0};
+    sa.sa_handler = test_handler;
+    assert(vprocSigaction(cpid, SIGCONT, &sa, NULL) == 0);
+    g_handler_hits = 0;
+    assert(vprocKillShim(cpid, SIGSTOP) == 0);
+    assert(vprocWaitPidShim(cpid, &status, WUNTRACED) == cpid);
+    assert(WIFSTOPPED(status));
+    assert(vprocKillShim(cpid, SIGCONT) == 0);
+    assert(vprocWaitPidShim(cpid, &status, WCONTINUED | WNOHANG) == cpid);
+    assert(WIFCONTINUED(status));
+    /* Its handler is the task's to run, and this thread isn't the task's. */
+    assert(g_handler_hits == 0);
+    sigset_t pending;
+    assert(vprocSigpending(cpid, &pending) == 0);
+    assert(sigismember(&pending, SIGCONT));
+
+    /* A stop takes back a continue still pending. */
+    assert(vprocKillShim(cpid, SIGSTOP) == 0);
+    assert(vprocSigpending(cpid, &pending) == 0);
+    assert(!sigismember(&pending, SIGCONT));
+    assert(vprocWaitPidShim(cpid, &status, WUNTRACED) == cpid);
+    assert(WIFSTOPPED(status));
+
+    /* Blocked: it continues, and the signal stays pending. */
+    struct sigaction sa_default = {0};
+    sa_default.sa_handler = SIG_DFL;
+    assert(vprocSigaction(cpid, SIGCONT, &sa_default, NULL) == 0);
+    assert(vprocBlockSignals(cpid, 1 << SIGCONT) == 0);
+    assert(vprocKillShim(cpid, SIGCONT) == 0);
+    assert(vprocWaitPidShim(cpid, &status, WCONTINUED | WNOHANG) == cpid);
+    assert(WIFCONTINUED(status));
+    assert(vprocSigpending(cpid, &pending) == 0);
+    assert(sigismember(&pending, SIGCONT));
+
+    vprocMarkExit(child, 0);
+    (void)vprocWaitPidShim(cpid, &status, 0);
+    vprocDestroy(child);
+}
+
+/* A task in a slot an earlier one used starts clean: one that unwinds itself would not end when
+ * it was killed. */
+static void assert_reused_slot_starts_clean(void) {
+    int parent = current_waiter_pid();
+    for (int i = 0; i < 2; ++i) {
+        VProc *vp = vprocCreate(NULL);
+        assert(vp);
+        int pid = vprocPid(vp);
+        vprocSetParent(pid, parent);
+        assert(vprocKillShim(pid, SIGTERM) == 0);
+        int status = 0;
+        assert(vprocWaitPidShim(pid, &status, WNOHANG) == pid);
+        assert(WIFSIGNALED(status));
+        vprocSetUnwindsItself(pid, true);
+        vprocSetSilentToParent(pid, true);
+        vprocSetNotAProcess(pid);
+        vprocNoteCaughtSignal(pid, SIGUSR1);
+        vprocDiscard(pid);
+        vprocDestroy(vp);
+    }
+}
+
+/* A `.` or `eval` is not a process: what it starts sees the shell as its parent, and only what
+ * was marked is passed over. */
+static void assert_getppid_passes_over_what_is_no_process(void) {
+    int shell = current_waiter_pid();
+    VProc *stage = vprocCreate(NULL);
+    assert(stage);
+    int stage_pid = vprocPid(stage);
+    vprocSetParent(stage_pid, shell);
+    VProc *child = vprocCreate(NULL);
+    assert(child);
+    int child_pid = vprocPid(child);
+    vprocSetParent(child_pid, stage_pid);
+
+    vprocActivate(child);
+    assert(vprocGetPpidShim() == stage_pid);
+    vprocDeactivate();
+
+    vprocSetNotAProcess(stage_pid);
+    vprocActivate(child);
+    assert(vprocGetPpidShim() == shell);
+    vprocDeactivate();
+
+    /* The stage is still what waits for it. */
+    vprocActivate(stage);
+    int status = 0;
+    assert(vprocWaitPidShim(child_pid, &status, WNOHANG) == 0);
+    vprocDeactivate();
+
+    vprocDiscard(child_pid);
+    vprocDestroy(child);
+    vprocDiscard(stage_pid);
+    vprocDestroy(stage);
+}
+
+/* As exec does. SIGINT and SIGQUIT stay, for a stage's Ctrl-C. */
+static void assert_reset_caught_signals(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    int pid = vprocPid(vp);
+    struct sigaction sa = {0};
+    sa.sa_handler = test_handler;
+    struct sigaction ign = {0};
+    ign.sa_handler = SIG_IGN;
+    assert(vprocSigaction(pid, SIGUSR1, &sa, NULL) == 0);
+    assert(vprocSigaction(pid, SIGINT, &sa, NULL) == 0);
+    assert(vprocSigaction(pid, SIGUSR2, &ign, NULL) == 0);
+    vprocResetCaughtSignals(pid);
+    struct sigaction now = {0};
+    assert(vprocSigaction(pid, SIGUSR1, NULL, &now) == 0);
+    assert(now.sa_handler == SIG_DFL);
+    assert(vprocSigaction(pid, SIGINT, NULL, &now) == 0);
+    assert(now.sa_handler == test_handler);
+    assert(vprocSigaction(pid, SIGUSR2, NULL, &now) == 0);
+    assert(now.sa_handler == SIG_IGN);
+    vprocMarkExit(vp, 0);
+    vprocDiscard(pid);
+    vprocDestroy(vp);
+}
+
 typedef struct {
     VProc *parent;
     int child_pid;
@@ -8517,6 +8785,18 @@ int main(void) {
     assert_siginfo_handler_invoked();
     fprintf(stderr, "TEST kill_does_not_self_cancel\n");
     assert_kill_does_not_self_cancel();
+    fprintf(stderr, "TEST handler_waits_for_its_task\n");
+    assert_handler_waits_for_its_task();
+    fprintf(stderr, "TEST unwinding_task_is_not_cancelled\n");
+    assert_unwinding_task_is_not_cancelled();
+    fprintf(stderr, "TEST sigcont_continues_whatever_its_disposition\n");
+    assert_sigcont_continues_whatever_its_disposition();
+    fprintf(stderr, "TEST reset_caught_signals\n");
+    assert_reset_caught_signals();
+    fprintf(stderr, "TEST reused_slot_starts_clean\n");
+    assert_reused_slot_starts_clean();
+    fprintf(stderr, "TEST getppid_passes_over_what_is_no_process\n");
+    assert_getppid_passes_over_what_is_no_process();
     fprintf(stderr, "TEST cancelled_wait_lets_go_of_task_table\n");
     assert_cancelled_wait_lets_go_of_task_table();
     fprintf(stderr, "TEST cancel_pending_lets_go_of_vproc_lock\n");

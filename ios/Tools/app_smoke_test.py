@@ -545,6 +545,18 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("kill_vm_loop", f"( pascal smoke/spin.pas & p=$!; sleep 1; kill $p; wait $p; echo $? ) | grep -v '^\\[' {R}; echo after | cat {A}", "143\nafter\n"),
     # [s]: grep's own row holds its argument, and an empty result shows any row that is left.
     ("killed_leaves_no_rows", f'( sleep 37 ) & p=$!; sleep 0.2; kill $p; wait $p; sleep 37 & p=$!; kill $p; wait $p; lps | grep "[s]leep 37" {R}', ""),
+    # A trap is set on the shell's own task, not the command's, and runs on the shell's thread.
+    ("trap_beside_job", f"trap 'echo got {A}' USR2; ( while :; do :; done ) & j=$!; sleep 0.2; kill -USR2 $$; sleep 0.2; echo end {A}; kill $j; wait $j 2>/dev/null; trap - USR2; unset j", "got\nend\n"),
+    ("trap_from_job", f"trap 'echo got {A}' USR2; me=$$; ( sleep 0.1; kill -USR2 $me ) & i=0; while [ $i -lt 40 ]; do ( : ); sleep 0.01; i=$((i+1)); done; wait; echo end {A}; trap - USR2; unset i me", "got\nend\n"),
+    ("trap_during_wait", f"trap 'echo got {A}' USR2; sleep 2 & j=$!; me=$$; ( sleep 0.3; kill -USR2 $me ) & wait $j; r=$?; [ $r -gt 128 ] && echo interrupted {A}; kill $j; wait 2>/dev/null; trap - USR2; unset j me r", "got\ninterrupted\n"),
+    ("trap_cont_handler", f"( trap 'echo c {A}' CONT; sleep 1; echo body-end {A} ) & p=$!; sleep 0.3; kill -STOP $p; sleep 0.2; kill -CONT $p; wait $p; echo \"rc $?\" {A}; unset p", "c\nbody-end\nrc 0\n"),
+    ("trap_job_keeps_none", f"trap 'echo shell {A}' TERM; sleep 30 & p=$!; kill $p; wait $p; echo \"rc $?\" {A}; trap - TERM; unset p", "rc 143\n"),
+    ("trap_job_own", f"( trap 'echo term {A}; exit 3' TERM; while :; do sleep 0.01; done ) & p=$!; sleep 0.3; kill $p; wait $p; echo \"rc $?\" {A}; unset p", "term\nrc 3\n"),
+    ("trap_nested_sh", f"sh -c 'trap \"echo got\" USR1; me=$$; ( sleep 0.1; kill -USR1 $me ) & sleep 0.3; echo end' {R}", "got\nend\n"),
+    ("kill_nested_sh_from_job", f"sh -c 'me=$$; ( sleep 0.1; kill $me ) & sleep 0.3; echo alive' {R}; echo \"rc $?\" {A}", "rc 143\n"),
+    # A `.` is no process, and a nested shell is: who a command's parent is.
+    ("ppid_sourced", f"printf 'sh -c \"echo \\\\$PPID\" > smoke/pp\\n' > smoke/pp.sh; . smoke/pp.sh; [ \"$(cat smoke/pp)\" = \"$$\" ] && echo same {R}", "same\n"),
+    ("ppid_nested_stage", f"printf 'echo $$ > smoke/pn1\\nsh -c \"echo \\\\$PPID\" | cat > smoke/pn2\\n' > smoke/pn.sh; sh smoke/pn.sh; [ \"$(cat smoke/pn1)\" = \"$(cat smoke/pn2)\" ] && echo same {R}", "same\n"),
     # A substitution puts back the stdout it found. A body's redirection moves only its slot,
     # and the substitution rebuilt that slot from the host's fd 1, so what followed it left
     # the redirection and went to the real stdout. Run in the app, a `#!` script lost it too.
