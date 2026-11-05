@@ -197,6 +197,23 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("and_list_background", f"sleep 1 && echo bg {A} & echo first {R}; wait", "first\nbg\n"),
     ("pipeline_background", f"{{ sleep 1; echo bg; }} | cat {A} & echo first {R}; wait", "first\nbg\n"),
     ("background_var", f"B=1; {{ B=2; sleep 1; echo \"group $B\" {A}; }} & echo \"shell $B\" {R}; wait", "shell 1\ngroup 2\n"),
+    # A simple job keeps what it changes, as a compound one does. The directory goes back within the
+    # row, so a failure here does not move the rows after it.
+    ("job_own_var", f"J=1; jv() {{ J=2; }}; jv & wait; echo \"[$J]\" {R}", "[1]\n"),
+    ("job_own_read", f"J=1; read J <<< x & wait; echo \"[$J]\" {R}", "[1]\n"),
+    ("job_own_cd", f"jd=$PWD; cd smoke & wait; jp=$PWD; cd \"$jd\"; [ \"$jp\" = \"$jd\" ] && echo stayed {R}", "stayed\n"),
+    ("job_own_cd_func", f"jd=$PWD; jg() {{ cd /; }}; jg & wait; jp=$PWD; cd \"$jd\"; [ \"$jp\" = \"$jd\" ] && echo stayed {R}", "stayed\n"),
+    ("job_own_cd_moves_it", f"jg() {{ cd smoke; echo x > jm.txt; }}; jg & wait; cat smoke/jm.txt {R}", "x\n"),
+    ("job_own_has_old_def", f"jf() {{ echo old {A}; }}; : {R}; jf & jf() {{ echo new {A}; }}; wait", "old\n"),
+    ("job_own_mask", f"umask 022; js() {{ sleep 0.2; }}; js & umask 077; wait; umask {R}; umask 022", "0077\n"),
+    ("job_own_mask_modes", f"umask 022; jm() {{ umask 077; : > smoke/jmj; }}; jm & wait; : > smoke/jms; ls -l smoke/jmj smoke/jms | cut -c1-10 {R}", "-rw-------\n-rw-r--r--\n"),
+    ("job_own_called_from", f"jg() {{ echo \"${{FUNCNAME[1]}}\" {R}; }}; jf() {{ jg & wait; }}; jf", "jf\n"),
+    # So does a pipeline stage, wherever it stands.
+    ("stage_own_cd", f"jd=$PWD; cd smoke | cat; jp=$PWD; cd \"$jd\"; [ \"$jp\" = \"$jd\" ] && echo stayed {R}", "stayed\n"),
+    ("stage_own_cd_last", f"jd=$PWD; true | cd smoke; jp=$PWD; cd \"$jd\"; [ \"$jp\" = \"$jd\" ] && echo stayed {R}", "stayed\n"),
+    ("stage_own_read", f"J=1; echo x | read J; echo \"[$J]\" {R}", "[1]\n"),
+    ("stage_own_mask", f"umask 022; umask 077 | cat; umask {R}", "0022\n"),
+    ("stage_own_exit", f"true | exit 3; echo \"next ${{PIPESTATUS[1]}}\" {R}", "next 3\n"),
     # A job with its output redirected lets go of the pipe it replaced: the reader sees end of
     # file while the job runs. The job marks a held pipe and gives up, so this cannot hang.
     ("background_release", f"( {{ : > smoke/rel.up; i=0; while [ ! -e smoke/rel.seen ] && [ $i -lt 30 ]; do i=$((i+1)); sleep 0.1; done; [ -e smoke/rel.seen ] || : > smoke/rel.held; }} > /dev/null 2>&1 & until [ -e smoke/rel.up ]; do sleep 0.05; done ) | {{ cat > /dev/null; if [ -e smoke/rel.held ]; then echo held; else echo released; fi; : > smoke/rel.seen; }} {R}; wait", "released\n"),
@@ -790,6 +807,9 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("rsync_background", f"rsync -a smoke/rs/a smoke/rs/bg > /dev/null 2>&1 & wait $!; echo \"wait $?\" {R}; cat smoke/rs/bg/a/f {A}", "wait 0\nx\n"),
     ("rsync_loop", f"for i in 1 2 3 4 5 6 7 8; do rsync -a smoke/rs/a smoke/rs/lp$i {A}; echo $? {A}; done", "0\n0\n0\n0\n0\n0\n0\n0\n"),
     ("rsync_two_at_once", f"rsync -a --exclude f smoke/rs/a/ smoke/rs/t1 > /dev/null 2>&1 & p=$!; rsync -a smoke/rs/a/ smoke/rs/t2 {R}; wait $p; ls smoke/rs/t1 smoke/rs/t2 {A}", "smoke/rs/t1:\nb\n\nsmoke/rs/t2:\nb\nf\n"),
+    # The receiver zeroes the file mask, as a process about to exit may. That stays in rsync.
+    ("rsync_keeps_mask", f"umask 027; rsync -a smoke/rs/a smoke/rs/km {R}; umask {A}; : > smoke/rs/kmf; umask 022; ls -l smoke/rs/kmf | cut -c1-10 {A}", "0027\n-rw-r-----\n"),
+    ("rsync_keeps_job_mask", f"( umask 027; rsync -a smoke/rs/a smoke/rs/kj; umask; : > smoke/rs/kjf ) {R}; ls -l smoke/rs/kjf | cut -c1-10 {A}", "0027\n-rw-r-----\n"),
     # These fail with a status, and the app carries on.
     ("rsync_no_source", f"rsync -a smoke/nope smoke/rs/no > /dev/null 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
     ("rsync_bad_dest", f"rsync -a smoke/rs/a smoke/d.txt/x > /dev/null 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
