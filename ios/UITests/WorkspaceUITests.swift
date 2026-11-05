@@ -89,8 +89,9 @@ final class WorkspaceUITests: XCTestCase {
         text.typeText("x")
         text.typeKey("a", modifierFlags: .command)
         text.typeText("y")
-        guard text.value as? String == "y" else {
-            throw XCTSkip("this launch got no hardware key events")
+        let typed = text.value as? String
+        guard typed == "y" else {
+            throw XCTSkip("this launch got no hardware key events: the text is \(typed ?? "nil")")
         }
         text.typeText(XCUIKeyboardKey.delete.rawValue)
         return text
