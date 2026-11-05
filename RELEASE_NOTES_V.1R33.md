@@ -47,6 +47,8 @@ Base: `V.1R32`
 - A signal stays in the app, from any thread and whatever the pid. From a thread with no task of its own, `0`, `-1` and `-N` went to iOS's `kill`, which reads them as real process groups, and `-1` as every process the app may signal. A positive pid went there too with a signal such as SIGKILL, SIGHUP or SIGUSR1, so it reached whichever process had that number and not the task. Every pid now means the app's own tasks.
 - The keyboard showing or hiding no longer types a space and a delete into the terminal. A running program got them as keys, for example when a graphics window took the keyboard away. The terminal scrolls back to the prompt instead.
 - `eval` or `.` nested 16 or more deep no longer loses the shell's directory. From then on a relative path stopped meaning the directory `pwd` printed, so `cat`, `rm` and `>` found or made files somewhere else, and `cd` did not bring it back.
+- `who am i` at a prompt prints the user, `pts/N` and the login time. Each terminal, a shell tab or an SSH tab, has a login in `/var/run/utmp` from before its startup file runs until its shell ends or its tab closes, and `/var/log/wtmp` gets the login and the logout. So `who`, `users` and `uptime` count open tabs, and `who -u` gives each tab's shell.
+- A launch of the app is its boot. `who -b` and `who -r` answer, and `/var/run/utmp` starts empty, so a run iOS ended leaves no logins behind. `/var/log/wtmp` moves to `/var/log/wtmp.1` at a launch once it reaches 1 MB.
 
 
 
@@ -65,8 +67,13 @@ Base: `V.1R32`
 - `ls -ld /dev/fd` shows a directory, though `readlink /dev/fd` answers `/proc/self/fd`.
 - Libraries that open files themselves, such as sqlite's, and the Go tools don't see these names.
 - After an upgrade, a `/dev/stdout` file left by an earlier build stays until removed. The name still reaches the descriptor, but `ls` and `[ -L ]` see the file.
+- `who -u` gives `?` as a terminal's idle time, because a terminal in the app keeps no access time.
 
 ## Known Issues
 Descriptor names, on iOS:
 - `/proc/$$/fd/1` inside a redirected group misses the redirection: `{ echo a > /proc/$$/fd/1; } > f` leaves `f` empty. Host builds write `a` to `f`, as Linux does. Seen through the smoke tool, which runs in the nested `.exshrc` context, not at a prompt.
 - `readlink /proc/self/fd/3` on a file, and `readlink -f /dev/stdout` with stdout on a file, don't give the path that `$HOME` names it by. Host builds do.
+
+Terminals, on iOS:
+- Writing to `/dev/tty` shows nothing on screen, though the write succeeds, as `echo x > /dev/tty`.
+- `/dev/tty` fails in the first tab once a second tab has opened and closed, and in a second tab while it is open. `stty -F /dev/tty` says so.

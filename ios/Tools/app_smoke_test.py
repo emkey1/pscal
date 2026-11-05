@@ -39,6 +39,10 @@ RELEASE_BUILD = "Build/Products/Release-iphonesimulator/PSCAL.app"
 REPORTS = Path.home() / "Library/Logs/DiagnosticReports"
 DEVICES = Path.home() / "Library/Developer/CoreSimulator/Devices"
 HOOK = '[ -f "$HOME/smoke/auto.sh" ] && . "$HOME/smoke/auto.sh"'
+# The first line of auto.sh. A tab a test opens runs that file too, from its own .exshrc.
+TAB_HOOK = 'if [ -f "$HOME/smoke/tab.sh" ]; then . "$HOME/smoke/tab.sh"; return; fi'
+# The size at which a launch moves wtmp aside, in utmp_rec.c.
+WTMP_SEED_BYTES = 1024 * 1024
 # Lines the runtime logs into a command's captured stderr.
 NOISE = re.compile(r"^(objc\[\d+\]: |\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+ PSCAL\[).*\n", re.M)
 
@@ -362,7 +366,19 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("tty_named", f"tty {R}", "/dev/pts/0\n"),
     # Replacing /etc/passwd reloads the app's table while other commands read it, and that load had no lock.
     ("user_db_reload", f"w=$(whoami); i=0; while [ $i -lt 40 ]; do cp /etc/passwd /etc/passwd.t; mv /etc/passwd.t /etc/passwd; whoami > /dev/null & whoami > /dev/null & id > /dev/null & wait; i=$((i+1)); done; [ \"$(whoami)\" = \"$w\" ] && echo same {R}", "same\n"),
-    ("uptime_users", f"mkdir -p /var/run; cp smoke/utmp.rec /var/run/utmp; uptime | grep -c ' 3 users, ' {R}; rm /var/run/utmp", "1\n"),
+    # A terminal is a login: nothing used to write the record, so who am i found nothing.
+    ("who_am_i", f"who am i | awk '{{print $2}}' {R}", "pts/0\n"),
+    ("who_am_i_user", f"[ \"$(who am i | awk '{{print $1}}')\" = \"$(whoami)\" ] && echo same {R}", "same\n"),
+    ("who_am_i_not_tty", f"who am i < /dev/null {R}", ""),
+    # A login names the shell's process. A terminal here keeps no access time, so its idle time is unknown.
+    ("who_u", f"who -u | awk -v p=$$ '{{print ($NF == p), $5}}' {R}", "1 ?\n"),
+    ("who_counts_tab", f"who | wc -l {R}; users | wc -w {A}; uptime | grep -c ' 1 user, ' {A}", "1\n1\n1\n"),
+    # A launch is a boot. The ghost is seeded before it, as a run iOS ended without notice leaves one.
+    ("who_boot", f"who -b | grep -c 'system boot' {R}; who -r | grep -c 'run-level 2' {A}", "1\n1\n"),
+    ("who_no_ghost", f"who /var/run/utmp | grep -c ghost {R}", "0\n"),
+    ("wtmp_rotated", f"wc -c < /var/log/wtmp.1 {R}; who /var/log/wtmp | grep -c pts/0 {A}", f"{WTMP_SEED_BYTES}\n1\n"),
+    # Keeps the terminal's own record, or every row after this one reads an empty file.
+    ("uptime_users", f"cp /var/run/utmp smoke/utmp.real; cp smoke/utmp.rec /var/run/utmp; uptime | grep -c ' 3 users, ' {R}; cp smoke/utmp.real /var/run/utmp", "1\n"),
     # xargs reaches the applet by a call; the next two go through shell dispatch.
     ("wtmp_append", f"mkdir -p /var/log; rm -f /var/log/wtmp; xargs halt -w < /dev/null {R}; xargs halt -w < /dev/null {A}; wc -c < /var/log/wtmp {A}; who -r /var/log/wtmp | wc -l {A}", "800\n2\n"),
     ("wtmp_partial", f"printf x > /var/log/wtmp; xargs halt -w < /dev/null {R}; wc -c < /var/log/wtmp {A}", "400\n"),
@@ -1273,6 +1289,9 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("set_lists_array", f"sa=(1 'x y'); set | grep '^sa=' {R}", "sa=([0]=\"1\" [1]=\"x y\")\n"),
     # Last, so that the listing tests above never see these names in $HOME.
     ("vm_cleanup", f"rm -rf vm.* vmj.json smoke/v1 smoke/v2; ls vm.in 2>/dev/null | wc -l {R}", "0\n"),
+    # Last: on iOS /dev/tty fails in the first tab once a second has opened and closed, in R33's Known Issues.
+    # The hook in the new tab's .exshrc runs smoke/tab.sh when there is one. That tab's exit ends its login.
+    ("tab_login", f"printf 'who am i > \"$HOME/smoke/tab.who\"\\nuntil [ -e \"$HOME/smoke/tab.go\" ]; do sleep 0.1; done\\nexit\\n' > smoke/tab.sh; tabadd; waitfile smoke/tab.who; users | wc -w {R}; awk '{{print ($2 ~ /^pts\\/[1-9]/)}}' smoke/tab.who {A}; touch smoke/tab.go; waitusers 1; rm smoke/tab.sh; users | wc -w {A}", "2\n1\n1\n"),
 ]
 BY_NAME = {test[0]: test for test in TESTS}
 
@@ -1595,6 +1614,9 @@ SETUP = [
     "vmfiles() { rm -rf smoke/v1 smoke/v2; rm -f vm.* vmj.json; for t in 1 2 H; do if [ $t = H ]; then d=.; else d=smoke/v$t; mkdir -p $d/vmo; touch $d/vmo/only$t; fi; printf \"in$t\\n\" > $d/vm.in; printf \"ren$t\\n\" > $d/vm.ren; printf \"del$t\\n\" > $d/vm.del; printf '{\"n\":%s}\\n' \"${t#H}0\" > $d/vmj.json; done; }",
     "vmshow() { for f in smoke/v1/vm.* smoke/v2/vm.* vm.*; do echo \"$f: $(cat $f)\"; done; }",
     'vmctx() { cat smoke/v1/vm.out; [ -e vm.out ] && echo "wrong directory"; true; }',
+    # A tab's login is its own thread's work: wait for it, and a tab that never comes shows in the result.
+    'waitusers() { i=0; while [ "$(users | wc -w)" -ne "$1" ] && [ $i -lt 150 ]; do sleep 0.1; i=$((i+1)); done; }',
+    'waitfile() { i=0; while [ ! -s "$1" ] && [ $i -lt 150 ]; do sleep 0.1; i=$((i+1)); done; }',
 ]
 
 
@@ -1803,7 +1825,13 @@ class Session:
         self.smoke.mkdir(parents=True)
         for name, body in FIXTURES.items():
             (self.smoke / name).write_text(body)
-        (self.smoke / "auto.sh").write_text("\n".join([*SETUP, *lines, "touch smoke/AUTODONE"]) + "\n")
+        (self.smoke / "auto.sh").write_text("\n".join([TAB_HOOK, *SETUP, *lines, "touch smoke/AUTODONE"]) + "\n")
+        # What the last run leaves when iOS ends the app without notice, and a wtmp due to move aside.
+        records = self.home.parent / "var"
+        (records / "run").mkdir(parents=True, exist_ok=True)
+        (records / "log").mkdir(parents=True, exist_ok=True)
+        (records / "run/utmp").write_text(utmp_record("ghost", "pts/9"))
+        (records / "log/wtmp").write_text("\0" * WTMP_SEED_BYTES)
 
         before = set(REPORTS.glob("PSCAL-*.ips"))
         launched = simctl("launch", udid, self.bundle)

@@ -5,6 +5,9 @@ import Darwin
 import Combine
 import UniformTypeIdentifiers
 
+@_silgen_name("smallclueUtmpTerminalClosed")
+private func c_smallclueUtmpTerminalClosed(_ session: UInt64)
+
 @MainActor
 final class TerminalTabManager: ObservableObject {
     static let shared = TerminalTabManager()
@@ -330,6 +333,11 @@ final class TerminalTabManager: ObservableObject {
             promptReadySessions.remove(sessionId)
             pendingTitlesBySessionId.removeValue(forKey: sessionId)
             pendingStartupCommandsBySessionId.removeValue(forKey: sessionId)
+            // The terminal is gone even if a command keeps its shell from ending,
+            // and a file is no work for the main thread.
+            DispatchQueue.global(qos: .utility).async {
+                c_smallclueUtmpTerminalClosed(sessionId)
+            }
         }
         if removedId == activeSdlTabId {
             activeSdlTabId = nil
