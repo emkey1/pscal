@@ -75,11 +75,20 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertGreaterThan(after.height, before.height + 10)
     }
 
-    func testCommandWInMotePadAsksBeforeLosingWork() {
-        let pad = openApplet(group: "Workspace", title: "MotePad")
-        let text = app.textViews["workspace.motepad.text"]
+    /// MotePad's text view in that window, empty: a saved arrangement can bring others back,
+    /// and an unsaved draft returns in the next new window.
+    private func emptyText(in pad: XCUIElement) -> XCUIElement {
+        let text = pad.textViews["workspace.motepad.text"]
         XCTAssertTrue(text.waitForExistence(timeout: 10))
         text.tap()
+        text.typeKey("a", modifierFlags: .command)
+        text.typeText(XCUIKeyboardKey.delete.rawValue)
+        return text
+    }
+
+    func testCommandWInMotePadAsksBeforeLosingWork() {
+        let pad = openApplet(group: "Workspace", title: "MotePad")
+        let text = emptyText(in: pad)
         text.typeText("worth keeping")
         app.typeKey("w", modifierFlags: .command)
         let alert = app.alerts["Unsaved Changes"]
@@ -90,10 +99,7 @@ final class WorkspaceUITests: XCTestCase {
     }
 
     func testCommandArrowsMoveTheCaretInMotePadNotTheDesktop() {
-        _ = openApplet(group: "Workspace", title: "MotePad")
-        let text = app.textViews["workspace.motepad.text"]
-        XCTAssertTrue(text.waitForExistence(timeout: 10))
-        text.tap()
+        let text = emptyText(in: openApplet(group: "Workspace", title: "MotePad"))
         text.typeText("ab")
         app.typeKey(.leftArrow, modifierFlags: .command)
         text.typeText("c")
