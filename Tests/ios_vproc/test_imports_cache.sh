@@ -46,7 +46,7 @@ imports() {
 runimports() {
   clike "$1p.cl"; rea "$1p.rea"; aether "$1p.aether"
 }
-mkdir d e
+mkdir d e q
 programs start
 echo "- start"; runall
 sleep 2
@@ -60,26 +60,28 @@ echo "- d, from its entry"; loads; runall
 cd ..
 echo "- start again"; runall
 
+# The program's own directory, q, holds no import: Rea and Aether look there first. The start
+# directory holds one, which only the process's directory would find.
 imports start
 cd d || exit 1
 imports d
 cd ../e || exit 1
 imports e
 cd ..
-printf 'import "imx.cl";\nint main() { printf("%%s\\n", who()); return 0; }\n' > p.cl
-printf '#import "imx.rea";\nwriteln(who());\n' > p.rea
-printf 'use "imx.aether";\nfn main() -> Void { fx { println(who()); } ret; }\n' > p.aether
+printf 'import "imx.cl";\nint main() { printf("%%s\\n", who()); return 0; }\n' > q/p.cl
+printf '#import "imx.rea";\nwriteln(who());\n' > q/p.rea
+printf 'use "imx.aether";\nfn main() -> Void { fx { println(who()); } ret; }\n' > q/p.aether
 sleep 2
 cd d || exit 1
-echo "- the same program from d"; runimports ../
+echo "- the same program from d"; runimports ../q/
 sleep 2
 cd ../e || exit 1
-echo "- the same program from e"; runimports ../
+echo "- the same program from e"; runimports ../q/
 sleep 2
 echo "- from e, an import edited"
 imports e2
 sleep 2
-runimports ../
+runimports ../q/
 SCRIPT
 out=$(cd "$T/start" && PATH="$T/bin:$PATH" PATH_TRUNCATE="$T" HOME="$T" TMPDIR="$T" /usr/bin/perl -e 'alarm 120; exec @ARGV' "$EXE" "$T/t.sh" 2>&1 < /dev/null)
 rc=$?
