@@ -820,6 +820,45 @@ static void assert_fcntl_on_inproc_pipe(void) {
     vprocDestroy(vp);
 }
 
+/* A shell tab's terminal can name another tab's session, so the session's shell says whose tasks a
+ * close ends. Going by the terminal, closing a second tab whose shell would not end took the first
+ * tab's shell and left the closed tab running. */
+static void assert_terminate_session_by_id_goes_by_its_shell(void) {
+    struct pscal_fd *master = NULL;
+    struct pscal_fd *slave = NULL;
+    int pty_num = -1;
+    assert(pscalPtyOpenMaster(O_RDWR, &master, &pty_num) == 0);
+    assert(pscalPtyUnlock(master) == 0);
+    assert(pscalPtyOpenSlave(pty_num, O_RDWR, &slave) == 0);
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    assert(vprocSessionStdioInitWithPty(session, slave, master, 8765, 0) == 0);
+    vprocSessionStdioActivate(session);
+
+    VProc *other = vprocCreate(NULL);
+    VProc *own = vprocCreate(NULL);
+    assert(other && own);
+    int other_pid = vprocPid(other);
+    int own_pid = vprocPid(own);
+    assert(vprocSetSid(other_pid, other_pid) == 0);
+    assert(vprocSetSid(own_pid, own_pid) == 0);
+    int prev_shell = vprocGetShellSelfPid();
+    vprocSetShellSelfPid(own_pid);
+    slave->tty->session = (pid_t_)other_pid;
+
+    assert(vprocTerminateSessionById(8765));
+    assert(vprocGetSid(other_pid) == other_pid);
+    assert(vprocGetSid(own_pid) == -1);
+    /* Its shell is gone now, and that is no reason to believe the terminal. */
+    assert(!vprocTerminateSessionById(8765));
+    assert(vprocGetSid(other_pid) == other_pid);
+
+    vprocSetShellSelfPid(prev_shell);
+    vprocDestroy(own);
+    vprocDestroy(other);
+    vprocSessionStdioDestroy(session);
+}
+
 static void assert_fcntl_on_pty(void) {
     struct pscal_fd *master = NULL;
     struct pscal_fd *slave = NULL;
@@ -9341,6 +9380,7 @@ int main(void) {
     assert_fcntl_on_inproc_pipe();
     fprintf(stderr, "TEST fcntl_on_pty\n");
     assert_fcntl_on_pty();
+    assert_terminate_session_by_id_goes_by_its_shell();
     fprintf(stderr, "TEST fstat_and_ttyname_on_slots\n");
     assert_fstat_and_ttyname_on_slots();
     fprintf(stderr, "TEST spawn_entry_runs_as_a_child\n");
