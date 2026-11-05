@@ -181,6 +181,9 @@ bash "${ROOT}/Tests/ios_vproc/test_kill_blocked.sh" "${EXE}"
 bash "${ROOT}/Tests/ios_vproc/test_kill_vm_reader.sh" "${EXE}"
 bash "${ROOT}/Tests/ios_vproc/test_kill_last_stage.sh" "${EXE}"
 
+# How the line editor wraps, which only shows on a terminal.
+RUN_VPROC_TESTS=1 python3 "${INTERACTIVE_HARNESS}" --executable "${EXE}" --only line_wrap
+
 # Optional interactive PTY signal regressions. Enable explicitly while
 # debugging local Ctrl-C/Ctrl-Z behavior:
 #   RUN_INTERACTIVE_SIGNAL_TESTS=1 Tests/run_exsh_ios_host_tests.sh

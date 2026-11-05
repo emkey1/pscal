@@ -41,6 +41,10 @@ Base: `V.1R32`
 - `/bin/x` and `/usr/bin/x` on a host run the file, not the builtin of that name, as in bash. `/bin/echo -e` gets the file's answer, `/bin/cd` no longer moves the shell, and `/bin/exit` no longer ends it.
 - `which` on a host is the system's program, as in bash, so `t=$(which true); "$t"` works. The app keeps its builtin.
 - A program started by `command` keeps its own name: `command sh -c 'echo "$0"'` prints `sh`. `command -p` still passes the path.
+- A command line that wraps shows once. Under a prompt with a glyph like the default prompt's `⚡`, the prompt and the line's first row printed again at each wrap, because the editor counted that glyph as no cells and the terminal as two. The editor now counts as the terminal does, whatever the locale, and its screen matches bash's in a UTF-8 locale.
+- A line that ends exactly on the last column no longer eats the row above the prompt at the next key, and Enter there leaves no empty row. Neither does a key pressed with the cursor on an earlier row of a long line.
+- Enter, Ctrl-C and a completion list with the cursor on an earlier row of a long line print below all of it, not over its end. A reverse search with a match that wraps draws over itself.
+- Left, Right, Backspace and Delete at the prompt take a whole character, with any mark after it, where they took one byte.
 
 ## Faster in exsh
 - Commands that stay in the shell take about 0.41 of the time they did, which is about 1.65x bash 5 where it was about 4x. The numbers are from `tools/shellbench_cacheable`, 3 rounds on one laptop, with a Release build of each version. Commands that start a process are unchanged, at about 0.9x bash 5.
