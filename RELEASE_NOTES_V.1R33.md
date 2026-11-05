@@ -64,6 +64,15 @@ Base: `V.1R32`
 - `exec cmd &` runs `cmd` as the job. It said `exec: cannot be used in background`.
 - A background command or a pipeline stage leaves `$_` alone.
 - A CHLD trap's own commands do not run it again. A pipeline, subshell or program in one kept that shell busy for ever.
+- With job control off, a command stays in the shell's process group, as under bash. In a script on a terminal, `cat`, `stty`, `x=$(cat)` and `cat | tr` no longer stop for good, Ctrl-C reaches the command as well as the shell, and Ctrl-Z stops the script with its command, which `fg` resumes: the rest of the script used to be lost. `kill 0` reaches the whole script. `kill -- -$!` now says no such process, as bash does: a script that wants groups says `set -m`.
+- Ctrl-C ends a script only if it ended the command, as in bash. A command that dealt with it leaves the script going, though a trap still runs, and `$?` is 130 when the command died of it. The EXIT trap runs before the script dies of Ctrl-C.
+- A command dying of SIGINT, SIGQUIT or SIGTSTP with no job control says nothing about the shell. `sh -c 'kill -INT $$'; echo next` used to end the script.
+- A script ignores SIGQUIT unless it traps it, as bash 5 does, and its command does not. `trap '' INT` and a signal ignored when the script started now reach its commands: they used to get the default.
+- A job with no job control ignores Ctrl-C and Ctrl-\ for all its commands, not only the first, and a compound job whose stdin is the terminal reads `/dev/null`.
+- `set -m` and `set +m` take effect: `$-`, `set -o`, whether a job gets a group of its own. They were accepted and ignored.
+- `kill -TERM -- -123` works. It said `kill: invalid pid '--'`. `kill %1` reaches every stage of a job that has no group of its own, and `kill -N` signals the group, not only the commands of the job with that number.
+- At a prompt, `( cmd ) &` no longer stops itself by taking the terminal.
+- Ctrl-C ends a `read` waiting for a line, on hosts. It waited for the line, and a trap with it.
 
 ## Fixed in the iOS app
 - `env test a == a`, and `xargs` or `find -exec` running `test`, know `==`, and take a value of `!`. They said `test: unsupported expression`.
@@ -100,6 +109,10 @@ Base: `V.1R32`
 ## Fixed in the frontends on every platform
 - A bytecode cache entry covers the files its program imports. An import is also looked for in the working directory, so one program can compile to two from two directories, and run from the second it could reuse the first's entry. Rea and Aether could also miss an edit to a module that an imported module uses.
 - The Rea `landscape` demo runs on macOS. It crashed in `glCreateShader` at its first frame: a 3D window there draws with the SDL renderer and has no OpenGL context, and `LandscapeDrawCloudLayer` called OpenGL anyway. The demo now draws its sprite clouds there. `LandscapeDrawCloudLayer` and `LandscapeDrawSkyDome` without a current OpenGL context are a runtime error, and the new `LandscapeShadersAvailable()` says whether they can draw.
+- A script's commands share its process group, so Ctrl-C and Ctrl-Z reach them. Ctrl-C ends a script run with `sh`, and its `trap ... INT` and EXIT trap run, where SIGINT used to wait unseen on a nested shell. A command the shell starts no longer inherits the shell's traps as handlers, so a signal ends it.
+- `sleep` and other applets that poll on the shell's own thread end when a signal kills them.
+- A fatal signal a shell sends itself ends it: `( kill -TERM $BASHPID; echo x )` printed x, after its parent had been told it was gone.
+- `sh file` and `./file` at a prompt stop on Ctrl-Z and go on with `fg`, with their commands. `sh file` used to finish its command and then end, and `./file` kept the prompt's job control: `$-` had `im`, and a job had a group of its own.
 
 ## Faster in exsh
 - Commands that stay in the shell take about 0.67 of the time they did, which is about 1.21x bash 5 where it was 1.69x. The numbers are from `tools/shellbench_cacheable`, 3 rounds on one Mac, so they differ from the laptop's in V.1R32's notes. Commands that start a process are unchanged.
@@ -143,3 +156,4 @@ Pipes, on iOS:
 Terminals, on iOS:
 - Writing to `/dev/tty` shows nothing on screen, though the write succeeds, as `echo x > /dev/tty`.
 - `/dev/tty` fails in the first tab once a second tab has opened and closed, and in a second tab while it is open. `stty -F /dev/tty` says so.
+- Ctrl-C in a script whose background job has already ended reaches the tab's own shell, not the script: the command ends and the script goes on. `sleep 1 & sleep 30; echo "no $?"` run with `sh` prints `no 130`, where bash ends the script.
