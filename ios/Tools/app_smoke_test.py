@@ -584,6 +584,8 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("cd_source_frontend", f"printf 'cd smoke/sub\\npascal ../hello.pas > f.txt 2>&1\\nclike ../hello.clike >> f.txt 2>&1\\ncd \"$HOME\"\\n' > smoke/c5.sh; . smoke/c5.sh; cat smoke/sub/f.txt {R}", "pascal ok 42\nclike ok 42\n"),
     ("cd_two_levels", f"printf '. smoke/c7.sh\\ncat n.txt\\ncd \"$HOME\"\\n' > smoke/c6.sh; printf 'cd smoke/sub\\n' > smoke/c7.sh; . smoke/c6.sh {R}", "needle\n"),
     ("cd_eval", f"eval 'cd smoke/sub; cat n.txt; cd \"$HOME\"' {R}", "needle\n"),
+    # Past 16 levels the thread used to end with no vproc: paths went to the host's directory.
+    ("eval_nested_keeps_dir", f"cd smoke/sub; nf() {{ if [ \"$1\" -gt 0 ]; then eval \"nf $(( $1 - 1 ))\"; fi; }}; nf 20; cat n.txt > {O} 2>&1; pwd >> {O} 2>&1; cd \"$HOME\"; pwd {A}", "needle\n/home/smoke/sub\n/home\n"),
     ("cd_exsh_rm", f"printf 'H\\n' > cdv; mkdir smoke/cd3; printf 'D\\n' > smoke/cd3/cdv; printf 'cd smoke/cd3\\nrm cdv\\n' > smoke/c8.sh; exsh smoke/c8.sh; cat cdv {R}; ls smoke/cd3 {A}; pwd {A}; rm -f cdv", "H\n/home\n"),
     ("cd_exsh_keeps_caller", f"printf 'cd smoke/sub\\ncat n.txt\\npwd\\n' > smoke/c9.sh; exsh smoke/c9.sh {R}; pwd {A}; echo \"$PWD\" {A}", "needle\n/home/smoke/sub\n/home\n/home\n"),
     ("cd_sh_c", f"sh -c 'cd smoke/sub; cat n.txt; pwd' {R}; pwd {A}", "needle\n/home/smoke/sub\n/home\n"),

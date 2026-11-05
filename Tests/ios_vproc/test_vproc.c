@@ -5008,6 +5008,91 @@ static void assert_setlocale_is_the_threads_own(void) {
 }
 #endif
 
+/* Each eval or sourced file runs under a vproc stacked on the shell's thread, and that stack has
+ * no limit. One of 16 dropped what came after, and on the way out the thread ended with no vproc:
+ * paths and descriptors then went straight to the host's. */
+static void assert_vproc_stack_has_no_limit(void) {
+    /* Each holds descriptors, and a process may have 256: past the first spill is enough here. */
+    enum { kDepth = 40 };
+    char templ[] = "/tmp/vproc-stack-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    int prev_shell = vprocGetShellSelfPid();
+    VProc *below = vprocCurrent();
+
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/moved", root);
+    assert(mkdir(path, 0700) == 0);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = vprocReservePid();
+    VProc *shell_vp = vprocCreate(&opts);
+    assert(shell_vp);
+    vprocSetShellSelfPid(vprocPid(shell_vp));
+    vprocActivate(shell_vp);
+
+    VProc *stacked[kDepth];
+    mode_t mask = vprocShellUmaskShim(027);
+    for (int i = 0; i < kDepth; ++i) {
+        opts = vprocDefaultOptions();
+        opts.pid_hint = vprocReservePid();
+        stacked[i] = vprocCreate(&opts);
+        assert(stacked[i]);
+        vprocActivate(stacked[i]);
+        assert(vprocCurrent() == stacked[i]);
+    }
+
+    /* cd and umask at the top reach every level below it. */
+    assert(vprocShellChdirShim("/moved") == 0);
+    assert(vprocShellUmaskShim(022) == 027);
+    for (int i = kDepth - 1; i >= 0; --i) {
+        char cwd[PATH_MAX];
+        assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+        assert(strcmp(cwd, "/moved") == 0);
+        vprocDeactivate();
+        assert(vprocCurrent() == (i > 0 ? stacked[i - 1] : shell_vp));
+        vprocDestroy(stacked[i]);
+    }
+
+    /* Down a long way and back a few times, so the block is made, grown and freed again. */
+    for (int round = 0; round < 3; ++round) {
+        for (int i = 0; i < 1000; ++i) {
+            vprocActivate(shell_vp);
+        }
+        for (int i = 0; i < 1000; ++i) {
+            assert(vprocCurrent() == shell_vp);
+            vprocDeactivate();
+        }
+    }
+    assert(vprocCurrent() == shell_vp);
+
+    /* A vproc destroyed while below the top leaves an empty place, not a dangling one. */
+    opts = vprocDefaultOptions();
+    opts.pid_hint = vprocReservePid();
+    VProc *deep = vprocCreate(&opts);
+    assert(deep);
+    for (int i = 0; i < 20; ++i) {
+        vprocActivate(i == 0 ? deep : shell_vp);
+    }
+    vprocActivate(shell_vp);
+    vprocDestroy(deep);
+    for (int i = 0; i < 21; ++i) {
+        vprocDeactivate();
+    }
+    assert(vprocCurrent() == shell_vp);
+
+    vprocShellUmaskShim(mask);
+    vprocDeactivate();
+    assert(vprocCurrent() == below);
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
 static void assert_empty_path_names_nothing(void) {
     char templ[] = "/tmp/vproc-empty-XXXXXX";
     char *root = mkdtemp(templ);
@@ -9897,6 +9982,8 @@ int main(void) {
     assert_kernel_mounts_from_fstab_at_startup();
     fprintf(stderr, "TEST empty_path_names_nothing\n");
     assert_empty_path_names_nothing();
+    fprintf(stderr, "TEST vproc_stack_has_no_limit\n");
+    assert_vproc_stack_has_no_limit();
 #if defined(__APPLE__)
     fprintf(stderr, "TEST setlocale_is_the_threads_own\n");
     assert_setlocale_is_the_threads_own();

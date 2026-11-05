@@ -27,6 +27,7 @@ bash "${ROOT}/Tests/ios_host_statics.sh" "${BUILD_DIR}"
 # Run the targeted jobspec regression against the iOS-flavored binary.
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_subshell
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_cd_nested
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_deep_nesting
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_fd_above_stdio
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_big_substitution
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_substitution_keeps_redirect
