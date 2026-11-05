@@ -75,6 +75,12 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertGreaterThan(after.height, before.height + 10)
     }
 
+    /// On a phone with the on-screen keyboard up, a modified key straight after typing was lost
+    /// about one time in four. A person with a hardware keyboard has no on-screen one.
+    private func settleKeyboard() {
+        Thread.sleep(forTimeInterval: 1)
+    }
+
     /// MotePad's text view in that window, empty: a saved arrangement can bring others back,
     /// and an unsaved draft returns in the next new window.
     private func emptyText(in pad: XCUIElement) -> XCUIElement {
@@ -90,6 +96,7 @@ final class WorkspaceUITests: XCTestCase {
         let pad = openApplet(group: "Workspace", title: "MotePad")
         let text = emptyText(in: pad)
         text.typeText("worth keeping")
+        settleKeyboard()
         app.typeKey("w", modifierFlags: .command)
         let alert = app.alerts["Unsaved Changes"]
         XCTAssertTrue(alert.waitForExistence(timeout: 5), "Cmd-W closed MotePad without asking")
@@ -101,6 +108,7 @@ final class WorkspaceUITests: XCTestCase {
     func testCommandArrowsMoveTheCaretInMotePadNotTheDesktop() {
         let text = emptyText(in: openApplet(group: "Workspace", title: "MotePad"))
         text.typeText("ab")
+        settleKeyboard()
         app.typeKey(.leftArrow, modifierFlags: .command)
         text.typeText("c")
         XCTAssertEqual(text.value as? String, "cab")
