@@ -352,6 +352,8 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("who_m", f"who -m smoke/utmp.rec {R}; cut -d' ' -f1 {{o}} > {{o}}.1; mv {{o}}.1 {{o}}", "carol\n"),
     ("who_m_not_tty", f"who -m smoke/utmp.rec < /dev/null {R}", ""),
     ("tty_named", f"tty {R}", "/dev/pts/0\n"),
+    # Replacing /etc/passwd reloads the app's table while other commands read it, and that load had no lock.
+    ("user_db_reload", f"w=$(whoami); i=0; while [ $i -lt 40 ]; do cp /etc/passwd /etc/passwd.t; mv /etc/passwd.t /etc/passwd; whoami > /dev/null & whoami > /dev/null & id > /dev/null & wait; i=$((i+1)); done; [ \"$(whoami)\" = \"$w\" ] && echo same {R}", "same\n"),
     ("uptime_users", f"mkdir -p /var/run; cp smoke/utmp.rec /var/run/utmp; uptime | grep -c ' 3 users, ' {R}; rm /var/run/utmp", "1\n"),
     # xargs reaches the applet by a call; the next two go through shell dispatch.
     ("wtmp_append", f"mkdir -p /var/log; rm -f /var/log/wtmp; xargs halt -w < /dev/null {R}; xargs halt -w < /dev/null {A}; wc -c < /var/log/wtmp {A}; who -r /var/log/wtmp | wc -l {A}", "800\n2\n"),
