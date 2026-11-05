@@ -40,6 +40,8 @@ Base: `V.1R32`
 - A signal to the app's kernel task succeeds and does nothing, as for init on Linux. `kill -TERM 1` could stop the thread that carries Ctrl-C.
 - A signal to a group stays in the app, from any thread. From a thread with no task of its own, `0`, `-1` and `-N` went to iOS's `kill`, which reads them as real process groups, and `-1` as every process the app may signal. Only a positive pid can reach iOS's `kill` now.
 - `kill(0, sig)` from a program acts as `kill(-pgid, sig)` does. SIGINT to your own group is queued for the next check in both forms. `kill(0, SIGINT)` used to mark the task dead while it ran on.
+- `halt`, `reboot` and `poweroff` without `-w` end the tab, as `exit` does, from the prompt, a script, a pipeline or a subshell. In the first tab they ask what `exit` asks, `This will exit the app. Are you sure?`. They used to print `System halt requested...` and leave a tab with no prompt, which could only be closed.
+- In the first tab, the question asked when its shell ends reaches the screen, and a key answers it: `y` exits the app, and anything else starts a new shell. It went only to a buffer the terminal doesn't draw, so the tab showed a cursor with no prompt, and any key answered a question nobody could see.
 
 - A redirection on a closed stdout, stderr or stdin leaves it closed. `( exec >&-; { :; } > f; echo x )` printed `x`, because what was saved and put back was the host's descriptor of that number.
 - `>&$fd` with a closed descriptor of 10 or above says `Bad file descriptor`. It could find the copy of stdout saved for that very redirection in the same slot, and write to stdout.
@@ -75,6 +77,8 @@ Base: `V.1R32`
 ## Differs from Linux on iOS
 - `exec 3> >(cmd)` and `exec > >(cmd)` run the command at once on an empty file, so what the script writes afterwards is lost.
 - A function given `{fd}> f` as a job or a pipeline stage does not see `fd`.
+- `halt`, `reboot` and `poweroff` end only their own tab, since the app can't stop its device and each tab is a session of its own. They don't stop that tab's other commands: a job goes on as it does after `exit`, and the tab closes when a command in the same pipeline has finished.
+- A signal that ends a shell waiting at its prompt, from a job or another tab, takes effect when the next line is typed, where Linux ends it at once. So `halt &` closes the tab at the next Return, and that line doesn't run.
 - A fatal signal a subshell sends itself returns: `( kill -TERM $BASHPID; echo x )` prints `x`, though its status is 143.
 - A signal to a task that has ended but not been waited for says `No such process`, where Linux says 0.
 - SIGINT or SIGTSTP to your own group on your own thread is queued for the next check, for programs that check, where Linux acts before `kill` returns.

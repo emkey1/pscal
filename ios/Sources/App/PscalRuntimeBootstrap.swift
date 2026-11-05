@@ -1163,8 +1163,9 @@ final class PscalRuntimeBootstrap: ObservableObject, @unchecked Sendable {
             } else {
                 let banner = "\r\nThis will exit the app. Are you sure? [y/N]\r\n"
                 if let data = banner.data(using: .utf8) {
-                    self.terminalBuffer.append(data: data) {
-                        self.scheduleRender()
+                    self.outputDrainQueue.async { [weak self] in
+                        self?.enqueueHtermOutput(data)
+                        self?.appendOutput(data)
                     }
                 }
             }
