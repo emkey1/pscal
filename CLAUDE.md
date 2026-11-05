@@ -29,6 +29,10 @@ lives in the auto-memory files (this file wins if they disagree).
   hand-picking SHAs. This clone also sets `push.recurseSubmodules=on-demand`,
   which matters because `tools/check_submodule_refs.sh` fails CI on a gitlink
   whose commit was never pushed.
+- `lib/pascal`, `lib/rea` and `lib/clike` are the source of the library units.
+  Each of those frontend repos keeps a copy in its own `lib/<language>`, so a clone
+  of it works alone. After editing one here, run `tools/sync_frontend_units.sh`,
+  commit in the frontend and bump its gitlink; CI fails if a copy differs.
 - **Active development branch is `main`.** Commit and push there directly.
   (`AetherLang` was the active branch early on, with `main` synced from it by
   fast-forward; that's no longer the case — as of 2026-07-03 `main` is
