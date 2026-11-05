@@ -1161,7 +1161,7 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("im_cache_program", f"imfiles; clike same.clike > {O} 2>&1; sleep 1; clike same.clike >> {O} 2>&1; sleep 1; cd smoke/i1; clike same.clike >> {O} 2>&1; sleep 1; clike same.clike >> {O} 2>&1; cd \"$HOME\"; clike same.clike >> {O} 2>&1", "program H\nprogram H\nprogram 1\nprogram 1\nprogram H\n"),
     ("im_cache_script", f"imfiles; exsh same.sh > {O} 2>&1; sleep 1; exsh same.sh >> {O} 2>&1; sleep 1; cd smoke/i1; exsh same.sh >> {O} 2>&1; sleep 1; exsh same.sh >> {O} 2>&1; cd \"$HOME\"; exsh same.sh >> {O} 2>&1", "script H\nscript H\nscript 1\nscript 1\nscript H\n"),
     # The cache only loads when it can find the frontend's binary to compare with, so an old empty file stands in for it on PATH.
-    ("im_cache_loads", f"imfiles; mkdir -p bin; : > bin/clike; chmod +x bin/clike; sleep 1; cd smoke/i1; clike ../imp.clike > {O} 2>&1; sleep 1; clike --verbose ../imp.clike 2>&1 | grep -c 'Loaded cached' >> {O}; cd ../i2; clike ../imp.clike >> {O} 2>&1; cd \"$HOME\"; rm -f bin/clike", "clike 1\n1\nclike 2\n"),
+    ("im_cache_loads", f"imfiles; mkdir -p smoke/ib; : > smoke/ib/clike; chmod +x smoke/ib/clike; p=$PATH; PATH=\"$HOME/smoke/ib:$PATH\"; sleep 1; cd smoke/i1; clike ../imp.clike > {O} 2>&1; sleep 1; clike --verbose ../imp.clike 2>&1 | grep -c 'Loaded cached' >> {O}; cd ../i2; clike ../imp.clike >> {O} 2>&1; cd \"$HOME\"; PATH=$p; rm -rf smoke/ib", "clike 1\n1\nclike 2\n"),
     ("im_cleanup", f"rm -rf imx.* inc.h same.* plib smoke/i1 smoke/i2; ls imx.clike 2>/dev/null | wc -l {R}", "0\n"),
     ("urandom_applet", f"head -c 4 /dev/urandom | wc -c {R}", "4\n"),
     # /dev/stdin, /dev/stdout, /dev/stderr, /dev/fd/N and /proc/self/fd/N act as on Linux: the links lead to
