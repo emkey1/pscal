@@ -925,6 +925,8 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("rsync_dry_run", f"rsync -an smoke/rs/a smoke/rs/dry {R}; ls smoke/rs/dry {A}", "ls: cannot access 'smoke/rs/dry': No such file or directory\n"),
     ("rsync_pipe", f"rsync -a smoke/rs/a smoke/rs/pi | cat {R}; cat smoke/rs/pi/a/f {A}", "x\n"),
     ("rsync_background", f"rsync -a smoke/rs/a smoke/rs/bg > /dev/null 2>&1 & wait $!; echo \"wait $?\" {R}; cat smoke/rs/bg/a/f {A}", "wait 0\nx\n"),
+    # A stop to the job, once the receiver has its file open, reaches both ends, and both carry on.
+    ("rsync_stop_cont", f"mkdir smoke/rs/scd; dd if=/dev/zero of=smoke/rs/sc bs=1048576 count=500 2> /dev/null; rsync smoke/rs/sc smoke/rs/scd > /dev/null 2>&1 & p=$!; i=0; until [ -n \"$(ls -A smoke/rs/scd 2> /dev/null)\" ] || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; kill -STOP -$p; sleep 0.1; jobs > smoke/rs/scj; grep -c Stopped smoke/rs/scj {R}; kill -CONT -$p; wait $p; echo \"wait $?\" {A}; cmp smoke/rs/sc smoke/rs/scd/sc {A}; rm -f smoke/rs/sc smoke/rs/scd/sc", "1\nwait 0\n"),
     ("rsync_loop", f"for i in 1 2 3 4 5 6 7 8; do rsync -a smoke/rs/a smoke/rs/lp$i {A}; echo $? {A}; done", "0\n0\n0\n0\n0\n0\n0\n0\n"),
     ("rsync_two_at_once", f"rsync -a --exclude f smoke/rs/a/ smoke/rs/t1 > /dev/null 2>&1 & p=$!; rsync -a smoke/rs/a/ smoke/rs/t2 {R}; wait $p; ls smoke/rs/t1 smoke/rs/t2 {A}", "smoke/rs/t1:\nb\n\nsmoke/rs/t2:\nb\nf\n"),
     # The receiver zeroes the file mask, as a process about to exit may. That stays in rsync.
