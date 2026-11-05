@@ -871,7 +871,12 @@ main(int ac, char **av)
 	 * writable only by the owner, which is ok for all files for which we
 	 * don't set the modes explicitly.
 	 */
+#ifdef PSCAL_TARGET_IOS
+	/* The task's: a raw umask is the whole app's, and two of these at once can leave it at 077. */
+	vprocUmaskShim(022 | vprocUmaskShim(077));
+#else
 	umask(022 | umask(077));
+#endif
 
 	msetlocale();
 #ifdef PSCAL_TARGET_IOS

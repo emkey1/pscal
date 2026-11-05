@@ -2116,9 +2116,16 @@ sink(int argc, char **argv, const char *src)
 		SCREWUP("Unexpected off_t/time_t size");
 
 	setimes = targisdir = 0;
+#ifdef PSCAL_TARGET_IOS
+	/* The task's: a raw umask is the whole app's, and -p would leave it at 0 for every tab. */
+	mask = vprocUmaskShim(0);
+	if (!pflag)
+		(void) vprocUmaskShim(mask);
+#else
 	mask = umask(0);
 	if (!pflag)
 		(void) umask(mask);
+#endif
 	if (argc != 1) {
 		run_err("ambiguous target");
 		exit(1);

@@ -1852,7 +1852,12 @@ parse_dispatch_command(struct sftp_conn *conn, const char *cmd, char **pwd,
 		local_do_shell(cmd);
 		break;
 	case I_LUMASK:
+#ifdef PSCAL_TARGET_IOS
+		/* The task's, and what it opens goes by that. A raw umask is the whole app's. */
+		vprocUmaskShim(n_arg);
+#else
 		umask(n_arg);
+#endif
 		printf("Local umask: %03lo\n", n_arg);
 		break;
 	case I_CHMOD:

@@ -1295,6 +1295,48 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("declare_i_stage", f"declare -i di=1; declare -i | grep -c '^declare -i di=' {R}", "1\n"),
     ("subshell_keeps_attribute", f"declare -i di2=1; ( di2=di2+1; echo \"$di2\" ) {R}; echo \"$di2\" {A}", "2\n1\n"),
     ("set_lists_array", f"sa=(1 'x y'); set | grep '^sa=' {R}", "sa=([0]=\"1\" [1]=\"x y\")\n"),
+    # The loops around a command substitution are the shell's. break and continue end it, and the loop goes on. It warned and ran the next command.
+    ("subst_break", f"for i in 1 2; do x=$(break; echo not); echo \"[$x] $i\"; done {R}", "[] 1\n[] 2\n"),
+    ("subst_continue", f"for i in 1 2; do x=$(continue; echo not); echo \"[$x] $i\"; done {R}", "[] 1\n[] 2\n"),
+    ("subst_break_stage", f"for i in 1; do x=$(echo p | break; echo y); echo \"[$x]\"; done {R}", "[y]\n"),
+    # FUNCNAME, BASH_SOURCE, BASH_LINENO and caller read one list. A function names the file that defined it, and a shell run as a command has its own list, on the caller's thread.
+    ("source_defined_in", f"printf 'sg() {{ echo \"${{BASH_SOURCE[0]}} ${{FUNCNAME[0]}}\"; }}\\n' > smoke/sg.sh; . smoke/sg.sh; sg {R}", "smoke/sg.sh sg\n"),
+    ("source_lists_file", f"printf 'sh2() {{ echo \"${{FUNCNAME[*]}}|${{BASH_SOURCE[0]}}\"; }}; sh2\\n' > smoke/sh2.sh; . smoke/sh2.sh | sed 's/ main//; s/ .*|/|/' {R}", "sh2|smoke/sh2.sh\n"),
+    ("caller_in_script", f"printf 'caller; echo \"$? ${{BASH_SOURCE[*]}} [${{FUNCNAME[*]}}] ${{BASH_LINENO[*]}}\"\\n' > smoke/cs.sh; csf() {{ sh smoke/cs.sh; }}; csf {R}", "0 NULL\n0 smoke/cs.sh [] 0\n"),
+    ("caller_no_shebang", f"printf 'caller; echo \"${{BASH_SOURCE[*]}} [${{FUNCNAME[*]}}]\"\\n' > smoke/cn.sh; chmod +x smoke/cn.sh; cnf() {{ smoke/cn.sh; }}; cnf {R}", "0 NULL\nsmoke/cn.sh []\n"),
+    ("caller_in_function", f"printf 'cf() {{ caller; caller 0; caller 1; echo \"$?\"; }}\\ncf\\n' > smoke/cf.sh; sh smoke/cf.sh {R}", "2 smoke/cf.sh\n2 main smoke/cf.sh\n1\n"),
+    # `jobs` alone as a stage lists the shell's jobs, and only that. In a substitution or a nested shell the stage listed the top shell's.
+    ("jobs_stage", f"( sleep 2 & jp=$!; jobs | wc -l; kill $jp; wait $jp 2>/dev/null ) {R}", "1\n"),
+    ("jobs_stage_subst", f"x=$(sleep 1 & sleep 1 & jobs | wc -l); echo \"[$x]\" {R}", "[2]\n"),
+    ("jobs_stage_nested", f"( sleep 1 & sh -c 'jobs | wc -l'; wait ) {R}", "0\n"),
+    ("jobs_stage_kill", f"( sleep 2 & jp=$!; kill %1 2>/dev/null | cat; jobs | wc -l; kill $jp; wait $jp 2>/dev/null ) {R}", "1\n"),
+    ("jobs_group_none", f"( sleep 1 & {{ jobs; }} | wc -l; wait ) {R}", "0\n"),
+    ("jobs_pid", f"( sleep 2 & jp=$!; [ \"$(jobs -p)\" = \"$jp\" ] && echo same; kill $jp; wait $jp 2>/dev/null ) {R}", "same\n"),
+    ("disown_all", f"( sleep 1 & disown -a; jobs | wc -l ) {R}", "0\n"),
+    # mkfifo is a command, in the task's directory, by the task's mask. So is what tar and cp make: they reached the host's directory.
+    ("mkfifo_found", f"command -v mkfifo {R}", "mkfifo\n"),
+    ("mkfifo_through", f"rm -f smoke/ff; mkfifo smoke/ff; [ -p smoke/ff ] && echo fifo {R}; ( echo through > smoke/ff ) & cat smoke/ff {A}; wait; rm -f smoke/ff", "fifo\nthrough\n"),
+    ("mkfifo_cd", f"mkdir -p smoke/fd; cd smoke/fd; rm -f p; mkfifo p; cd ../..; [ -p smoke/fd/p ] && echo here {R}", "here\n"),
+    ("mkfifo_mask", f"rm -f smoke/fm; umask 077; mkfifo smoke/fm; umask 022; find smoke/fm -perm 600 {R}; rm -f smoke/fm; umask 077; mkfifo -m 640 smoke/fm; umask 022; find smoke/fm -perm 640 {A}; rm -f smoke/fm", "smoke/fm\nsmoke/fm\n"),
+    ("mkfifo_taken", f"rm -f smoke/ft; mkfifo smoke/ft; mkfifo smoke/ft 2>&1 | sed 's/.*: //' {R}; rm -f smoke/ft", "File exists\n"),
+    ("tar_fifo", f"rm -f smoke/tf smoke/tf.tar; mkfifo smoke/tf; tar cf smoke/tf.tar -C smoke tf; rm smoke/tf; tar xf smoke/tf.tar -C smoke; [ -p smoke/tf ] && echo back {R}; rm -f smoke/tf smoke/tf.tar", "back\n"),
+    ("mknod_fifo", f"rm -f smoke/nf; mknod smoke/nf p; [ -p smoke/nf ] && echo fifo {R}; rm -f smoke/nf", "fifo\n"),
+    # ulimit is the shell's, and a limit is the task's. A limit on open files holds the task's descriptors to it.
+    ("ulimit_builtin", f"type ulimit {R}", "ulimit is a shell builtin\n"),
+    ("ulimit_subshell", f"un=$(ulimit -n); ( ulimit -n 64; ulimit -n ) {R}; [ \"$(ulimit -n)\" = \"$un\" ] && echo kept {A}", "64\nkept\n"),
+    ("ulimit_hard", f"( ulimit -n 64; ulimit -n 128 2>/dev/null; echo \"$?\"; ulimit -Hn ) {R}", "1\n64\n"),
+    ("ulimit_soft", f"( ulimit -Sn 64; ulimit -Sn; ulimit -n 128; ulimit -Sn ) {R}", "64\n128\n"),
+    ("ulimit_subst_stage_job", f"un=$(ulimit -n); x=$(ulimit -n 64; ulimit -n); ulimit -n 64 | cat; ulimit -n 64 & wait; [ \"$x $(ulimit -n)\" = \"64 $un\" ] && echo kept {R}", "kept\n"),
+    ("ulimit_nested_sh", f"un=$(ulimit -n); sh -c 'ulimit -n 64; ulimit -n' {R}; [ \"$(ulimit -n)\" = \"$un\" ] && echo kept {A}", "64\nkept\n"),
+    ("ulimit_holds_files", f"( ulimit -n 20; exec 25>/dev/null ) 2>/dev/null; echo $? {R}", "1\n"),
+    ("ulimit_inherited", f"( ulimit -n 64; ulimit -n | cat; {{ ulimit -n; }} | cat; ulimit -n & wait ) {R}", "64\n64\n64\n"),
+    ("ulimit_all", f"ulimit -a | wc -l {R}", "11\n"),
+    # A file with a NUL on its first line is a program for some other system, not a script to run line by line.
+    ("exec_binary", f"printf 'ab\\0c\\n' > smoke/bn; chmod +x smoke/bn; smoke/bn 2>/dev/null; echo $? {R}", "126\n"),
+    # What ssh, scp and sftp set is the task's mask, which goes with it. They set the whole app's. fakesftp.sh answers the first two requests and no more.
+    ("ssh_keeps_umask", f"umask 002; ssh -G host-a.invalid > /dev/null 2>&1; umask {R}; umask 022", "0002\n"),
+    ("scp_keeps_umask", f"umask 002; scp -p -O -o BatchMode=yes nosuch.invalid:x smoke/scum > /dev/null 2>&1; umask {R}; umask 022", "0002\n"),
+    ("sftp_lumask", f"umask 022; printf 'lumask 027\\nlmkdir smoke/lm\\nquit\\n' > smoke/lmb; rm -rf smoke/lm; chmod +x smoke/fakesftp.sh; sftp -b smoke/lmb -S smoke/fakesftp.sh h > /dev/null 2>&1; ls -ld smoke/lm | cut -c1-10 {R}; umask {A}; : > smoke/lma; ls -l smoke/lma | cut -c1-10 {A}", "drwxr-x---\n0022\n-rw-r--r--\n"),
     # Last, so that the listing tests above never see these names in $HOME.
     ("vm_cleanup", f"rm -rf vm.* vmj.json smoke/v1 smoke/v2; ls vm.in 2>/dev/null | wc -l {R}", "0\n"),
     # Last: on iOS /dev/tty fails in the first tab once a second has opened and closed, in R33's Known Issues.
@@ -1369,6 +1411,9 @@ FIXTURES = {
     "glprims.pas": "program GlPrims;\nbegin\n  InitGraph(320, 240, 'smoke');\n  GLBegin('quad_strip');\n  GLEnd;\n  GLBegin('polygon');\n  GLEnd;\n  CloseGraph;\n  writeln('drawn');\nend.\n",
     "thread.rea": 'void child() {\n    writeln("child ok");\n}\n\nint t = spawn child();\njoin t;\nwriteln("main ok");\n',
     **AT_ONCE_FIXTURES,
+    "fakesftp.sh": "#!/bin/exsh\nprintf '\\000\\000\\000\\005\\002\\000\\000\\000\\003'\n"
+                   "printf '\\000\\000\\000\\026\\150\\000\\000\\000\\001\\000\\000\\000\\001\\000\\000\\000\\001/\\000\\000\\000\\000\\000\\000\\000\\000'\n"
+                   "cat > /dev/null\n",
     "esc.bin": "\x1b",
     "key.pas": "program Key;\nuses crt;\nvar c: char;\nbegin\n  c := readkey;\n  writeln(ord(c));\nend.\n",
     "key2.pas": "program Key2;\nuses crt;\nvar c: char;\nbegin\n  c := readkey;\n  writeln(ord(c));\n  c := readkey;\n  writeln(ord(c));\nend.\n",

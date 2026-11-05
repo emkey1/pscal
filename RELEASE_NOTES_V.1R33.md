@@ -40,6 +40,12 @@ Base: `V.1R32`
 - `a=([1+1]=x)` sets index 2. Outside `declare -A` a subscript in a literal is arithmetic, where it became a key named `1+1`. `a=([1/0]=1)` reports and leaves the array empty.
 - `${x:1/0}` with x unset, and `${a[@]:1/0}` with no a, do not work out the offset, as in bash. `${x:1/0}` reports under the name as written, `x: 1/0: ...`.
 - A report of arithmetic in `for`, `case` and a plain `while [ ]` gives their own line, not the line of the command before. A long expression is reported whole, and an assignment to a name over 255 characters works.
+- `break` and `continue` in `$(...)` inside a loop end the substitution, quietly, and the loop goes on: `x=$(break; echo not)` is empty, as in bash. They used to warn and run the next command.
+- `FUNCNAME`, `BASH_SOURCE`, `BASH_LINENO` and `caller` read one list, as in bash. A function names the file that defined it, wherever it is called from, a sourced file has an entry of its own, and the script is under them as `main`. `BASH_LINENO` is new. A bare `caller` at the top of a script prints `0 NULL` with status 0; `caller 0` prints the name as well as the line and file.
+- `jobs | wc -l` lists the shell's jobs, on hosts too, and nothing else in a stage sees them. `jobs` takes `-p`, `-l`, `-r`, `-s` and job specs. It ignored them all, so `kill $(jobs -p)` could not work.
+- `disown` takes `-a`, `-r` and `-h`, and says `no such job` in bash's words. `wait` and `kill` say where in the script their errors are, as other builtins do.
+- `ulimit` is a builtin, on every platform. A file named `ulimit` on PATH could not change the shell, and Linux has none. It reads and sets `-c -d -f -l -m -n -p -s -t -u -v`, with `-S`, `-H` and `-a`. What a subshell, stage, job, substitution or nested shell sets ends with it.
+- A script with no `#!` is read by exsh itself on a host, as bash reads it. It went to the system's `sh`, where a bashism failed and on Linux an array or `caller` was not there. A file with a NUL on its first line says `cannot execute binary file` and gives 126, where it was run as a script.
 
 ## Fixed in the iOS app
 - `env test a == a`, and `xargs` or `find -exec` running `test`, know `==`, and take a value of `!`. They said `test: unsupported expression`.
@@ -50,10 +56,17 @@ Base: `V.1R32`
 - `who am i` at a prompt prints the user, `pts/N` and the login time. Each terminal, a shell tab or an SSH tab, has a login in `/var/run/utmp` from before its startup file runs until its shell ends or its tab closes, and `/var/log/wtmp` gets the login and the logout. So `who`, `users` and `uptime` count open tabs, and `who -u` gives each tab's shell.
 - A launch of the app is its boot. `who -b` and `who -r` answer, and `/var/run/utmp` starts empty, so a run iOS ended leaves no logins behind. `/var/log/wtmp` moves to `/var/log/wtmp.1` at a launch once it reaches 1 MB.
 - `lps` no longer keeps an `exited` row for a task whose parent ended first. It stayed until the app restarted: `timeout 1 pascal x.pas` left one, and so did `( sleep 1 & )` and `sh -c 'sleep 1 &'`. A task like that shows as `running` while it runs, and its row goes when it ends, as init reaps one on Linux. Its end no longer runs the CHLD trap of the shell that took it in.
+- `mkfifo` is a command, and a FIFO goes where the task's directory says, with the task's mask. `tar` and `cp` making a FIFO, and `mknod`, went to the host's directory.
+- `ulimit` keeps each task's limits in the VM, and the open files limit holds its descriptors: a new task may have 1024 of them. Nothing else is enforced yet.
+- `sftp`'s `lumask`, and `ssh` and `scp -p`, set the task's file mask, not the whole app's.
+- In a shell run as a command, `caller`, `FUNCNAME` and `BASH_SOURCE` show that script. They showed its caller's as well, since it runs on the caller's thread.
+- `sh -c 'jobs | wc -l'` lists that shell's jobs, and in `$(...)` a stage lists the substitution's, not the top shell's.
 
 
 
 ## Differs from bash
+- `jobs` does not list a job that has ended, and its line lacks the marker, the padding and the ` &`. `jobs -n` and `jobs -x` are not there.
+- A hard limit set inside `$(...)` on a host sets only the soft one, as the substitution runs in the shell's process and a hard limit could not come back up.
 
 - Unquoted parentheses among a command's words are plain words: `find . ( -name a )` runs, and `f(x) { :; }` reports `}` where bash reports `x`. The owner chose to keep this.
 - A `[[ ]]` bash can't parse, such as `[[ a == ]]`, runs.
