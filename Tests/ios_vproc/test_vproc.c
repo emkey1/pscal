@@ -9294,6 +9294,191 @@ static void assert_destroy_leaves_replaced_stdio_number_alone(void) {
     }
 }
 
+/* The links in /dev and /proc lead to this vproc's slots, past anything the host's descriptors
+ * hold, and opening one acts as on Linux: a file is opened again, and nothing lands under the root. */
+static void assert_named_descriptors_act_as_on_linux(void) {
+    char templ[] = "/tmp/vproc-devstdio-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    pathTruncateProvisionDev(root);
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+    int pid = vprocPid(vp);
+
+    assert(vprocPathNamedFd("/dev/stdin") == STDIN_FILENO);
+    assert(vprocPathNamedFd("/dev/stdout") == STDOUT_FILENO);
+    assert(vprocPathNamedFd("/dev/stderr") == STDERR_FILENO);
+    assert(vprocPathNamedFd("//dev/./stdout") == STDOUT_FILENO);
+    assert(vprocPathNamedFd("/private/dev/stderr") == STDERR_FILENO);
+    assert(vprocPathNamedFd("/dev/fd/12") == 12);
+    assert(vprocPathNamedFd("/proc/self/fd/3") == 3);
+    char own[64];
+    snprintf(own, sizeof(own), "/proc/%d/fd/4", pid);
+    assert(vprocPathNamedFd(own) == 4);
+    snprintf(own, sizeof(own), "/proc/%d/fd/4", pid + 1);
+    assert(vprocPathNamedFd(own) == -1);
+    assert(vprocPathNamedFd("/dev/stdout2") == -1);
+    assert(vprocPathNamedFd("/home/dev/stdout") == -1);
+    assert(vprocPathNamedFd("stdout") == -1);
+    assert(vprocPathNamedFd("/dev/null") == -1);
+    assert(vprocPathNamedFd("/dev/fd") == -1);
+    assert(vprocPathNamedFd("/dev/fd/") == -1);
+    assert(vprocPathNamedFd("/dev/fd/1x") == -1);
+    assert(vprocPathNamedFd("/dev/fd/99999999999") == -1);
+    assert(vprocPathNamedFd("") == -1);
+    assert(vprocPathNamedFd(NULL) == -1);
+
+    /* What readlink and lstat see. */
+    char link[PATH_MAX];
+    ssize_t link_len = pscalPathVirtualized_readlink("/dev/stdout", link, sizeof(link) - 1);
+    assert(link_len > 0);
+    link[link_len] = '\0';
+    assert(strcmp(link, "/proc/self/fd/1") == 0);
+    struct stat st;
+    assert(pscalPathVirtualized_lstat("/dev/stdout", &st) == 0 && S_ISLNK(st.st_mode));
+
+    /* A pipe: a copy of the end it has. */
+    int pipefd[2];
+    assert(vprocPipe(vp, pipefd) == 0);
+    assert(vprocDup2(vp, pipefd[1], STDOUT_FILENO) == STDOUT_FILENO);
+    assert(vprocDup2(vp, pipefd[0], STDIN_FILENO) == STDIN_FILENO);
+    int fd = vprocOpenShim("/dev/stdout", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    assert(fd > STDERR_FILENO);
+    assert(vprocWriteShim(fd, "a", 1) == 1);
+    assert(vprocCloseShim(fd) == 0);
+    assert(vprocWriteShim(STDOUT_FILENO, "b", 1) == 1);
+
+    /* Through a stream, with no host descriptor, and it does not wait for a close. */
+    FILE *out = pscalPathVirtualized_fopen("/dev/stdout", "w");
+    assert(out);
+    int slot = vprocFilenoShim(out);
+    assert(slot > STDERR_FILENO);
+    assert(pscalPathVirtualized_streamSlot(out) == slot);
+    assert(pscalPathVirtualized_streamSlot(stdout) == -1);
+    assert(fputs("c", out) >= 0);
+    char got[16] = {0};
+    assert(vprocReadShim(STDIN_FILENO, got, 3) == 3);
+    assert(memcmp(got, "abc", 3) == 0);
+    assert(vprocWriteShim(slot, "d\n", 2) == 2);
+    assert(fclose(out) == 0);
+    FILE *in = pscalPathVirtualized_fopen("/dev/stdin", "r");
+    assert(in);
+    assert(fgets(got, sizeof(got), in) != NULL);
+    assert(strcmp(got, "d\n") == 0);
+    assert(fclose(in) == 0);
+    assert(pscalPathVirtualized_access("/dev/stdout", F_OK) == 0);
+    errno = 0;
+    assert(pscalPathVirtualized_access("/dev/stdout", X_OK) == -1 && errno == EACCES);
+    errno = 0;
+    assert(vprocOpenShim("/dev/stdin", O_WRONLY) == -1 && errno == EACCES);
+    assert(vprocOpenShim("/dev/fd/1", O_WRONLY) > STDERR_FILENO);
+    assert(vprocFdLinkTarget(pid, STDOUT_FILENO, link, sizeof(link)));
+    assert(strncmp(link, "pipe:[", 6) == 0);
+
+    /* A file: opened again, whatever the descriptor's mode, offset or flags. */
+    int file = vprocOpenShim("/named.txt", O_RDONLY | O_CREAT, 0644);
+    assert(file >= 0);
+    assert(vprocDup2(vp, file, STDIN_FILENO) == STDIN_FILENO);
+    fd = vprocOpenShim("/dev/stdin", O_WRONLY);
+    assert(fd > STDERR_FILENO);
+    assert(vprocWriteShim(fd, "hello\n", 6) == 6);
+    assert(vprocCloseShim(fd) == 0);
+    assert(vprocReadShim(STDIN_FILENO, got, 2) == 2);
+    fd = vprocOpenShim("/proc/self/fd/0", O_RDONLY);
+    assert(fd > STDERR_FILENO);
+    memset(got, 0, sizeof(got));
+    assert(vprocReadShim(fd, got, 5) == 5);
+    assert(strcmp(got, "hello") == 0);
+    assert(vprocCloseShim(fd) == 0);
+    fd = vprocOpenShim("/dev/stdin", O_WRONLY | O_APPEND);
+    assert(vprocWriteShim(fd, "x", 1) == 1);
+    assert(vprocCloseShim(fd) == 0);
+    assert(pscalPathVirtualized_stat("/dev/stdin", &st) == 0 && S_ISREG(st.st_mode) && st.st_size == 7);
+    fd = vprocOpenShim("/dev/fd/0", O_WRONLY | O_TRUNC);
+    assert(vprocCloseShim(fd) == 0);
+    assert(pscalPathVirtualized_stat("/dev/stdin", &st) == 0 && st.st_size == 0);
+    assert(pscalPathVirtualized_access("/dev/stdin", W_OK) == 0);
+    errno = 0;
+    assert(vprocOpenShim("/dev/stdin", O_WRONLY | O_CREAT | O_EXCL, 0644) == -1 && errno == EEXIST);
+    assert(vprocFdLinkTarget(pid, STDIN_FILENO, link, sizeof(link)));
+    char *real = vprocRealpathShim("/dev/stdin", NULL);
+    assert(real && strcmp(real, "/named.txt") == 0);
+    free(real);
+    assert(pscalPathVirtualized_realpath("/dev/fd/0", got) == NULL || strcmp(got, "/named.txt") == 0);
+
+    /* The name went to another file: that one stays as it is, and the descriptor is what counts. */
+    assert(pscalPathVirtualized_rename("/named.txt", "/moved.txt") == 0);
+    int taker = vprocOpenShim("/named.txt", O_WRONLY | O_CREAT, 0644);
+    assert(taker >= 0);
+    assert(vprocWriteShim(taker, "keep", 4) == 4);
+    assert(vprocCloseShim(taker) == 0);
+    fd = vprocOpenShim("/dev/stdin", O_RDONLY | O_TRUNC);
+    assert(fd > STDERR_FILENO);
+    assert(vprocCloseShim(fd) == 0);
+    assert(pscalPathVirtualized_stat("/named.txt", &st) == 0 && st.st_size == 4);
+
+    /* vprocOpenAt gives a slot, and vprocHostOpen a host descriptor of that file. */
+    fd = vprocOpenAt(vp, "/dev/stdin", O_RDONLY, 0);
+    assert(fd > STDERR_FILENO);
+    assert(vprocCloseShim(fd) == 0);
+    int host = vprocHostOpen("/dev/stdin", O_RDONLY);
+    assert(host >= 0);
+    assert(vprocHostClose(host) == 0);
+
+    /* A closed descriptor's link leads nowhere. */
+    assert(vprocClose(vp, STDERR_FILENO) == 0);
+    errno = 0;
+    assert(vprocOpenShim("/dev/stderr", O_WRONLY) == -1 && errno == ENOENT);
+    errno = 0;
+    assert(pscalPathVirtualized_stat("/dev/stderr", &st) == -1 && errno == ENOENT);
+    errno = 0;
+    assert(pscalPathVirtualized_access("/dev/stderr", F_OK) == -1 && errno == ENOENT);
+    errno = 0;
+    assert(vprocRealpathShim("/dev/stderr", NULL) == NULL && errno == ENOENT);
+    errno = 0;
+    assert(vprocHostOpen("/dev/stderr", O_WRONLY) == -1 && errno == ENOENT);
+    assert(!vprocFdLinkTarget(pid, STDERR_FILENO, link, sizeof(link)));
+
+    /* /proc/<pid>/fd/N is that vproc's descriptor, whoever asks. */
+    VProc *other = vprocCreate(NULL);
+    assert(other);
+    int ends[2];
+    assert(vprocPipe(other, ends) == 0);
+    char other_name[64];
+    snprintf(other_name, sizeof(other_name), "/proc/%d/fd/%d", vprocPid(other), ends[1]);
+    assert(vprocPathNamedFd(other_name) == ends[1]);
+    assert(pscalPathVirtualized_stat(other_name, &st) == 0 && S_ISFIFO(st.st_mode));
+    int other_out = vprocOpenShim(other_name, O_WRONLY);
+    assert(other_out >= 0);
+    assert(vprocWriteShim(other_out, "z", 1) == 1);
+    assert(vprocCloseShim(other_out) == 0);
+    snprintf(other_name, sizeof(other_name), "/proc/%d/fd/%d", vprocPid(other), ends[0]);
+    int other_in = vprocOpenShim(other_name, O_RDONLY);
+    assert(other_in >= 0);
+    assert(vprocReadShim(other_in, got, 1) == 1 && got[0] == 'z');
+    assert(vprocCloseShim(other_in) == 0);
+    snprintf(other_name, sizeof(other_name), "/proc/%d/fd/200", vprocPid(other));
+    errno = 0;
+    assert(vprocOpenShim(other_name, O_RDONLY) == -1 && errno == ENOENT);
+    errno = 0;
+    assert(pscalPathVirtualized_stat(other_name, &st) == -1 && errno == ENOENT);
+    vprocDestroy(other);
+
+    char stray[PATH_MAX];
+    struct stat stray_st;
+    const char *names[] = {"stdin", "stdout", "stderr"};
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        snprintf(stray, sizeof(stray), "%s/dev/%s", root, names[i]);
+        assert((lstat)(stray, &stray_st) == 0 && S_ISLNK(stray_st.st_mode));
+    }
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+    setenv("PATH_TRUNCATE", "/tmp", 1);
+}
+
 static void *inproc_pipe_read_thread(void *arg) {
     struct pscal_fd *fd = (struct pscal_fd *)arg;
     char c;
@@ -9704,6 +9889,8 @@ int main(void) {
     assert_sigint_non_shell_same_tid_does_not_request_runtime_interrupt();
     fprintf(stderr, "TEST destroy_leaves_replaced_stdio_number_alone\n");
     assert_destroy_leaves_replaced_stdio_number_alone();
+    fprintf(stderr, "TEST named_descriptors_act_as_on_linux\n");
+    assert_named_descriptors_act_as_on_linux();
     fprintf(stderr, "TEST cancelled_pipe_wait_leaves_pipe_usable\n");
     assert_cancelled_pipe_wait_leaves_pipe_usable();
     fprintf(stderr, "TEST kernel_mounts_from_fstab_at_startup\n");

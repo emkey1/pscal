@@ -3,6 +3,7 @@
 Base: `V.1R32`
 
 ## Fixed in exsh
+- `sh /dev/stdin` reads a script from a pipe, on every platform. It failed with status 126 and said nothing.
 - A failed expansion in a background command or a later stage of a pipeline is that command's failure, as in bash: it reports and ends with status 1, the rest of the pipeline runs and the script goes on. `set -u; echo $nope &` and `true | cat ${v:?msg}` used to end the script.
 - `$1` under `set -u` is reported as `$1: unbound variable`, as bash has it.
 - A DEBUG trap no longer runs for a compound stage or a backgrounded compound command, as in bash: `{ a; } | b` and `( a ) &` counted one too many.
@@ -59,6 +60,7 @@ Base: `V.1R32`
 
 ## Fixed in the iOS app
 - `env test a == a`, and `xargs` or `find -exec` running `test`, know `==`, and take a value of `!`. They said `test: unsupported expression`.
+- `/dev/stdout`, `/dev/stderr`, `/dev/stdin`, `/dev/fd/N` and `/proc/<pid>/fd/N` are the command's own descriptors, as on Linux, for the shell, applets and every frontend's file builtins, redirected and in a pipeline. `echo x > /dev/stdout` and a program writing to that name used to create a regular file under the app's root, so the output was lost with no error, and `cat /dev/stdin` said no such file. Opening one opens the file again, with its own offset, so `> /dev/stdout` truncates a redirected file and `cat /dev/stdin` reads it from the top. A pipe or the terminal gives a copy. `/proc/<pid>/fd/N` reaches that task's descriptor. `/dev` holds the links, and `ls -l /proc/self/fd` shows where each leads.
 - A pipeline with a DEBUG trap set no longer ends the app. A trap on the shell's thread cleared the pipeline's state while a stage's thread was reading it. A trap now runs in a copy of the shell's state while a pipeline runs, whichever trap it is.
 - A failed expansion in a later stage of a pipeline no longer ends the app. `set -u; f() { sleep 1 | cat $nope; }; f` ended the shell with the first stage still starting, most of the time in a function, `eval` or a sourced file.
 - `kill -TERM -1` means what it means on Linux: every task but the caller and the app's kernel task, and `No such process` when none is left. It used to mark the kernel task as dying and cancel its thread, and `kill -0 -1` said a task was there when none could be reached.
@@ -98,6 +100,11 @@ Base: `V.1R32`
 - A device at the destination is refused with status 3. GNU's replaces it as root, and otherwise ends with 23.
 
 ## Differs from Linux on iOS
+- Opening `/dev/stdin` or `/dev/fd/N` on a pipe in the direction the descriptor doesn't go says `Permission denied`, where Linux opens the pipe's other end. On a socket it gives a copy, where Linux says `No such device or address`.
+- A symlink to `/dev/stdout` reaches the app's own stdout and not the command's: after `ln -s /dev/stdout x`, `echo a > x` is lost. Any symlink whose target starts with `/` is followed outside the app's root.
+- `ls -ld /dev/fd` shows a directory, though `readlink /dev/fd` answers `/proc/self/fd`.
+- Libraries that open files themselves, such as sqlite's, and the Go tools don't see these names.
+- After an upgrade, a `/dev/stdout` file left by an earlier build stays until removed. The name still reaches the descriptor, but `ls` and `[ -L ]` see the file.
 - `exec 3> >(cmd)` and `exec > >(cmd)` run the command at once on an empty file, so what the script writes afterwards is lost.
 - `halt`, `reboot` and `poweroff` end only their own tab, since the app can't stop its device and each tab is a session of its own. They don't stop that tab's other commands: a job goes on as it does after `exit`, and the tab closes when a command in the same pipeline has finished.
 - A signal that ends a shell waiting at its prompt, from a job or another tab, takes effect when the next line is typed, where Linux ends it at once. So `halt &` closes the tab at the next Return, and that line doesn't run.
@@ -106,3 +113,8 @@ Base: `V.1R32`
 - SIGINT or SIGTSTP to your own group on your own thread is queued for the next check, for programs that check, where Linux acts before `kill` returns.
 - The task table has no user id, so anyone can signal anyone. That is Linux for one user, and `EPERM` belongs here once the app has users.
 - `which true` prints `true: shell builtin`, so running its answer gives status 127. `/bin/cd` moves the shell, `/bin/export` and `/bin/set` act on it, and `/bin/exit` ends it, where Linux gives status 127. No file exists for those names.
+
+## Known Issues
+Descriptor names, on iOS:
+- `/proc/$$/fd/1` inside a redirected group misses the redirection: `{ echo a > /proc/$$/fd/1; } > f` leaves `f` empty. Host builds write `a` to `f`, as Linux does. Seen through the smoke tool, which runs in the nested `.exshrc` context, not at a prompt.
+- `readlink /proc/self/fd/3` on a file, and `readlink -f /dev/stdout` with stdout on a file, don't give the path that `$HOME` names it by. Host builds do.
