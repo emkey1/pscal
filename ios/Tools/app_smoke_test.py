@@ -437,6 +437,7 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("bg_group_lt", f"{{ cat; }} < smoke/d.txt {R} & wait $!; echo \"rc=$?\" {A}", "b\na\nc\nrc=0\n"),
     ("bg_read_lt", f"read x < smoke/d.txt & wait $!; echo \"rc=$?\" {R}", "rc=0\n"),
     ("bg_sort_lt", f"sort < smoke/d.txt {R} & wait $!; echo \"rc=$?\" {A}", "a\nb\nc\nrc=0\n"),
+    ("bg_script_lt", f"printf '#!/bin/exsh\\ncat\\nexit 4\\n' > smoke/bgl.sh; chmod +x smoke/bgl.sh; smoke/bgl.sh < smoke/d.txt {R} & wait $!; echo \"rc=$?\" {A}", "b\na\nc\nrc=4\n"),
     ("b64_cat", f"cat smoke/c.txt | base64 {R}", "b25lOnR3bwo=\n"),
     ("od_cat", f"cat smoke/c.txt | od -c | wc -l {R}", "2\n"),
     ("rev_cat", f"cat smoke/c.txt | rev {R}", "owt:eno\n"),

@@ -3678,6 +3678,69 @@ static void assert_background_read_of_session_stdin_stops(void) {
     unlink(path);
 }
 
+/* A socket on stdin, as an rsync server has, reads like any descriptor. A terminal put back with
+ * dup2 stops the job again. */
+static void assert_background_read_of_a_socket_does_not_stop(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    VProcOptions leader_opts = vprocDefaultOptions();
+    leader_opts.pid_hint = vprocReservePid();
+    VProc *leader = vprocCreate(&leader_opts);
+    assert(leader);
+    int sid = vprocPid(leader);
+    vprocSetShellSelfPid(sid);
+    assert(vprocSetSid(sid, sid) == 0);
+    assert(vprocSetForegroundPgid(sid, sid) == 0);
+
+    int master = -1;
+    int terminal = open_test_terminal(&master);
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = vprocReservePid();
+    opts.stdin_fd = terminal;
+    VProc *vp = vprocCreate(&opts);
+    assert(vp);
+    int pid = vprocPid(vp);
+    assert(vprocSetPgid(pid, sid + 5) == 0);
+
+    VProc *prev = vprocCurrent();
+    vprocActivate(vp);
+    int saved = vprocDupShim(STDIN_FILENO);
+    assert(saved >= 0);
+    int sv[2];
+    assert(vprocSocketpairShim(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    assert(vprocWriteShim(sv[1], "s", 1) == 1);
+    assert(vprocDup2Shim(sv[0], STDIN_FILENO) == STDIN_FILENO);
+    char ch = 0;
+    assert(vprocReadShim(STDIN_FILENO, &ch, 1) == 1);
+    assert(ch == 's');
+    vprocDeactivate();
+    int status = 0;
+    assert(vprocWaitPidShim(pid, &status, WUNTRACED | WNOHANG) == 0);
+
+    vprocActivate(vp);
+    assert(vprocDup2Shim(saved, STDIN_FILENO) == STDIN_FILENO);
+    errno = 0;
+    assert(vprocReadShim(STDIN_FILENO, &ch, 1) == -1);
+    assert(errno == EINTR);
+    vprocDeactivate();
+    assert(vprocWaitPidShim(pid, &status, WUNTRACED) == pid);
+    assert(WIFSTOPPED(status));
+    assert(vprocKillShim(pid, SIGCONT) == 0);
+    if (prev) {
+        vprocActivate(prev);
+        vprocDeactivate();
+    }
+
+    vprocMarkExit(vp, 0);
+    (void)vprocWaitPidShim(pid, &status, 0);
+    vprocDestroy(vp);
+    vprocMarkExit(leader, 0);
+    (void)vprocWaitPidShim(sid, &status, 0);
+    vprocDestroy(leader);
+    vprocSetShellSelfPid(prev_shell);
+    close(terminal);
+    close(master);
+}
+
 static void assert_getpid_falls_back_to_shell_and_create_inherits_session(void) {
     int prev_shell = vprocGetShellSelfPid();
 
@@ -9320,6 +9383,8 @@ int main(void) {
     assert_background_read_of_a_file_does_not_stop();
     fprintf(stderr, "TEST background_read_of_session_stdin_stops\n");
     assert_background_read_of_session_stdin_stops();
+    fprintf(stderr, "TEST background_read_of_a_socket_does_not_stop\n");
+    assert_background_read_of_a_socket_does_not_stop();
     fprintf(stderr, "TEST getpid_fallback_and_create_inherits\n");
     assert_getpid_falls_back_to_shell_and_create_inherits_session();
     fprintf(stderr, "TEST job_id_present_in_snapshot\n");
