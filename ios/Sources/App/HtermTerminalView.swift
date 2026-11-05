@@ -1162,7 +1162,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     private func debugLog(_ message: String) {
         guard HtermTerminalController.debugEnabled else { return }
         if let data = (message + "\n").data(using: .utf8) {
-            FileHandle.standardError.write(data)
+            try? FileHandle.standardError.write(contentsOf: data)
         }
     }
 

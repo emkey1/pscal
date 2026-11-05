@@ -24,7 +24,7 @@ final class SshRuntimeSession: ObservableObject {
     private static func logHterm(_ message: String) {
         guard htermDebugEnabled else { return }
         if let data = (message + "\n").data(using: .utf8) {
-            FileHandle.standardError.write(data)
+            try? FileHandle.standardError.write(contentsOf: data)
         }
     }
 
@@ -190,7 +190,7 @@ final class SshRuntimeSession: ObservableObject {
             let ctxDesc = runtimeContext.map { String(describing: $0) } ?? "nil"
             let message = "SshSession: start id=\(sessionId) ctx=\(ctxDesc)\n"
             if let data = message.data(using: .utf8) {
-                FileHandle.standardError.write(data)
+                try? FileHandle.standardError.write(contentsOf: data)
             }
         }
 
@@ -209,7 +209,7 @@ final class SshRuntimeSession: ObservableObject {
         if Self.ioDebugEnabled {
             let message = "SshSession: launched id=\(sessionId) readFd=\(readFd) writeFd=\(writeFd)\n"
             if let data = message.data(using: .utf8) {
-                FileHandle.standardError.write(data)
+                try? FileHandle.standardError.write(contentsOf: data)
             }
         }
         lastStartErrno = 0
