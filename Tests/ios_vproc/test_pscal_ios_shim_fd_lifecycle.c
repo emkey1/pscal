@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <poll.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <spawn.h>
@@ -68,6 +69,8 @@ int pscal_ios_execvp(const char *file, char *const argv[]);
 void pscal_ios__exit(int code);
 pid_t pscal_ios_waitpid(pid_t pid, int *status, int options);
 int pscal_ios_kill(pid_t pid, int sig);
+int pscal_ios_daemon(int nochdir, int noclose);
+int pscal_ios_poll_devices_ready(struct pollfd *fds, nfds_t nfds, int ready);
 
 static int createTrackedSocket(void) {
     int fd = vprocSocketShim(AF_INET, SOCK_STREAM, 0);
@@ -354,6 +357,44 @@ static void assertExitInSimulatedForkEndsOnlyTheChild(void) {
     vprocDestroy(vp);
 }
 
+/* ssh -n and ssh > /dev/null: poll(2) on Darwin says POLLNVAL for a device, on a good descriptor. */
+static void assertDevNullPollsAndEnds(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+
+    int in = vprocAdoptHostFd(vp, pscal_ios_open("/dev/null", O_RDONLY));
+    assert(in >= 0);
+    struct pollfd rd = {.fd = in, .events = POLLIN};
+    assert(pscal_ios_poll_devices_ready(&rd, 1, vprocPollShim(&rd, 1, 1000)) == 1);
+    assert(rd.revents == POLLIN);
+    char byte;
+    assert(pscal_ios_read(in, &byte, 1) == 0);
+    assert(pscal_ios_close(in) == 0);
+
+    int out = vprocAdoptHostFd(vp, pscal_ios_open("/dev/null", O_WRONLY));
+    assert(out >= 0);
+    struct pollfd wr = {.fd = out, .events = POLLOUT};
+    assert(pscal_ios_poll_devices_ready(&wr, 1, vprocPollShim(&wr, 1, 1000)) == 1);
+    assert(wr.revents == POLLOUT);
+    assert(pscal_ios_write(out, "x", 1) == 1);
+    assert(pscal_ios_close(out) == 0);
+
+    /* A descriptor that really is bad stays bad. */
+    struct pollfd bad = {.fd = 987, .events = POLLIN};
+    assert(pscal_ios_poll_devices_ready(&bad, 1, vprocPollShim(&bad, 1, 0)) == 1);
+    assert(bad.revents & POLLNVAL);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
+static void assertDaemonStaysInTheApp(void) {
+    errno = 0;
+    assert(pscal_ios_daemon(1, 1) == -1);
+    assert(errno == ENOSYS);
+}
+
 /* The stdio of a task whose host descriptors have numbers in the sweep. */
 static void assertClosefromKeepsHostFdsBehindStdio(void) {
     int out[2] = {-1, -1};
@@ -466,6 +507,12 @@ static void assertKillStaysOffTheHost(void) {
 }
 
 int main(void) {
+    fprintf(stderr, "TEST pscal_ios_dev_null_polls_and_ends\n");
+    assertDevNullPollsAndEnds();
+
+    fprintf(stderr, "TEST pscal_ios_daemon_stays_in_the_app\n");
+    assertDaemonStaysInTheApp();
+
     fprintf(stderr, "TEST pscal_ios_closefrom_keeps_host_fds_behind_stdio\n");
     assertClosefromKeepsHostFdsBehindStdio();
 

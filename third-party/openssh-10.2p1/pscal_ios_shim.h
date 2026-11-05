@@ -4,6 +4,7 @@
 #ifdef PSCAL_TARGET_IOS
 #include <dirent.h>
 #include <errno.h>
+#include <poll.h>
 #include <libgen.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -69,6 +70,8 @@ char *pscal_ios_host_path(const char *path);
 extern __thread sigjmp_buf pscal_ios_fork_jmpbuf;
 pid_t pscal_ios_fork_dispatch(int jump_rc);
 pid_t pscal_ios_waitpid(pid_t pid, int *status, int options);
+int pscal_ios_daemon(int nochdir, int noclose);
+int pscal_ios_poll_devices_ready(struct pollfd *fds, nfds_t nfds, int ready);
 int pscal_ios_kill(pid_t pid, int sig);
 void pscal_ios__exit(int code) __attribute__((noreturn));
 int pscal_ios_execv(const char *path, char *const argv[]);
@@ -81,6 +84,7 @@ int pscal_ios_execlp(const char *file, const char *arg, ...);
 # define fork() pscal_ios_fork_dispatch(sigsetjmp(pscal_ios_fork_jmpbuf, 1))
 # define _exit(code) pscal_ios__exit(code)
 # define waitpid(...) pscal_ios_waitpid(__VA_ARGS__)
+# define daemon(...) pscal_ios_daemon(__VA_ARGS__)
 # define kill(...) pscal_ios_kill(__VA_ARGS__)
 # define getpid() vprocGetPidShim()
 # define execv(...) pscal_ios_execv(__VA_ARGS__)

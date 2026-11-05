@@ -70,7 +70,8 @@ ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *tmoutp,
 	}
 
 	(void)sigmask;
-	return vprocPollShim(fds, nfds, timeout_ms);
+	return pscal_ios_poll_devices_ready(fds, nfds,
+	    vprocPollShim(fds, nfds, timeout_ms));
 #else
 	int ret, fd, maxfd = 0;
 	fd_set readfds, writefds, exceptfds;

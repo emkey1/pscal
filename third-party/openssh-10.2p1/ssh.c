@@ -2404,6 +2404,11 @@ ssh_session2_open(struct ssh *ssh)
 
 	if (options.stdin_null) {
 		in = open(_PATH_DEVNULL, O_RDONLY);
+#ifdef PSCAL_TARGET_IOS
+		/* That's a host descriptor, and the channel polls slots. */
+		if (in != -1)
+			in = vprocAdoptHostFd(vprocCurrent(), in);
+#endif
 	} else {
 		in = dup(STDIN_FILENO);
 	}

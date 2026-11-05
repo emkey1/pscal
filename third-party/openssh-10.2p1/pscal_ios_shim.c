@@ -1559,6 +1559,40 @@ pid_t pscal_ios_waitpid(pid_t pid, int *status, int options) {
     return waited;
 }
 
+/*
+ * poll(2) on Darwin doesn't support devices: on a good descriptor for /dev/null
+ * it says POLLNVAL, where select(2) says ready. Upstream's ppoll on a Mac is built
+ * on pselect, and the app's goes through poll. So ssh gave up on any of its stdio
+ * that was a device, as in ssh -n and ssh host cmd > /dev/null.
+ */
+int pscal_ios_poll_devices_ready(struct pollfd *fds, nfds_t nfds, int ready) {
+    VProc *vp = vprocCurrent();
+    for (nfds_t i = 0; ready > 0 && i < nfds; ++i) {
+        if (fds[i].fd < 0 || !(fds[i].revents & POLLNVAL)) {
+            continue;
+        }
+        /* A slot, so not pscal_ios_fstat: that asks the host about the number first. */
+        struct stat st;
+        int host = vp ? vprocTranslateFd(vp, fds[i].fd) : fds[i].fd;
+        if (host < 0 || fstat(host, &st) != 0 || !S_ISCHR(st.st_mode)) {
+            continue;
+        }
+        fds[i].revents = fds[i].events & (POLLIN | POLLOUT);
+        if (fds[i].revents == 0) {
+            ready--;
+        }
+    }
+    return ready;
+}
+
+/* libc's forks for real and ends the parent, and the parent is the whole app. */
+int pscal_ios_daemon(int nochdir, int noclose) {
+    (void)nochdir;
+    (void)noclose;
+    errno = ENOSYS;
+    return -1;
+}
+
 /* With no task, vprocKillShim would pass this on to the host. */
 int pscal_ios_kill(pid_t pid, int sig) {
     if (!vprocCurrent()) {
