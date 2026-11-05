@@ -1052,6 +1052,11 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("pwd_stale_cat", f"( cd smoke/sub; PWD=/ sh -c 'cat n.txt; echo \"$PWD\"' ) {R}", "needle\n/home/smoke/sub\n"),
     ("pwd_right", f"( cd smoke/sub; sh -c 'echo \"$PWD\"' ) {R}", "/home/smoke/sub\n"),
     # Traps take a signal sent to the shell's own vproc, whoever sends it.
+    # Killing a foreground pipeline's stages leaves the tab's shell: the last one is on its thread.
+    ("kill_last_stage", f"( sleep 0.5; lps | grep '[s]leep 3.1' | while read kp kr; do kill -TERM $kp; done ) & sleep 3.1 | sleep 3.1; echo alive {A}", "alive\n"),
+    # A foreground subshell or command is not the shell, so another task's signal ends it there.
+    ("kill_foreground_subshell", f"( p=$BASHPID; ( sleep 0.3; kill -TERM $p ) & sleep 3; echo no {A} ); echo st=$? {A}", "st=143\n"),
+    ("kill_foreground_command", f"( sleep 0.5; lps | grep '[s]eq 1 90000000' | while read kp kr; do kill -TERM $kp; done ) & seq 1 90000000 > /dev/null; echo st=$? {A}", "st=143\n"),
     ("trap_self", f"{{ trap 'echo got' USR1; kill -USR1 $$; echo after; trap - USR1; }} {R}", "got\nafter\n"),
     ("trap_function_local", f"{{ tf() {{ local tv=1; trap 'echo \"[$tv]\"' USR1; kill -USR1 $$; }}; tf; trap - USR1; }} {R}", "[1]\n"),
     ("trap_set_in_function", f"{{ tf() {{ trap 'echo later' USR1; }}; tf; kill -USR1 $$; echo after; trap - USR1; }} {R}", "later\nafter\n"),
