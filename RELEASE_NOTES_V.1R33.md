@@ -16,6 +16,13 @@ Base: `V.1R32`
 - A loop, `if`, `{ }` or `( )` with no command in it is a syntax error, as in bash: `while false; do done`, `if true; then fi`, `{ }`. They used to run as if nothing was wrong, so a script holding one now stops there with status 2. Case arms may still be empty.
 - A token no command can start with is reported in bash's words, with the line it is on: ``syntax error near unexpected token `done'``. `while do`, `{ ; }` and a stray `done` used to say `shell parse error at 1:9: Expected command`. Other parse errors keep exsh's own wording.
 
+## Faster in exsh
+- Commands that stay in the shell take about 0.41 of the time they did, which is about 1.65x bash 5 where it was about 4x. The numbers are from `tools/shellbench_cacheable`, 3 rounds on one laptop, with a Release build of each version. Commands that start a process are unchanged, at about 0.9x bash 5.
+- `[ ]` takes 3.7 µs, down from 21.4 µs, and no longer reads the directory. Among 10,000 files it took 2,911 µs and takes 4.1 µs.
+- `eval` takes 9.2 µs, down from 49.3 µs, and a function call 4.0 µs, down from 10.7 µs. `eval`, `source` and traps keep one VM between calls, as functions already did. A reset skips thread slots nobody used, and builtin names are found by hash.
+- The shell asks once whether its ids can be trusted, where it made about 20 system calls per command. It asks again after an applet, since `su`, `sudo`, `login` and `chroot` come back with new ids if their exec fails.
+- A word with a `[` and no `]` after it in the same part of a path stays as it is, as in bash. That makes these work as they should: `shopt -s nullglob; [ a = a ]` failed with `a: No such file or directory`, `failglob` stopped on `[`, `dotglob` with a file `.[` turned `[` into `.[`, and `nocaseglob` with a file `A[` turned `a[` into `A[`.
+
 ## Fixed in the iOS app
 - A pipeline with a DEBUG trap set no longer ends the app. The trap ran between stages and pulled the pipeline's state out from under a stage already running. It now runs before any stage starts, once for each simple command, as often as in bash.
 - `kill -TERM -1` means what it means on Linux: every task but the caller and the app's kernel task, and `No such process` when none is left. It used to mark the kernel task as dying and cancel its thread, and `kill -0 -1` said a task was there when none could be reached.
