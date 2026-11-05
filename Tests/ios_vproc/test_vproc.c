@@ -4914,6 +4914,17 @@ static void assert_env_capture_survives_changes(void) {
     for (int i = 0; i < 4; ++i) {
         pthread_join(writers[i], NULL);
     }
+    /* The copy holds no lock while it is walked, so what walks it can change the environment. */
+    VProcEnv *walked = vprocEnvCapture();
+    assert(walked);
+    size_t seen = 0;
+    for (char **entry = vprocEnvEntries(walked); entry && *entry; ++entry) {
+        seen++;
+        assert(vprocSetenvShim("PSCAL_ENV_CAPTURE_TEST", *entry, 1) == 0);
+        assert(vprocUnsetenvShim("PSCAL_ENV_CAPTURE_TEST") == 0);
+    }
+    assert(seen >= 200);
+    vprocEnvRelease(walked);
     for (int i = 0; i < 200; ++i) {
         snprintf(name, sizeof(name), "PSCAL_ENV_CAPTURE_%d", i);
         assert(vprocUnsetenvShim(name) == 0);

@@ -29,6 +29,7 @@ VPROC_SOURCES=(
   "${CORE}/src/runtime/vproc/vproc.c"
   "${CORE}/src/common/frontend_kind.c"
   "${CORE}/src/common/path_virtualization.c"
+  "${CORE}/src/common/env_snapshot.c"
   "${CORE}/src/common/path_truncate.c"
   "${CORE}/src/common/runtime_tty.c"
   "${ROOT}/src/ios/runtime_session_stub.c"
