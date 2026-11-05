@@ -830,6 +830,12 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("at_once_both", f"clike --no-cache smoke/v.clike | {{ clike --no-cache smoke/x.clike; cat; }} {R}", "clike2 4 9 8\nclike 3 5 7\n"),
     ("at_once_rea_aether", f"rea --no-cache smoke/v.rea | {{ aether --no-cache smoke/x.aether; cat; }} {R}", "aether2 4 x false\nrea 3 3 true\n"),
     ("at_once_aether_rea", f"aether --no-cache smoke/v.aether | {{ rea --no-cache smoke/x.rea; cat; }} {R}", "rea2 4 4 false\naether 3 b true\n"),
+    # From five levels down this wrote into freed memory, and an abort ends the whole app.
+    ("substitution_depth",
+     f"sum() {{ if [ \"$1\" -le 0 ]; then echo 0; else echo $(( $1 + $(sum $(( $1 - 1 ))) )); fi; }}; "
+     f"{{ sum 5; sum 8; sum 12; }} {R}", "15\n36\n78\n"),
+    # The stages it started used to go on with the subshell's state after it was freed.
+    ("debug_trap_exit", f"{{ ( trap 'exit 4' DEBUG; true | cat | cat; echo no ); echo $?; }} {R}", "4\n"),
     ("at_once_background", f"{{ clike --no-cache smoke/v.clike & pascal --no-cache smoke/v.pas & rea --no-cache smoke/v.rea & aether --no-cache smoke/v.aether & wait; }} 2>&1 | sort {R}", "aether 3 b true\nclike 3 5 7\npascal 3 a TRUE\nrea 3 3 true\n"),
     # One printf, one write: clike's used to go out a byte at a time and interleave mid-line.
     ("at_once_same_lines", f"{{ clike --no-cache smoke/v.clike & clike --no-cache smoke/x.clike & clike --no-cache smoke/v.clike & clike --no-cache smoke/x.clike & wait; }} 2>&1 | sort {R}", "clike 3 5 7\nclike 3 5 7\nclike2 4 9 8\nclike2 4 9 8\n"),
