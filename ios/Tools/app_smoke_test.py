@@ -328,6 +328,9 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("sdl_open_close", f"pascal smoke/sdlclose.pas {R}; sleep 3", "closed\n"),
     ("sdl_open_error", f"pascal smoke/sdlerror.pas > /dev/null 2>&1; echo back {R}; sleep 3", "back\n"),
     ("gl_quad_strip", f"pascal smoke/glprims.pas {R}; sleep 3", "drawn\n"),
+    # The window takes the keyboard away from the terminal. That used to type a space and a delete
+    # into the running program.
+    ("sdl_no_typed_keys", f"pascal smoke/sdlkeys.pas {R}; sleep 3", "keys 0\n"),
     ("applet_fail_rc", f"awk 1 smoke/nope > /dev/null 2>&1; echo $? {R}", "2\n"),
     ("shebang_fail_rc", f"smoke/sb3.sh > /dev/null 2>&1; echo $? {R}", "3\n"),
     # A #! frontend has no process exit to flush its output: it arrived after the
@@ -1330,6 +1333,7 @@ FIXTURES = {
     "bigout.clike": 'int main() {\n    int i;\n    for (i = 1; i <= 30000; i = i + 1) {\n        printf("%d\\n", i);\n    }\n    return 0;\n}\n',
     "big.pas": "program Big;\nvar i: integer;\nbegin\n  for i := 1 to 100000 do writeln('line of big output');\nend.\n",
     "first.pas": "program First;\nuses crt;\nbegin\n  writeln('first stage');\n  delay(2000);\nend.\n",
+    "sdlkeys.pas": "program SdlKeys;\nvar i, k, n: integer;\nbegin\n  InitGraph(320, 240, 'smoke');\n  n := 0;\n  for i := 1 to 20 do\n  begin\n    GraphLoop(100);\n    k := PollKeyAny();\n    while k <> 0 do\n    begin\n      n := n + 1;\n      k := PollKeyAny();\n    end;\n  end;\n  CloseGraph;\n  writeln('keys ', n);\nend.\n",
     "halt2.pas": "program Halting2;\nbegin\n  writeln('before halt');\n  halt(3);\nend.\n",
     "sdlclose.pas": "program SdlClose;\nbegin\n  InitGraph(320, 240, 'smoke');\n  CloseGraph;\n  writeln('closed');\nend.\n",
     "sdlerror.pas": "program SdlError;\nbegin\n  InitGraph(320, 240, 'smoke');\n  GLBegin('no_such_primitive');\nend.\n",

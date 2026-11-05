@@ -378,16 +378,12 @@ final class TerminalTabManager: ObservableObject {
         selectedId = tab.id
     }
 
-    func sendInputToSelected(_ text: String) {
-        guard !text.isEmpty else { return }
-        tabInitLog("sendInputToSelected len=\(text.utf8.count) selectedId=\(selectedId)")
+    func scrollSelectedToBottom() {
         switch selectedTab.kind {
         case .shell(let runtime):
-            runtime.send(text)
-        case .shellSession(let session):
-            session.send(text)
-        case .ssh(let session):
-            session.send(text)
+            runtime.ensureHtermController().scheduleScrollToBottom()
+        case .shellSession(let session), .ssh(let session):
+            session.htermController.scheduleScrollToBottom()
         case .sdl:
             break
         }

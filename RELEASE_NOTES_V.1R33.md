@@ -45,7 +45,7 @@ Base: `V.1R32`
 - `env test a == a`, and `xargs` or `find -exec` running `test`, know `==`, and take a value of `!`. They said `test: unsupported expression`.
 - `/dev/stdout`, `/dev/stderr`, `/dev/stdin`, `/dev/fd/N` and `/proc/<pid>/fd/N` are the command's own descriptors, as on Linux, for the shell, applets and every frontend's file builtins, redirected and in a pipeline. `echo x > /dev/stdout` and a program writing to that name used to create a regular file under the app's root, so the output was lost with no error, and `cat /dev/stdin` said no such file. Opening one opens the file again, with its own offset, so `> /dev/stdout` truncates a redirected file and `cat /dev/stdin` reads it from the top. A pipe or the terminal gives a copy. `/proc/<pid>/fd/N` reaches that task's descriptor. `/dev` holds the links, and `ls -l /proc/self/fd` shows where each leads.
 - A signal stays in the app, from any thread and whatever the pid. From a thread with no task of its own, `0`, `-1` and `-N` went to iOS's `kill`, which reads them as real process groups, and `-1` as every process the app may signal. A positive pid went there too with a signal such as SIGKILL, SIGHUP or SIGUSR1, so it reached whichever process had that number and not the task. Every pid now means the app's own tasks.
-
+- The keyboard showing or hiding no longer types a space and a delete into the terminal. A running program got them as keys, for example when a graphics window took the keyboard away. The terminal scrolls back to the prompt instead.
 
 
 

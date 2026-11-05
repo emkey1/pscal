@@ -304,7 +304,8 @@ final class TerminalRootViewController: UIViewController {
     }
 
     private func updateKeyboardInset(overlap: CGFloat) {
-        let baseBottomInset = view.safeAreaInsets.bottom
+        // The safe area already includes the inset set here, and a repeated notification mustn't count it twice.
+        let baseBottomInset = view.safeAreaInsets.bottom - additionalSafeAreaInsets.bottom
         let extra = max(0, overlap - baseBottomInset)
         if abs(extra - lastKeyboardOverlap) < 0.5 {
             return
@@ -312,11 +313,11 @@ final class TerminalRootViewController: UIViewController {
         additionalSafeAreaInsets.bottom = extra
         let prev = lastKeyboardOverlap
         lastKeyboardOverlap = extra
-        // When the keyboard shows or hides, nudge the shell to ensure the prompt is visible.
+        // When the keyboard shows or hides, bring the prompt back into view. Scroll for that and send
+        // no keys: they would reach whatever program is running.
         let transitioned = (prev == 0 && extra > 0) || (prev > 0 && extra == 0)
         if transitioned {
-            TerminalTabManager.shared.sendInputToSelected(" ")
-            TerminalTabManager.shared.sendInputToSelected("\u{7F}") // delete
+            TerminalTabManager.shared.scrollSelectedToBottom()
         }
     }
 }

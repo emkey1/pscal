@@ -951,7 +951,7 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         return "exports.writeB64ForEpoch(\(epoch), \"\(encoded)\")"
     }
 
-    private func scheduleScrollToBottom() {
+    func scheduleScrollToBottom() {
         guard !scrollToBottomPending else { return }
         scrollToBottomPending = true
         DispatchQueue.main.async { [weak self] in
