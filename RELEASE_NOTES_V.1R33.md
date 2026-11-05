@@ -17,6 +17,11 @@ Base: `V.1R32`
 - `kill SIG 0` signals the shell's own group, on every platform. It said `kill: (0) Invalid argument`.
 - A loop, `if`, `{ }` or `( )` with no command in it is a syntax error, as in bash: `while false; do done`, `if true; then fi`, `{ }`. They used to run as if nothing was wrong, so a script holding one now stops there with status 2. Case arms may still be empty.
 - A token no command can start with is reported in bash's words, with the line it is on: ``syntax error near unexpected token `done'``. `while do`, `{ ; }` and a stray `done` used to say `shell parse error at 1:9: Expected command`. Other parse errors keep exsh's own wording.
+- `exec {fd}> f` and every other `{name}` redirection work, on `exec`, a builtin, a function and a compound command: the shell picks a descriptor from 10 up, `name` (an array element too) gets its number, and it stays open until `exec {name}>&-`. It used to look for a program called `{fd}`.
+- `wait -n` in `$(...)` gives 0 for each job the shell started, then 127, as in bash. It gave 127 at once.
+- `exec ""` says `exec: : not found` and ends the script with status 127. It said `exec: expected command`, status 1, and went on.
+- On a host, `exec 3< <(cmd)` and `exec 3> >(cmd)` keep descriptor 3, and the same goes for any other number the pipe could land on. It was closed when `exec` was done, so the next read said `Bad file descriptor`.
+- `${!:-x}` and the other operators right after the `!` mean `$!` with that operator. They said `bad substitution`. `${!!}` and `${!$}` are now bad substitutions, as in bash, and `$!` with no job yet fails under `set -u`.
 
 ## Faster in exsh
 - Commands that stay in the shell take about 0.41 of the time they did, which is about 1.65x bash 5 where it was about 4x. The numbers are from `tools/shellbench_cacheable`, 3 rounds on one laptop, with a Release build of each version. Commands that start a process are unchanged, at about 0.9x bash 5.
@@ -33,6 +38,9 @@ Base: `V.1R32`
 - A signal to a group stays in the app, from any thread. From a thread with no task of its own, `0`, `-1` and `-N` went to iOS's `kill`, which reads them as real process groups, and `-1` as every process the app may signal. Only a positive pid can reach iOS's `kill` now.
 - `kill(0, sig)` from a program acts as `kill(-pgid, sig)` does. SIGINT to your own group is queued for the next check in both forms. `kill(0, SIGINT)` used to mark the task dead while it ran on.
 
+- A redirection on a closed stdout, stderr or stdin leaves it closed. `( exec >&-; { :; } > f; echo x )` printed `x`, because what was saved and put back was the host's descriptor of that number.
+- `>&$fd` with a closed descriptor of 10 or above says `Bad file descriptor`. It could find the copy of stdout saved for that very redirection in the same slot, and write to stdout.
+
 ## For iOS-flavoured builds on a host
 - The real root is never provisioned. `PATH_TRUNCATE=/`, any spelling or symlink that comes to it, and `HOME=/` with nothing else set used to make directories in the root, prune `/proc` there and rename links over `/usr/bin` names. `$HOME` stands in now, as path translation already did, and nothing is provisioned when `$HOME` is the root or unset.
 
@@ -43,7 +51,13 @@ Base: `V.1R32`
 - A syntax error stops a script before any of it runs, where bash runs the lines before it.
 - `a; ;` still parses, where bash reports the second `;`.
 
+- The words of a command's redirections expand before any of them acts, so `exec {a}> f {b}>&$a` finds `a` empty.
+- `command prog {fd}> f` sets `fd` in the shell, and the descriptor stays open there.
+- `shopt varredir_close` is not there.
+
 ## Differs from Linux on iOS
+- `exec 3> >(cmd)` and `exec > >(cmd)` run the command at once on an empty file, so what the script writes afterwards is lost.
+- A function given `{fd}> f` as a job or a pipeline stage does not see `fd`.
 - A fatal signal a subshell sends itself returns: `( kill -TERM $BASHPID; echo x )` prints `x`, though its status is 143.
 - A signal to a task that has ended but not been waited for says `No such process`, where Linux says 0.
 - SIGINT or SIGTSTP to your own group on your own thread is queued for the next check, for programs that check, where Linux acts before `kill` returns.
