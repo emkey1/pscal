@@ -306,6 +306,11 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("aether_fail_rc", f"aether smoke/nope.aether > /dev/null 2>&1; echo $? {R}", "1\n"),
     ("pascal_fail_or", f"pascal smoke/nope.pas 2>/dev/null || echo failed {R}", "failed\n"),
     ("pascal_halt_rc", f"pascal smoke/halt.pas > /dev/null 2>&1; echo $? {R}", "3\n"),
+    # An SDL window gone as soon as it is up. It used to come back after the close, and released
+    # while key it took the app down, so each row waits out the promote retries.
+    ("sdl_open_close", f"pascal smoke/sdlclose.pas {R}; sleep 3", "closed\n"),
+    ("sdl_open_error", f"pascal smoke/sdlerror.pas > /dev/null 2>&1; echo back {R}; sleep 3", "back\n"),
+    ("gl_quad_strip", f"pascal smoke/glprims.pas {R}; sleep 3", "drawn\n"),
     ("applet_fail_rc", f"awk 1 smoke/nope > /dev/null 2>&1; echo $? {R}", "2\n"),
     ("shebang_fail_rc", f"smoke/sb3.sh > /dev/null 2>&1; echo $? {R}", "3\n"),
     # A #! frontend has no process exit to flush its output: it arrived after the
@@ -1065,6 +1070,9 @@ FIXTURES = {
     "big.pas": "program Big;\nvar i: integer;\nbegin\n  for i := 1 to 100000 do writeln('line of big output');\nend.\n",
     "first.pas": "program First;\nuses crt;\nbegin\n  writeln('first stage');\n  delay(2000);\nend.\n",
     "halt2.pas": "program Halting2;\nbegin\n  writeln('before halt');\n  halt(3);\nend.\n",
+    "sdlclose.pas": "program SdlClose;\nbegin\n  InitGraph(320, 240, 'smoke');\n  CloseGraph;\n  writeln('closed');\nend.\n",
+    "sdlerror.pas": "program SdlError;\nbegin\n  InitGraph(320, 240, 'smoke');\n  GLBegin('no_such_primitive');\nend.\n",
+    "glprims.pas": "program GlPrims;\nbegin\n  InitGraph(320, 240, 'smoke');\n  GLBegin('quad_strip');\n  GLEnd;\n  GLBegin('polygon');\n  GLEnd;\n  CloseGraph;\n  writeln('drawn');\nend.\n",
     "thread.rea": 'void child() {\n    writeln("child ok");\n}\n\nint t = spawn child();\njoin t;\nwriteln("main ok");\n',
     **AT_ONCE_FIXTURES,
     "esc.bin": "\x1b",
