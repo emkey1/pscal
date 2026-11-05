@@ -13,6 +13,7 @@ OUT_HOST_GUARDS="${BUILD_DIR}/ios_vproc_host_guards_test"
 OUT_USER_DB="${BUILD_DIR}/ios_vproc_user_db_test"
 OUT_FIRST_THREAD="${BUILD_DIR}/ios_vproc_first_thread_test"
 OUT_UTMP_WRITERS="${BUILD_DIR}/ios_vproc_utmp_writers_test"
+OUT_SELF_SIGNAL="${BUILD_DIR}/ios_vproc_self_signal_test"
 OUT_NEXTVI_PASTE="${BUILD_DIR}/ios_nextvi_bracketed_paste_test"
 NEXTVI_OBJ="${BUILD_DIR}/nextvi_ios_regression_vi.o"
 # The vproc/tty platform layer lives in pscal-core since the components split;
@@ -106,6 +107,13 @@ cc -DVPROC_ENABLE_STUBS_FOR_TESTS=1 -DPSCAL_TARGET_IOS=1 \
    "${VPROC_SOURCES[@]}" \
    -o "${OUT_FIRST_THREAD}"
 
+cc -DVPROC_ENABLE_STUBS_FOR_TESTS=1 -DPSCAL_TARGET_IOS=1 \
+   -pthread \
+   "${INCLUDE_DIRS[@]}" \
+   "${ROOT}/Tests/ios_vproc/test_self_signal.c" \
+   "${VPROC_SOURCES[@]}" \
+   -o "${OUT_SELF_SIGNAL}"
+
 cc -DPSCAL_TARGET_IOS=1 \
    -pthread \
    "-I${ROOT}/src/smallclue/src" \
@@ -146,4 +154,5 @@ echo "Running ios_vproc tests..."
 "${OUT_USER_DB}"
 "${OUT_FIRST_THREAD}"
 "${OUT_UTMP_WRITERS}"
+"${OUT_SELF_SIGNAL}"
 "${OUT_NEXTVI_PASTE}"

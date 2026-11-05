@@ -1455,6 +1455,32 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     # A foreground subshell or command is not the shell, so another task's signal ends it there.
     ("kill_foreground_subshell", f"( p=$BASHPID; ( sleep 0.3; kill -TERM $p ) & sleep 3; echo no {A} ); echo st=$? {A}", "st=143\n"),
     ("kill_foreground_command", f"( sleep 0.5; lps | grep '[s]eq 1 90000000' | while read kp kr; do kill -TERM $kp; done ) & seq 1 90000000 > /dev/null; echo st=$? {A}", "st=143\n"),
+    # A fatal signal a shell sends itself ends it there and then, and the prompt goes on.
+    ("kill_self_subshell", f"{{ ( kill -TERM $BASHPID; echo no ); echo st=$?; }} {R}", "st=143\n"),
+    ("kill_self_subshell_kill", f"{{ ( kill -KILL $BASHPID; echo no ); echo st=$?; }} {R}", "st=137\n"),
+    ("kill_self_exit_trap", f"{{ ( trap 'echo bye' EXIT; kill -TERM $BASHPID; echo no ); echo st=$?; }} {R}", "bye\nst=143\n"),
+    ("kill_self_exit_trap_kill", f"{{ ( trap 'echo bye' EXIT; kill -KILL $BASHPID; echo no ); echo st=$?; }} {R}", "st=137\n"),
+    ("kill_self_in_function", f"{{ ( kf() {{ kill -TERM $BASHPID; echo no; }}; kf; echo no ); echo st=$?; }} {R}", "st=143\n"),
+    ("kill_self_job", f"( kill -TERM $BASHPID; echo no {A} ) & wait $!; echo st=$? {A}", "st=143\n"),
+    ("kill_self_stage", f"{{ {{ kill -TERM $BASHPID; echo no; }} | cat; echo st=${{PIPESTATUS[0]}}; }} {R}", "st=143\n"),
+    ("kill_self_last_stage", f"{{ echo a | {{ kill -TERM $BASHPID; echo no; }}; echo st=$?; }} {R}", "st=143\n"),
+    ("kill_self_sh", f"{{ sh -c 'kill -TERM $$; echo no'; echo st=$?; }} {R}", "st=143\n"),
+    ("kill_self_by_child", f"{{ ( env kill -TERM $BASHPID; echo no ); echo st=$?; }} {R}", "st=143\n"),
+    ("kill_self_by_job", f"( p=$BASHPID; kill -TERM $p {A} & wait $!; echo no {A} ); echo st=$? {A}", "st=143\n"),
+    ("kill_self_raise_stage", f"{{ tail -f smoke/d.txt | head -1; echo st=${{PIPESTATUS[0]}}; }} {R}", "b\nst=141\n"),
+    # Ignored by the shell's trap, it stays ignored in what the shell starts, and tail says so.
+    ("kill_self_raise_ignored", f"( trap '' PIPE; tail -f smoke/d.txt | head -1; echo st=${{PIPESTATUS[0]}} ) {R}", "b\nst=1\n"),
+    ("kill_self_raise_inline", f"{{ echo | tail -f smoke/d.txt; echo st=$? > {{o}}.2; }} | head -1 {R}; cat {{o}}.2 {A}; rm -f {{o}}.2", "b\nst=141\n"),
+    ("kill_self_prompt_lives", f"( kill -KILL $BASHPID ); sh -c 'kill -TERM $$'; echo alive {R}", "alive\n"),
+    # It hears of it at its next look, here sleep's, and says so.
+    ("kill_last_stage_status", f"( sleep 0.5; lps | grep '[s]leep 3.2' | while read kp kr; do kill -TERM $kp; done ) & sleep 3.2 | sleep 3.2; echo st=$? {A}", "st=143\n"),
+    # A frontend's VM stops for a kill: by a cancel on a worker, by asking at its loop's checks on the shell's thread.
+    # Its waiter is the tool's thread too, and the shell's thread must not wait for it for ever.
+    ("kill_frontend_worker", f"( sleep 0.5; lps | grep '[s]pin.clike' | while read kp kr; do kill -TERM $kp; done ) & clike smoke/spin.clike; echo st=$? {A}", "st=143\n"),
+    ("kill_frontend_last_stage", f"( sleep 0.5; lps | grep '[s]pin.clike' | while read kp kr; do kill -TERM $kp; done ) & echo | clike smoke/spin.clike; echo st=$? {A}", "st=143\n"),
+    ("exit_trap_sh", f"sh -c 'trap \"echo bye\" EXIT; echo a' {R}", "a\nbye\n"),
+    ("exit_trap_sh_exit", f"sh -c 'trap \"echo bye\" EXIT; exit 3' {R}; echo st=$? {A}", "bye\nst=3\n"),
+    ("kill_ended_task", f"( sleep 0.1 & echo $! > smoke/kz; exec sleep 4 ) & j=$!; sleep 1; read kz < smoke/kz; kill -TERM $kz; echo term=$? {A}; kill -KILL $kz; echo kill=$? {A}; kill -0 $kz; echo probe=$? {A}; kill $j; wait $j; echo parent=$? {A}", "term=0\nkill=0\nprobe=0\nparent=143\n"),
     ("trap_self", f"{{ trap 'echo got' USR1; kill -USR1 $$; echo after; trap - USR1; }} {R}", "got\nafter\n"),
     ("trap_function_local", f"{{ tf() {{ local tv=1; trap 'echo \"[$tv]\"' USR1; kill -USR1 $$; }}; tf; trap - USR1; }} {R}", "[1]\n"),
     ("trap_set_in_function", f"{{ tf() {{ trap 'echo later' USR1; }}; tf; kill -USR1 $$; echo after; trap - USR1; }} {R}", "later\nafter\n"),
@@ -1619,6 +1645,7 @@ FIXTURES = {
     "utmp.rec": utmp_record("alice", "pts/1") + utmp_record("bob", "pts/2") + utmp_record("carol", "pts/0"),
     "hello.pas": "program Hello;\nbegin\n  writeln('pascal ok ', 6*7);\nend.\n",
     "hello.clike": 'int main() {\n    printf("clike ok %d\\n", 6*7);\n    return 0;\n}\n',
+    "spin.clike": 'int main() {\n    while (1) {\n    }\n    return 0;\n}\n',
     "envp.clike": 'int main() {\n    printf("[%s]\\n", getenv("ep"));\n    return 0;\n}\n',
     "envp.pas": "program EnvP;\nbegin\n  writeln('[', getenv('ep'), ']');\nend.\n",
     "hello.rea": 'class Main {}\n\nwriteln("rea ok ", 6*7);\n',

@@ -2928,10 +2928,14 @@ static void *vproc_self_cancel_thread(void *arg) {
     assert(vp);
     vprocActivate(vp);
     vprocRegisterThread(vp, pthread_self());
-    int pid = vprocPid(vp);
-    assert(vprocKillShim(pid, SIGTERM) == 0);
-    /* If self-cancel regresses, this call will cancel the thread immediately. */
+    /* Another task's signal is not this thread's end. Its own is, see test_self_signal.c. */
+    VProc *other = vprocCreate(NULL);
+    assert(other);
+    assert(vprocKillShim(vprocPid(other), SIGTERM) == 0);
     pthread_testcancel();
+    int status = 0;
+    (void)vprocWaitPidShim(vprocPid(other), &status, WNOHANG);
+    vprocDestroy(other);
     vprocDeactivate();
     vprocDestroy(vp);
     ctx->completed = 1;

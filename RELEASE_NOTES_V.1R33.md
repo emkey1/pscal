@@ -119,6 +119,14 @@ Base: `V.1R32`
 - `/dev/tty` is the terminal of the tab a command runs in. The shell's own `> /dev/tty` and `< /dev/tty` opened a device of that name outside the app, which no tab draws, so `echo x > /dev/tty` showed nothing and `read x < /dev/tty` or `cat < /dev/tty` got nothing. A program's own open of it went by a table that a second tab could take over, so it could reach that tab's terminal, or a closed one's.
 - In `ssh`, `scp`, `sftp` and `ssh-keygen`, `/dev/tty` is the terminal, not a copy of stdin, and a password or passphrase question goes there, as on Linux. A report of such a question going to the file with stderr redirected was not reproduced in this build: `ssh-keygen -y -f key 2> f` asks on the screen here, as it did in the build before this fix.
 - `halt`, `reboot` or `poweroff` run from a job, and a signal such as `kill -HUP` that ends a shell waiting at its prompt, end it at once. It waited for the next line to be typed.
+- A program's own fatal signal doesn't return: `kill(getpid(), SIGTERM)`, `raise`, and `sigprocmask` or `sigsuspend` letting in one that was waiting. They used to mark the task dead while it ran on. On a thread of its own it ends there. A command on the shell's or a subshell's thread leaves by a way back to the shell, which goes on with 128 + the signal. A simulated fork's child ends and its parent goes on from `fork`.
+- `tail -f f | head -1` gives 141 for `tail`, not 1. What the shell starts takes SIGPIPE's default action, as a child does on a host, unless the shell ignores it with `trap '' PIPE`, and `kill -PIPE` ends a subshell.
+- A stage that dies of a signal on a thread of its own shows 128 + the signal in `PIPESTATUS`, where it showed 0.
+- A signal to a task that has ended but not been waited for succeeds and does nothing, for a pid, a group and `-1`, as on Linux. It said `No such process`, while `kill -0` said it was there. Ctrl-C and Ctrl-Z still find no one to take it in that group, and fall back as they did.
+- A stage killed on a subshell's thread leaves that subshell going. `( a | b; echo x )` lost the `x` when `b` was killed.
+- A stage killed on the shell's or a subshell's thread stops, and `$?` is 143 where it was 0. A call that waits gives up, an applet leaves at its next look for signals and a frontend the next time it calls or loops.
+- A shell run as a command runs its EXIT trap: `sh -c`, `sh file` and a `#!` script. It never ran on iOS.
+- A shell dying of a signal it sent itself runs its EXIT trap first, as bash does, except for KILL and QUIT, and `exit` in that trap doesn't change the status.
 
 ## Updated in the iOS app
 - `ssh`, `scp`, `sftp` and `ssh-keygen` are OpenSSH 10.6p2, the latest upstream release (2026-11-05), up from 10.2p1. `ssh -V` says so. Every change the app makes to OpenSSH is carried over. Security fixes they gain:
@@ -173,6 +181,11 @@ Base: `V.1R32`
 - `who -u` gives `?` as a terminal's idle time, because a terminal in the app keeps no access time.
 - `echo */.` lists files as well as directories and drops the `/.`, because resolving the pattern against the task's directory drops it.
 - Killing a shell takes the command it is running with it: `sh -c 'pascal x.pas; echo y' &` killed ends `pascal` too, where on Linux it runs on as an orphan. `sh -c 'pascal x.pas'` and `( pascal x.pas )` end as they do on Linux, where the shell becomes the command.
+- `$BASHPID` in `$(...)` is the shell's: a substitution has no task of its own. So `x=$(kill -TERM $BASHPID)` ends the shell, where bash ends only the substitution.
+- A subshell with an EXIT trap killed from another task doesn't run it, because its thread is cancelled. Bash runs it.
+- A shell whose thread can't be cancelled acts on a fatal signal from another task only when its current command is done, where Linux ends it at once and leaves the command running.
+- A command on the shell's or a subshell's thread that doesn't look for signals keeps running when killed from another task, where Linux ends it. A call that waits gives up, and the rest runs until the command ends.
+- A fatal signal from code with no way back to the shell, on a thread that has to go on, returns with the task marked as ending. Only applets have that way back, and a frontend stops the next time it calls or loops.
 
 ## Known Issues
 - `micro` makes a new file with the first tab's shell's mask, not its own: the Go runtime reaches libc directly.

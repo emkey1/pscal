@@ -51,6 +51,9 @@ RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_group_signal
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only group_signal_foreground
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only timeout_nested_shell
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_kill_self
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_kill_ended
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_exit_trap_program
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_exec_program
 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_exec_stdin
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_env_program
