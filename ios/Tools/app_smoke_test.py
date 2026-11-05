@@ -150,6 +150,11 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("parity_array_quoting", f"a=(\"b c\" d); echo \"${{#a[@]}} ${{a[0]}}\" {R}", "2 b c\n"),
     ("parity_assoc_array", f"declare -A pm; pm[k]=v; echo \"${{pm[k]}}\" {R}", "v\n"),
     ("parity_tilde", f"[ ~ = \"$HOME\" ] && echo same {R}", "same\n"),
+    # [ and test compare strings; patterns and nocasematch are for [[ and case.
+    ("test_literal", f"( [ abc = 'a*' ]; echo $?; [ '[5]' = '[5]' ]; echo $?; [ '[5]' != '[5]' ]; echo $?; test '[5]' = '[5]'; echo $?; v='*'; [ abc = \"$v\" ]; echo $?; [ \"$v\" = \"$v\" ]; echo $? ) {R}", "1\n0\n1\n0\n1\n0\n"),
+    ("test_literal_cond", f"( [[ abc = a* ]]; echo $?; [[ abc = 'a*' ]]; echo $?; [[ '[5]' = '[5]' ]]; echo $?; shopt -s nocasematch; [ ABC = abc ]; echo $?; [[ ABC = abc ]]; echo $?; case ABC in abc) echo c;; esac; shopt -u nocasematch ) {R}", "0\n1\n0\n1\n0\nc\n"),
+    ("test_operator_value", f"( v='!'; [ \"$v\" = x ]; echo $?; [ \"$v\" != \"$v\" ]; echo $?; [ a = ] 2>/dev/null; echo $?; [ a b ] 2>/dev/null; echo $?; builtin [ a == a ]; echo $? ) {R}", "1\n1\n2\n2\n0\n"),
+    ("test_applet", f"( env test a == a; echo $?; env test '!' = x; echo $?; env test abc = 'a*'; echo $?; env test '[5]' = '[5]'; echo $? ) {R}", "0\n1\n1\n0\n"),
     ("parity_replace", f"x=abcb; echo ${{x/b/B}} ${{x//b/B}} {R}", "aBcb aBcB\n"),
     ("parity_regex", f"[[ abc =~ ^(a)b ]] && echo \"${{BASH_REMATCH[1]}}\" {R}", "a\n"),
     ("parity_bracket_and", f"[[ a == a && b == b ]] && echo y {R}", "y\n"),

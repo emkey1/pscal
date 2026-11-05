@@ -45,6 +45,10 @@ Base: `V.1R32`
 - A line that ends exactly on the last column no longer eats the row above the prompt at the next key, and Enter there leaves no empty row. Neither does a key pressed with the cursor on an earlier row of a long line.
 - Enter, Ctrl-C and a completion list with the cursor on an earlier row of a long line print below all of it, not over its end. A reverse search with a match that wraps draws over itself.
 - Left, Right, Backspace and Delete at the prompt take a whole character, with any mark after it, where they took one byte.
+- `[` and `test` compare strings. A right side of `=`, `==` or `!=` holding `*`, `?` or `[` was read as a pattern, so `[ abc = "a*" ]` was true, `[ "[5]" = "[5]" ]` was false, and `while [ "$x" != "[5]" ]` never ended. `nocasematch` no longer reaches them either. `[[ ]]` and `case` keep both.
+- A value of `!` is a value: `v='!'; [ "$v" = x ]` was true. So is a value that looks like an operator in a longer expression, such as `[ "$v" = x -a 1 = 1 ]` with `v=-n`, and `)` as a word.
+- `[` and `test` with the wrong number of words give bash's message and status 2, also as a `while` or `until` condition. `[ $empty = y ]` and `[ a b ]` used to be false with no message.
+- `[ -a f ]`, `[ -o noglob ]`, `[ -v x ]`, `[[ -a f ]]`, `[[ -o noglob ]]` and `builtin [` work. The first two were always false, and `builtin [` said `unknown VM builtin`.
 
 ## Faster in exsh
 - Commands that stay in the shell take about 0.41 of the time they did, which is about 1.65x bash 5 where it was about 4x. The numbers are from `tools/shellbench_cacheable`, 3 rounds on one laptop, with a Release build of each version. Commands that start a process are unchanged, at about 0.9x bash 5.
@@ -54,6 +58,7 @@ Base: `V.1R32`
 - A word with a `[` and no `]` after it in the same part of a path stays as it is, as in bash. That makes these work as they should: `shopt -s nullglob; [ a = a ]` failed with `a: No such file or directory`, `failglob` stopped on `[`, `dotglob` with a file `.[` turned `[` into `.[`, and `nocaseglob` with a file `A[` turned `a[` into `A[`.
 
 ## Fixed in the iOS app
+- `env test a == a`, and `xargs` or `find -exec` running `test`, know `==`, and take a value of `!`. They said `test: unsupported expression`.
 - A pipeline with a DEBUG trap set no longer ends the app. A trap on the shell's thread cleared the pipeline's state while a stage's thread was reading it. A trap now runs in a copy of the shell's state while a pipeline runs, whichever trap it is.
 - A failed expansion in a later stage of a pipeline no longer ends the app. `set -u; f() { sleep 1 | cat $nope; }; f` ended the shell with the first stage still starting, most of the time in a function, `eval` or a sourced file.
 - `kill -TERM -1` means what it means on Linux: every task but the caller and the app's kernel task, and `No such process` when none is left. It used to mark the kernel task as dying and cancel its thread, and `kill -0 -1` said a task was there when none could be reached.
