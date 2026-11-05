@@ -41,6 +41,13 @@ Base: `V.1R32`
 - A redirection on a closed stdout, stderr or stdin leaves it closed. `( exec >&-; { :; } > f; echo x )` printed `x`, because what was saved and put back was the host's descriptor of that number.
 - `>&$fd` with a closed descriptor of 10 or above says `Bad file descriptor`. It could find the copy of stdout saved for that very redirection in the same slot, and write to stdout.
 
+## Fixed in rsync
+- `rsync file newname` and `rsync host:file newname` make a file named `newname` when nothing is there, as GNU `rsync` does. They used to make `newname/file`. A destination ending in `/`, an existing directory or more than one source still means a directory.
+- `rsync file oldfile` replaces the file. It used to fail, as it did with a link there. A link or a FIFO in the way goes, and the link's target stays as it was. With `dir/file` a link, `rsync file dir` failed, and with a FIFO there it blocked for good.
+- An updated file keeps its own permissions unless `-p` is given. It used to take the source's.
+- Nothing is made until the file list arrives, so a missing source, a directory without `-r` or an `--exclude` that matches everything leaves no empty directory behind.
+- A destination that can't be used ends with status 3: a file where a directory is needed, or a missing directory above a new name. `rsync file nosuch/new` used to make `nosuch/new/file`. `rsync -n` says so too.
+
 ## For iOS-flavoured builds on a host
 - The real root is never provisioned. `PATH_TRUNCATE=/`, any spelling or symlink that comes to it, and `HOME=/` with nothing else set used to make directories in the root, prune `/proc` there and rename links over `/usr/bin` names. `$HOME` stands in now, as path translation already did, and nothing is provisioned when `$HOME` is the root or unset.
 
@@ -54,6 +61,13 @@ Base: `V.1R32`
 - The words of a command's redirections expand before any of them acts, so `exec {a}> f {b}>&$a` finds `a` empty.
 - `command prog {fd}> f` sets `fd` in the shell, and the descriptor stays open there.
 - `shopt varredir_close` is not there.
+
+## Differs from GNU rsync
+- Missing directories above a destination that means a directory get made: `rsync -a dir x/y/new`. GNU's fails with status 11 unless given `--mkpath`. The rsync in macOS makes them too.
+- A new directory without `-p` gets the default mode, where GNU's gets the source's.
+- A missing source ends the transfer with status 1, where GNU's copies the rest and ends with 23.
+- `-c` fails or stops at the timeout with a GNU `rsync` at the other end.
+- A device at the destination is refused with status 3. GNU's replaces it as root, and otherwise ends with 23.
 
 ## Differs from Linux on iOS
 - `exec 3> >(cmd)` and `exec > >(cmd)` run the command at once on an empty file, so what the script writes afterwards is lost.

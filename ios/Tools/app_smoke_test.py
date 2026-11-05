@@ -859,7 +859,21 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("rsync_contents", f"rsync -a smoke/rs/a/ smoke/rs/con {R}; ls smoke/rs/con {A}", "b\nf\n"),
     ("rsync_dot", f"( cd smoke/rs/a; rsync -a . ../dot ) {R}; ls smoke/rs/dot {A}", "b\nf\n"),
     ("rsync_dotdot", f"( cd smoke/rs/a/b; rsync -a .. ../../up ) {R}; ls smoke/rs/up {A}", "b\nf\n"),
-    ("rsync_file", f"rsync smoke/d.txt smoke/rs/one {R}; cat smoke/rs/one/d.txt {A}", "b\na\nc\n"),
+    # One file with nothing at the destination takes its name, as with GNU rsync. A slash, a directory or two files mean a directory.
+    ("rsync_file", f"rsync smoke/d.txt smoke/rs/one {R}; [ -f smoke/rs/one ] && cat smoke/rs/one {A}", "b\na\nc\n"),
+    ("rsync_file_name", f"rsync -a smoke/rs/a/f smoke/rs/nm {R}; echo \"rc=$?\" {A}; [ -f smoke/rs/nm ] && cat smoke/rs/nm {A}; echo y > smoke/rs/nm2; touch -t 202001020304 smoke/rs/nm2; rsync smoke/d.txt smoke/rs/nm2 {A}; cat smoke/rs/nm2 {A}", "rc=0\nx\nb\na\nc\n"),
+    ("rsync_file_slash", f"rsync smoke/d.txt smoke/rs/sl1/ {R}; cat smoke/rs/sl1/d.txt {A}", "b\na\nc\n"),
+    ("rsync_file_dir", f"mkdir smoke/rs/ed; rsync smoke/d.txt smoke/rs/ed {R}; cat smoke/rs/ed/d.txt {A}; ln -s ed smoke/rs/ld; rsync smoke/rs/a/f smoke/rs/ld {A}; ls smoke/rs/ed {A}; readlink smoke/rs/ld {A}", "b\na\nc\nd.txt\nf\ned\n"),
+    ("rsync_two_files", f"rsync smoke/d.txt smoke/rs/a/f smoke/rs/two {R}; ls smoke/rs/two {A}", "d.txt\nf\n"),
+    # A link goes, not what it points at.
+    ("rsync_file_link", f"echo y > smoke/rs/lt; ln -s lt smoke/rs/lf; ln -s nowhere smoke/rs/lg; rsync smoke/rs/a/f smoke/rs/lf {R}; rsync smoke/rs/a/f smoke/rs/lg {A}; cat smoke/rs/lt smoke/rs/lf smoke/rs/lg {A}; [ -L smoke/rs/lf ] || [ -L smoke/rs/lg ] || echo gone {A}", "y\nx\nx\ngone\n"),
+    # Nothing left behind, and a status that says why.
+    ("rsync_file_no_parent", f"rsync smoke/d.txt smoke/rs/nope/x/new > /dev/null 2>&1; echo \"rc=$?\" {R}; ls smoke/rs/nope {A}", "rc=3\nls: cannot access 'smoke/rs/nope': No such file or directory\n"),
+    ("rsync_two_onto_file", f"echo y > smoke/rs/tf; rsync smoke/d.txt smoke/rs/a/f smoke/rs/tf > /dev/null 2>&1; echo \"rc=$?\" {R}; cat smoke/rs/tf {A}", "rc=3\ny\n"),
+    ("rsync_file_dry_run", f"rsync -n smoke/d.txt smoke/rs/fdr {R}; ls smoke/rs/fdr {A}", "ls: cannot access 'smoke/rs/fdr': No such file or directory\n"),
+    ("rsync_file_cwd", f"( cd smoke/rs; rsync a/f inhere; cat inhere ) {R}", "x\n"),
+    # A device isn't anyone's file to replace, and it still works after.
+    ("rsync_dev_null", f"rsync smoke/d.txt /dev/null > /dev/null 2>&1; [ $? -ne 0 ] && echo failed {R}; echo x > /dev/null; echo \"rc=$?\" {A}; cat /dev/null {A}", "failed\nrc=0\n"),
     # The list holds the app's own paths, not the container's.
     ("rsync_progress", f"rsync --progress -a smoke/rs/a smoke/rs/pr 2>&1 | grep -c Documents {R}", "0\n"),
     ("rsync_error_path", f"rsync -a smoke/nope smoke/rs/ep 2>&1 | head -1 {R}", "rsync: error: /home/smoke/nope: lstat: No such file or directory\n"),
@@ -867,7 +881,7 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("rsync_in_subshell", f"( cd smoke/rs; rsync -a a sub ) {R}; cat smoke/rs/sub/a/f {A}", "x\n"),
     ("rsync_update", f"rsync -a smoke/rs/a smoke/rs/up {R}; cp smoke/d.txt smoke/rs/a/h; rsync -a smoke/rs/a smoke/rs/up {A}; cat smoke/rs/up/a/h {A}; rm smoke/rs/a/h", "b\na\nc\n"),
     # Big enough to fill the socket between the two ends, then again to send it as a delta.
-    ("rsync_big", f"seq 1 200000 > smoke/rs/big; rsync smoke/rs/big smoke/rs/bd {R}; cmp smoke/rs/big smoke/rs/bd/big {A}; echo more >> smoke/rs/big; rsync smoke/rs/big smoke/rs/bd {A}; cmp smoke/rs/big smoke/rs/bd/big {A}", ""),
+    ("rsync_big", f"seq 1 200000 > smoke/rs/big; rsync smoke/rs/big smoke/rs/bd {R}; cmp smoke/rs/big smoke/rs/bd {A}; echo more >> smoke/rs/big; rsync smoke/rs/big smoke/rs/bd {A}; cmp smoke/rs/big smoke/rs/bd {A}", ""),
     ("rsync_symlink", f"ln -s f smoke/rs/a/l; rsync -a smoke/rs/a smoke/rs/sl {R}; rm smoke/rs/a/l; readlink smoke/rs/sl/a/l {A}", "f\n"),
     ("rsync_meta", f"chmod 640 smoke/rs/a/f; touch -t 202001020304 smoke/rs/a/f; rsync -a smoke/rs/a smoke/rs/me {R}; stat -c %a smoke/rs/me/a/f {A}; date -r smoke/rs/me/a/f +%Y {A}", "640\n2020\n"),
     ("rsync_delete", f"mkdir smoke/rs/del; echo z > smoke/rs/del/old; rsync -a --delete smoke/rs/a/ smoke/rs/del {R}; ls smoke/rs/del {A}", "b\nf\n"),
@@ -886,7 +900,7 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("rsync_keeps_job_mask", f"( umask 027; rsync -a smoke/rs/a smoke/rs/kj; umask; : > smoke/rs/kjf ) {R}; ls -l smoke/rs/kjf | cut -c1-10 {A}", "0027\n-rw-r-----\n"),
     # These fail with a status, and the app carries on.
     ("rsync_no_source", f"rsync -a smoke/nope smoke/rs/no > /dev/null 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
-    ("rsync_bad_dest", f"rsync -a smoke/rs/a smoke/d.txt/x > /dev/null 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
+    ("rsync_bad_dest", f"rsync -a smoke/rs/a smoke/d.txt/x > /dev/null 2>&1; echo \"rc=$?\" {R}", "rc=3\n"),
     ("rsync_no_server", f"rsync -a --rsync-path=nope smoke/rs/a smoke/rs/ns > /dev/null 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
     ("rsync_no_shell", f"rsync -a -e nope smoke/rs/a host:x > /dev/null 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
     ("rsync_usage", f"rsync > /dev/null 2>&1; echo \"rc=$?\" {R}", "rc=1\n"),
