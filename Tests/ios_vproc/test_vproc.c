@@ -8,6 +8,10 @@
 #include <glob.h>
 #include <unistd.h>
 #include <pthread.h>
+#if defined(__APPLE__)
+#include <locale.h>
+#include <xlocale.h>
+#endif
 #include <sched.h>
 #include <poll.h>
 #include <sys/ioctl.h>
@@ -4866,6 +4870,94 @@ static void assert_path_virtualized_glob_matches_dynamic_proc_entries(void) {
     (void)system(cleanup_cmd);
 }
 
+#if defined(__APPLE__)
+static void *assert_setlocale_thread_main(void *arg) {
+    (void)arg;
+    for (int i = 0; i < 20; ++i) {
+        const char *set = vprocSetlocaleShim(LC_CTYPE, "en_US.UTF-8");
+        assert(set && strcmp(set, "en_US.UTF-8") == 0);
+        assert(strcmp(vprocSetlocaleShim(LC_CTYPE, NULL), "en_US.UTF-8") == 0);
+    }
+    return NULL;
+}
+
+static atomic_bool g_env_capture_stop = false;
+
+static void *assert_env_capture_writer(void *arg) {
+    (void)arg;
+    while (!atomic_load(&g_env_capture_stop)) {
+        assert(vprocSetenvShim("PSCAL_ENV_CAPTURE_TEST", "value", 1) == 0);
+        assert(vprocUnsetenvShim("PSCAL_ENV_CAPTURE_TEST") == 0);
+    }
+    return NULL;
+}
+
+/* A capture counted libc's environment and then read it, and an unsetenv between the two gave it a
+ * NULL, which ended the app. */
+static void assert_env_capture_survives_changes(void) {
+    char name[32];
+    for (int i = 0; i < 200; ++i) {
+        snprintf(name, sizeof(name), "PSCAL_ENV_CAPTURE_%d", i);
+        assert(vprocSetenvShim(name, "1", 1) == 0);
+    }
+    pthread_t writers[4];
+    atomic_store(&g_env_capture_stop, false);
+    for (int i = 0; i < 4; ++i) {
+        assert(vprocHostPthreadCreate(&writers[i], NULL, assert_env_capture_writer, NULL) == 0);
+    }
+    for (int i = 0; i < 3000; ++i) {
+        VProcEnv *env = vprocEnvCapture();
+        assert(env);
+        vprocEnvRelease(env);
+    }
+    atomic_store(&g_env_capture_stop, true);
+    for (int i = 0; i < 4; ++i) {
+        pthread_join(writers[i], NULL);
+    }
+    for (int i = 0; i < 200; ++i) {
+        snprintf(name, sizeof(name), "PSCAL_ENV_CAPTURE_%d", i);
+        assert(vprocUnsetenvShim(name) == 0);
+    }
+}
+
+static void assert_setlocale_is_the_threads_own(void) {
+    void *start = vprocLocaleSave();
+    assert(strcmp(vprocSetlocaleShim(LC_CTYPE, NULL), "C") == 0);
+
+    pthread_t threads[8];
+    for (int i = 0; i < 8; ++i) {
+        assert(vprocHostPthreadCreate(&threads[i], NULL, assert_setlocale_thread_main, NULL) == 0);
+    }
+    for (int i = 0; i < 8; ++i) {
+        pthread_join(threads[i], NULL);
+    }
+    /* None of that reached this thread or the whole app's locale. */
+    assert(strcmp(vprocSetlocaleShim(LC_CTYPE, NULL), "C") == 0);
+    assert(strcmp(querylocale(LC_CTYPE_MASK, LC_GLOBAL_LOCALE), "C") == 0);
+
+    /* "" is what the environment says. */
+    assert(vprocUnsetenvShim("LC_ALL") == 0);
+    assert(vprocUnsetenvShim("LC_CTYPE") == 0);
+    assert(vprocSetenvShim("LANG", "en_US.UTF-8", 1) == 0);
+    assert(strcmp(vprocSetlocaleShim(LC_CTYPE, ""), "en_US.UTF-8") == 0);
+    assert(vprocUnsetenvShim("LANG") == 0);
+
+    /* What was saved comes back, past another made and freed inside. */
+    void *saved = vprocLocaleSave();
+    assert(strcmp(vprocSetlocaleShim(LC_CTYPE, "C"), "C") == 0);
+    assert(strcmp(vprocSetlocaleShim(LC_CTYPE, "en_US.ISO8859-1"), "en_US.ISO8859-1") == 0);
+    vprocLocaleRestore(saved);
+    assert(strcmp(vprocSetlocaleShim(LC_CTYPE, NULL), "en_US.UTF-8") == 0);
+
+    /* A name that isn't there changes nothing. */
+    assert(vprocSetlocaleShim(LC_CTYPE, "nosuch.UTF-8") == NULL);
+    assert(strcmp(vprocSetlocaleShim(LC_CTYPE, NULL), "en_US.UTF-8") == 0);
+
+    vprocLocaleRestore(start);
+    assert(strcmp(vprocSetlocaleShim(LC_CTYPE, NULL), "C") == 0);
+}
+#endif
+
 static void assert_empty_path_names_nothing(void) {
     char templ[] = "/tmp/vproc-empty-XXXXXX";
     char *root = mkdtemp(templ);
@@ -9567,6 +9659,12 @@ int main(void) {
     assert_kernel_mounts_from_fstab_at_startup();
     fprintf(stderr, "TEST empty_path_names_nothing\n");
     assert_empty_path_names_nothing();
+#if defined(__APPLE__)
+    fprintf(stderr, "TEST setlocale_is_the_threads_own\n");
+    assert_setlocale_is_the_threads_own();
+    fprintf(stderr, "TEST env_capture_survives_changes\n");
+    assert_env_capture_survives_changes();
+#endif
 #if defined(PSCAL_TARGET_IOS)
     /* Ensure path virtualization macros remain visible even when vproc shim is included. */
     int (*fn)(const char *) = chdir;

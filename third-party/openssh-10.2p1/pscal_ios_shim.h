@@ -6,9 +6,11 @@
 #include <errno.h>
 #include <poll.h>
 #include <libgen.h>
+#include <locale.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -98,6 +100,17 @@ int pscal_ios_execlp(const char *file, const char *arg, ...);
 # undef dirname
 # define basename(path) vprocBasenameShim((path))
 # define dirname(path) vprocDirnameShim((path))
+
+/* libc's is the whole app's, and it crashes if two clients load a locale at once. */
+# undef setlocale
+# define setlocale(category, name) vprocSetlocaleShim((category), (name))
+
+/* libc's environment is the whole app's, and a capture of it for a command crashed on an unsetenv
+ * here. What a client changes stays its own, as it would in its own process. */
+# undef setenv
+# undef unsetenv
+# define setenv(name, value, overwrite) vprocSetenvShim((name), (value), (overwrite))
+# define unsetenv(name) vprocUnsetenvShim((name))
 
 # define read(...) pscal_ios_read(__VA_ARGS__)
 # define open(...) pscal_ios_open(__VA_ARGS__)

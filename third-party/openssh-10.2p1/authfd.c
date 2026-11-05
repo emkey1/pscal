@@ -54,6 +54,13 @@
 #include "sshbuf.h"
 #include "sshkey.h"
 #include "authfd.h"
+
+#ifdef PSCAL_TARGET_IOS
+/* IdentityAgent sets it in this client's environment. */
+# define AUTHFD_GETENV(name) vprocGetenvShim((name))
+#else
+# define AUTHFD_GETENV(name) getenv((name))
+#endif
 #include "cipher.h"
 #include "log.h"
 #include "atomicio.h"
@@ -126,7 +133,7 @@ ssh_get_authentication_socket(int *fdp)
 	if (fdp != NULL)
 		*fdp = -1;
 
-	authsocket = getenv(SSH_AUTHSOCKET_ENV_NAME);
+	authsocket = AUTHFD_GETENV(SSH_AUTHSOCKET_ENV_NAME);
 	if (authsocket == NULL || *authsocket == '\0')
 		return SSH_ERR_AGENT_NOT_PRESENT;
 
@@ -206,7 +213,7 @@ ssh_request_reply_decode(int sock, struct sshbuf *request)
 void
 ssh_close_authentication_socket(int sock)
 {
-	if (getenv(SSH_AUTHSOCKET_ENV_NAME))
+	if (AUTHFD_GETENV(SSH_AUTHSOCKET_ENV_NAME))
 		close(sock);
 }
 

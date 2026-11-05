@@ -1235,11 +1235,11 @@ int pscal_ios_ioctl(int fd, unsigned long request, ...) {
         char buffer[16];
         if (wsz->ws_col > 0) {
             snprintf(buffer, sizeof(buffer), "%u", (unsigned)wsz->ws_col);
-            setenv("COLUMNS", buffer, 1);
+            vprocSetenvShim("COLUMNS", buffer, 1);
         }
         if (wsz->ws_row > 0) {
             snprintf(buffer, sizeof(buffer), "%u", (unsigned)wsz->ws_row);
-            setenv("LINES", buffer, 1);
+            vprocSetenvShim("LINES", buffer, 1);
         }
         return 0;
     }

@@ -73,5 +73,23 @@ for name in _getopt _getopt_long _optarg _opterr _optind _optopt _optreset; do
     fi
 done
 
+# setlocale is the whole app's, and libc crashes if two threads load a locale at once.
+if nm -u "$BUILD_DIR/bin/exsh" 2>/dev/null | grep -x _setlocale > /dev/null; then
+    echo "FAIL ios_host_statics: exsh calls setlocale, which is the whole app's; the macros in vproc_shim.h and pscal_ios_shim.h keep it from libc"
+    status=1
+fi
+
+# libc's environment is the whole app's, and a capture of it for a command crashed when a client's
+# unsetenv shifted it. Through pscal_ios_shim.h a client changes its own.
+openssh_objects="$BUILD_DIR/CMakeFiles/pscal_core_static.dir/third-party/openssh-10.2p1"
+if [ -d "$openssh_objects" ]; then
+    while read -r object; do
+        if nm -u "$object" 2>/dev/null | grep -xE '_(setenv|unsetenv|putenv)' > /dev/null; then
+            echo "FAIL ios_host_statics: $(basename "$object") changes libc's environment, which is the whole app's"
+            status=1
+        fi
+    done < <(find "$openssh_objects" -name '*.c.o' | sort)
+fi
+
 [ "$status" -eq 0 ] && echo "PASS ios_host_statics"
 exit "$status"
