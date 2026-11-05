@@ -1815,9 +1815,10 @@ static void assert_children_reparent_to_shell(void) {
     int status = 0;
     assert(vprocWaitPidShim(parent_pid, &status, 0) == parent_pid);
 
+    /* The shell takes it in without having started it, so there is nothing to wait for. */
     vprocMarkExit(child, 0);
-    memset(&status, 0, sizeof(status));
-    assert(vprocWaitPidShim(child_pid, &status, 0) == child_pid);
+    errno = 0;
+    assert(vprocWaitPidShim(child_pid, &status, 0) == -1 && errno == ECHILD);
 
     vprocDestroy(parent);
     vprocDestroy(child);
@@ -8111,6 +8112,124 @@ static void assert_reparenting_uses_session_leader_sid(void) {
     vprocSetShellSelfPid(prev_shell);
 }
 
+/* The parent of a task in the table, or -1 with no row for it. */
+static int task_row_parent(int pid) {
+    size_t cap = vprocSnapshot(NULL, 0);
+    VProcSnapshot *snaps = calloc(cap ? cap : 1, sizeof(VProcSnapshot));
+    assert(snaps);
+    size_t count = vprocSnapshot(snaps, cap);
+    int parent = snapshot_find_parent(snaps, count, pid);
+    free(snaps);
+    return parent;
+}
+
+/* Nothing waits for an orphan: what took it in only waits for its own jobs. Its row goes when it
+ * ends, and it says nothing to whoever took it in, as init reaps one on Linux. */
+static void assert_orphan_rows_go_when_they_end(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int prev_kernel = vprocGetKernelPid();
+    VProc *kernel = vprocCreate(NULL);
+    VProc *leader = vprocCreate(NULL);
+    assert(kernel && leader);
+    int kernel_pid = vprocPid(kernel);
+    int leader_pid = vprocPid(leader);
+    vprocSetKernelPid(kernel_pid);
+    vprocSetShellSelfPid(leader_pid);
+    vprocSetParent(kernel_pid, 0);
+    vprocSetParent(leader_pid, kernel_pid);
+    assert(vprocSetSid(leader_pid, leader_pid) == 0);
+
+    VProc *parent = vprocCreate(NULL);
+    VProc *running = vprocCreate(NULL);
+    VProc *ended = vprocCreate(NULL);
+    VProc *middle = vprocCreate(NULL);
+    VProc *below = vprocCreate(NULL);
+    VProc *threadless = vprocCreate(NULL);
+    VProc *taken_back = vprocCreate(NULL);
+    assert(parent && running && ended && middle && below && threadless && taken_back);
+    int parent_pid = vprocPid(parent);
+    int running_pid = vprocPid(running);
+    int ended_pid = vprocPid(ended);
+    int middle_pid = vprocPid(middle);
+    int below_pid = vprocPid(below);
+    int threadless_pid = vprocPid(threadless);
+    int taken_back_pid = vprocPid(taken_back);
+    int tasks[] = { parent_pid, running_pid, ended_pid, middle_pid, below_pid, threadless_pid, taken_back_pid };
+    for (size_t i = 0; i < sizeof(tasks) / sizeof(tasks[0]); ++i) {
+        assert(vprocSetSid(tasks[i], leader_pid) == 0);
+        vprocSetParent(tasks[i], tasks[i] == parent_pid ? leader_pid : parent_pid);
+    }
+    vprocSetParent(below_pid, middle_pid);
+
+    /* It ended before its parent: only the parent could have waited, and that is gone too. */
+    vprocMarkExit(ended, 0);
+    assert(task_row_parent(ended_pid) == parent_pid);
+    /* Its own child goes on, and is an orphan in its turn. */
+    vprocMarkExit(middle, 0);
+    assert(task_row_parent(middle_pid) == parent_pid);
+
+    vprocMarkExit(parent, 0);
+    assert(task_row_parent(ended_pid) == -1);
+    assert(task_row_parent(middle_pid) == -1);
+    vprocActivate(leader);
+    int status = 0;
+    assert(vprocWaitPidShim(parent_pid, &status, 0) == parent_pid);
+    vprocDeactivate();
+
+    /* Still running, it is there to see and to signal. */
+    assert(task_row_parent(running_pid) == leader_pid);
+    assert(task_row_parent(below_pid) == leader_pid);
+    assert(vprocKillShim(running_pid, 0) == 0);
+
+    vprocMarkExit(running, 0);
+    assert(task_row_parent(running_pid) == -1);
+    errno = 0;
+    assert(vprocKillShim(running_pid, 0) == -1 && errno == ESRCH);
+    vprocMarkExit(below, 0);
+    assert(task_row_parent(below_pid) == -1);
+    assert(!vprocSigchldPending(leader_pid));
+
+    /* With no thread, a kill is the end of it, and nothing else would say so. */
+    assert(task_row_parent(threadless_pid) == leader_pid);
+    assert(vprocKillShim(threadless_pid, SIGTERM) == 0);
+    assert(task_row_parent(threadless_pid) == -1);
+
+    /* Given a parent again, it has one to wait for it. */
+    vprocSetParent(taken_back_pid, leader_pid);
+    vprocMarkExit(taken_back, 3);
+    assert(task_row_parent(taken_back_pid) == leader_pid);
+    vprocActivate(leader);
+    assert(vprocWaitPidShim(taken_back_pid, &status, 0) == taken_back_pid);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 3);
+    vprocDeactivate();
+
+    /* A parent reaped in place of ending leaves its children the same way. */
+    VProc *reaped = vprocCreate(NULL);
+    VProc *under_reaped = vprocCreate(NULL);
+    assert(reaped && under_reaped);
+    int reaped_pid = vprocPid(reaped);
+    int under_reaped_pid = vprocPid(under_reaped);
+    assert(vprocSetSid(reaped_pid, leader_pid) == 0);
+    assert(vprocSetSid(under_reaped_pid, leader_pid) == 0);
+    vprocSetParent(reaped_pid, leader_pid);
+    vprocSetParent(under_reaped_pid, reaped_pid);
+    vprocDiscard(reaped_pid);
+    assert(task_row_parent(under_reaped_pid) == leader_pid);
+    vprocMarkExit(under_reaped, 0);
+    assert(task_row_parent(under_reaped_pid) == -1);
+
+    VProc *all[] = { reaped, under_reaped, parent, running, ended, middle, below, threadless, taken_back };
+    for (size_t i = 0; i < sizeof(all) / sizeof(all[0]); ++i) {
+        vprocDestroy(all[i]);
+    }
+    vprocDiscard(leader_pid);
+    vprocDestroy(leader);
+    vprocDiscard(kernel_pid);
+    vprocDestroy(kernel);
+    vprocSetKernelPid(prev_kernel);
+    vprocSetShellSelfPid(prev_shell);
+}
+
 static bool snapshot_contains_sid(const VProcSnapshot *snaps, size_t count, int sid) {
     if (sid <= 0) return false;
     for (size_t i = 0; i < count; ++i) {
@@ -9812,6 +9931,8 @@ int main(void) {
     assert_pid_hint_not_self_parented();
     fprintf(stderr, "TEST reparenting_uses_sid\n");
     assert_reparenting_uses_session_leader_sid();
+    fprintf(stderr, "TEST orphan_rows_go_when_they_end\n");
+    assert_orphan_rows_go_when_they_end();
     fprintf(stderr, "TEST terminate_session_discards_entries\n");
     assert_terminate_session_discards_entries();
     fprintf(stderr, "TEST pthread_inherits_session_ids\n");

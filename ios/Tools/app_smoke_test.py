@@ -751,6 +751,14 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("kill_vm_loop", f"( pascal smoke/spin.pas & p=$!; sleep 1; kill $p; wait $p; echo $? ) | grep -v '^\\[' {R}; echo after | cat {A}", "143\nafter\n"),
     # [s]: grep's own row holds its argument, and an empty result shows any row that is left.
     ("killed_leaves_no_rows", f'( sleep 37 ) & p=$!; sleep 0.2; kill $p; wait $p; sleep 37 & p=$!; kill $p; wait $p; lps | grep "[s]leep 37" {R}', ""),
+    # An orphan has no one to wait for it, so its row goes when it ends. These stayed `exited`.
+    ("timeout_leaves_no_rows", f'timeout 0.5 pascal smoke/spin.pas | cat; timeout 0.5 sh -c "pascal smoke/spin.pas"; sleep 0.2; lps | grep "[p]ascal smoke/spin" {R}', ""),
+    ("orphan_leaves_no_rows", f'( sleep 0.21 & ); sh -c "sleep 0.21 &"; sleep 0.6; lps | grep "[s]leep 0.21" {R}', ""),
+    ("orphan_running_has_a_row", f'( sleep 0.71 & ); sleep 0.1; lps | grep -c "[s]leep 0.71" {R}; sleep 1; lps | grep -c "[s]leep 0.71" {A}', "1\n0\n"),
+    # A kill cancelled only what waits for a frontend, which ran on with a row saying `exited`.
+    ("kill_ends_a_subshells_frontend", f'( pascal smoke/slow.pas ) & p=$!; sleep 0.2; kill $p; wait $p; echo "rc $?" {R}; sh -c "pascal smoke/slow.pas" & p=$!; sleep 0.2; kill $p; wait $p; echo "rc $?" {A}; sleep 1.2; lps | grep "[p]ascal smoke/slow" {A}', "rc 143\nrc 143\n"),
+    # Shell code leaves what it starts to the shell, so `wait` gets the status.
+    ("wait_after_command_eval", f'command eval "(sleep 0.2; exit 7) &"; wait $!; echo "$?" {R}; builtin eval "(sleep 0.2; exit 8) &"; sleep 0.5; wait $!; echo "$?" {A}', "7\n8\n"),
     # A trap is set on the shell's own task, not the command's, and runs on the shell's thread.
     ("trap_beside_job", f"trap 'echo got {A}' USR2; ( while :; do :; done ) & j=$!; sleep 0.2; kill -USR2 $$; sleep 0.2; echo end {A}; kill $j; wait $j 2>/dev/null; trap - USR2; unset j", "got\nend\n"),
     ("trap_from_job", f"trap 'echo got {A}' USR2; me=$$; ( sleep 0.1; kill -USR2 $me ) & i=0; while [ $i -lt 40 ]; do ( : ); sleep 0.01; i=$((i+1)); done; wait; echo end {A}; trap - USR2; unset i me", "got\nend\n"),

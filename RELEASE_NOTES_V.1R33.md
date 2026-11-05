@@ -49,6 +49,7 @@ Base: `V.1R32`
 - `eval` or `.` nested 16 or more deep no longer loses the shell's directory. From then on a relative path stopped meaning the directory `pwd` printed, so `cat`, `rm` and `>` found or made files somewhere else, and `cd` did not bring it back.
 - `who am i` at a prompt prints the user, `pts/N` and the login time. Each terminal, a shell tab or an SSH tab, has a login in `/var/run/utmp` from before its startup file runs until its shell ends or its tab closes, and `/var/log/wtmp` gets the login and the logout. So `who`, `users` and `uptime` count open tabs, and `who -u` gives each tab's shell.
 - A launch of the app is its boot. `who -b` and `who -r` answer, and `/var/run/utmp` starts empty, so a run iOS ended leaves no logins behind. `/var/log/wtmp` moves to `/var/log/wtmp.1` at a launch once it reaches 1 MB.
+- `lps` no longer keeps an `exited` row for a task whose parent ended first. It stayed until the app restarted: `timeout 1 pascal x.pas` left one, and so did `( sleep 1 & )` and `sh -c 'sleep 1 &'`. A task like that shows as `running` while it runs, and its row goes when it ends, as init reaps one on Linux. Its end no longer runs the CHLD trap of the shell that took it in.
 
 
 
@@ -68,6 +69,7 @@ Base: `V.1R32`
 - Libraries that open files themselves, such as sqlite's, and the Go tools don't see these names.
 - After an upgrade, a `/dev/stdout` file left by an earlier build stays until removed. The name still reaches the descriptor, but `ls` and `[ -L ]` see the file.
 - `who -u` gives `?` as a terminal's idle time, because a terminal in the app keeps no access time.
+- Killing a shell takes the command it is running with it: `sh -c 'pascal x.pas; echo y' &` killed ends `pascal` too, where on Linux it runs on as an orphan. `sh -c 'pascal x.pas'` and `( pascal x.pas )` end as they do on Linux, where the shell becomes the command.
 
 ## Known Issues
 Descriptor names, on iOS:

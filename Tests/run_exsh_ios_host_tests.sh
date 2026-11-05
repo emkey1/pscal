@@ -184,6 +184,7 @@ bash "${ROOT}/Tests/ios_vproc/test_empty_path.sh" "${EXE}"
 bash "${ROOT}/Tests/ios_vproc/test_kill_blocked.sh" "${EXE}"
 bash "${ROOT}/Tests/ios_vproc/test_kill_vm_reader.sh" "${EXE}"
 bash "${ROOT}/Tests/ios_vproc/test_kill_last_stage.sh" "${EXE}"
+bash "${ROOT}/Tests/ios_vproc/test_killed_rows.sh" "${EXE}"
 bash "${ROOT}/Tests/ios_vproc/test_dev_stdio.sh" "${EXE}"
 
 # How the line editor wraps, which only shows on a terminal.
