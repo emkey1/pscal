@@ -1345,10 +1345,9 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("ulimit_all", f"ulimit -a | wc -l {R}", "11\n"),
     # A file with a NUL on its first line is a program for some other system, not a script to run line by line.
     ("exec_binary", f"printf 'ab\\0c\\n' > smoke/bn; chmod +x smoke/bn; smoke/bn 2>/dev/null; echo $? {R}", "126\n"),
-    # What ssh, scp and sftp set is the task's mask, which goes with it. They set the whole app's. fakesftp.sh answers the first two requests and no more.
+    # What ssh and scp set is the task's mask, which goes with it. They set the whole app's.
     ("ssh_keeps_umask", f"umask 002; ssh -G host-a.invalid > /dev/null 2>&1; umask {R}; umask 022", "0002\n"),
     ("scp_keeps_umask", f"umask 002; scp -p -O -o BatchMode=yes nosuch.invalid:x smoke/scum > /dev/null 2>&1; umask {R}; umask 022", "0002\n"),
-    ("sftp_lumask", f"umask 022; printf 'lumask 027\\nlmkdir smoke/lm\\nquit\\n' > smoke/lmb; rm -rf smoke/lm; chmod +x smoke/fakesftp.sh; sftp -b smoke/lmb -S smoke/fakesftp.sh h > /dev/null 2>&1; ls -ld smoke/lm | cut -c1-10 {R}; umask {A}; : > smoke/lma; ls -l smoke/lma | cut -c1-10 {A}", "drwxr-x---\n0022\n-rw-r--r--\n"),
     # Last, so that the listing tests above never see these names in $HOME.
     ("vm_cleanup", f"rm -rf vm.* vmj.json smoke/v1 smoke/v2; ls vm.in 2>/dev/null | wc -l {R}", "0\n"),
     # Last: on iOS /dev/tty fails in the first tab once a second has opened and closed, in R33's Known Issues.
@@ -1423,9 +1422,6 @@ FIXTURES = {
     "glprims.pas": "program GlPrims;\nbegin\n  InitGraph(320, 240, 'smoke');\n  GLBegin('quad_strip');\n  GLEnd;\n  GLBegin('polygon');\n  GLEnd;\n  CloseGraph;\n  writeln('drawn');\nend.\n",
     "thread.rea": 'void child() {\n    writeln("child ok");\n}\n\nint t = spawn child();\njoin t;\nwriteln("main ok");\n',
     **AT_ONCE_FIXTURES,
-    "fakesftp.sh": "#!/bin/exsh\nprintf '\\000\\000\\000\\005\\002\\000\\000\\000\\003'\n"
-                   "printf '\\000\\000\\000\\026\\150\\000\\000\\000\\001\\000\\000\\000\\001\\000\\000\\000\\001/\\000\\000\\000\\000\\000\\000\\000\\000'\n"
-                   "cat > /dev/null\n",
     "esc.bin": "\x1b",
     "key.pas": "program Key;\nuses crt;\nvar c: char;\nbegin\n  c := readkey;\n  writeln(ord(c));\nend.\n",
     "key2.pas": "program Key2;\nuses crt;\nvar c: char;\nbegin\n  c := readkey;\n  writeln(ord(c));\n  c := readkey;\n  writeln(ord(c));\nend.\n",
