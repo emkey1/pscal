@@ -430,6 +430,7 @@ enum WorkspaceTestHooks {
         var result: [String: Any] = [
             "ok": true,
             "mode": root.workspace == nil ? "tabs" : "workspace",
+            "landscape": root.view.window?.windowScene?.interfaceOrientation.isLandscape ?? false,
             "selectedId": String(manager.selectedId),
             "tabs": manager.tabs.map(tabDescriptor),
             "keyInputFocused": root.view.window.flatMap { keyInputFirstResponder(in: $0) }.map { _ in true } ?? false,
