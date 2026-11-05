@@ -199,6 +199,9 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("background_var", f"B=1; {{ B=2; sleep 1; echo \"group $B\" {A}; }} & echo \"shell $B\" {R}; wait", "shell 1\ngroup 2\n"),
     # A simple job keeps what it changes, as a compound one does. The directory goes back within the
     # row, so a failure here does not move the rows after it.
+    # A DEBUG trap ran between a pipeline's stages, which ended the app.
+    ("debug_trap_pipeline", f"jn=0; trap 'jn=$((jn+1))' DEBUG; echo a | tr a b | cat {R}; trap - DEBUG; echo \"$jn\" {A}; unset jn", "b\n4\n"),
+    ("debug_trap_group_stage", f"jn=0; trap 'jn=$((jn+1))' DEBUG; {{ true; }} | cat; trap - DEBUG; echo \"$jn\" {R}; unset jn", "2\n"),
     ("job_own_var", f"J=1; jv() {{ J=2; }}; jv & wait; echo \"[$J]\" {R}", "[1]\n"),
     ("job_own_read", f"J=1; read J <<< x & wait; echo \"[$J]\" {R}", "[1]\n"),
     ("job_own_cd", f"jd=$PWD; cd smoke & wait; jp=$PWD; cd \"$jd\"; [ \"$jp\" = \"$jd\" ] && echo stayed {R}", "stayed\n"),

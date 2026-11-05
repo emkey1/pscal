@@ -3,6 +3,7 @@
 Base: `V.1R32`
 
 ## Fixed in exsh
+- A DEBUG trap no longer runs for a compound stage or a backgrounded compound command, as in bash: `{ a; } | b` and `( a ) &` counted one too many.
 - A signal sent to the shell while `$(...)` runs now waits for it, and the shell's trap runs after the command, as in bash. `x=$(cmd)` assigns, then the trap runs. The trap used to run inside the substitution: its `echo` landed in the variable and its `exit` ended only the substitution, so `trap 'exit 1' TERM; while :; do x=$(echo 1); done` could not be stopped by TERM, and a script went on to the end with status 0.
 - `trap - TERM` or `trap '' TERM` inside `$(...)` stays there. It used to change the signal for the whole shell, which could then die of a TERM it had a trap for.
 - Ctrl-C during `$(...)` with an INT trap set ends the substitution, and the trap runs afterwards.
@@ -16,6 +17,7 @@ Base: `V.1R32`
 - A token no command can start with is reported in bash's words, with the line it is on: ``syntax error near unexpected token `done'``. `while do`, `{ ; }` and a stray `done` used to say `shell parse error at 1:9: Expected command`. Other parse errors keep exsh's own wording.
 
 ## Fixed in the iOS app
+- A pipeline with a DEBUG trap set no longer ends the app. The trap ran between stages and pulled the pipeline's state out from under a stage already running. It now runs before any stage starts, once for each simple command, as often as in bash.
 - `kill -TERM -1` means what it means on Linux: every task but the caller and the app's kernel task, and `No such process` when none is left. It used to mark the kernel task as dying and cancel its thread, and `kill -0 -1` said a task was there when none could be reached.
 - A signal to the app's kernel task succeeds and does nothing, as for init on Linux. `kill -TERM 1` could stop the thread that carries Ctrl-C.
 - A signal to a group stays in the app, from any thread. From a thread with no task of its own, `0`, `-1` and `-N` went to iOS's `kill`, which reads them as real process groups, and `-1` as every process the app may signal. Only a positive pid can reach iOS's `kill` now.
