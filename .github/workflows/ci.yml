@@ -219,6 +219,36 @@ jobs:
           export PASCAL_LIB_DIR="$GITHUB_WORKSPACE/lib/pascal"
           python3 Tests/examples/compile_all_examples.py --languages rea --fail-on-empty
 
+  # PSCAL_VM_CODE_PROTECT makes a chunk's bytecode read-only after load, so a write
+  # to it crashes. Only an explicit -DCMAKE_BUILD_TYPE=Debug turns it on, so the build
+  # job above never has it. The test scripts all run build/bin, so this is a job of
+  # its own with its own build/, not a second directory there. It runs beside that
+  # job, so the workflow takes no longer.
+  code-protect:
+    needs: submodule-ref-guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake libcurl4-openssl-dev
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+      - name: Fail unless PSCAL_VM_CODE_PROTECT is on
+        run: |
+          grep -qx 'PSCAL_VM_CODE_PROTECT:BOOL=ON' build/CMakeCache.txt
+          grep -q -e '-DPSCAL_VM_CODE_PROTECT' build/CMakeFiles/pscal_core_static.dir/flags.make
+      - name: Build
+        id: protected-build
+        run: cmake --build build --parallel "$(nproc)" --target aether pscalvm clike exsh pascal rea pscaljson2bc pscald pscalasm
+      - name: CTest
+        run: cd build && ctest --output-on-failure
+      # A CTest failure must not hide what the exsh tests would have said.
+      - name: Run exsh tests
+        if: ${{ !cancelled() && steps.protected-build.outcome == 'success' }}
+        run: Tests/run_shell_tests.sh
+
   # Nothing else in this workflow compiles the iOS app -- every other job runs on
   # ubuntu, so Swift changes and iOS-only C paths reached main unbuilt. This job
   # exists to catch that. macOS runners bill at 10x, so it is gated on the paths
