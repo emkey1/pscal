@@ -6,6 +6,15 @@ if(APPLE)
 endif()
 enable_testing()
 
+# Default to an optimised build that keeps its debug info. With nothing set,
+# third-party/libgit2 forces Debug into the cache, and everything but pascal then
+# compiles at -O0. The default is a cache value, so -DCMAKE_BUILD_TYPE=Debug (or any
+# other) still wins, and a build directory configured before keeps the type it has.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type (default RelWithDebInfo)" FORCE)
+endif()
+message(STATUS "PSCAL build type: ${CMAKE_BUILD_TYPE}")
+
 option(PSCAL_FORCE_IOS "Force iOS mode (PSCAL_TARGET_IOS + vproc shims) on non-iOS hosts." OFF)
 option(VPROC_ENABLE_STUBS_FOR_TESTS "Build vproc with test stubs (host-only helpers)." OFF)
 

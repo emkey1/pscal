@@ -166,8 +166,15 @@ cmake -S . -B build
 cmake --build build -j
 ```
 
+A plain configure gives `RelWithDebInfo` (`-O2 -g`). A build directory keeps the
+type it was first configured with, so to move an old one pass the type you want
+or delete the directory.
+
 Common configure options:
 
+- `-DCMAKE_BUILD_TYPE=Debug`: no optimisation, for stepping in a debugger and for
+  sanitizers; it also turns on `PSCAL_VM_CODE_PROTECT`. `Release` is `-O3` with no
+  debug info.
 - `-DSDL=ON`: enable SDL-dependent graphics/audio builtins and examples.
 - `-DPSCAL_USE_SDL3=ON`: prefer SDL3 where supported.
 - `-DRELEASE_BUILD=ON`: append `_REL` to version naming while keeping

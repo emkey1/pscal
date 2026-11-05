@@ -47,6 +47,10 @@ lives in the auto-memory files (this file wins if they disagree).
 
 - Configure/build: `cmake --build build --target <aether|rea|pascal|clike|exsh>`
   (build dir already configured). Binaries land in `build/bin/`.
+- A plain configure is `RelWithDebInfo` (`-O2 -g`). A build directory keeps the
+  type it was first configured with, and one from before this default is `-O0`, so
+  check `CMAKE_BUILD_TYPE` in its `CMakeCache.txt` before trusting a timing. Use
+  `-DCMAKE_BUILD_TYPE=Debug` for a debugger or a sanitizer.
 - Run frontends with `--no-cache` when testing compiler changes:
   `./build/bin/aether --no-cache prog.ae`.
 - Full sweep: `python3 Tests/run_all_suites.py` (core, library, scope). Consult
