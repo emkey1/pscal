@@ -202,6 +202,13 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     # A DEBUG trap ran between a pipeline's stages, which ended the app.
     ("debug_trap_pipeline", f"jn=0; trap 'jn=$((jn+1))' DEBUG; echo a | tr a b | cat {R}; trap - DEBUG; echo \"$jn\" {A}; unset jn", "b\n4\n"),
     ("debug_trap_group_stage", f"jn=0; trap 'jn=$((jn+1))' DEBUG; {{ true; }} | cat; trap - DEBUG; echo \"$jn\" {R}; unset jn", "2\n"),
+    ("debug_trap_word_timing", f"unset jv; trap 'jv=$((jv+1))' DEBUG; echo \"first $jv\" | cat {R}; trap - DEBUG; unset jv", "first 1\n"),
+    ("debug_trap_again_and_again", f"trap 'jv=1' DEBUG; for ji in 1 2 3 4 5 6 7 8 9 10 11 12; do echo a | cat | cat > /dev/null; done; trap - DEBUG; unset jv; echo alive {R}", "alive\n"),
+    # A stage's word that failed ended the shell under a running stage, which ended the app.
+    ("stage_word_fails_function", f"( set -u; jf() {{ sleep 0.01 | cat $jwn; echo \"in $?\" {R}; }}; jf ) 2>/dev/null", "in 1\n"),
+    ("stage_word_fails_eval", f"( set -u; eval 'sleep 0.01 | cat $jwn; echo \"in $?\" {R}' ) 2>/dev/null", "in 1\n"),
+    ("stage_word_fails_nested_sh", f"sh -c 'set -u; sleep 0.01 | cat $jwn' 2>/dev/null; echo alive {R}", "alive\n"),
+    ("stage_word_fails_again_and_again", f"for ji in 1 2 3 4 5 6 7 8 9 10 11 12; do ( set -u; jf() {{ sleep 0.005 | cat $jwn; }}; jf ) 2>/dev/null; done; echo alive {R}", "alive\n"),
     ("job_own_var", f"J=1; jv() {{ J=2; }}; jv & wait; echo \"[$J]\" {R}", "[1]\n"),
     ("job_own_read", f"J=1; read J <<< x & wait; echo \"[$J]\" {R}", "[1]\n"),
     ("job_own_cd", f"jd=$PWD; cd smoke & wait; jp=$PWD; cd \"$jd\"; [ \"$jp\" = \"$jd\" ] && echo stayed {R}", "stayed\n"),

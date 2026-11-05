@@ -3,6 +3,8 @@
 Base: `V.1R32`
 
 ## Fixed in exsh
+- A failed expansion in a background command or a later stage of a pipeline is that command's failure, as in bash: it reports and ends with status 1, the rest of the pipeline runs and the script goes on. `set -u; echo $nope &` and `true | cat ${v:?msg}` used to end the script.
+- `$1` under `set -u` is reported as `$1: unbound variable`, as bash has it.
 - A DEBUG trap no longer runs for a compound stage or a backgrounded compound command, as in bash: `{ a; } | b` and `( a ) &` counted one too many.
 - A signal sent to the shell while `$(...)` runs now waits for it, and the shell's trap runs after the command, as in bash. `x=$(cmd)` assigns, then the trap runs. The trap used to run inside the substitution: its `echo` landed in the variable and its `exit` ended only the substitution, so `trap 'exit 1' TERM; while :; do x=$(echo 1); done` could not be stopped by TERM, and a script went on to the end with status 0.
 - `trap - TERM` or `trap '' TERM` inside `$(...)` stays there. It used to change the signal for the whole shell, which could then die of a TERM it had a trap for.
@@ -24,7 +26,8 @@ Base: `V.1R32`
 - A word with a `[` and no `]` after it in the same part of a path stays as it is, as in bash. That makes these work as they should: `shopt -s nullglob; [ a = a ]` failed with `a: No such file or directory`, `failglob` stopped on `[`, `dotglob` with a file `.[` turned `[` into `.[`, and `nocaseglob` with a file `A[` turned `a[` into `A[`.
 
 ## Fixed in the iOS app
-- A pipeline with a DEBUG trap set no longer ends the app. The trap ran between stages and pulled the pipeline's state out from under a stage already running. It now runs before any stage starts, once for each simple command, as often as in bash.
+- A pipeline with a DEBUG trap set no longer ends the app. A trap on the shell's thread cleared the pipeline's state while a stage's thread was reading it. A trap now runs in a copy of the shell's state while a pipeline runs, whichever trap it is.
+- A failed expansion in a later stage of a pipeline no longer ends the app. `set -u; f() { sleep 1 | cat $nope; }; f` ended the shell with the first stage still starting, most of the time in a function, `eval` or a sourced file.
 - `kill -TERM -1` means what it means on Linux: every task but the caller and the app's kernel task, and `No such process` when none is left. It used to mark the kernel task as dying and cancel its thread, and `kill -0 -1` said a task was there when none could be reached.
 - A signal to the app's kernel task succeeds and does nothing, as for init on Linux. `kill -TERM 1` could stop the thread that carries Ctrl-C.
 - A signal to a group stays in the app, from any thread. From a thread with no task of its own, `0`, `-1` and `-N` went to iOS's `kill`, which reads them as real process groups, and `-1` as every process the app may signal. Only a positive pid can reach iOS's `kill` now.
