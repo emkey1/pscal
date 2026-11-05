@@ -30,6 +30,14 @@ Base: `V.1R32`
 - `exec ""` says `exec: : not found` and ends the script with status 127. It said `exec: expected command`, status 1, and went on.
 - On a host, `exec 3< <(cmd)` and `exec 3> >(cmd)` keep descriptor 3, and the same goes for any other number the pipe could land on. It was closed when `exec` was done, so the next read said `Bad file descriptor`.
 - `${!:-x}` and the other operators right after the `!` mean `$!` with that operator. They said `bad substitution`. `${!!}` and `${!$}` are now bad substitutions, as in bash, and `$!` with no job yet fails under `set -u`.
+- `wait -n ID` waits for the jobs it names. It ignored them and took whichever ended first. `wait` also takes `-p name`, which gets the pid, and `-f`, and a word it does not know as an option is an error, status 2.
+- A redirection's word expands when its turn comes where that can show: `exec {a}> f {b}>&$a` uses the descriptor just made, and `echo y > a 2> "$(cat a)"` reads `a` after it is emptied. Nothing after a redirection that fails runs.
+- `command prog {fd}> f` leaves the shell as it was, and the descriptor closes with the program, as on a plain `prog {fd}> f`.
+- `shopt -s varredir_close` closes a `{name}` descriptor when its command ends, unless that is `exec`.
+- `${!@}` and `${!*}` use the positional parameter as the name, with any operator after them applied to that. They gave nothing. Several parameters, or one that is no name, is `invalid variable name`, as in bash 5.
+- `[[ 3>2 ]]` and `[[ {a}>b ]]` are syntax errors, as in bash 5. A number or `{name}` touching the operator is a redirection there. They ran as a comparison.
+- `wait -n` in `<(...)` and `>(...)` on a host gives 0 for each job the shell started, then 127, as it does in `$(...)`. It gave 127 at once. `jobs` there lists them.
+- On iOS, a function, `eval` or `.` given `{fd}> f` as a job or a pipeline stage sees `fd`.
 - `/bin/x` and `/usr/bin/x` on a host run the file, not the builtin of that name, as in bash. `/bin/echo -e` gets the file's answer, `/bin/cd` no longer moves the shell, and `/bin/exit` no longer ends it.
 - `which` on a host is the system's program, as in bash, so `t=$(which true); "$t"` works. The app keeps its builtin.
 - A program started by `command` keeps its own name: `command sh -c 'echo "$0"'` prints `sh`. `command -p` still passes the path.
@@ -69,9 +77,6 @@ Base: `V.1R32`
 - A substitution that sets its own trap takes that signal even when it was sent to `$$`, for the same reason.
 - Every child gets a process group of its own, with job control off too, where bash leaves a script's children in the shell's group. So `kill 0` in a script reaches only the shell, and `kill -- -$!` finds the job where bash says no such process.
 
-- The words of a command's redirections expand before any of them acts, so `exec {a}> f {b}>&$a` finds `a` empty.
-- `command prog {fd}> f` sets `fd` in the shell, and the descriptor stays open there.
-- `shopt varredir_close` is not there.
 - Unquoted parentheses among a command's words are plain words: `find . ( -name a )` runs, and `f(x) { :; }` reports `}` where bash reports `x`. The owner chose to keep this.
 - A `[[ ]]` bash can't parse, such as `[[ a == ]]`, runs.
 - Text that runs out says what 3.2 and 5.2 say. 5.3 adds which construct was open, and where.
@@ -85,7 +90,6 @@ Base: `V.1R32`
 
 ## Differs from Linux on iOS
 - `exec 3> >(cmd)` and `exec > >(cmd)` run the command at once on an empty file, so what the script writes afterwards is lost.
-- A function given `{fd}> f` as a job or a pipeline stage does not see `fd`.
 - `halt`, `reboot` and `poweroff` end only their own tab, since the app can't stop its device and each tab is a session of its own. They don't stop that tab's other commands: a job goes on as it does after `exit`, and the tab closes when a command in the same pipeline has finished.
 - A signal that ends a shell waiting at its prompt, from a job or another tab, takes effect when the next line is typed, where Linux ends it at once. So `halt &` closes the tab at the next Return, and that line doesn't run.
 - A fatal signal a subshell sends itself returns: `( kill -TERM $BASHPID; echo x )` prints `x`, though its status is 143.
