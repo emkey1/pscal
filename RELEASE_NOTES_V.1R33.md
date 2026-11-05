@@ -17,6 +17,14 @@ Base: `V.1R32`
 - `kill SIG 0` signals the shell's own group, on every platform. It said `kill: (0) Invalid argument`.
 - A loop, `if`, `{ }` or `( )` with no command in it is a syntax error, as in bash: `while false; do done`, `if true; then fi`, `{ }`. They used to run as if nothing was wrong, so a script holding one now stops there with status 2. Case arms may still be empty.
 - A token no command can start with is reported in bash's words, with the line it is on: ``syntax error near unexpected token `done'``. `while do`, `{ ; }` and a stray `done` used to say `shell parse error at 1:9: Expected command`. Other parse errors keep exsh's own wording.
+- Every other syntax error is reported in bash's words too, with the line it is on: a keyword where another has to come (`if true; done`), a redirection with no target (`echo >`), a bad case pattern (`case x in )`), a doubled `;` or `&`, and a word after a compound command (`( a ) b`, `if a; then b; fi c`). Several of these used to run.
+- The lines before a syntax error run, as under bash, which reads a line at a time. exsh used to run none of the script. An `exit` or `return` before the error means nothing reports it.
+- Text that ends inside a quote, `$(`, `${` or an array is an error, `unexpected EOF while looking for matching`, with status 2, or 1 for an array. It used to run as if the quote were closed. Text that ends inside `if`, a loop or a group says `syntax error: unexpected end of file`.
+- A here-document that ends with the text runs with what it has, with bash 5's warning. It used to be an error.
+- A reserved word works wherever only a word can stand: `for in in in`, `for x in do`, `case if in if)`, `echo x > in`.
+- `f() (( 1 ))` and `f() [[ a ]]` define functions, and `if (a) then (b) fi` and `while (a) do (b) done` run. `f() echo x` is an error, where it used to define nothing and say `invalid stage count`.
+- `for 1 in a` reports `` `1': not a valid identifier `` when the loop runs, with status 1, and the script goes on, as under bash. It used to be a syntax error.
+- At a prompt, `for` or `echo >` followed by Enter reports the error at once instead of asking for another line, and `!` alone or `! cmd` is no history reference. `!` alone is `! :`, as in bash 5.
 - `exec {fd}> f` and every other `{name}` redirection work, on `exec`, a builtin, a function and a compound command: the shell picks a descriptor from 10 up, `name` (an array element too) gets its number, and it stays open until `exec {name}>&-`. It used to look for a program called `{fd}`.
 - `wait -n` in `$(...)` gives 0 for each job the shell started, then 127, as in bash. It gave 127 at once.
 - `exec ""` says `exec: : not found` and ends the script with status 127. It said `exec: expected command`, status 1, and went on.
@@ -60,12 +68,13 @@ Base: `V.1R32`
 - `kill -INT $$` from inside `$(...)` with an INT trap set ends the substitution too, where bash's would carry on, because exsh's runs in the shell's process.
 - A substitution that sets its own trap takes that signal even when it was sent to `$$`, for the same reason.
 - Every child gets a process group of its own, with job control off too, where bash leaves a script's children in the shell's group. So `kill 0` in a script reaches only the shell, and `kill -- -$!` finds the job where bash says no such process.
-- A syntax error stops a script before any of it runs, where bash runs the lines before it.
-- `a; ;` still parses, where bash reports the second `;`.
 
 - The words of a command's redirections expand before any of them acts, so `exec {a}> f {b}>&$a` finds `a` empty.
 - `command prog {fd}> f` sets `fd` in the shell, and the descriptor stays open there.
 - `shopt varredir_close` is not there.
+- Unquoted parentheses among a command's words are plain words: `find . ( -name a )` runs, and `f(x) { :; }` reports `}` where bash reports `x`. The owner chose to keep this.
+- A `[[ ]]` bash can't parse, such as `[[ a == ]]`, runs.
+- Text that runs out says what 3.2 and 5.2 say. 5.3 adds which construct was open, and where.
 
 ## Differs from GNU rsync
 - Missing directories above a destination that means a directory get made: `rsync -a dir x/y/new`. GNU's fails with status 11 unless given `--mkpath`. The rsync in macOS makes them too.
