@@ -12,6 +12,8 @@ Base: `V.1R32`
 - On iOS, a signal with no trap sent to the shell during `$(...)` ends the shell, not only the substitution.
 - `tools/shellbench_cacheable/shellbench` gets a number from exsh on every case of `sample/assign.sh` and `sample/eval.sh`.
 - `kill SIG 0` signals the shell's own group, on every platform. It said `kill: (0) Invalid argument`.
+- A loop, `if`, `{ }` or `( )` with no command in it is a syntax error, as in bash: `while false; do done`, `if true; then fi`, `{ }`. They used to run as if nothing was wrong, so a script holding one now stops there with status 2. Case arms may still be empty.
+- A token no command can start with is reported in bash's words, with the line it is on: ``syntax error near unexpected token `done'``. `while do`, `{ ; }` and a stray `done` used to say `shell parse error at 1:9: Expected command`. Other parse errors keep exsh's own wording.
 
 ## Fixed in the iOS app
 - `kill -TERM -1` means what it means on Linux: every task but the caller and the app's kernel task, and `No such process` when none is left. It used to mark the kernel task as dying and cancel its thread, and `kill -0 -1` said a task was there when none could be reached.
@@ -26,6 +28,8 @@ Base: `V.1R32`
 - `kill -INT $$` from inside `$(...)` with an INT trap set ends the substitution too, where bash's would carry on, because exsh's runs in the shell's process.
 - A substitution that sets its own trap takes that signal even when it was sent to `$$`, for the same reason.
 - Every child gets a process group of its own, with job control off too, where bash leaves a script's children in the shell's group. So `kill 0` in a script reaches only the shell, and `kill -- -$!` finds the job where bash says no such process.
+- A syntax error stops a script before any of it runs, where bash runs the lines before it.
+- `a; ;` still parses, where bash reports the second `;`.
 
 ## Differs from Linux on iOS
 - A fatal signal a subshell sends itself returns: `( kill -TERM $BASHPID; echo x )` prints `x`, though its status is 143.
