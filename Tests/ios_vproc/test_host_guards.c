@@ -1,10 +1,11 @@
 /* Two guards between the iOS flavour and the machine it runs on when that is a host: the real root
- * is never provisioned as a PATH_TRUNCATE prefix, and a signal to a group or to everything never
- * reaches the host's kill. Both hooks stay armed while a guarded form is tried, so without a guard
- * this test records the attempt and fails, and still touches nothing and signals nothing. Each hook
- * is proved live on a harmless value first, and the test stops there if it is not. Inside the VM
- * those same signals mean what they mean on Linux, which is checked against the task table. */
+ * is never provisioned as a PATH_TRUNCATE prefix, and no signal reaches the host's kill. A hook and
+ * the kill defined below stay in place while a guarded form is tried, so without a guard this test
+ * records the attempt and fails, and still touches nothing and signals nothing. Each is proved live
+ * first, and the test stops there if it is not. Inside the VM those same signals mean what they
+ * mean on Linux, which is checked against the task table. */
 #define _GNU_SOURCE 1
+#include <dlfcn.h>
 #include <errno.h>
 #include <ftw.h>
 #include <limits.h>
@@ -49,6 +50,16 @@ static int record_kill(pid_t pid, int sig) {
     }
     g_seen_pid_count++;
     return 0;
+}
+
+/* These stand in for libc's in every object linked here, so a call put back in vproc lands on them
+ * and signals nothing. run_ios_vproc_tests.sh stops if vproc gets to the host's kill any other way. */
+int kill(pid_t pid, int sig) {
+    return record_kill(pid, sig);
+}
+
+int killpg(pid_t pgrp, int sig) {
+    return record_kill(-pgrp, sig);
 }
 
 static void fail(const char *what, const char *detail) {
@@ -317,6 +328,39 @@ static void check_host_kill(void) {
     }
 }
 
+/* A real process with a pid the table does not know. It ends by itself when its pipe closes, so how
+ * it ended says whether anything else reached it, however that got to the host. */
+static void check_real_process_stays_out_of_reach(void) {
+    int gate[2];
+    if (pipe(gate) != 0) {
+        fail("pipe", strerror(errno));
+        return;
+    }
+    fflush(stdout);
+    fflush(stderr);
+    pid_t child = fork();
+    if (child < 0) {
+        fail("fork", strerror(errno));
+        return;
+    }
+    if (child == 0) {
+        char byte;
+        close(gate[1]);
+        alarm(30);
+        _exit(read(gate[0], &byte, 1) == 0 ? 7 : 1);
+    }
+    close(gate[0]);
+    const int sigs[] = { SIGHUP, SIGUSR1, SIGUSR2, SIGABRT, SIGKILL, SIGWINCH, SIGTERM, 0 };
+    for (size_t s = 0; s < sizeof(sigs) / sizeof(sigs[0]); ++s) {
+        expect_refused("a real process's pid", child, sigs[s]);
+    }
+    close(gate[1]);
+    int status = 0;
+    if (waitpid(child, &status, 0) != child || !WIFEXITED(status) || WEXITSTATUS(status) != 7) {
+        fail("the child was reached", "it did not end by itself");
+    }
+}
+
 /* Inside the VM a program gets Linux's answers: the host is out of it, the table is not. */
 
 static volatile int g_usr1_hits = 0;
@@ -427,6 +471,25 @@ static void vm_broadcast_with_no_context(void) {
     expect_signal("kill(-1) with no context and the kernel", kernel, 0);
 }
 
+/* Signals no one asked the VM to handle specially, from a thread that is no task: they reach the task. */
+static void vm_pid_with_no_context(void) {
+    int kernel = vprocEnsureKernelPid();
+    int a = other_task(0);
+    int b = other_task(0);
+    int c = other_task(0);
+    expect_kill("kill(a, 0) with no context", a, 0, 0, 0);
+    expect_kill("kill(a, SIGHUP) with no context", a, SIGHUP, 0, 0);
+    expect_signal("a task with no context", a, SIGHUP);
+    expect_signal("another task with no context", c, 0);
+    expect_kill("kill(b, SIGKILL) with no context", b, SIGKILL, 0, 0);
+    expect_signal("a task with no context", b, SIGKILL);
+    expect_kill("kill(kernel, SIGKILL) with no context", kernel, SIGKILL, 0, 0);
+    expect_signal("the kernel with no context", kernel, 0);
+    /* Above any pid the host can give out. */
+    expect_kill("kill(an unknown pid, SIGKILL) with no context", 200000, SIGKILL, -1, ESRCH);
+    expect_kill("kill(an unknown pid, 0) with no context", 200000, 0, -1, ESRCH);
+}
+
 static void vm_kill_zero_is_the_callers_group(void) {
     (void)vprocEnsureKernelPid();
     VProc *me = become_task();
@@ -511,6 +574,7 @@ static void check_vm_signals(void) {
     in_child("broadcast", vm_broadcast_reaches_all_but_caller_and_kernel);
     in_child("broadcast to no one", vm_broadcast_with_no_one_to_reach);
     in_child("broadcast with no context", vm_broadcast_with_no_context);
+    in_child("a pid with no context", vm_pid_with_no_context);
     in_child("kill(0)", vm_kill_zero_is_the_callers_group);
     in_child("kill(0) and the group form", vm_kill_zero_acts_as_the_group_form);
     in_child("group 1", vm_group_one_is_not_everything);
@@ -529,7 +593,6 @@ static int remove_entry(const char *path, const struct stat *st, int type, struc
 int main(void) {
     /* Armed before anything can ask, and proved live before a guarded form is tried. */
     pathTruncateSetProvisionHookForTests(record_prefix);
-    vprocSetHostKillHookForTests(record_kill);
 
     const char *tmp = getenv("TMPDIR");
     char tmpl[PATH_MAX];
@@ -548,17 +611,17 @@ int main(void) {
     reset_env(g_home);
     pathTruncateApplyEnvironment(g_home);
     bool prefix_hook_live = (g_seen_prefix_count > 0 && strcmp(g_seen_prefix[0], g_home) == 0);
-    g_seen_pid_count = 0;
-    bool kill_hook_live = (vprocKillShim(99999, SIGHUP) == 0 && g_seen_pid_count == 1 && g_seen_pid[0] == 99999);
-    if (!prefix_hook_live || !kill_hook_live) {
+    bool kill_stands_in = (dlsym(RTLD_DEFAULT, "kill") == (void *)kill);
+    if (!prefix_hook_live || !kill_stands_in) {
         fprintf(stderr, "FAIL the hooks are not live (prefix %d, kill %d); stopping here\n",
-                (int)prefix_hook_live, (int)kill_hook_live);
+                (int)prefix_hook_live, (int)kill_stands_in);
         g_fails++;
     } else {
         check_root_prefixes();
         check_ordinary_prefix_provisions();
         check_vm_signals();
         check_host_kill();
+        check_real_process_stays_out_of_reach();
     }
 
     pathTruncateSetProvisionHookForTests(record_prefix);

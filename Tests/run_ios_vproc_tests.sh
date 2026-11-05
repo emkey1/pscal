@@ -120,6 +120,13 @@ cc -DPSCAL_TARGET_IOS=1 \
    "${NEXTVI_OBJ}" \
    -o "${OUT_NEXTVI_PASTE}"
 
+# test_host_guards signals groups and everything, trusting its own kill to catch a call that gets
+# through. A name looked up or a raw syscall would pass that by and send a real one, so stop here.
+if grep -rnE '"kill(pg)?"|SYS_kill' "${CORE}/src/runtime/vproc"; then
+  echo "FAIL vproc reaches the host's kill in a way test_host_guards cannot catch" >&2
+  exit 1
+fi
+
 echo "Running ios_vproc tests..."
 "${OUT}"
 "${OUT_PGID}"
