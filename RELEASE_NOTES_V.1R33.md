@@ -22,6 +22,9 @@ Base: `V.1R32`
 - `exec ""` says `exec: : not found` and ends the script with status 127. It said `exec: expected command`, status 1, and went on.
 - On a host, `exec 3< <(cmd)` and `exec 3> >(cmd)` keep descriptor 3, and the same goes for any other number the pipe could land on. It was closed when `exec` was done, so the next read said `Bad file descriptor`.
 - `${!:-x}` and the other operators right after the `!` mean `$!` with that operator. They said `bad substitution`. `${!!}` and `${!$}` are now bad substitutions, as in bash, and `$!` with no job yet fails under `set -u`.
+- `/bin/x` and `/usr/bin/x` on a host run the file, not the builtin of that name, as in bash. `/bin/echo -e` gets the file's answer, `/bin/cd` no longer moves the shell, and `/bin/exit` no longer ends it.
+- `which` on a host is the system's program, as in bash, so `t=$(which true); "$t"` works. The app keeps its builtin.
+- A program started by `command` keeps its own name: `command sh -c 'echo "$0"'` prints `sh`. `command -p` still passes the path.
 
 ## Faster in exsh
 - Commands that stay in the shell take about 0.41 of the time they did, which is about 1.65x bash 5 where it was about 4x. The numbers are from `tools/shellbench_cacheable`, 3 rounds on one laptop, with a Release build of each version. Commands that start a process are unchanged, at about 0.9x bash 5.
@@ -76,3 +79,4 @@ Base: `V.1R32`
 - A signal to a task that has ended but not been waited for says `No such process`, where Linux says 0.
 - SIGINT or SIGTSTP to your own group on your own thread is queued for the next check, for programs that check, where Linux acts before `kill` returns.
 - The task table has no user id, so anyone can signal anyone. That is Linux for one user, and `EPERM` belongs here once the app has users.
+- `which true` prints `true: shell builtin`, so running its answer gives status 127. `/bin/cd` moves the shell, `/bin/export` and `/bin/set` act on it, and `/bin/exit` ends it, where Linux gives status 127. No file exists for those names.
