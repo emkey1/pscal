@@ -28,7 +28,18 @@ Base: `V.1R32`
 - A value of `!` is a value: `v='!'; [ "$v" = x ]` was true. So is a value that looks like an operator in a longer expression, such as `[ "$v" = x -a 1 = 1 ]` with `v=-n`, and `)` as a word.
 - `[` and `test` with the wrong number of words give bash's message and status 2, also as a `while` or `until` condition. `[ $empty = y ]` and `[ a b ]` used to be false with no message.
 - `[ -a f ]`, `[ -o noglob ]`, `[ -v x ]`, `[[ -a f ]]`, `[[ -o noglob ]]` and `builtin [` work. The first two were always false, and `builtin [` said `unknown VM builtin`.
-
+- Failed arithmetic names what bash names: the expression as it was read, without blanks in front, and the last token read with all that follows it. `$((1/0))` says `1/0: division by 0 (error token is "0")`, `2+1/0` the same `"0"`, `1/x` says `"x"`, `$(( 1 / 0 ))` says `1 / 0 : ... "0 "` and `1/0+1` says `"0+1"`, as bash 5 does. `$((1/$x))` shows `1/0`, and a variable holding `1/0` shows that, not the variable's name. The token used to be the text after the cursor, usually `""`.
+- `((1/0))` reports once and runs once. It used to fall through to a second evaluation, so `((x++, 1/0))` raised x by 2 and printed the message twice.
+- `$((1/0))`, `${a[1/0]}`, `${x:1/0}`, `a[1/0]=1` and `declare -i n=1/0` drop the rest of their line and the script reads on from the next, with status 1, as in bash. They used to end the script. So does eval and a sourced file, from their own next line. A subshell or `$(...)` still ends.
+- `for ((;;))` takes each clause as one expression. It split the condition at the first comparison it found, so `i<3 ? 1 : 0`, `i<3<2` and `! i > 1` gave wrong answers. A clause that fails is reported as `((: i=1/0: ...`, where it used to say nothing, and `set -e` does not take it for a command that failed.
+- `[[ 1/0 -eq 1 ]]` reports the failure, is false and has status 1. It said nothing and had status 2, and the rest of `[[ ]]` still runs, as `[[ 1/0 -eq 1 || 2 -eq 2 ]]` shows.
+- `declare -i n=1/0`, `typeset -i` and `local -i` report the real error under their own names. They said `syntax error: operand expected` for all of them, from a check that ran the system's bash to choose its words, which is gone. `declare -i n=5; n=1/0` and `n+=1/0` report and keep 5, where they silently set 0. `declare -i n` and `local -i n` start empty, not 0.
+- `let`, `[[ ]]` and `declare -i` do not expand their text again: `let '$x+1'` and `[[ '$x' -eq 1 ]]` are errors, as in bash. Double quotes are dropped in `$(( ))` and `(( ))`, not in `let` or a variable's value, where `x='"1"'; echo $((x))` is an error.
+- `set -u; ((nosuch))`, and `let`, `[[ ]]` and `for ((;;))` with an unset name, end the script, as `$((nosuch))` always did. The message is `nosuch: unbound variable`, and `r: readonly variable` has no expression or label either.
+- More of bash's arithmetic errors: `1 = 2` is `attempted assignment to non-variable`, `1 @ 2` is `invalid arithmetic operator`, `1?` and `1?2:` are `expression expected`, `2#` is `invalid integer constant`. `0x` is 0. `a?b:c=1` is an error, since the third part is no assignment, and `x**=2` is not one either.
+- `a=([1+1]=x)` sets index 2. Outside `declare -A` a subscript in a literal is arithmetic, where it became a key named `1+1`. `a=([1/0]=1)` reports and leaves the array empty.
+- `${x:1/0}` with x unset, and `${a[@]:1/0}` with no a, do not work out the offset, as in bash. `${x:1/0}` reports under the name as written, `x: 1/0: ...`.
+- A report of arithmetic in `for`, `case` and a plain `while [ ]` gives their own line, not the line of the command before. A long expression is reported whole, and an assignment to a name over 255 characters works.
 
 ## Fixed in the iOS app
 - `env test a == a`, and `xargs` or `find -exec` running `test`, know `==`, and take a value of `!`. They said `test: unsupported expression`.
@@ -43,7 +54,9 @@ Base: `V.1R32`
 - Unquoted parentheses among a command's words are plain words: `find . ( -name a )` runs, and `f(x) { :; }` reports `}` where bash reports `x`. The owner chose to keep this.
 - A `[[ ]]` bash can't parse, such as `[[ a == ]]`, runs.
 - Text that runs out says what 3.2 and 5.2 say. 5.3 adds which construct was open, and where.
-
+- Arithmetic syntax errors say `syntax error`, as bash does up to 5.2, where 5.3 says `arithmetic syntax error`. `[ a -eq 1 ]` says `integer expression expected`, where 5.3 says `integer expected`.
+- After failed arithmetic in a compound command over several lines, what follows it on its last line runs, where bash drops it: `{ echo $((1/0))` and then `}; echo x`.
+- `y=1 z=$((1/0))` assigns nothing, where bash has set y by then. `cat <<< $((1/0)); echo x` drops `echo x`, where bash runs it. An integer variable's assignment as a pipeline's stage, `n=1/0 | cat`, says nothing.
 
 ## Differs from Linux on iOS
 - Opening `/dev/stdin` or `/dev/fd/N` on a pipe in the direction the descriptor doesn't go says `Permission denied`, where Linux opens the pipe's other end. On a socket it gives a copy, where Linux says `No such device or address`.
