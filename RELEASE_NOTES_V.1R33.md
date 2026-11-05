@@ -68,7 +68,7 @@ Base: `V.1R32`
 - `sftp`'s `lumask`, and `ssh` and `scp -p`, set the task's file mask, not the whole app's.
 - In a shell run as a command, `caller`, `FUNCNAME` and `BASH_SOURCE` show that script. They showed its caller's as well, since it runs on the caller's thread.
 - `sh -c 'jobs | wc -l'` lists that shell's jobs, and in `$(...)` a stage lists the substitution's, not the top shell's.
-
+- A program's stdout, stderr and stdin close when it ends. Each `pascal x > f` left one descriptor open for as long as the app ran, the file stayed open too, and after about 230 of them `pascal x | cat` failed with `Too many open files`.
 
 
 ## Differs from bash

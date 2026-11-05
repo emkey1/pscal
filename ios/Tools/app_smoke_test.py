@@ -911,6 +911,10 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("frontend_bg_reader", f"{{ sleep 10 | tr a b; }} > /dev/null 2>&1 & s=$(date +%s); pascal smoke/hello.pas {R}; e=$(date +%s); [ $((e - s)) -lt 8 ] && echo quick {A}", "pascal ok 42\nquick\n"),
     # Each writer now flushes its own output, on every way out.
     ("frontend_halt_output", f"pascal smoke/halt2.pas | cat {R}", "before halt\n"),
+    ("frontend_halt_output_file", f"pascal smoke/halt2.pas > smoke/ho; cat smoke/ho {R}", "before halt\n"),
+    # A thread's streams close as it ends: each of these used to leave a descriptor open for the
+    # life of the app. Tests/ios_vproc/test_thread_end_streams.sh counts them.
+    ("frontend_streams_repeat", f"i=0; while [ $i -lt 100 ]; do pascal smoke/hello.pas > /dev/null; pascal smoke/halt2.pas > smoke/ho; i=$((i + 1)); done; pascal smoke/hello.pas | wc -l | tr -d ' ' {R}", "1\n"),
     ("rea_thread_output", f"rea smoke/thread.rea | tr -d ' ' | sort {R}", "childok\nmainok\n"),
     # Both ends of a local rsync run in this one process, with no fork or process exit
     # between them: a real _exit took every terminal session with it, and what one run

@@ -194,6 +194,7 @@ bash "${ROOT}/Tests/ios_vproc/test_kill_vm_reader.sh" "${EXE}"
 bash "${ROOT}/Tests/ios_vproc/test_kill_last_stage.sh" "${EXE}"
 bash "${ROOT}/Tests/ios_vproc/test_killed_rows.sh" "${EXE}"
 bash "${ROOT}/Tests/ios_vproc/test_dev_stdio.sh" "${EXE}"
+bash "${ROOT}/Tests/ios_vproc/test_thread_end_streams.sh" "${EXE}"
 
 # How the line editor wraps, which only shows on a terminal.
 RUN_VPROC_TESTS=1 python3 "${INTERACTIVE_HARNESS}" --executable "${EXE}" --only line_wrap

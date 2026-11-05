@@ -9467,6 +9467,28 @@ static void assert_sigint_non_shell_same_tid_does_not_request_runtime_interrupt(
 /* Replacing slot 2 closes the number vprocCreate saved for it. vprocDestroy closed that number
  * again, and by then it could be anything. It was the poll wake pipe's when Aether muted stderr
  * around its pre-pass, and wakeups then wrote NULs to whatever had the number next. */
+/* A thread's stream at its end: the buffer goes out only when asked, and either way the
+ * descriptor closes, so the reader sees the end. */
+static void assert_stream_end_with_thread(void) {
+    for (int write_out = 0; write_out <= 1; ++write_out) {
+        int p[2];
+        assert(vprocHostPipeUnowned(p) == 0);
+        FILE *stream = (fdopen)(p[1], "w");
+        assert(stream);
+        assert(setvbuf(stream, NULL, _IOFBF, 4096) == 0);
+        assert(fwrite("abc", 1, 3, stream) == 3);
+        vprocStreamEndWithThread(stream, write_out != 0);
+        char buf[8];
+        ssize_t got = vprocHostRead(p[0], buf, sizeof(buf));
+        if (write_out) {
+            assert(got == 3 && memcmp(buf, "abc", 3) == 0);
+            got = vprocHostRead(p[0], buf, sizeof(buf));
+        }
+        assert(got == 0);
+        vprocHostClose(p[0]);
+    }
+}
+
 static void assert_destroy_leaves_replaced_stdio_number_alone(void) {
     int hole = vprocHostOpen("/dev/null", O_RDONLY);
     assert(hole >= 0);
@@ -10183,6 +10205,8 @@ int main(void) {
     assert_destroy_leaves_replaced_stdio_number_alone();
     fprintf(stderr, "TEST named_descriptors_act_as_on_linux\n");
     assert_named_descriptors_act_as_on_linux();
+    fprintf(stderr, "TEST stream_end_with_thread\n");
+    assert_stream_end_with_thread();
     fprintf(stderr, "TEST cancelled_pipe_wait_leaves_pipe_usable\n");
     assert_cancelled_pipe_wait_leaves_pipe_usable();
     fprintf(stderr, "TEST two_pollers_on_a_pipe_keep_moving\n");
