@@ -601,7 +601,7 @@ set_next_interval(const struct timespec *now, struct timespec *next_interval,
 {
 	struct timespec tmp;
 	long long interval_ns, fuzz_ns;
-	static long long rate_fuzz;
+	static PSCAL_SSH_THREAD_LOCAL long long rate_fuzz;
 
 	interval_ns = interval_ms * (1000LL * 1000);
 	fuzz_ns = (interval_ns * SSH_KEYSTROKE_TIMING_FUZZ) / 100;

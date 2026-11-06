@@ -24,14 +24,69 @@ _g_sigArityCap
 _g_sigArityOnce
 _break_requested
 _globals_mutex
+_interrupted
+_alarm_fired
+_win_resized
+_client_x11_get_proto.data
+_client_x11_get_proto.proto
+_esc_txt
+_compat_banner.check
+_proposals_match.check
+_pscalKexBannerRetryBudgetMs.cached
+_dh_new_group1.gen
+_dh_new_group1.group1
+_dh_new_group14.gen
+_dh_new_group14.group14
+_dh_new_group16.gen
+_dh_new_group16.group16
+_dh_new_group18.gen
+_dh_new_group18.group18
+_moduli_filename
+_crypto_int16_optblocker
+_crypto_int32_optblocker
+_crypto_int64_optblocker
+_monotime_ts.gettime_failed
+_default_ssh_port.port
+_kex_default_pk_alg.pkalgs
+_keywords
+_log_facilities
+_log_levels
+_ssh_bzero
+_cclasses
+_signo
+_pick_salt.salt
+_helpers
+_nhelpers
+_ssh_init.called
+_umac_ctx
+_umac128_ctx
+_g_pscal_ios_tty_lock
+_g_pscal_ios_virtual_ttys
+_pscal_ios_translate_etc_path.kPrefixes
+_pscal_openssh_hostkey_dir.dirbuf
+_pscal_openssh_hostkey_path.pathbuf
 '
 
 list_writable() {
     nm -m "$1" 2>/dev/null | awk -v want="$2" '
         /\.o:$/ { obj = $1; sub(/:$/, "", obj); next }
-        /\(__DATA,__data\)|\(__DATA,__bss\)|\(__DATA,__common\)/ {
+        /\(__DATA,__data\)|\(__DATA,__bss\)|\(__DATA,__common\)|\(common\)/ {
             if ($NF !~ /^ltmp/ && (want == "" || index(want, " " obj " "))) print obj, $NF
         }'
+}
+
+# ssh, scp and sftp can run at once in the app as well, on threads of their own, so what one
+# run keeps is PSCAL_SSH_THREAD_LOCAL. These go by file: openrsync has a log.c and a misc.c too,
+# and the archive names both alike. ssh-keygen runs alone, and moduli is only part of it.
+list_writable_openssh() {
+    local dir="$BUILD_DIR/CMakeFiles/pscal_core_static.dir/third-party/openssh-10.6p2"
+    [ -d "$dir" ] || return 0
+    find "$dir" -name '*.c.o' ! -name 'ssh-keygen.c.o' ! -name 'moduli.c.o' | sort | while read -r object; do
+        nm -m "$object" 2>/dev/null | awk -v obj="$(basename "$object")" '
+            /\(__DATA,__data\)|\(__DATA,__bss\)|\(__DATA,__common\)|\(common\)/ {
+                if ($NF !~ /^ltmp/) print obj, $NF
+            }'
+    done
 }
 
 found=$(
@@ -39,7 +94,8 @@ found=$(
     list_writable "$BUILD_DIR/libpscal_clike_static.a" ""
     list_writable "$BUILD_DIR/libpscal_rea_static.a" ""
     list_writable "$BUILD_DIR/libpscal_aether_static.a" ""
-    list_writable "$BUILD_DIR/libpscal_core_static.a" " compiler.c.o globals.c.o frontend_kind.c.o diagmap.c.o scp.c.o sftp.c.o sftp-glob.c.o sftp-usergroup.c.o mac.c.o setproctitle.c.o "
+    list_writable "$BUILD_DIR/libpscal_core_static.a" " compiler.c.o globals.c.o frontend_kind.c.o diagmap.c.o "
+    list_writable_openssh
 )
 
 status=0

@@ -64,7 +64,15 @@ static struct dirent *
 fudge_readdir(struct SFTP_OPENDIR *od)
 {
 	/* Solaris needs sizeof(dirent) + path length (see below) */
-	static PSCAL_SSH_THREAD_LOCAL char buf[sizeof(struct dirent) + MAXPATHLEN];
+#ifdef PSCAL_TARGET_IOS
+	/* On the heap: every thread in the app would carry it otherwise. */
+	static PSCAL_SSH_THREAD_LOCAL char *buf;
+
+	if (buf == NULL)
+		buf = xmalloc(sizeof(struct dirent) + MAXPATHLEN);
+#else
+	static char buf[sizeof(struct dirent) + MAXPATHLEN];
+#endif
 	struct dirent *ret = (struct dirent *)buf;
 #ifdef __GNU_LIBRARY__
 	static int inum = 1;
@@ -73,7 +81,7 @@ fudge_readdir(struct SFTP_OPENDIR *od)
 	if (od->dir[od->offset] == NULL)
 		return(NULL);
 
-	memset(buf, 0, sizeof(buf));
+	memset(buf, 0, sizeof(struct dirent) + MAXPATHLEN);
 
 	/*
 	 * Solaris defines dirent->d_name as a one byte array and expects

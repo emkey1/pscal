@@ -324,7 +324,7 @@ getopt_internal(int nargc, char * const *nargv, const char *options,
 {
 	char *oli;				/* option letter list index */
 	int optchar, short_too;
-	static int posixly_correct = -1;
+	static PSCAL_SSH_THREAD_LOCAL int posixly_correct = -1;
 
 	if (options == NULL)
 		return (-1);

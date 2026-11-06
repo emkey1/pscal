@@ -1367,12 +1367,23 @@ makeargv(const char *arg, int *argcp, int sloppy, char *lastquote,
 {
 	int argc, quot;
 	size_t i, j;
-	static PSCAL_SSH_THREAD_LOCAL char argvs[MAXARGLEN];
-	static PSCAL_SSH_THREAD_LOCAL char *argv[MAXARGS + 1];
+#ifdef PSCAL_TARGET_IOS
+	/* On the heap: as per-thread arrays they would cost every thread in the app 9 KB. */
+	static PSCAL_SSH_THREAD_LOCAL char *argvs;
+	static PSCAL_SSH_THREAD_LOCAL char **argv;
+
+	if (argvs == NULL) {
+		argvs = xmalloc(MAXARGLEN);
+		argv = xcalloc(MAXARGS + 1, sizeof(*argv));
+	}
+#else
+	static char argvs[MAXARGLEN];
+	static char *argv[MAXARGS + 1];
+#endif
 	enum { MA_START, MA_SQUOTE, MA_DQUOTE, MA_UNQUOTED } state, q;
 
 	*argcp = argc = 0;
-	if (strlen(arg) > sizeof(argvs) - 1) {
+	if (strlen(arg) > MAXARGLEN - 1) {
  args_too_longs:
 		error("string too long");
 		return NULL;
@@ -1384,7 +1395,7 @@ makeargv(const char *arg, int *argcp, int sloppy, char *lastquote,
 	state = MA_START;
 	i = j = 0;
 	for (;;) {
-		if ((size_t)argc >= sizeof(argv) / sizeof(*argv)){
+		if ((size_t)argc >= MAXARGS + 1){
 			error("Too many arguments.");
 			return NULL;
 		}
@@ -1425,7 +1436,7 @@ makeargv(const char *arg, int *argcp, int sloppy, char *lastquote,
 					 * glob will undo one level of
 					 * escaping. NB. string can grow here.
 					 */
-					if (j >= sizeof(argvs) - 5)
+					if (j >= MAXARGLEN - 5)
 						goto args_too_longs;
 					argvs[j++] = '\\';
 					argvs[j++] = arg[i++];
@@ -1498,7 +1509,7 @@ makeargv(const char *arg, int *argcp, int sloppy, char *lastquote,
 				 * glob(3) wildcards. NB. string can grow
 				 * here.
 				 */
-				if (j >= sizeof(argvs) - 3)
+				if (j >= MAXARGLEN - 3)
 					goto args_too_longs;
 				argvs[j++] = '\\';
 				argvs[j++] = arg[i];
