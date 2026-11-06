@@ -241,7 +241,7 @@ PSCAL also uses other submodules and vendored source trees:
   `third-party/micro`, `third-party/dvtm`, `third-party/libgit2`,
   `third-party/openrsync`.
 - Vendored in-tree sources: notably `third-party/nextvi` and
-  `third-party/openssh-10.2p1`.
+  `third-party/openssh-10.6p2`.
 
 SmallCLUE note: `src/smallclue/third-party` is bootstrap-generated and
 intentionally not tracked as submodules; it is populated by the SmallCLUE

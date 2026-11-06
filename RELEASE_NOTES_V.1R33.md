@@ -106,6 +106,18 @@ Base: `V.1R32`
 - `aether --version` names the language the app ships and the build: `Aether Compiler Version: 2026-10-30-1+<commit> (1.0, latest tag: ...)`. It said `1.01-dev`, the standalone repository's label for the release after 1.0, which does not exist yet. The app reports the nearest Aether release whose language is still its own, and `aether_version()` returns the same text.
 - `~/Docs/Aether` holds the full Aether guide, `aether_for_llms_and_others.md`, ending in the inventory of every builtin. `~/Docs` had the PSCAL documents only.
 
+## Updated in the iOS app
+- `ssh`, `scp`, `sftp` and `ssh-keygen` are OpenSSH 10.6p2, the latest upstream release (2026-11-05), up from 10.2p1. `ssh -V` says so. Every change the app makes to OpenSSH is carried over. Security fixes they gain:
+  - sftp checks the paths a server returns in a recursive download, which could write outside the target directory (10.6), and `sftp host:/path .` can't be sent to another local path (10.4).
+  - scp between two remote hosts can't be made to write into the parent of the target (10.4), and `scp -O` clears setuid and setgid bits on what it downloads (10.3).
+  - ssh no longer uses freed memory when a server changes its host key during a rekey (10.4), or when a forwarding is added through a multiplexing master while another is pending (10.5).
+  - Compression no longer shares its dictionary across channels, which let one channel's data be recovered through another's (10.6). Compressed data can't grow past the largest packet (10.6).
+  - A user name given on the command line is checked before `%u` can reach `Match exec` or `ProxyCommand`. `$` and `\` in one are refused (10.3, 10.6).
+  - Key types are checked against the allowed lists before a key is parsed, key files with an absurd KDF round count are refused, and ssh-keygen gets certificate expiry right across a daylight saving change (10.6).
+  - One-byte out-of-bounds reads in sftp are fixed, and so is a download loop on a server that keeps returning nothing (10.3, 10.4).
+  - Not in the app: 10.6p2's own security fix (sshd on musl Linux without PAM), and the sshd and ssh-agent fixes.
+- Changes you may notice: a user name with `$` or `\` on the command line is refused (a `User` line in a config file still works), `Compression yes` compresses less, and `scp -R` warns that it is deprecated. A peer that can't rekey now fails when a rekey comes due, as does one that sends other messages during a rekey. The post-quantum key type `ssh-mldsa44-ed25519` is accepted by default (`ssh-keygen -t mldsa44-ed25519`), and keys made by 10.3's experimental form of it must be made again. ssh-keygen encrypts new keys with 32 KDF rounds instead of 24. No `ssh_config` keyword was added or removed.
+
 ## Fixed in the frontends on every platform
 - A bytecode cache entry covers the files its program imports. An import is also looked for in the working directory, so one program can compile to two from two directories, and run from the second it could reuse the first's entry. Rea and Aether could also miss an edit to a module that an imported module uses.
 - The Rea `landscape` demo runs on macOS. It crashed in `glCreateShader` at its first frame: a 3D window there draws with the SDL renderer and has no OpenGL context, and `LandscapeDrawCloudLayer` called OpenGL anyway. The demo now draws its sprite clouds there. `LandscapeDrawCloudLayer` and `LandscapeDrawSkyDome` without a current OpenGL context are a runtime error, and the new `LandscapeShadersAvailable()` says whether they can draw.

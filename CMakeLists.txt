@@ -420,7 +420,7 @@ endif()
 file(WRITE "${CMAKE_BINARY_DIR}/pscal_install_root.txt" "${PSCAL_INSTALL_ROOT}\n")
 
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/openssh")
-configure_file(third-party/openssh-10.2p1/config_pscal_ios.h
+configure_file(third-party/openssh-10.6p2/config_pscal_ios.h
     "${CMAKE_BINARY_DIR}/generated/openssh/config.h" COPYONLY)
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/openrsync")
 configure_file(third-party/openrsync/config_pscal.h
@@ -469,6 +469,32 @@ if(NOT PSCAL_PLATFORM_IOS)
         endif()
     endforeach()
 endif()
+
+# OpenSSH's configure writes shim headers so its sources can include headers a
+# platform lacks without #ifdefs (COMPATINCLUDES in its configure.ac). Make the
+# same set from the final config.h.
+set(PSCAL_OPENSSH_COMPAT_INCLUDE_DIR "${CMAKE_BINARY_DIR}/generated/openssh/compat-include")
+file(REMOVE_RECURSE "${PSCAL_OPENSSH_COMPAT_INCLUDE_DIR}")
+file(MAKE_DIRECTORY "${PSCAL_OPENSSH_COMPAT_INCLUDE_DIR}/sys")
+file(WRITE "${PSCAL_OPENSSH_COMPAT_INCLUDE_DIR}/sys/queue.h" "#include \"openbsd-compat/sys-queue.h\"\n")
+file(WRITE "${PSCAL_OPENSSH_COMPAT_INCLUDE_DIR}/sys/tree.h" "#include \"openbsd-compat/sys-tree.h\"\n")
+file(READ "${CMAKE_BINARY_DIR}/generated/openssh/config.h" _pscal_openssh_config_final)
+if(_pscal_openssh_config_final MATCHES "#define[ \t]+BROKEN_GLOB[ \t]+1")
+    file(WRITE "${PSCAL_OPENSSH_COMPAT_INCLUDE_DIR}/glob.h" "#include \"openbsd-compat/glob.h\"\n")
+endif()
+foreach(_pscal_openssh_hdr IN ITEMS endian.h ifaddrs.h libgen.h paths.h netgroup.h nlist.h
+        poll.h stdint.h sys/mman.h sys/stat.h sys/statvfs.h sys/time.h sys/un.h time.h util.h)
+    string(TOUPPER "HAVE_${_pscal_openssh_hdr}" _pscal_openssh_have)
+    string(REGEX REPLACE "[/.]" "_" _pscal_openssh_have "${_pscal_openssh_have}")
+    if(NOT _pscal_openssh_config_final MATCHES "#define[ \t]+${_pscal_openssh_have}[ \t]+1")
+        if(_pscal_openssh_hdr STREQUAL "poll.h")
+            file(WRITE "${PSCAL_OPENSSH_COMPAT_INCLUDE_DIR}/poll.h"
+                "#ifdef HAVE_SYS_POLL_H\n#include <sys/poll.h>\n#endif\n")
+        else()
+            file(WRITE "${PSCAL_OPENSSH_COMPAT_INCLUDE_DIR}/${_pscal_openssh_hdr}" "")
+        endif()
+    endif()
+endforeach()
 
 # Resolve the final runtime destination so install rules can write directly to
 # either an absolute override or the default path under the chosen prefix.
@@ -1403,7 +1429,10 @@ if(PSCAL_PLATFORM_IOS)
         -include ${CMAKE_SOURCE_DIR}/src/smallclue/src/app_hooks.h)
 endif()
 
-set(PSCAL_OPENSSH_ROOT third-party/openssh-10.2p1)
+set(PSCAL_OPENSSH_ROOT third-party/openssh-10.6p2)
+# smallclue's bridge header includes this tree's hooks by this name, so it names no version.
+set_property(SOURCE src/smallclue/src/openssh_app.c APPEND PROPERTY COMPILE_DEFINITIONS
+    "PSCAL_OPENSSH_HOOKS_HEADER=\"${CMAKE_SOURCE_DIR}/${PSCAL_OPENSSH_ROOT}/pscal_runtime_hooks.h\"")
 set(PSCAL_OPENSSH_COMMON_SOURCES
         ${PSCAL_OPENSSH_ROOT}/pscal_ios_shim.c
         ${PSCAL_OPENSSH_ROOT}/addr.c
@@ -1427,9 +1456,9 @@ set(PSCAL_OPENSSH_COMMON_SOURCES
         ${PSCAL_OPENSSH_ROOT}/dns.c
         ${PSCAL_OPENSSH_ROOT}/dh.c
         ${PSCAL_OPENSSH_ROOT}/ed25519.c
+        ${PSCAL_OPENSSH_ROOT}/ed25519-openssl.c
         ${PSCAL_OPENSSH_ROOT}/entropy.c
         ${PSCAL_OPENSSH_ROOT}/fatal.c
-        ${PSCAL_OPENSSH_ROOT}/hash.c
         ${PSCAL_OPENSSH_ROOT}/hmac.c
         ${PSCAL_OPENSSH_ROOT}/kex.c
         ${PSCAL_OPENSSH_ROOT}/kex-names.c
@@ -1440,9 +1469,11 @@ set(PSCAL_OPENSSH_COMMON_SOURCES
         ${PSCAL_OPENSSH_ROOT}/kexgex.c
         ${PSCAL_OPENSSH_ROOT}/kexgexc.c
         ${PSCAL_OPENSSH_ROOT}/kexgexs.c
+        ${PSCAL_OPENSSH_ROOT}/kexmlkem768ecdh.c
         ${PSCAL_OPENSSH_ROOT}/kexmlkem768x25519.c
         ${PSCAL_OPENSSH_ROOT}/kexsntrup761x25519.c
         ${PSCAL_OPENSSH_ROOT}/krl.c
+        ${PSCAL_OPENSSH_ROOT}/libcrux-mlkem-mldsa.c
         ${PSCAL_OPENSSH_ROOT}/log.c
         ${PSCAL_OPENSSH_ROOT}/mac.c
         ${PSCAL_OPENSSH_ROOT}/match.c
@@ -1467,6 +1498,7 @@ set(PSCAL_OPENSSH_COMMON_SOURCES
         ${PSCAL_OPENSSH_ROOT}/ssh_api.c
         ${PSCAL_OPENSSH_ROOT}/ssh-ed25519.c
         ${PSCAL_OPENSSH_ROOT}/ssh-ecdsa.c
+        ${PSCAL_OPENSSH_ROOT}/ssh-mldsa-eddsa.c
         ${PSCAL_OPENSSH_ROOT}/ssh-sk.c
         ${PSCAL_OPENSSH_ROOT}/ssh-rsa.c
         ${PSCAL_OPENSSH_ROOT}/sshbuf.c
@@ -1475,6 +1507,7 @@ set(PSCAL_OPENSSH_COMMON_SOURCES
         ${PSCAL_OPENSSH_ROOT}/sshbuf-io.c
         ${PSCAL_OPENSSH_ROOT}/sshbuf-misc.c
         ${PSCAL_OPENSSH_ROOT}/ssherr.c
+        ${PSCAL_OPENSSH_ROOT}/ssherr-libcrypto.c
         ${PSCAL_OPENSSH_ROOT}/sshkey.c
         ${PSCAL_OPENSSH_ROOT}/sshsig.c
         ${PSCAL_OPENSSH_ROOT}/ssh-pkcs11-client.c
@@ -1607,8 +1640,9 @@ if(PSCAL_PLATFORM_IOS OR APPLE)
 endif()
 set(_pscal_openssh_include_dirs
     "${CMAKE_BINARY_DIR}/generated/openssh"
-    "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1"
-    "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1/openbsd-compat")
+    "${PSCAL_OPENSSH_COMPAT_INCLUDE_DIR}"
+    "${CMAKE_SOURCE_DIR}/third-party/openssh-10.6p2"
+    "${CMAKE_SOURCE_DIR}/third-party/openssh-10.6p2/openbsd-compat")
 if(PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR)
     list(APPEND _pscal_openssh_include_dirs "${PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR}")
 endif()
@@ -1678,7 +1712,7 @@ set_property(SOURCE ${PSCAL_OPENRSYNC_SOURCES}
     APPEND PROPERTY INCLUDE_DIRECTORIES
     "${CMAKE_BINARY_DIR}/generated/openrsync"
     "${CMAKE_SOURCE_DIR}/third-party/openrsync"
-    "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1")
+    "${CMAKE_SOURCE_DIR}/third-party/openssh-10.6p2")
 set_property(SOURCE ${PSCAL_OPENRSYNC_SOURCES}
     APPEND PROPERTY COMPILE_OPTIONS
     "-include${CMAKE_BINARY_DIR}/generated/openrsync/config.h"
