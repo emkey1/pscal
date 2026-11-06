@@ -87,6 +87,7 @@ Base: `V.1R32`
 - A program started in a subshell has its own `$$`. It had the shell's, so `( sh -c 'kill -USR1 $$' )` ended the shell.
 - `$RANDOM` in a job or a stage no longer moves the shell's sequence.
 - `cat <(cmd) &` works. The file standing in for `<(cmd)` was gone before the job read it.
+- With stdin closed (`cmd <&-`, or after `exec <&-`), `awk`, `wc`, `base64`, `gzip -c` and `xargs` fail and say why, as with the Mac's or Linux's tools. `awk` gave 0, `wc -l` and `base64` failed without a word, `gzip -c` wrote its header to stdout before it failed, and `xargs` gave 0. `[ -t 0 ]` and `tty` no longer take the session's terminal for a closed stdin: `exec <&-; [ -t 0 ]` said it was a terminal, and `tty <&-` or `tty < /dev/null` printed its name.
 
 
 ## Differs from bash
