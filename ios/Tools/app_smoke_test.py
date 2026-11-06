@@ -503,6 +503,10 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     ("tail_f_reader_gone", f"tail -f smoke/d.txt | head -1 {R}", "b\n"),
     ("stat_stdin_pipe", f"echo x | stat -c %F - {R}", "fifo\n"),
     ("stty_named", f"stty -F /dev/tty size > /dev/null 2>&1; echo $? {R}", "0\n"),
+    # The shell's own < and > opened the host's /dev/tty, which no tab draws: a write showed nothing
+    # and a read failed. A command's open of it gives the tab's terminal; these two are the shell's.
+    ("dev_tty_read_redirect", f"tty < /dev/tty | sed 's/[0-9]*$//' {R}", "/dev/pts/\n"),
+    ("dev_tty_write_redirect", f"( exec 3> /dev/tty; tty <&3 ) | sed 's/[0-9]*$//' {R}", "/dev/pts/\n"),
     ("stty_not_tty", f"stty -F /dev/null {R}; echo $? {A}", "stty: /dev/null: Inappropriate ioctl for device\n1\n"),
     # pscal-core's own fcntl on 0-2 and on dup's slots reached the host's descriptors.
     # ReadKey set O_NONBLOCK on the host's fd 0, so a lone ESC on a pipe waited for the
@@ -1558,9 +1562,12 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     ("mask_git", f"rm -rf smoke/gm smoke/gn; ( umask 077; git init -q smoke/gm ) > /dev/null 2>&1; umask 077; git init -q smoke/gn > /dev/null 2>&1; umask 022; a=$(cd smoke/gm && find . | sort | xargs ls -ld | cut -c1-10); b=$(cd smoke/gn && find . | sort | xargs ls -ld | cut -c1-10); [ -n \"$a\" ] && [ \"$a\" = \"$b\" ] && echo same {R}; ls -ld smoke/gm/.git | cut -c1-10 {A}; rm -rf smoke/gm smoke/gn", "same\ndrwx------\n"),
     # Last, so that the listing tests above never see these names in $HOME.
     ("vm_cleanup", f"rm -rf vm.* vmj.json smoke/v1 smoke/v2; ls vm.in 2>/dev/null | wc -l {R}", "0\n"),
-    # Last: on iOS /dev/tty fails in the first tab once a second has opened and closed, in R33's Known Issues.
+    # Near last: a second tab opens and closes, and the rows after it check this tab's /dev/tty.
     # The hook in the new tab's .exshrc runs smoke/tab.sh when there is one. That tab's exit ends its login.
     ("tab_login", f"printf 'who am i > \"$HOME/smoke/tab.who\"\\nuntil [ -e \"$HOME/smoke/tab.go\" ]; do sleep 0.1; done\\nexit\\n' > smoke/tab.sh; tabadd; waitfile smoke/tab.who; users | wc -w {R}; awk '{{print ($2 ~ /^pts\\/[1-9]/)}}' smoke/tab.who {A}; touch smoke/tab.go; waitusers 1; rm smoke/tab.sh; users | wc -w {A}", "2\n1\n1\n"),
+    # /dev/tty went by a table a second tab could take over, and that tab's close could leave this one without.
+    ("stty_named_after_tab", f"stty -F /dev/tty size > /dev/null 2>&1; echo $? {R}", "0\n"),
+    ("dev_tty_after_tab", f"tty < /dev/tty | sed 's/[0-9]*$//' {R}", "/dev/pts/\n"),
 ]
 BY_NAME = {test[0]: test for test in TESTS}
 

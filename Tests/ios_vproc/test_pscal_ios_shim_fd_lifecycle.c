@@ -15,6 +15,8 @@
 #include <unistd.h>
 
 #include "ios/vproc.h"
+#include "ios/tty/pscal_pty.h"
+#include <pthread.h>
 
 #if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
 void pscalRuntimeDebugLog(const char *message) {
@@ -552,6 +554,78 @@ static void assertKillStaysOffTheHost(void) {
     vprocDestroy(vp);
 }
 
+typedef struct {
+    pthread_mutex_t mu;
+    char buf[256];
+    size_t len;
+} TerminalCapture;
+
+static void captureTerminal(uint64_t session_id, const unsigned char *data, size_t len, void *context) {
+    (void)session_id;
+    TerminalCapture *capture = (TerminalCapture *)context;
+    pthread_mutex_lock(&capture->mu);
+    size_t room = sizeof(capture->buf) - 1 - capture->len;
+    size_t n = len < room ? len : room;
+    memcpy(capture->buf + capture->len, data, n);
+    capture->len += n;
+    capture->buf[capture->len] = '\0';
+    pthread_mutex_unlock(&capture->mu);
+}
+
+/* ssh's passphrase prompt opens /dev/tty, and it has to reach the tab's terminal with stdin
+ * and stderr on files: `ssh host 2> log < f` asked into the file and waited. */
+static void assertDevTtyIsTheTerminalWithStdinOnAFile(void) {
+    struct pscal_fd *master = NULL;
+    struct pscal_fd *slave = NULL;
+    int pty_num = -1;
+    assert(pscalPtyOpenMaster(O_RDWR, &master, &pty_num) == 0);
+    assert(pscalPtyUnlock(master) == 0);
+    assert(pscalPtyOpenSlave(pty_num, O_RDWR, &slave) == 0);
+    const uint64_t session_id = 5200;
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    assert(vprocSessionStdioInitWithPty(session, slave, master, session_id, 0) == 0);
+    TerminalCapture capture = {.len = 0};
+    pthread_mutex_init(&capture.mu, NULL);
+    vprocSessionSetOutputHandler(session_id, captureTerminal, &capture);
+    vprocSessionStdioActivate(session);
+
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+    char path[] = "/tmp/pscal_devtty_stdinXXXXXX";
+    int host = mkstemp(path);
+    assert(host >= 0);
+    int file = vprocAdoptHostFd(vp, host);
+    assert(file >= 0);
+    assert(vprocDup2(vp, file, STDIN_FILENO) == STDIN_FILENO);
+
+    int tty = pscal_ios_open("/dev/tty", O_WRONLY | O_NOCTTY);
+    assert(tty >= 0);
+    assert(pscal_ios_write(tty, "Passphrase: ", 12) == 12);
+    pscal_ios_close(tty);
+
+    bool seen = false;
+    for (int i = 0; i < 200 && !seen; i++) {
+        pthread_mutex_lock(&capture.mu);
+        seen = strstr(capture.buf, "Passphrase: ") != NULL;
+        pthread_mutex_unlock(&capture.mu);
+        if (!seen) {
+            usleep(10000);
+        }
+    }
+    struct stat st;
+    assert(fstat(STDIN_FILENO, &st) == 0);
+    unlink(path);
+    if (!seen || st.st_size != 0) {
+        fprintf(stderr, "terminal=[%s] stdin file size=%lld\n", capture.buf, (long long)st.st_size);
+    }
+    assert(seen);
+    assert(st.st_size == 0);
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
 int main(void) {
     fprintf(stderr, "TEST pscal_ios_dev_null_polls_and_ends\n");
     assertDevNullPollsAndEnds();
@@ -594,6 +668,9 @@ int main(void) {
 
     fprintf(stderr, "TEST pscal_ios_kill_stays_off_the_host\n");
     assertKillStaysOffTheHost();
+
+    fprintf(stderr, "TEST pscal_ios_dev_tty_is_the_terminal_with_stdin_on_a_file\n");
+    assertDevTtyIsTheTerminalWithStdinOnAFile();
 
     fprintf(stderr, "PASS ios openssh shim fd lifecycle tests\n");
     return 0;

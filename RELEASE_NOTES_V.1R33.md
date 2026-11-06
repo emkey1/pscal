@@ -116,6 +116,9 @@ Base: `V.1R32`
 - Ctrl-C ends a VM program with status 130 and says nothing. On a Pascal `readln` it printed `--- VM execution Failed (Runtime Error) ---` and a debug line, and during `eof(stdin)` it gave 1.
 - Ctrl-C ends `delay()` at once. The program ran on to the end of the delay.
 - Ctrl-C ends the whole job, as it does on Linux: `wc` and `sort` print nothing, and `cat | tr a b` gives 130 and stops the rest of the line. `wc` printed `0 0 0`, and `cat | tr` gave 0 with the line running on.
+- `/dev/tty` is the terminal of the tab a command runs in. The shell's own `> /dev/tty` and `< /dev/tty` opened a device of that name outside the app, which no tab draws, so `echo x > /dev/tty` showed nothing and `read x < /dev/tty` or `cat < /dev/tty` got nothing. A program's own open of it went by a table that a second tab could take over, so it could reach that tab's terminal, or a closed one's.
+- In `ssh`, `scp`, `sftp` and `ssh-keygen`, `/dev/tty` is the terminal, not a copy of stdin, and a password or passphrase question goes there, as on Linux.
+- `halt`, `reboot` or `poweroff` run from a job, and a signal such as `kill -HUP` that ends a shell waiting at its prompt, end it at once. It waited for the next line to be typed.
 
 ## Updated in the iOS app
 - `ssh`, `scp`, `sftp` and `ssh-keygen` are OpenSSH 10.6p2, the latest upstream release (2026-11-05), up from 10.2p1. `ssh -V` says so. Every change the app makes to OpenSSH is carried over. Security fixes they gain:
@@ -181,6 +184,5 @@ Pipes, on iOS:
 - A program writing to a pipe or FIFO whose reader has gone, as in `clike x | head -1`, runs on, and the line never ends: its writes fail with `EPIPE`, where on Linux SIGPIPE ends it. `kill` ends it.
 
 Terminals, on iOS:
-- Writing to `/dev/tty` shows nothing on screen, though the write succeeds, as `echo x > /dev/tty`.
-- `/dev/tty` fails in the first tab once a second tab has opened and closed, and in a second tab while it is open. `stty -F /dev/tty` says so.
 - Ctrl-C in a script whose background job has already ended reaches the tab's own shell, not the script: the command ends and the script goes on. `sleep 1 & sleep 30; echo "no $?"` run with `sh` prints `no 130`, where bash ends the script.
+- The terminal's size can be wrong after an SDL program exits, and `reset` doesn't restore it. Seen on an iPad, not reproduced in the simulator.

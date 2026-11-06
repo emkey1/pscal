@@ -273,9 +273,15 @@ static bool pscal_ios_path_is_devtty(const char *path) {
     return false;
 }
 
-static int pscal_ios_open_devtty(void) {
+static int pscal_ios_open_devtty(int oflag) {
     VProc *vp = vprocCurrent();
     if (vp) {
+        /* The tab's terminal, whatever stdin is: a prompt has to reach the screen with
+         * stdin or stderr on a file. Stdin stands in only where there is none. */
+        int ttyfd = vprocOpenShim("/dev/tty", oflag & ~(O_CREAT | O_TRUNC | O_EXCL));
+        if (ttyfd >= 0) {
+            return ttyfd;
+        }
         int dupfd = vprocDup(vp, STDIN_FILENO);
         if (dupfd >= 0) {
             return dupfd;
@@ -781,7 +787,7 @@ int pscal_ios_open(const char *path, int oflag, ...) {
     }
 
     if (path != NULL && pscal_ios_path_is_devtty(path)) {
-        return pscal_ios_open_devtty();
+        return pscal_ios_open_devtty(oflag);
     }
 
     char remapped[PATH_MAX];
@@ -819,7 +825,7 @@ int pscal_ios_openat(int fd, const char *path, int oflag, ...) {
     }
 
     if (pscal_ios_path_is_devtty(path)) {
-        return pscal_ios_open_devtty();
+        return pscal_ios_open_devtty(oflag);
     }
 
     char remapped[PATH_MAX];

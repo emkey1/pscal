@@ -618,6 +618,193 @@ static void case_termios_in_the_hosts_numbers(void) {
     expect_text("line\n");
 }
 
+/* --- /dev/tty: each tab's commands reach that tab's own terminal --- */
+
+static bool echo_has(terminal *t, const char *want, int wait_ms) {
+    for (int waited = 0; waited <= wait_ms; waited += 10) {
+        pthread_mutex_lock(&t->echoed.mu);
+        bool seen = strstr(t->echoed.buf, want) != NULL;
+        pthread_mutex_unlock(&t->echoed.mu);
+        if (seen) {
+            return true;
+        }
+        usleep(10000);
+    }
+    return false;
+}
+
+/* Open /dev/tty as a command does and write a line to it. */
+static void write_dev_tty(const char *text) {
+    int fd = vprocOpenShim("/dev/tty", O_WRONLY);
+    if (fd < 0) {
+        fprintf(stderr, "/dev/tty open failed errno=%d\n", errno);
+    }
+    assert(fd >= 0);
+    assert(vprocWriteShim(fd, text, strlen(text)) == (ssize_t)strlen(text));
+    assert(vprocCloseShim(fd) == 0);
+}
+
+static void case_dev_tty_is_the_tabs_terminal(void) {
+    terminal t;
+    terminal_open(&t);
+    terminal_run_command(&t);
+    write_dev_tty("to-tty\n");
+    assert(echo_has(&t, "to-tty", KEY_WAIT_MS));
+}
+
+/* `read x < /dev/tty`, `head -1 < /dev/tty`: typed lines come through it, one per read,
+ * and the next read through the command's own stdin gets the line after: both read the
+ * session's queue. */
+static void case_dev_tty_reads_typed_lines(void) {
+    terminal t;
+    terminal_open(&t);
+    terminal_run_command(&t);
+    int fd = vprocOpenShim("/dev/tty", O_RDONLY);
+    assert(fd >= 0);
+    char got[64];
+    type_str(&t, "one\ntwo\n");
+    usleep(50000);
+    ssize_t n = read_fd(fd, got, sizeof(got), KEY_WAIT_MS);
+    assert(n == 4 && memcmp(got, "one\n", 4) == 0);
+    assert(vprocCloseShim(fd) == 0);
+    expect_text("two\n");
+}
+
+/* halt from a job, or kill -HUP from another tab: the shell waiting at its prompt takes it
+ * then, not when a line is next typed. Such a signal waits with a shell's task until it looks. */
+typedef struct {
+    int pid;
+    terminal *t;
+} prompt_kill;
+
+static void *kill_then_type(void *arg) {
+    prompt_kill *pk = (prompt_kill *)arg;
+    usleep(200000);
+    assert(vprocKillShim(pk->pid, SIGHUP) == 0);
+    /* Only for a read that never woke: the test then fails instead of hanging. */
+    usleep(1500000);
+    type_str(pk->t, "late\n");
+    return NULL;
+}
+
+static void case_prompt_read_wakes_for_a_signal_that_ends_the_shell(void) {
+    terminal t;
+    terminal_open(&t);
+    int pid = vprocPid(t.vp);
+    vprocSetUnwindsItself(pid, true);
+    vprocSetShellPromptReadActive(pid, true);
+    vprocSetPipelineStage(false);
+    prompt_kill pk = {pid, &t};
+    pthread_t thread;
+    assert(pthread_create(&thread, NULL, kill_then_type, &pk) == 0);
+    char got[16];
+    ssize_t n = vprocReadShim(STDIN_FILENO, got, sizeof(got));
+    int err = errno;
+    pthread_join(thread, NULL);
+    if (n >= 0) {
+        fprintf(stderr, "prompt read gave %zd bytes, not EINTR\n", n);
+    }
+    assert(n < 0 && err == EINTR);
+}
+
+/* A second tab as the app opens one: its thread takes the session before its
+ * shell has a task, when the session id it finds is the first tab's shell. */
+typedef struct {
+    terminal t;
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    int step;
+    int done;
+} second_tab;
+
+static void second_tab_wait(second_tab *tab, int step) {
+    pthread_mutex_lock(&tab->mu);
+    while (tab->step < step) {
+        pthread_cond_wait(&tab->cv, &tab->mu);
+    }
+    pthread_mutex_unlock(&tab->mu);
+}
+
+static void second_tab_done(second_tab *tab, int done) {
+    pthread_mutex_lock(&tab->mu);
+    tab->done = done;
+    pthread_cond_broadcast(&tab->cv);
+    pthread_mutex_unlock(&tab->mu);
+}
+
+static void second_tab_wait_done(second_tab *tab, int done) {
+    pthread_mutex_lock(&tab->mu);
+    while (tab->done < done) {
+        pthread_cond_wait(&tab->cv, &tab->mu);
+    }
+    pthread_mutex_unlock(&tab->mu);
+}
+
+static void second_tab_go(second_tab *tab, int step) {
+    pthread_mutex_lock(&tab->mu);
+    tab->step = step;
+    pthread_cond_broadcast(&tab->cv);
+    pthread_mutex_unlock(&tab->mu);
+}
+
+static void *second_tab_thread(void *arg) {
+    second_tab *tab = (second_tab *)arg;
+    terminal_open(&tab->t);
+    int pid = vprocPid(tab->t.vp);
+    vprocSetSid(pid, pid);
+    vprocSetShellSelfPid(pid);
+    terminal_run_command(&tab->t);
+    second_tab_done(tab, 1);
+    second_tab_wait(tab, 2);
+    write_dev_tty("from-second\n");
+    second_tab_done(tab, 2);
+    second_tab_wait(tab, 3);
+    vprocSessionStdioDestroy(tab->t.session);
+    second_tab_done(tab, 3);
+    return NULL;
+}
+
+static void *set_global_shell_pid(void *arg) {
+    vprocSetShellSelfPid(*(int *)arg);
+    return NULL;
+}
+
+static void case_dev_tty_follows_each_tab(void) {
+    terminal first;
+    terminal_open(&first);
+    int first_pid = vprocPid(first.vp);
+    vprocSetSid(first_pid, first_pid);
+    terminal_run_command(&first);
+    /* The first tab's shell is the one a thread with no task of its own finds. */
+    pthread_t hint;
+    assert(pthread_create(&hint, NULL, set_global_shell_pid, &first_pid) == 0);
+    pthread_join(hint, NULL);
+
+    second_tab tab;
+    memset(&tab, 0, sizeof(tab));
+    pthread_mutex_init(&tab.mu, NULL);
+    pthread_cond_init(&tab.cv, NULL);
+    pthread_t thread;
+    assert(pthread_create(&thread, NULL, second_tab_thread, &tab) == 0);
+    second_tab_wait_done(&tab, 1);
+
+    write_dev_tty("from-first\n");
+    assert(echo_has(&first, "from-first", KEY_WAIT_MS));
+    assert(!echo_has(&tab.t, "from-first", NOTHING_WAIT_MS));
+
+    second_tab_go(&tab, 2);
+    second_tab_wait_done(&tab, 2);
+    assert(echo_has(&tab.t, "from-second", KEY_WAIT_MS));
+    assert(!echo_has(&first, "from-second", NOTHING_WAIT_MS));
+
+    /* The second tab closes; the first tab's /dev/tty is still its terminal. */
+    second_tab_go(&tab, 3);
+    second_tab_wait_done(&tab, 3);
+    pthread_join(thread, NULL);
+    write_dev_tty("after-close\n");
+    assert(echo_has(&first, "after-close", KEY_WAIT_MS));
+}
+
 typedef struct {
     const char *name;
     void (*run)(void);
@@ -649,6 +836,10 @@ int main(void) {
         CASE(case_poll_sees_lines_and_the_end_of_file_key),
         CASE(case_termios_in_linux_numbers),
         CASE(case_termios_in_the_hosts_numbers),
+        CASE(case_dev_tty_is_the_tabs_terminal),
+        CASE(case_dev_tty_follows_each_tab),
+        CASE(case_dev_tty_reads_typed_lines),
+        CASE(case_prompt_read_wakes_for_a_signal_that_ends_the_shell),
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {

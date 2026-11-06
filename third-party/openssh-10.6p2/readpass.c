@@ -51,6 +51,21 @@
 #include "ssh.h"
 
 #ifdef PSCAL_TARGET_IOS
+/* A prompt goes to the terminal, as readpassphrase's does: with stderr on a file the
+ * question would go there and the read would wait for an answer nobody saw asked. */
+static void
+pscal_write_prompt(const char *text, size_t len)
+{
+	int ttyfd = open(_PATH_TTY, O_WRONLY | O_NOCTTY);
+
+	if (ttyfd >= 0) {
+		(void)write(ttyfd, text, len);
+		close(ttyfd);
+		return;
+	}
+	(void)write(STDERR_FILENO, text, len);
+}
+
 static void
 pscal_dump_session_state(const char *tag, int host_fd)
 {
@@ -104,9 +119,9 @@ ssh_askpass(char *askpass, const char *msg, const char *env_hint)
 
 	if (msg && *msg) {
 		size_t msglen = strlen(msg);
-		(void)write(STDERR_FILENO, msg, msglen);
+		pscal_write_prompt(msg, msglen);
 		if (msg[msglen - 1] != ' ')
-			(void)write(STDERR_FILENO, " ", 1);
+			pscal_write_prompt(" ", 1);
 	}
 	if (readpassphrase("", buf, sizeof(buf), RPP_ECHO_OFF | RPP_STDIN) == NULL)
 		return NULL;
@@ -254,9 +269,9 @@ read_passphrase(const char *prompt, int flags)
 	}
 	if (prompt && *prompt) {
 		size_t plen = strlen(prompt);
-		(void)write(STDERR_FILENO, prompt, plen);
+		pscal_write_prompt(prompt, plen);
 		if (prompt[plen - 1] != ' ')
-			(void)write(STDERR_FILENO, " ", 1);
+			pscal_write_prompt(" ", 1);
 	}
 	bool prompt_written = (prompt && *prompt);
 	size_t len = 0;
@@ -345,7 +360,7 @@ readpass_done:
 	}
 	/* Ensure remote banners begin on a new line after password entry. */
 	if (prompt_written) {
-		(void)write(STDERR_FILENO, "\n", 1);
+		pscal_write_prompt("\n", 1);
 	}
 	return ret;
 #endif
