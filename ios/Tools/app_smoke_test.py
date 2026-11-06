@@ -1452,6 +1452,8 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     ("kill_last_stage", f"( sleep 0.5; lps | grep '[s]leep 3.1' | while read kp kr; do kill -TERM $kp; done ) & sleep 3.1 | sleep 3.1; echo alive {A}", "alive\n"),
     # A frontend there too: what waits for its thread was the program's as well, and went with the kill.
     ("kill_last_stage_frontend", f"( sleep 0.5; lps | grep '[s]pin.pas' | while read kp kr; do kill -TERM $kp; done ) & echo | pascal smoke/spin.pas; echo alive {A}", "alive\n"),
+    # The first, killed, lets go of its end of the pipe, so the last one, reading it, ends too.
+    ("kill_first_stage", f"( sleep 0.5; lps | grep '[s]leep 3.3' | while read kp kr; do [ $kp = $$ ] || kill -TERM $kp; done ) & sleep 3.3 | cat; echo st=${{PIPESTATUS[0]}} {A}", "st=143\n"),
     # A foreground subshell or command is not the shell, so another task's signal ends it there.
     ("kill_foreground_subshell", f"( p=$BASHPID; ( sleep 0.3; kill -TERM $p ) & sleep 3; echo no {A} ); echo st=$? {A}", "st=143\n"),
     ("kill_foreground_command", f"( sleep 0.5; lps | grep '[s]eq 1 90000000' | while read kp kr; do kill -TERM $kp; done ) & seq 1 90000000 > /dev/null; echo st=$? {A}", "st=143\n"),

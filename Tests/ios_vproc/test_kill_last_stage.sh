@@ -3,7 +3,8 @@
 # thread, and a thread the shell had started hid that, so the kill cancelled the shell: only the kernel's
 # thread was left, which blocks every signal, so nothing ended the process short of SIGKILL. In the app
 # that is a tab with no prompt. The task numbers are small and repeat on this flavour, so the script
-# signals all of them but its own and the shell's.
+# signals all of them but its own and the shell's. A killed first stage let go of its end of the pipe only
+# when it returned, so the last, still reading, waited for good.
 #   test_kill_last_stage.sh <exsh>
 set -u
 EXE=${1:?usage: test_kill_last_stage.sh <exsh>}
@@ -49,5 +50,7 @@ check "a foreground pipeline" "( sleep 0.3; $KILL_STAGES ) & sleep 2 | sleep 2; 
 more"
 check "a pipeline of three" "( sleep 0.3; $KILL_STAGES ) & sleep 2 | sleep 2 | sleep 2; echo alive" "alive"
 check "again after one" "sleep 0 | sleep 0; ( sleep 0.3; $KILL_STAGES ) & sleep 2 | sleep 2; echo alive" "alive"
+FIRST='( sleep 0.3; lps | grep "[s]leep 2.3" | while read kp kr; do [ "$kp" = $$ ] || kill -TERM "$kp"; done ) & sleep 2.3 | cat; echo "st ${PIPESTATUS[0]}"'
+check "the first stage, with the last still reading" "$FIRST" "st 143"
 [ "$fails" = 0 ] && echo "test_kill_last_stage: ok"
 exit "$fails"
