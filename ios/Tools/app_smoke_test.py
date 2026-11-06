@@ -1525,6 +1525,10 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     # What ssh and scp set is the task's mask, which goes with it. They set the whole app's.
     ("ssh_keeps_umask", f"umask 002; ssh -G host-a.invalid > /dev/null 2>&1; umask {R}; umask 022", "0002\n"),
     ("scp_keeps_umask", f"umask 002; scp -p -O -o BatchMode=yes nosuch.invalid:x smoke/scum > /dev/null 2>&1; umask {R}; umask 022", "0002\n"),
+    # What a task makes obeys its own mask by every route, looser or tighter than the app's, which is the first tab's shell's. ssh-keygen and git reached libc, which used the app's.
+    ("mask_looser_task", f"rm -rf smoke/tl smoke/tld; umask 077; ( umask 022; : > smoke/tl; mkdir smoke/tld ); umask 022; ls -ld smoke/tl smoke/tld | cut -c1-10 {R}", "-rw-r--r--\ndrwxr-xr-x\n"),
+    ("mask_keygen", f"rm -f smoke/kh smoke/kh.pub; umask 077; ( umask 022; ssh-keygen -q -t ed25519 -N '' -f smoke/kh < /dev/null ); umask 022; ls -l smoke/kh smoke/kh.pub | cut -c1-10 {R}", "-rw-------\n-rw-r--r--\n"),
+    ("mask_git", f"rm -rf smoke/gm smoke/gn; ( umask 077; git init -q smoke/gm ) > /dev/null 2>&1; umask 077; git init -q smoke/gn > /dev/null 2>&1; umask 022; a=$(cd smoke/gm && find . | sort | xargs ls -ld | cut -c1-10); b=$(cd smoke/gn && find . | sort | xargs ls -ld | cut -c1-10); [ -n \"$a\" ] && [ \"$a\" = \"$b\" ] && echo same {R}; ls -ld smoke/gm/.git | cut -c1-10 {A}; rm -rf smoke/gm smoke/gn", "same\ndrwx------\n"),
     # Last, so that the listing tests above never see these names in $HOME.
     ("vm_cleanup", f"rm -rf vm.* vmj.json smoke/v1 smoke/v2; ls vm.in 2>/dev/null | wc -l {R}", "0\n"),
     # Last: on iOS /dev/tty fails in the first tab once a second has opened and closed, in R33's Known Issues.

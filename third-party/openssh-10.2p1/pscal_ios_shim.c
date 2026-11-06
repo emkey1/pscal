@@ -788,9 +788,10 @@ int pscal_ios_open(const char *path, int oflag, ...) {
         return -1;
     }
 
+    /* What it makes obeys the task's mask: libc's open would use the host's, the session shell's. */
     int fd;
     if (has_mode) {
-        fd = open(target_path, oflag, mode);
+        fd = vprocHostOpenMasked(target_path, oflag, mode);
     } else {
         fd = open(target_path, oflag);
     }
@@ -840,7 +841,7 @@ int pscal_ios_openat(int fd, const char *path, int oflag, ...) {
     int fd_host = pscal_ios_translate_fd(fd);
     int opened;
     if (has_mode) {
-        opened = openat(fd_host, target_path, oflag, mode);
+        opened = vprocHostOpenatMasked(fd_host, target_path, oflag, mode);
     } else {
         opened = openat(fd_host, target_path, oflag);
     }
@@ -1439,7 +1440,7 @@ FILE *pscal_ios_fopen(const char *path, const char *mode) {
         errno = EFAULT;
         return NULL;
     }
-    return fopen(target, mode);
+    return vprocHostFopenMasked(target, mode);
 }
 
 DIR *pscal_ios_opendir(const char *path) {
@@ -1461,7 +1462,25 @@ int pscal_ios_mkdir(const char *path, mode_t mode) {
         errno = EFAULT;
         return -1;
     }
-    return mkdir(target, mode);
+    return vprocHostMkdirMasked(target, mode);
+}
+
+int pscal_ios_mkdirat(int fd, const char *path, mode_t mode) {
+    if (!path) {
+        errno = EFAULT;
+        return -1;
+    }
+    char remapped[PATH_MAX];
+    const char *target = path;
+    if (path[0] == '/' || fd == AT_FDCWD) {
+        target = pscal_ios_effective_path(path, remapped, sizeof(remapped));
+        if (target == NULL) {
+            errno = EFAULT;
+            return -1;
+        }
+    }
+    int fd_host = (fd == AT_FDCWD) ? AT_FDCWD : pscal_ios_translate_fd(fd);
+    return vprocHostMkdiratMasked(fd_host, target, mode);
 }
 
 int pscal_ios_rmdir(const char *path) {

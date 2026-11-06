@@ -78,6 +78,8 @@ Base: `V.1R32`
 - A file run with `.` at a prompt no longer announces its background jobs, as under bash.
 - `ulimit` keeps each task's limits in the VM, and the open files limit holds its descriptors: a new task may have 1024 of them. Nothing else is enforced yet.
 - `sftp`'s `lumask`, and `ssh` and `scp -p`, set the task's file mask, not the whole app's.
+- What a command makes obeys its own file mask by every route, looser or tighter than the first tab's shell's. `git`, `ssh-keygen`, `ssh`, `scp`, `sftp` and `rsync` made files and directories through libc, which goes by one mask for the whole app, the first tab's shell's: `( umask 077; git init r )` left `r/.git` readable by everyone, and nothing `sftp` made after `lumask` obeyed it. So did a program's own `mkdir`, `creat` or `fopen`.
+- `ssh` replacing a `known_hosts` entry and `ssh-keygen` saving a key no longer set the whole app's mask while they write, where a command in another tab could make its file with `077`.
 - In a shell run as a command, `caller`, `FUNCNAME` and `BASH_SOURCE` show that script. They showed its caller's as well, since it runs on the caller's thread.
 - `sh -c 'jobs | wc -l'` lists that shell's jobs, and in `$(...)` a stage lists the substitution's, not the top shell's.
 - A program's stdout, stderr and stdin close when it ends. Each `pascal x > f` left one descriptor open for as long as the app ran, the file stayed open too, and after about 230 of them `pascal x | cat` failed with `Too many open files`.
@@ -129,6 +131,7 @@ Base: `V.1R32`
 - Killing a shell takes the command it is running with it: `sh -c 'pascal x.pas; echo y' &` killed ends `pascal` too, where on Linux it runs on as an orphan. `sh -c 'pascal x.pas'` and `( pascal x.pas )` end as they do on Linux, where the shell becomes the command.
 
 ## Known Issues
+- `micro` makes a new file with the first tab's shell's mask, not its own: the Go runtime reaches libc directly.
 Descriptor names, on iOS:
 - `/proc/$$/fd/1` inside a redirected group misses the redirection: `{ echo a > /proc/$$/fd/1; } > f` leaves `f` empty. Host builds write `a` to `f`, as Linux does. Seen through the smoke tool, which runs in the nested `.exshrc` context, not at a prompt.
 - `readlink /proc/self/fd/3` on a file, and `readlink -f /dev/stdout` with stdout on a file, don't give the path that `$HOME` names it by. Host builds do.

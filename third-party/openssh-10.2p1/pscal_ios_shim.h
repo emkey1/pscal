@@ -32,6 +32,7 @@ static inline int pscal_ios_vproc_set_compat_errno(int err) {
 
 int pscal_ios_open(const char *path, int oflag, ...);
 int pscal_ios_openat(int fd, const char *path, int oflag, ...);
+int pscal_ios_mkdirat(int fd, const char *path, mode_t mode);
 ssize_t pscal_ios_read(int fd, void *buf, size_t nbyte);
 ssize_t pscal_ios_write(int fd, const void *buf, size_t nbyte);
 int pscal_ios_fprintf(FILE *stream, const char *format, ...);
@@ -145,6 +146,16 @@ int pscal_ios_execlp(const char *file, const char *arg, ...);
 # define futimes(fd, times) pscal_ios_futimes((fd), (times))
 # define chdir(path) vprocChdirShim((path))
 # define getcwd(buffer, size) vprocGetcwdShim((buffer), (size))
+/* vproc_shim.h may have these already. A file made here obeys the task's mask, and umask sets
+ * that, not the whole app's. */
+# undef fopen
+# undef mkdir
+# undef mkdirat
+# undef creat
+# undef umask
+# define umask(mask) vprocUmaskShim((mask))
+# define creat(path, mode) pscal_ios_open((path), O_CREAT | O_WRONLY | O_TRUNC, (mode))
+# define mkdirat(fd, path, mode) pscal_ios_mkdirat((fd), (path), (mode))
 # define fopen(path, mode) pscal_ios_fopen((path), (mode))
 # define opendir(path) pscal_ios_opendir((path))
 # define mkdir(path, mode) pscal_ios_mkdir((path), (mode))
