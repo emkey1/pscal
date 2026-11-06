@@ -117,7 +117,7 @@ Base: `V.1R32`
 - Ctrl-C ends `delay()` at once. The program ran on to the end of the delay.
 - Ctrl-C ends the whole job, as it does on Linux: `wc` and `sort` print nothing, and `cat | tr a b` gives 130 and stops the rest of the line. `wc` printed `0 0 0`, and `cat | tr` gave 0 with the line running on.
 - `/dev/tty` is the terminal of the tab a command runs in. The shell's own `> /dev/tty` and `< /dev/tty` opened a device of that name outside the app, which no tab draws, so `echo x > /dev/tty` showed nothing and `read x < /dev/tty` or `cat < /dev/tty` got nothing. A program's own open of it went by a table that a second tab could take over, so it could reach that tab's terminal, or a closed one's.
-- In `ssh`, `scp`, `sftp` and `ssh-keygen`, `/dev/tty` is the terminal, not a copy of stdin, and a password or passphrase question goes there, as on Linux.
+- In `ssh`, `scp`, `sftp` and `ssh-keygen`, `/dev/tty` is the terminal, not a copy of stdin, and a password or passphrase question goes there, as on Linux. A report of such a question going to the file with stderr redirected was not reproduced in this build: `ssh-keygen -y -f key 2> f` asks on the screen here, as it did in the build before this fix.
 - `halt`, `reboot` or `poweroff` run from a job, and a signal such as `kill -HUP` that ends a shell waiting at its prompt, end it at once. It waited for the next line to be typed.
 
 ## Updated in the iOS app
