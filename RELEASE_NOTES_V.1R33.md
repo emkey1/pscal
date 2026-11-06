@@ -52,6 +52,7 @@ Base: `V.1R32`
 - At a prompt on a host, `[1] 1234` is printed for a job, as on iOS, and `( cmd ) &`, `{ cmd; } &`, a function and `a && b &` no longer stop for good on the terminal.
 - `ulimit` is a builtin, on every platform. A file named `ulimit` on PATH could not change the shell, and Linux has none. It reads and sets `-c -d -f -l -m -n -p -s -t -u -v`, with `-S`, `-H` and `-a`. What a subshell, stage, job, substitution or nested shell sets ends with it.
 - A script with no `#!` is read by exsh itself on a host, as bash reads it. It went to the system's `sh`, where a bashism failed and on Linux an array or `caller` was not there. A file with a NUL on its first line says `cannot execute binary file` and gives 126, where it was run as a script.
+- On a plain build, `mkfifo p; echo x > p & cat p` no longer hangs the shell. exsh opened a job's redirections before it forked, and a FIFO's open waits for the other end, which was the shell's next command; at a prompt Ctrl-C could not free it. A job now opens its own redirections, each in its turn, as bash does. The same goes for `cat < p &`, functions, groups, subshells, loops and pipeline stages. Other forms change with it: `cat <&3 3< f` fails, `/bin/echo x > a <&9 > b` no longer creates `b`, `cat 3>&1 <<EOF` keeps its body, and `echo hi | cat < /dev/stdin` reads the pipe.
 
 ## Fixed in the iOS app
 - `env test a == a`, and `xargs` or `find -exec` running `test`, know `==`, and take a value of `!`. They said `test: unsupported expression`.
