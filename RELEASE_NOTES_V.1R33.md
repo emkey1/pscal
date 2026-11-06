@@ -91,10 +91,16 @@ Base: `V.1R32`
 - With stdin closed (`cmd <&-`, or after `exec <&-`), `awk`, `wc`, `base64`, `gzip -c` and `xargs` fail and say why, as with the Mac's or Linux's tools. `awk` gave 0, `wc -l` and `base64` failed without a word, `gzip -c` wrote its header to stdout before it failed, and `xargs` gave 0. `[ -t 0 ]` and `tty` no longer take the session's terminal for a closed stdin: `exec <&-; [ -t 0 ]` said it was a terminal, and `tty <&-` or `tty < /dev/null` printed its name.
 - A program's imports follow `cd` and take the app's absolute paths. After `cd d`, `clike ../p.cl` with `import "m.cl"` compiled the `m.cl` in the directory the app started in, with no error, and an import of `/home/x/m.cl` said `Could not open import`. This covered CLike's `import` and `#include`, Rea's `#import`, Aether's `use`, and Pascal's units under a relative or absolute `PASCAL_LIB_DIR`.
 - A group, subshell, `if`, loop or function as a pipeline's first stage goes on when the stage after it stops reading. In `{ cat big; echo "x $?" > s; } | head -1` only `cat` ends, with status 141, as under bash, and the `echo` runs; the whole stage used to end there. A builtin writing to that pipe still ends the stage, as bash's subshell dies of SIGPIPE.
+- A glob that ends in a slash takes only directories and keeps the slash, so `for d in */` no longer goes through every file as well. `echo */` printed files and directories alike, with no slash.
 
 ## Fixed in the frontends on every platform
 - A bytecode cache entry covers the files its program imports. An import is also looked for in the working directory, so one program can compile to two from two directories, and run from the second it could reuse the first's entry. Rea and Aether could also miss an edit to a module that an imported module uses.
 
+## Faster in exsh
+- Commands that stay in the shell take about 0.67 of the time they did, which is about 1.21x bash 5 where it was 1.69x. The numbers are from `tools/shellbench_cacheable`, 3 rounds on one Mac, so they differ from the laptop's in V.1R32's notes. Commands that start a process are unchanged.
+- A function calling a function takes 2.6 µs, down from 11.1 µs, and three deep 3.4 µs, down from 24.9 µs. Functions, `eval`, `source` and traps take a VM from a pool of 16, where only the first level kept one.
+- `:` takes 0.64 µs, down from 0.97 µs, an assignment 0.95 µs, down from 1.46 µs, and `eval` 4.7 µs, down from 6.0 µs. A command reads its metadata in place instead of copying it, sets `EXSH_LAST_STATUS` only when it changes, and reads debug switches such as `PSCALI_REDIR_DEBUG` again only after the shell sets a variable.
+- `[ ]` among 10,000 files took twice as long as in an empty directory, and now takes the same.
 
 
 ## Differs from bash
@@ -117,6 +123,7 @@ Base: `V.1R32`
 - Libraries that open files themselves, such as sqlite's, and the Go tools don't see these names.
 - After an upgrade, a `/dev/stdout` file left by an earlier build stays until removed. The name still reaches the descriptor, but `ls` and `[ -L ]` see the file.
 - `who -u` gives `?` as a terminal's idle time, because a terminal in the app keeps no access time.
+- `echo */.` lists files as well as directories and drops the `/.`, because resolving the pattern against the task's directory drops it.
 - Killing a shell takes the command it is running with it: `sh -c 'pascal x.pas; echo y' &` killed ends `pascal` too, where on Linux it runs on as an orphan. `sh -c 'pascal x.pas'` and `( pascal x.pas )` end as they do on Linux, where the shell becomes the command.
 
 ## Known Issues
