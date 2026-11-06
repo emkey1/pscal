@@ -112,6 +112,10 @@
 #include "ios/tty/ish_compat.h"
 #include "ios/vproc.h"
 
+/* This file gets no macros from pscal_ios_shim.h, and it reads what its client was given. */
+#undef getenv
+#define getenv(name) vprocGetenvShim((name))
+
 #ifndef vprocSetCompatErrno
 static int pscal_ios_set_compat_errno(int err) {
     errno = pscalCompatErrno(err);

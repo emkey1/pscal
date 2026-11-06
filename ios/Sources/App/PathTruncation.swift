@@ -6,6 +6,23 @@ import Darwin
 @_silgen_name("PSCALRuntimeApplyPathTruncation")
 func PSCALRuntimeApplyPathTruncation(_ path: UnsafePointer<CChar>?)
 
+// libc's environment is what each new tab copies, under a lock these take. On this side of the
+// app they stand in for Darwin's, so no call site can miss it. Nothing here reaches a running tab.
+@_silgen_name("vprocSetenvShim")
+private func vprocSetenvShim(_ name: UnsafePointer<CChar>, _ value: UnsafePointer<CChar>, _ overwrite: Int32) -> Int32
+@_silgen_name("vprocUnsetenvShim")
+private func vprocUnsetenvShim(_ name: UnsafePointer<CChar>) -> Int32
+
+@discardableResult
+func setenv(_ name: String, _ value: String, _ overwrite: Int32) -> Int32 {
+    return vprocSetenvShim(name, value, overwrite)
+}
+
+@discardableResult
+func unsetenv(_ name: String) -> Int32 {
+    return vprocUnsetenvShim(name)
+}
+
 struct PathTruncationPreferences {
     static let enabledDefaultsKey = "com.pscal.terminal.pathTruncateEnabled"
     static let pathDefaultsKey = "com.pscal.terminal.pathTruncateValue"

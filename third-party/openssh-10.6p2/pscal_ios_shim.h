@@ -106,12 +106,17 @@ int pscal_ios_execlp(const char *file, const char *arg, ...);
 # undef setlocale
 # define setlocale(category, name) vprocSetlocaleShim((category), (name))
 
-/* libc's environment is the whole app's, and a capture of it for a command crashed on an unsetenv
- * here. What a client changes stays its own, as it would in its own process. */
+/* libc's environment is the whole app's. A client has the one its shell started it with, what it
+ * changes stays its own, and it sees only what was exported, as it would in its own process.
+ * `extern char **environ;` after this declares vprocEnvironShim again, compatibly. */
+# undef getenv
 # undef setenv
 # undef unsetenv
+# undef environ
+# define getenv(name) vprocGetenvShim((name))
 # define setenv(name, value, overwrite) vprocSetenvShim((name), (value), (overwrite))
 # define unsetenv(name) vprocUnsetenvShim((name))
+# define environ (*vprocEnvironShim())
 
 # define read(...) pscal_ios_read(__VA_ARGS__)
 # define open(...) pscal_ios_open(__VA_ARGS__)

@@ -110,6 +110,7 @@ Base: `V.1R32`
 - Ctrl-C ends an `rsync` to or from another host, with its `ssh`, and the prompt comes back with status 130. It waited out the transfer. A local `rsync` stops too, where its copy went on writing behind the prompt, and either way no temporary file is left.
 - An `ssh` in the background keeps running when Ctrl-C is meant for the command in the foreground. It took the Ctrl-C and ended, and the foreground command did not.
 - Two `ssh`, `scp` or `sftp` at once keep their own working state: how `sftp` reads a command and expands a remote glob, and the buffers behind their messages, times and option parsing.
+- Each tab has an environment of its own, as each terminal's shell does on Linux: `export x=1` in one tab no longer shows in another, and what a command starts sees only what its shell exported. `ssh`, `scp`, `sftp` and `rsync` read that one too, `HOME`, `SSH_AUTH_SOCK` and a variable for `SendEnv` among them.
 
 ## Updated in the iOS app
 - `ssh`, `scp`, `sftp` and `ssh-keygen` are OpenSSH 10.6p2, the latest upstream release (2026-11-05), up from 10.2p1. `ssh -V` says so. Every change the app makes to OpenSSH is carried over. Security fixes they gain:

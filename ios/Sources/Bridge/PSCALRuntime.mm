@@ -1967,6 +1967,32 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     }
     PSCALRuntimeRegisterSessionContext(session_id);
     PSCALRuntimeRegisterSessionOutputHandler(session_id, PSCALRuntimeDirectOutputHandler, NULL);
+    // Before the shell starts: it copies the environment as it does, and later changes to
+    // this one are not its concern.
+    // Ensure session-heavy tools (e.g., embedded Editor) write into a
+    // writable sandbox directory instead of the app bundle.
+    @autoreleasepool {
+        // Prefer a stable Documents/home working directory so tools like Editor
+        // can create temp/session files in a writable location.
+        NSString *homeRoot = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/home"];
+        NSError *dirError = nil;
+        [[NSFileManager defaultManager] createDirectoryAtPath:homeRoot
+                                  withIntermediateDirectories:YES
+                                                   attributes:nil
+                                                        error:&dirError];
+        NSString *sessionRoot = homeRoot;
+        if (sessionRoot.length == 0) {
+            sessionRoot = NSTemporaryDirectory();
+        }
+        if (sessionRoot.length > 0) {
+            vprocSetenvShim("HOME", sessionRoot.UTF8String, 1);
+            vprocSetenvShim("SESSIONPATH", sessionRoot.UTF8String, 1);
+            vprocSetenvShim("TMPDIR", sessionRoot.UTF8String, 1);
+            vprocSetenvShim("PWD", sessionRoot.UTF8String, 1);
+            chdir(sessionRoot.UTF8String);
+        }
+    }
+
     int master_fd = -1;
     int input_fd = -1;
     if (PSCALRuntimeCreateShellSession(argc, argv, session_id, &master_fd, &input_fd) != 0) {
@@ -1994,30 +2020,6 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     }
 
     PSCALRuntimeSetSessionWinsize(session_id, initial_columns, initial_rows);
-    // Ensure session-heavy tools (e.g., embedded Editor) write into a
-    // writable sandbox directory instead of the app bundle.
-    @autoreleasepool {
-        // Prefer a stable Documents/home working directory so tools like Editor
-        // can create temp/session files in a writable location.
-        NSString *homeRoot = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/home"];
-        NSError *dirError = nil;
-        [[NSFileManager defaultManager] createDirectoryAtPath:homeRoot
-                                  withIntermediateDirectories:YES
-                                                   attributes:nil
-                                                        error:&dirError];
-        NSString *sessionRoot = homeRoot;
-        if (sessionRoot.length == 0) {
-            sessionRoot = NSTemporaryDirectory();
-        }
-        if (sessionRoot.length > 0) {
-            setenv("HOME", sessionRoot.UTF8String, 1);
-            setenv("SESSIONPATH", sessionRoot.UTF8String, 1);
-            setenv("TMPDIR", sessionRoot.UTF8String, 1);
-            setenv("PWD", sessionRoot.UTF8String, 1);
-            chdir(sessionRoot.UTF8String);
-        }
-    }
-
     // Ensure stdio is line-buffered at most to reduce latency.
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
@@ -2245,10 +2247,11 @@ void PSCALRuntimeUpdateWindowSize(int columns, int rows) {
     }
 
     char buffer[16];
+    /* What a tab starts with. A running one follows its terminal. */
     snprintf(buffer, sizeof(buffer), "%d", columns);
-    setenv("COLUMNS", buffer, 1);
+    vprocSetenvShim("COLUMNS", buffer, 1);
     snprintf(buffer, sizeof(buffer), "%d", rows);
-    setenv("LINES", buffer, 1);
+    vprocSetenvShim("LINES", buffer, 1);
 
     pthread_mutex_lock(&s_runtime_mutex);
     s_pending_columns = columns;

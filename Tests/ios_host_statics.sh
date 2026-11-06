@@ -136,12 +136,12 @@ if nm -u "$BUILD_DIR/bin/exsh" 2>/dev/null | grep -x _setlocale > /dev/null; the
 fi
 
 # libc's environment is the whole app's, and a capture of it for a command crashed when a client's
-# unsetenv shifted it. Through pscal_ios_shim.h a client changes its own.
+# unsetenv shifted it. Through pscal_ios_shim.h a client reads and changes the one it was given.
 openssh_objects="$BUILD_DIR/CMakeFiles/pscal_core_static.dir/third-party/openssh-10.6p2"
 if [ -d "$openssh_objects" ]; then
     while read -r object; do
-        if nm -u "$object" 2>/dev/null | grep -xE '_(setenv|unsetenv|putenv)' > /dev/null; then
-            echo "FAIL ios_host_statics: $(basename "$object") changes libc's environment, which is the whole app's"
+        if nm -u "$object" 2>/dev/null | grep -xE '_(getenv|setenv|unsetenv|putenv|environ)' > /dev/null; then
+            echo "FAIL ios_host_statics: $(basename "$object") uses libc's environment, which is the whole app's"
             status=1
         fi
     done < <(find "$openssh_objects" -name '*.c.o' | sort)

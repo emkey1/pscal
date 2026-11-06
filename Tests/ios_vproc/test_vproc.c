@@ -4972,6 +4972,72 @@ static void assert_env_capture_survives_changes(void) {
     }
 }
 
+/* An environment lasts as long as a tab's shell, so what it keeps of old values can't grow for ever. */
+static void assert_env_keeps_only_so_much(void) {
+    VProcEnv *env = vprocEnvCapture();
+    assert(env);
+    VProcEnv *previous = vprocEnvActivate(env);
+    assert(vprocSetenvShim("PSCAL_ENV_KEEP_TEST", "first", 1) == 0);
+    for (int i = 0; i < 20000; ++i) {
+        assert(vprocUnsetenvShim("PSCAL_ENV_KEEP_TEST") == 0);
+        assert(vprocSetenvShim("PSCAL_ENV_KEEP_TEST", "value", 1) == 0);
+    }
+    const char *value = vprocGetenvShim("PSCAL_ENV_KEEP_TEST");
+    assert(value && strcmp(value, "value") == 0);
+    assert(vprocGetenvShim("PSCAL_ENV_KEEP_ABSENT") == NULL);
+    vprocEnvActivate(previous);
+    assert(vprocGetenvShim("PSCAL_ENV_KEEP_TEST") == NULL);
+    vprocEnvRelease(env);
+}
+
+/* A glob's directory comes from the program's PWD, never from libc's, which is the whole app's: a tab's cd only
+ * reaches its own environment, and a pattern that matched nothing there went on to the app's directory. */
+static void assert_glob_reads_the_programs_pwd(void) {
+    char templ[] = "/tmp/vproc-pwd-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(pscalPathVirtualized_mkdir("/here", 0700) == 0);
+    assert(pscalPathVirtualized_mkdir("/there", 0700) == 0);
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/there/onlythere", root);
+    FILE *file = fopen(path, "w");
+    assert(file);
+    fclose(file);
+    snprintf(path, sizeof(path), "%s/here", root);
+    assert(chdir(path) == 0);
+    char *saved_pwd = getenv("PWD") ? strdup(getenv("PWD")) : NULL;
+    setenv("PWD", "/there", 1);
+
+    VProcEnv *env = vprocEnvCapture();
+    assert(env);
+    VProcEnv *previous = vprocEnvActivate(env);
+    assert(vprocSetenvShim("PWD", "/here", 1) == 0);
+    glob_t matches;
+    memset(&matches, 0, sizeof(matches));
+    assert(pscalPathVirtualized_glob("onlyth*", 0, NULL, &matches) == GLOB_NOMATCH);
+    vprocEnvActivate(previous);
+    vprocEnvRelease(env);
+
+    /* With no environment of its own, a program's PWD is libc's, and the same pattern finds the file. */
+    memset(&matches, 0, sizeof(matches));
+    assert(pscalPathVirtualized_glob("onlyth*", 0, NULL, &matches) == 0);
+    assert(matches.gl_pathc == 1);
+    globfree(&matches);
+
+    if (saved_pwd) {
+        setenv("PWD", saved_pwd, 1);
+        free(saved_pwd);
+    } else {
+        unsetenv("PWD");
+    }
+    unsetenv("PATH_TRUNCATE");
+    assert(chdir("/tmp") == 0);
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
 static void assert_setlocale_is_the_threads_own(void) {
     void *start = vprocLocaleSave();
     assert(strcmp(vprocSetlocaleShim(LC_CTYPE, NULL), "C") == 0);
@@ -10318,6 +10384,10 @@ int main(void) {
     assert_setlocale_is_the_threads_own();
     fprintf(stderr, "TEST env_capture_survives_changes\n");
     assert_env_capture_survives_changes();
+    fprintf(stderr, "TEST env_keeps_only_so_much\n");
+    assert_env_keeps_only_so_much();
+    fprintf(stderr, "TEST glob_reads_the_programs_pwd\n");
+    assert_glob_reads_the_programs_pwd();
 #endif
 #if defined(PSCAL_TARGET_IOS)
     /* Ensure path virtualization macros remain visible even when vproc shim is included. */
