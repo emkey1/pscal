@@ -39,6 +39,12 @@ for comp in "${components[@]}"; do
         echo "[bundle examples] note: no Examples in components/${comp}; skipping" >&2
         continue
     fi
+    # The top-level Examples/<lang> entries are links into the components. The
+    # folder reference copies them into the bundle as links that point outside
+    # it, so replace each with the real directory.
+    if [ -L "${dest_root}/${comp}" ]; then
+        rm -f "${dest_root}/${comp}"
+    fi
     /usr/bin/rsync -a "${rsync_excludes[@]}" "${src}/" "${dest_root}/${comp}/"
     copied_any=1
 done
