@@ -3,6 +3,13 @@
 Base: `V.1R32`
 
 ## Fixed in exsh
+- IFS splits only what an expansion produced, as in bash. Text a word itself holds used to split too: `IFS=:; printf '<%s>' a:b` gave two fields, `IFS=/; ls /dev/null` passed `dev` and `null`, and `IFS=e; echo hello` could not find its command. Redirection targets, `for` lists, loop conditions and the words inside `$(...)` all follow it. Where bash 3.2 and 5 differ, as in `a:$x:b`, exsh follows 5.
+- A quoted part no longer keeps the rest of a word from being split or matched: `"c"$x` with `x='a b'` is two fields where it was one, and `""$g` with `g='f*'` matches files.
+- `$@`, `$*` and `${a[@]}` outside quotes are joined with IFS's first character and then split, as in bash, so `set -- a '' b; printf '<%s>' $@` gives `<a><b>` and under `IFS=:` gives `<a><><b>`. The first used to keep the empty one and `IFS=:; set -- a: b` lost one.
+- White space around an IFS delimiter is part of it: with `IFS=' :'`, `a : b` is two fields where it was three and `a : ` is one where it was two. A field that starts with a quoted or literal byte ends at its delimiter: `x$y` under `IFS=:` gave an empty field for each.
+- `""$@` and `$@""` with no arguments are one empty field, and `IFS=; x=; printf '%s' $x` gives no field where it gave one.
+- `> $@` with two arguments is an ambiguous redirect, as in bash. It used to write a file named `a b`.
+- `while [ f* = fa ]` and `until test ...` expand their words as any command does: a loop's test used to skip braces and globs.
 - A glob's matches sort as the locale collates them, as in bash, by `LC_ALL`, `LC_COLLATE` or `LANG`, exported or not, from the moment one is assigned. Under `en_US.UTF-8` on Linux `echo *` gives `[a] a b [x Z`; it used to sort by bytes under every locale.
 - `sh /dev/stdin` reads a script from a pipe, on every platform. It failed with status 126 and said nothing.
 - Every other syntax error is reported in bash's words too, with the line it is on: a keyword where another has to come (`if true; done`), a redirection with no target (`echo >`), a bad case pattern (`case x in )`), a doubled `;` or `&`, and a word after a compound command (`( a ) b`, `if a; then b; fi c`). Several of these used to run.
