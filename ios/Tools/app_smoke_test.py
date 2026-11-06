@@ -1311,7 +1311,9 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("caller_in_function", f"printf 'cf() {{ caller; caller 0; caller 1; echo \"$?\"; }}\\ncf\\n' > smoke/cf.sh; sh smoke/cf.sh {R}", "2 smoke/cf.sh\n2 main smoke/cf.sh\n1\n"),
     # `jobs` alone as a stage lists the shell's jobs, and only that. In a substitution or a nested shell the stage listed the top shell's.
     ("jobs_stage", f"( sleep 2 & jp=$!; jobs | wc -l; kill $jp; wait $jp 2>/dev/null ) {R}", "1\n"),
-    ("jobs_stage_subst", f"x=$(sleep 1 & sleep 1 & jobs | wc -l); echo \"[$x]\" {R}", "[2]\n"),
+    ("jobs_stage_subst", f"( x=$(sleep 1 & sleep 1 & jobs | wc -l); echo \"[$x]\" ) {R}", "[2]\n"),
+    # A substitution drops what has ended, but for the job $! names, as bash's fork does.
+    ("jobs_subst_ended", f"( false & a=$!; while kill -0 $a 2>/dev/null; do sleep 0.05; done; true & b=$!; while kill -0 $b 2>/dev/null; do sleep 0.05; done; x=$(jobs); echo \"$x\" | sed -E 's/\\][-+ ]/]/; s/  +/ /g' ) {R}", "[2] Done true\n"),
     ("jobs_stage_nested", f"( sleep 1 & sh -c 'jobs | wc -l'; wait ) {R}", "0\n"),
     ("jobs_stage_kill", f"( sleep 2 & jp=$!; kill %1 2>/dev/null | cat; jobs | wc -l; kill $jp; wait $jp 2>/dev/null ) {R}", "1\n"),
     ("jobs_group_none", f"( sleep 1 & {{ jobs; }} | wc -l; wait ) {R}", "0\n"),
