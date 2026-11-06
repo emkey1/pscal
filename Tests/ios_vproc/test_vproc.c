@@ -9709,6 +9709,92 @@ static void cancel_after_it_parks(void *(*start)(void *), struct pscal_fd *fd) {
     assert(ret == PTHREAD_CANCELED);
 }
 
+/* ssh a | ssh b: both ends poll with no timeout, and each read or write moves as much as the
+ * pipe holds, so each end goes back to sleep at once. A wakeup the other end misses stops both for good. */
+typedef struct {
+    struct pscal_fd *fd;
+    bool reader;
+    size_t total;
+    atomic_size_t moved;
+    int wake_fd;
+    atomic_int *finished;
+} vproc_poll_pipe_ctx;
+
+static void *vproc_poll_pipe_thread(void *arg) {
+    vproc_poll_pipe_ctx *ctx = (vproc_poll_pipe_ctx *)arg;
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = vprocReservePid();
+    VProc *vp = vprocCreate(&opts);
+    assert(vp);
+    vprocActivate(vp);
+    assert(vprocAdoptPscalFd(vp, STDIN_FILENO, ctx->fd) == 0);
+    ctx->fd->flags |= O_NONBLOCK;
+    ctx->wake_fd = pscalPollWakeFd();
+    char buf[32 * 1024];
+    memset(buf, 'x', sizeof(buf));
+    struct pollfd p = {.fd = STDIN_FILENO, .events = ctx->reader ? POLLIN : POLLOUT};
+    while (atomic_load(&ctx->moved) < ctx->total) {
+        assert(vprocPollShim(&p, 1, -1) >= 0);
+        ssize_t n = ctx->reader ? ctx->fd->ops->read(ctx->fd, buf, sizeof(buf))
+                                : ctx->fd->ops->write(ctx->fd, buf, sizeof(buf));
+        if (n > 0) {
+            atomic_fetch_add(&ctx->moved, (size_t)n);
+        }
+    }
+    atomic_fetch_add(ctx->finished, 1);
+    vprocDeactivate();
+    vprocDiscard(vprocPid(vp));
+    vprocDestroy(vp);
+    return NULL;
+}
+
+static void assert_two_pollers_on_a_pipe_keep_moving(void) {
+    enum { THREADS = 2 };
+    atomic_int finished = 0;
+    vproc_poll_pipe_ctx ctx[THREADS];
+    pthread_t tid[THREADS];
+    struct pscal_fd *read_end = NULL;
+    struct pscal_fd *write_end = NULL;
+    assert(vprocCreateInprocPipe(&read_end, &write_end) == 0);
+    for (int i = 0; i < THREADS; ++i) {
+        memset(&ctx[i], 0, sizeof(ctx[i]));
+        ctx[i].fd = i == 0 ? read_end : write_end;
+        ctx[i].reader = i == 0;
+        ctx[i].total = 16u * 1024u * 1024u;
+        ctx[i].finished = &finished;
+    }
+    for (int i = 0; i < THREADS; ++i) {
+        assert(pthread_create(&tid[i], NULL, vproc_poll_pipe_thread, &ctx[i]) == 0);
+    }
+    /* A missed wakeup never ends, so this has a limit where the threads have none: ten
+     * seconds with not a byte moving, however busy the machine. */
+    size_t last_moved = 0;
+    for (int idle = 0; atomic_load(&finished) < THREADS; ++idle) {
+        size_t moved = atomic_load(&ctx[0].moved) + atomic_load(&ctx[1].moved);
+        if (moved != last_moved) {
+            last_moved = moved;
+            idle = 0;
+        }
+        if (idle >= 200) {
+            fprintf(stderr, "a poller missed its wakeup: %d of %d threads finished, %zu bytes moved\n",
+                    atomic_load(&finished), THREADS, moved);
+            assert(!"a poller missed its wakeup");
+        }
+        struct timespec nap = {.tv_sec = 0, .tv_nsec = 50000000};
+        nanosleep(&nap, NULL);
+    }
+    for (int i = 0; i < THREADS; ++i) {
+        assert(pthread_join(tid[i], NULL) == 0);
+    }
+    /* A thread's wake pipe goes with it, or every command would leave two descriptors. */
+    for (int i = 0; i < THREADS; ++i) {
+        errno = 0;
+        assert(fcntl(ctx[i].wake_fd, F_GETFD) == -1);
+        assert(errno == EBADF);
+        pscal_fd_close(ctx[i].fd);
+    }
+}
+
 /* A cancelled thread leaves a cond wait holding the mutex. A hang here is that
  * mutex: whoever has the other end of the pipe would wait for it for good. */
 static void assert_cancelled_pipe_wait_leaves_pipe_usable(void) {
@@ -10099,6 +10185,8 @@ int main(void) {
     assert_named_descriptors_act_as_on_linux();
     fprintf(stderr, "TEST cancelled_pipe_wait_leaves_pipe_usable\n");
     assert_cancelled_pipe_wait_leaves_pipe_usable();
+    fprintf(stderr, "TEST two_pollers_on_a_pipe_keep_moving\n");
+    assert_two_pollers_on_a_pipe_keep_moving();
     fprintf(stderr, "TEST kernel_mounts_from_fstab_at_startup\n");
     assert_kernel_mounts_from_fstab_at_startup();
     fprintf(stderr, "TEST empty_path_names_nothing\n");
