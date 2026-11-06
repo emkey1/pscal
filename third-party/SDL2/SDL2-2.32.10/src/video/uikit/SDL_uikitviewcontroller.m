@@ -182,7 +182,7 @@ SDL_HideHomeIndicatorHintChanged(void *userdata, const char *name, const char *o
     displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(doLoop:)];
 
 #ifdef __IPHONE_10_3
-    data = (__bridge SDL_WindowData *) window->driverdata;
+    data = window ? (__bridge SDL_WindowData *) window->driverdata : nil;
 
     if ([displayLink respondsToSelector:@selector(preferredFramesPerSecond)]
         && data != nil && data.uiwindow != nil
@@ -235,12 +235,16 @@ SDL_HideHomeIndicatorHintChanged(void *userdata, const char *name, const char *o
 #if !TARGET_OS_TV
 - (NSUInteger)supportedInterfaceOrientations
 {
+    /* PSCAL: the window is NULL once SDL has destroyed it, and UIKit may still ask. */
+    if (!window) {
+        return UIInterfaceOrientationMaskAll;
+    }
     return UIKit_GetSupportedOrientations(window);
 }
 
 - (BOOL)prefersStatusBarHidden
 {
-    BOOL hidden = (window->flags & (SDL_WINDOW_FULLSCREEN|SDL_WINDOW_BORDERLESS)) != 0;
+    BOOL hidden = window && (window->flags & (SDL_WINDOW_FULLSCREEN|SDL_WINDOW_BORDERLESS)) != 0;
     return hidden;
 }
 
@@ -264,7 +268,7 @@ SDL_HideHomeIndicatorHintChanged(void *userdata, const char *name, const char *o
     }
 
     /* By default, fullscreen and borderless windows get all screen gestures */
-    if ((window->flags & (SDL_WINDOW_FULLSCREEN|SDL_WINDOW_BORDERLESS)) != 0) {
+    if (window && (window->flags & (SDL_WINDOW_FULLSCREEN|SDL_WINDOW_BORDERLESS)) != 0) {
         return UIRectEdgeAll;
     } else {
         return UIRectEdgeNone;
@@ -527,11 +531,19 @@ SDL_HideHomeIndicatorHintChanged(void *userdata, const char *name, const char *o
 
 - (void)updateKeyboard
 {
-    SDL_WindowData *data = (__bridge SDL_WindowData *)window->driverdata;
-
-    CGAffineTransform t = self.view.transform;
+    SDL_WindowData *data;
+    CGAffineTransform t;
     CGPoint offset = CGPointMake(0.0, 0.0);
-    CGRect frame = UIKit_ComputeViewFrame(window, data.uiwindow.screen);
+    CGRect frame;
+
+    /* PSCAL: nothing to lay out once SDL has destroyed the window. */
+    if (!window || !window->driverdata) {
+        return;
+    }
+    data = (__bridge SDL_WindowData *)window->driverdata;
+
+    t = self.view.transform;
+    frame = UIKit_ComputeViewFrame(window, data.uiwindow.screen);
 
     if (self.keyboardHeight) {
         int rectbottom = self.textInputRect.y + self.textInputRect.h;
@@ -585,6 +597,21 @@ SDL_HideHomeIndicatorHintChanged(void *userdata, const char *name, const char *o
 }
 
 #endif
+
+/* PSCAL: UIKit can keep this controller after SDL has freed its window, and on iOS 17 it
+ * hands the text field the keyboard again once another responder lets go. So stop
+ * watching the keyboard, take the text field out of the responder chain, and forget
+ * the window: the methods that read it return a default without one. */
+- (void)detachFromSDLWindow
+{
+#ifdef SDL_IPHONE_KEYBOARD
+    [self deinitKeyboard];
+    keyboardVisible = NO;
+    [textField resignFirstResponder];
+    [textField removeFromSuperview];
+#endif
+    window = NULL;
+}
 
 @end
 

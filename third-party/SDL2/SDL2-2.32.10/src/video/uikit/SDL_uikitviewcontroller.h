@@ -47,6 +47,9 @@
 
 - (instancetype)initWithSDLWindow:(SDL_Window *)_window;
 
+/* PSCAL: as SDL destroys the window, which this controller may outlive. */
+- (void)detachFromSDLWindow;
+
 - (void)setAnimationCallback:(int)interval
                     callback:(void (*)(void*))callback
                callbackParam:(void*)callbackParam;

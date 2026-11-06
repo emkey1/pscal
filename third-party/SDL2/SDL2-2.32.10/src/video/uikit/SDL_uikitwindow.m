@@ -352,6 +352,12 @@ void UIKit_DestroyWindow(_THIS, SDL_Window * window)
             data.uiwindow.rootViewController = nil;
             data.uiwindow.hidden = YES;
 
+            /* PSCAL: iOS can keep the view controller itself alive too. On iOS 17 it
+             * gave the controller's text field back the keyboard after the terminal
+             * let go of it, and the controller, still watching the keyboard, read this
+             * window after it was freed. */
+            [data.viewcontroller detachFromSDLWindow];
+
             CFRelease(window->driverdata);
             window->driverdata = NULL;
         }
