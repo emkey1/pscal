@@ -126,9 +126,14 @@ kill $p
 wait $p
 echo "ended $?"' 'ended 143'
 
-# The shell goes on past a killed writer whose reader has stalled. The writer's thread itself stays
-# in libc's write, which a cancel can't reach, until the reader moves. So nothing here can look for
-# its descriptors going away: vprocStreamEndWithThread has its own test in test_vproc.c.
+# fifo_held: how many descriptors the shell has on this case's FIFO, from lsof outside it.
+fifo_held() {
+    lsof -p "$SHELL_PID" 2>/dev/null | awk '$5 == "FIFO"' | grep -c "$(basename "$BASE")/r$n/f\$"
+}
+
+# A killed writer whose reader has stalled ends, and lets go of the FIFO while the reader still
+# stalls. Its writes wait where a kill can act: libc's own write under a FILE can't be cancelled,
+# and the thread stayed in it, holding 4 descriptors, until the reader moved.
 setup
 mkfifo "$T/f"
 sleep 120 < "$T/f" &
@@ -143,6 +148,13 @@ echo "ended $?"
 while [ ! -e go ]; do sleep 1; done' > "$T/t.sh"
 start
 count_at mark > /dev/null
+held=$(fifo_held)
+i=0
+while [ "$held" != 0 ] && [ "$i" -lt 50 ]; do
+    sleep 0.1
+    held=$(fifo_held)
+    i=$((i + 1))
+done
 : > "$T/go"
 wait "$SHELL_PID"
 rc=$?
@@ -150,12 +162,39 @@ out=$(cat "$T/out.txt")
 kill "$READER" 2>/dev/null
 wait "$READER" 2>/dev/null
 READER=""
-if [ "$rc" != 0 ] || [ "$out" != "ended 143" ]; then
-    echo "FAIL kill_stalled_reader: status $rc, output: $out"
+if [ "$rc" != 0 ] || [ "$out" != "ended 143" ] || [ "$held" != 0 ]; then
+    echo "FAIL kill_stalled_reader: status $rc, $held descriptors left on the FIFO, output: $out"
     head -5 "$T/err.txt"
     fails=$((fails + 1))
 else
     echo "ok kill_stalled_reader"
+fi
+
+# A FIFO's reader that goes away gives the writer EPIPE, not the whole shell a SIGPIPE: the
+# shell's own signal() goes to its vproc, and the host's disposition ended it with 141.
+setup
+mkfifo "$T/f"
+printf '%s\n' 'head -c 50 < f > /dev/null &
+r=$!
+clike flood.clike > f &
+p=$!
+wait $r
+echo "reader $?"
+sleep 1
+kill $p
+wait $p
+echo "ended $?"' > "$T/t.sh"
+start
+wait "$SHELL_PID"
+rc=$?
+out=$(cat "$T/out.txt")
+if [ "$rc" != 0 ] || [ "$out" != "reader 0
+ended 143" ]; then
+    echo "FAIL reader_leaves: status $rc, output: $out"
+    head -5 "$T/err.txt"
+    fails=$((fails + 1))
+else
+    echo "ok reader_leaves"
 fi
 
 # Later commands still have their stdout.

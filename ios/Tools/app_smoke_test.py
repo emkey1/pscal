@@ -926,6 +926,10 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     # A thread's streams close as it ends: each of these used to leave a descriptor open for the
     # life of the app. Tests/ios_vproc/test_thread_end_streams.sh counts them.
     ("frontend_streams_repeat", f"i=0; while [ $i -lt 100 ]; do pascal smoke/hello.pas > /dev/null; pascal smoke/halt2.pas > smoke/ho; i=$((i + 1)); done; pascal smoke/hello.pas | wc -l | tr -d ' ' {R}", "1\n"),
+    # A killed frontend whose FIFO reader has stalled, or gone, ends at once: its writes wait where
+    # a kill can act. Tests/ios_vproc/test_thread_end_streams.sh also checks it lets go of the FIFO.
+    ("frontend_fifo_stalled_kill", f"rm -f smoke/kf; mkfifo smoke/kf; sleep 30 < smoke/kf & r=$!; clike smoke/flood.clike > smoke/kf & p=$!; sleep 1; kill $p; wait $p; echo \"ended $?\" {R}; kill $r; wait $r; clike smoke/hello.clike {A}; rm -f smoke/kf", "ended 143\nclike ok 42\n"),
+    ("frontend_fifo_reader_gone", f"rm -f smoke/kf; mkfifo smoke/kf; head -c 5 < smoke/kf > /dev/null & r=$!; clike smoke/flood.clike > smoke/kf & p=$!; wait $r; sleep 1; kill $p; wait $p; echo \"ended $?\" {R}; rm -f smoke/kf", "ended 143\n"),
     ("rea_thread_output", f"rea smoke/thread.rea | tr -d ' ' | sort {R}", "childok\nmainok\n"),
     # A killed program in raw mode puts the terminal back, from its thread's key destructor,
     # and so does a worker that went raw. Tests/ios_vproc/test_thread_end_raw_mode.py has both.
@@ -1437,6 +1441,7 @@ FIXTURES = {
     "big.pas": "program Big;\nvar i: integer;\nbegin\n  for i := 1 to 100000 do writeln('line of big output');\nend.\n",
     "first.pas": "program First;\nuses crt;\nbegin\n  writeln('first stage');\n  delay(2000);\nend.\n",
     "sdlkeys.pas": "program SdlKeys;\nvar i, k, n: integer;\nbegin\n  InitGraph(320, 240, 'smoke');\n  n := 0;\n  for i := 1 to 20 do\n  begin\n    GraphLoop(100);\n    k := PollKeyAny();\n    while k <> 0 do\n    begin\n      n := n + 1;\n      k := PollKeyAny();\n    end;\n  end;\n  CloseGraph;\n  writeln('keys ', n);\nend.\n",
+    "flood.clike": 'int main() {\n    while (1) {\n        printf("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\n");\n    }\n    return 0;\n}\n',
     "halt2.pas": "program Halting2;\nbegin\n  writeln('before halt');\n  halt(3);\nend.\n",
     "rawk.clike": 'int main() {\n    keypressed();\n    printf("raw\\n");\n    fflush();\n    delay(60000);\n    return 0;\n}\n',
     "raww.clike": 'void w() {\n    keypressed();\n}\nint main() {\n    int t = spawn w();\n    join t;\n    printf("joined\\n");\n    fflush();\n    delay(60000);\n    return 0;\n}\n',

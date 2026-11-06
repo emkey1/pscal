@@ -79,6 +79,7 @@ Base: `V.1R32`
 - A program's stdout, stderr and stdin close when it ends. Each `pascal x > f` left one descriptor open for as long as the app ran, the file stayed open too, and after about 230 of them `pascal x | cat` failed with `Too many open files`.
 - A program killed while it reads single keys, after `ReadKey` or `KeyPressed` in it or in a thread it spawned, puts the terminal back in line mode with echo. A background one left the terminal with no echo and no line editing.
 - A thread that polled more than 128 descriptors no longer leaves about 5 KB behind when it ends.
+- A killed program whose output goes to a pipe or FIFO that has stopped reading ends at once and lets go of it. `wait` reported it gone, but it stayed in its write, holding the FIFO open, until the reader moved. On the host test build of exsh, the reader then leaving ended the whole shell with status 141; the app ignores SIGPIPE and could not.
 
 
 ## Differs from bash
@@ -107,6 +108,9 @@ Base: `V.1R32`
 Descriptor names, on iOS:
 - `/proc/$$/fd/1` inside a redirected group misses the redirection: `{ echo a > /proc/$$/fd/1; } > f` leaves `f` empty. Host builds write `a` to `f`, as Linux does. Seen through the smoke tool, which runs in the nested `.exshrc` context, not at a prompt.
 - `readlink /proc/self/fd/3` on a file, and `readlink -f /dev/stdout` with stdout on a file, don't give the path that `$HOME` names it by. Host builds do.
+
+Pipes, on iOS:
+- A program writing to a pipe or FIFO whose reader has gone, as in `clike x | head -1`, runs on, and the line never ends: its writes fail with `EPIPE`, where on Linux SIGPIPE ends it. `kill` ends it.
 
 Terminals, on iOS:
 - Writing to `/dev/tty` shows nothing on screen, though the write succeeds, as `echo x > /dev/tty`.
