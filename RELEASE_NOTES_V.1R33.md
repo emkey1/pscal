@@ -128,6 +128,7 @@ Base: `V.1R32`
 - A stage killed on the shell's or a subshell's thread stops, and `$?` is 143 where it was 0. A call that waits gives up, an applet leaves at its next look for signals and a frontend the next time it calls or loops.
 - A shell run as a command runs its EXIT trap: `sh -c`, `sh file` and a `#!` script. It never ran on iOS.
 - A shell dying of a signal it sent itself runs its EXIT trap first, as bash does, except for KILL and QUIT, and `exit` in that trap doesn't change the status.
+- `~/Examples/aether/sdl/circles.aether`, Aether's SDL demo, runs. It was written in the builtin names' old capitals (`InitGraph`), so since builtin names became case-sensitive it stopped at once with `[SCOPE-001] identifier 'InitGraph' not in scope`, on every platform.
 
 ## Updated in the iOS app
 - `ssh`, `scp`, `sftp` and `ssh-keygen` are OpenSSH 10.6p2, the latest upstream release (2026-11-05), up from 10.2p1. `ssh -V` says so. Every change the app makes to OpenSSH is carried over. Security fixes they gain:

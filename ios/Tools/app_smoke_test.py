@@ -439,6 +439,9 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     # The window takes the keyboard away from the terminal. That used to type a space and a delete
     # into the running program.
     ("sdl_no_typed_keys", f"pascal smoke/sdlkeys.pas {R}; sleep 3", "keys 0\n"),
+    # Aether's SDL demo, as ~/Examples has it: opens a window, draws, closes.
+    ("sdl_aether_circles", f"aether --no-cache Examples/aether/sdl/circles.aether {R}; sleep 3",
+     "Aether SDL demo: init + draw + present + close, clean.\n"),
     ("applet_fail_rc", f"awk 1 smoke/nope > /dev/null 2>&1; echo $? {R}", "2\n"),
     ("shebang_fail_rc", f"smoke/sb3.sh > /dev/null 2>&1; echo $? {R}", "3\n"),
     # A #! frontend has no process exit to flush its output: it arrived after the
