@@ -60,6 +60,10 @@ Base: `V.1R32`
 - `ulimit` is a builtin, on every platform. A file named `ulimit` on PATH could not change the shell, and Linux has none. It reads and sets `-c -d -f -l -m -n -p -s -t -u -v`, with `-S`, `-H` and `-a`. What a subshell, stage, job, substitution or nested shell sets ends with it.
 - A script with no `#!` is read by exsh itself on a host, as bash reads it. It went to the system's `sh`, where a bashism failed and on Linux an array or `caller` was not there. A file with a NUL on its first line says `cannot execute binary file` and gives 126, where it was run as a script.
 - On a plain build, `mkfifo p; echo x > p & cat p` no longer hangs the shell. exsh opened a job's redirections before it forked, and a FIFO's open waits for the other end, which was the shell's next command; at a prompt Ctrl-C could not free it. A job now opens its own redirections, each in its turn, as bash does. The same goes for `cat < p &`, functions, groups, subshells, loops and pipeline stages. Other forms change with it: `cat <&3 3< f` fails, `/bin/echo x > a <&9 > b` no longer creates `b`, `cat 3>&1 <<EOF` keeps its body, and `echo hi | cat < /dev/stdin` reads the pipe.
+- A background command's or pipeline stage's words expand in it, as in bash. `: ${v:=1} &`, `echo $((v=5)) | cat` and `x=$(cmd) &` no longer change the shell, and `cmd $(slow) &` no longer holds the shell until `slow` ends. `echo a | echo $(cat)` reads the pipe. `$!`, `wait` and `kill` still reach the command.
+- `exec cmd &` runs `cmd` as the job. It said `exec: cannot be used in background`.
+- A background command or a pipeline stage leaves `$_` alone.
+- A CHLD trap's own commands do not run it again. A pipeline, subshell or program in one kept that shell busy for ever.
 
 ## Fixed in the iOS app
 - `env test a == a`, and `xargs` or `find -exec` running `test`, know `==`, and take a value of `!`. They said `test: unsupported expression`.
@@ -80,6 +84,9 @@ Base: `V.1R32`
 - A program killed while it reads single keys, after `ReadKey` or `KeyPressed` in it or in a thread it spawned, puts the terminal back in line mode with echo. A background one left the terminal with no echo and no line editing.
 - A thread that polled more than 128 descriptors no longer leaves about 5 KB behind when it ends.
 - A killed program whose output goes to a pipe or FIFO that has stopped reading ends at once and lets go of it. `wait` reported it gone, but it stayed in its write, holding the FIFO open, until the reader moved. On the host test build of exsh, the reader then leaving ended the whole shell with status 141; the app ignores SIGPIPE and could not.
+- A program started in a subshell has its own `$$`. It had the shell's, so `( sh -c 'kill -USR1 $$' )` ended the shell.
+- `$RANDOM` in a job or a stage no longer moves the shell's sequence.
+- `cat <(cmd) &` works. The file standing in for `<(cmd)` was gone before the job read it.
 
 
 ## Differs from bash
