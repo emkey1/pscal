@@ -1273,7 +1273,8 @@ static const char *pscal_ios_effective_path(const char *path,
     if (pscal_ios_translate_etc_path(source_path, buffer, buflen)) {
         return buffer;
     }
-    if (source_path[0] == '/' && !pscal_ios_path_truncate_context_active()) {
+    /* A name joined to the shell's directory is the app's, as that directory is: map it always. */
+    if (source_path == path && path[0] == '/' && !pscal_ios_path_truncate_context_active()) {
         return source_path;
     }
     if (!pathTruncateExpand(source_path, buffer, buflen)) {
