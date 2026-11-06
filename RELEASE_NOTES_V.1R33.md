@@ -82,6 +82,7 @@ Base: `V.1R32`
 - `sh -c 'jobs | wc -l'` lists that shell's jobs, and in `$(...)` a stage lists the substitution's, not the top shell's.
 - A program's stdout, stderr and stdin close when it ends. Each `pascal x > f` left one descriptor open for as long as the app ran, the file stayed open too, and after about 230 of them `pascal x | cat` failed with `Too many open files`.
 - A program killed while it reads single keys, after `ReadKey` or `KeyPressed` in it or in a thread it spawned, puts the terminal back in line mode with echo. A background one left the terminal with no echo and no line editing.
+- A program that reads single keys puts the terminal back as it found it. Each one put back the settings the first such program in the app had found, on whichever tab, so it undid an `stty` made since: at a `ReadLn` after the keys, and when it was killed.
 - A thread that polled more than 128 descriptors no longer leaves about 5 KB behind when it ends.
 - A killed program whose output goes to a pipe or FIFO that has stopped reading ends at once and lets go of it. `wait` reported it gone, but it stayed in its write, holding the FIFO open, until the reader moved. On the host test build of exsh, the reader then leaving ended the whole shell with status 141; the app ignores SIGPIPE and could not.
 - A program started in a subshell has its own `$$`. It had the shell's, so `( sh -c 'kill -USR1 $$' )` ended the shell.

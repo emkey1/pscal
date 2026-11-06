@@ -985,6 +985,10 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     # and so does a worker that went raw. Tests/ios_vproc/test_thread_end_raw_mode.py has both.
     ("frontend_killed_raw_mode", f"rm -f smoke/rk; clike smoke/rawk.clike > smoke/rk & p=$!; i=0; while [ ! -s smoke/rk ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; kill $p; wait $p; sleep 0.3; stty -a | tr ' ' '\\n' | grep -x -e -icanon -e -echo {R}; stty icanon echo; echo end {A}", "end\n"),
     ("frontend_killed_raw_worker", f"rm -f smoke/rk; clike smoke/raww.clike > smoke/rk & p=$!; i=0; while [ ! -s smoke/rk ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; kill $p; wait $p; sleep 0.3; stty -a | tr ' ' '\\n' | grep -x -e -icanon -e -echo {R}; stty icanon echo; echo end {A}", "end\n"),
+    # Raw mode's base is the terminal as each program finds it. The first base taken was kept for
+    # the app's life, so a later program undid an stty made since. A normal end hides it (the shell
+    # restores around every frontend run), a kill doesn't. Tests/ios_vproc/test_termios_base.py.
+    ("frontend_termios_base", f"clike smoke/kp.clike & wait $!; stty -echoctl; rm -f smoke/rk; clike smoke/rawk.clike > smoke/rk & p=$!; i=0; while [ ! -s smoke/rk ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; kill $p; wait $p; sleep 0.3; stty -a | tr ' ' '\\n' | grep -x -e -echoctl -e echoctl {R}; stty echoctl", "-echoctl\n"),
     # Both ends of a local rsync run in this one process, with no fork or process exit
     # between them: a real _exit took every terminal session with it, and what one run
     # or one end sets must not reach another.
@@ -1536,6 +1540,7 @@ FIXTURES = {
     "sdlkeys.pas": "program SdlKeys;\nvar i, k, n: integer;\nbegin\n  InitGraph(320, 240, 'smoke');\n  n := 0;\n  for i := 1 to 20 do\n  begin\n    GraphLoop(100);\n    k := PollKeyAny();\n    while k <> 0 do\n    begin\n      n := n + 1;\n      k := PollKeyAny();\n    end;\n  end;\n  CloseGraph;\n  writeln('keys ', n);\nend.\n",
     "flood.clike": 'int main() {\n    while (1) {\n        printf("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\n");\n    }\n    return 0;\n}\n',
     "halt2.pas": "program Halting2;\nbegin\n  writeln('before halt');\n  halt(3);\nend.\n",
+    "kp.clike": 'int main() {\n    keypressed();\n    return 0;\n}\n',
     "rawk.clike": 'int main() {\n    keypressed();\n    printf("raw\\n");\n    fflush();\n    delay(60000);\n    return 0;\n}\n',
     "raww.clike": 'void w() {\n    keypressed();\n}\nint main() {\n    int t = spawn w();\n    join t;\n    printf("joined\\n");\n    fflush();\n    delay(60000);\n    return 0;\n}\n',
     "sdlclose.pas": "program SdlClose;\nbegin\n  InitGraph(320, 240, 'smoke');\n  CloseGraph;\n  writeln('closed');\nend.\n",
