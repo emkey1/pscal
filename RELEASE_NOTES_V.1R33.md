@@ -88,6 +88,11 @@ Base: `V.1R32`
 - `$RANDOM` in a job or a stage no longer moves the shell's sequence.
 - `cat <(cmd) &` works. The file standing in for `<(cmd)` was gone before the job read it.
 - With stdin closed (`cmd <&-`, or after `exec <&-`), `awk`, `wc`, `base64`, `gzip -c` and `xargs` fail and say why, as with the Mac's or Linux's tools. `awk` gave 0, `wc -l` and `base64` failed without a word, `gzip -c` wrote its header to stdout before it failed, and `xargs` gave 0. `[ -t 0 ]` and `tty` no longer take the session's terminal for a closed stdin: `exec <&-; [ -t 0 ]` said it was a terminal, and `tty <&-` or `tty < /dev/null` printed its name.
+- A program's imports follow `cd` and take the app's absolute paths. After `cd d`, `clike ../p.cl` with `import "m.cl"` compiled the `m.cl` in the directory the app started in, with no error, and an import of `/home/x/m.cl` said `Could not open import`. This covered CLike's `import` and `#include`, Rea's `#import`, Aether's `use`, and Pascal's units under a relative or absolute `PASCAL_LIB_DIR`.
+
+## Fixed in the frontends on every platform
+- A bytecode cache entry covers the files its program imports. An import is also looked for in the working directory, so one program can compile to two from two directories, and run from the second it could reuse the first's entry. Rea and Aether could also miss an edit to a module that an imported module uses.
+
 
 
 ## Differs from bash
