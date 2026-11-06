@@ -133,6 +133,7 @@ Base: `V.1R32`
 - `:` takes 0.64 µs, down from 0.97 µs, an assignment 0.95 µs, down from 1.46 µs, and `eval` 4.7 µs, down from 6.0 µs. A command reads its metadata in place instead of copying it, sets `EXSH_LAST_STATUS` only when it changes, and reads debug switches such as `PSCALI_REDIR_DEBUG` again only after the shell sets a variable.
 - `[ ]` among 10,000 files took twice as long as in an empty directory, and now takes the same.
 
+- `<(cmd)` and `>(cmd)` are a pipe with a command running beside whatever names it, as on Linux, and the word is `/dev/fd/N`. `exec 3> >(cmd)` and `exec > >(tee log)` lost everything written afterwards, because a file stood in and the command read it at once. `head -1 <(yes)` never ended and filled the disk. `tee >(a) >(b)` ran its commands one after the other, once `tee` was done.
 
 ## Differs from bash
 - A job's text is as it was written, where bash prints a compound command back on several lines in its own layout. `jobs -l` gives a pipeline one line, where bash gives each stage one. The padding is bash's on Linux; bash 5.3 on macOS pads further.
@@ -148,6 +149,7 @@ Base: `V.1R32`
 - `y=1 z=$((1/0))` assigns nothing, where bash has set y by then. `cat <<< $((1/0)); echo x` drops `echo x`, where bash runs it. An integer variable's assignment as a pipeline's stage, `n=1/0 | cat`, says nothing.
 
 ## Differs from Linux on iOS
+- A script at top level that writes to a pipe whose reader has gone, such as `exec 3> >(head -1)`, gets a write error and carries on. On Linux SIGPIPE ends it with status 141. A subshell does end.
 - Opening `/dev/stdin` or `/dev/fd/N` on a pipe in the direction the descriptor doesn't go says `Permission denied`, where Linux opens the pipe's other end. On a socket it gives a copy, where Linux says `No such device or address`.
 - A symlink to `/dev/stdout` reaches the app's own stdout and not the command's: after `ln -s /dev/stdout x`, `echo a > x` is lost. Any symlink whose target starts with `/` is followed outside the app's root.
 - `ls -ld /dev/fd` shows a directory, though `readlink /dev/fd` answers `/proc/self/fd`.
