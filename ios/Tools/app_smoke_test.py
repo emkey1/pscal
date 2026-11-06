@@ -416,8 +416,13 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     # The app's aether reports the released language it ships, and the commit it was built from.
     ("aether_version_label", f"aether --version | sed 's/+[0-9a-z-]* / /; s/, latest tag: [^)]*)$/)/' {R}", AETHER_VERSION_LINE),
     ("aether_version_commit", f"aether --version | cut -d' ' -f4 | tr -d '0-9a-z-' {R}", "+\n"),
-    # ~/Docs carries the full Aether guide.
+    # ~/Docs carries the full Aether guide, and its builtin inventory is this binary's.
     ("aether_guide_bundled", f"{{ cmp Docs/Aether/aether_for_llms_and_others.md smoke/guide.md && echo same; }} {R}", "same\n"),
+    ("aether_guide_inventory", f"aether --no-cache smoke/builtins.aether {R}", guide_inventory_matches),
+    # The shell's commands are not Aether's builtins in the app: smallclue's `sum` tool took the
+    # effect of Aether's pure `sum`, and `cat` compiled as a call.
+    ("aether_pure_sum", f"aether --no-cache smoke/psum.aether {R}", "sum 6\n"),
+    ("aether_no_shell_cat", f"aether --no-cache smoke/pcat.aether > /dev/null 2> smoke/pcat.err; echo $? {R}; grep -c SCOPE-001 smoke/pcat.err {A}", "1\n1\n"),
     ("pascal_fail_or", f"pascal smoke/nope.pas 2>/dev/null || echo failed {R}", "failed\n"),
     ("pascal_halt_rc", f"pascal smoke/halt.pas > /dev/null 2>&1; echo $? {R}", "3\n"),
     # An SDL window gone as soon as it is up. It used to come back after the close, and released
@@ -1844,6 +1849,9 @@ end.
                  '        println("then ", read_line());\n    }\n    ret;\n}\n',
     "all.aether": 'fn main() -> Void {\n    fx { print(read_all_stdin()); }\n    ret;\n}\n',
     "builtins.aether": 'fn main() -> Void {\n    fx { println(builtins_json(true)); }\n    ret;\n}\n',
+    "psum.aether": '@pure\nfn total(xs: Int[]) -> Int {\n    ret sum(xs);\n}\n\nfn main() -> Void {\n'
+                   '    let xs: Int[] = [1, 2, 3];\n    fx { println("sum ", total(xs)); }\n    ret;\n}\n',
+    "pcat.aether": 'fn main() -> Void {\n    fx { cat("smoke/d.txt"); println("after cat"); }\n    ret;\n}\n',
     "guide.md": AETHER_GUIDE.read_text(encoding="utf-8"),
 }
 

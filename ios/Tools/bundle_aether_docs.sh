@@ -7,7 +7,8 @@
 # The guide is the full one, aether_for_llms_and_others.md: it ends in the
 # generated inventory of every builtin, which aether's standalone build
 # produces. The categories that build leaves out (SDL graphics, 3D) are ones
-# the inventory skips anyway, so it is the app's inventory too.
+# the inventory skips anyway, so it is the app's inventory too; the app smoke
+# row aether_guide_inventory regenerates it from the app's builtins_json.
 #
 # Usage: bundle_aether_docs.sh <bundle_root>
 set -euo pipefail
