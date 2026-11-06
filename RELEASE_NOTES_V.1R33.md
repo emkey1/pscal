@@ -2,6 +2,16 @@
 
 Base: `V.1R32`
 
+## Licence
+- PSCAL is under the Apache License 2.0 from this release. Each repository has a `LICENSE` and a `NOTICE`, and the source headers say so.
+- No GPL code is left in the app. The terminal layer (terminals, pseudo-terminal pairs and their line discipline) and the terminal page with its host were written afresh from specifications, by implementers who hadn't read the old code, which came from iSH. GPL and LGPL files that nothing built are gone from the vendored SDL trees, as is the unused SDL_mixer submodule.
+- libgit2 is upstream's, unmodified, under GPLv2 with its linking exception. What PSCAL needs from it is done in the build.
+
+## New in the iOS app
+- Workspace, an option beside the tab bar: a desktop of windows inside the app. Shell sessions open as windows that move, resize, zoom and stack, on more than one Desktop, and an arrangement can be saved and restored. Tabs work as before, and the Workspace button switches between them.
+- Workspace's applets, from its Applets menu: Desktops, Launcher, Quick Actions, Sessions, Themes, Clock, Monitor, Networks, Logs, Settings, Diagnostics, File Manager, MotePad (a text editor), Markdown, Image Viewer, Storage, Browser, Video Player, Music and Equalizer.
+- `ws` reaches Workspace from a shell inside it: `ws open TOOL [PATH]` opens an applet, on a file for those that take one, `ws applets` lists the open applet windows, and `ws status` says whether the shell is in Workspace and which applets it can open.
+
 ## Fixed in exsh
 - IFS splits only what an expansion produced, as in bash. Text a word itself holds used to split too: `IFS=:; printf '<%s>' a:b` gave two fields, `IFS=/; ls /dev/null` passed `dev` and `null`, and `IFS=e; echo hello` could not find its command. Redirection targets, `for` lists, loop conditions and the words inside `$(...)` all follow it. Where bash 3.2 and 5 differ, as in `a:$x:b`, exsh follows 5.
 - A quoted part no longer keeps the rest of a word from being split or matched: `"c"$x` with `x='a b'` is two fields where it was one, and `""$g` with `g='f*'` matches files.
@@ -129,6 +139,9 @@ Base: `V.1R32`
 - A shell run as a command runs its EXIT trap: `sh -c`, `sh file` and a `#!` script. It never ran on iOS.
 - A shell dying of a signal it sent itself runs its EXIT trap first, as bash does, except for KILL and QUIT, and `exit` in that trap doesn't change the status.
 - `~/Examples/aether/sdl/circles.aether`, Aether's SDL demo, runs. It was written in the builtin names' old capitals (`InitGraph`), so since builtin names became case-sensitive it stopped at once with `[SCOPE-001] identifier 'InitGraph' not in scope`, on every platform.
+- Terminals act as Linux's do, held by a test that runs the same program on Linux and in the app's process model. A new terminal starts with Linux's settings, so `stty -a` prints what Linux prints. With `iexten` set, word erase, reprint, literal next and `eol2` work. The echo flags (`echonl`, `echoprt`, `echoke`, `echok`, `echoe`) and the other input and output flags a Linux pty honours, tab expansion among them, take effect, and with `iutf8` erase removes a whole character. `min 0 time N` is a timed read, `FIONREAD` in line mode counts only what a read could return, packet mode reports with `POLLPRI`, and errors come back as themselves where several were `EIO`.
+- Job control reaches the terminal: it knows its foreground group, and a background job that reads it is stopped by `SIGTTIN`, or by `SIGTTOU` when it writes with `tostop` set, as on Linux. A job that ignores or blocks the signal, or whose group is orphaned, gets `EIO`. Setting the foreground group checks it as Linux does, and a pty master never becomes a controlling terminal.
+- `SIGWINCH` goes to the terminal's foreground group, and only when the size changed. The size comes from the view alone, measured again after a rotation and once a burst of layout changes settles. Opening and closing SDL windows used to write it hundreds of times from competing sources.
 
 ## Updated in the iOS app
 - `ssh`, `scp`, `sftp` and `ssh-keygen` are OpenSSH 10.6p2, the latest upstream release (2026-11-05), up from 10.2p1. `ssh -V` says so. Every change the app makes to OpenSSH is carried over. Security fixes they gain:
@@ -188,6 +201,9 @@ Base: `V.1R32`
 - A shell whose thread can't be cancelled acts on a fatal signal from another task only when its current command is done, where Linux ends it at once and leaves the command running.
 - A command on the shell's or a subshell's thread that doesn't look for signals keeps running when killed from another task, where Linux ends it. A call that waits gives up, and the rest runs until the command ends.
 - A fatal signal from code with no way back to the shell, on a thread that has to go on, returns with the task marked as ending. Only applets have that way back, and a frontend stops the next time it calls or loops.
+- Ctrl-C and Ctrl-Z typed at a terminal become signals in the session's reader, not in the line discipline, and a command runs with `isig` clear.
+- Flow control isn't done: Ctrl-S and Ctrl-Q are ordinary keys whatever `ixon` says.
+- With `icanon` clear, input translation and echo stop too, where Linux keeps them while their own flags are set.
 
 ## Known Issues
 - `micro` makes a new file with the first tab's shell's mask, not its own: the Go runtime reaches libc directly.
