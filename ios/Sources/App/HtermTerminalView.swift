@@ -808,7 +808,13 @@ final class HtermTerminalController: NSObject {
     fileprivate func noteUserInput() {
         guard isLoaded else { return }
         callPage("exports.setUserGesture()")
-        // Input can arrive far faster than it's worth scrolling for.
+        scheduleScrollToBottom()
+    }
+
+    /// Brings the newest lines back into view, as the keyboard shows or hides. No input is sent.
+    func scheduleScrollToBottom() {
+        guard isLoaded else { return }
+        // Calls can arrive far faster than it's worth scrolling for.
         guard !scrollToBottomQueued else { return }
         scrollToBottomQueued = true
         DispatchQueue.main.async { [weak self] in
