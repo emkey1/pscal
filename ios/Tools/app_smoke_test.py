@@ -916,6 +916,10 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     # life of the app. Tests/ios_vproc/test_thread_end_streams.sh counts them.
     ("frontend_streams_repeat", f"i=0; while [ $i -lt 100 ]; do pascal smoke/hello.pas > /dev/null; pascal smoke/halt2.pas > smoke/ho; i=$((i + 1)); done; pascal smoke/hello.pas | wc -l | tr -d ' ' {R}", "1\n"),
     ("rea_thread_output", f"rea smoke/thread.rea | tr -d ' ' | sort {R}", "childok\nmainok\n"),
+    # A killed program in raw mode puts the terminal back, from its thread's key destructor,
+    # and so does a worker that went raw. Tests/ios_vproc/test_thread_end_raw_mode.py has both.
+    ("frontend_killed_raw_mode", f"rm -f smoke/rk; clike smoke/rawk.clike > smoke/rk & p=$!; i=0; while [ ! -s smoke/rk ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; kill $p; wait $p; sleep 0.3; stty -a | tr ' ' '\\n' | grep -x -e -icanon -e -echo {R}; stty icanon echo; echo end {A}", "end\n"),
+    ("frontend_killed_raw_worker", f"rm -f smoke/rk; clike smoke/raww.clike > smoke/rk & p=$!; i=0; while [ ! -s smoke/rk ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; kill $p; wait $p; sleep 0.3; stty -a | tr ' ' '\\n' | grep -x -e -icanon -e -echo {R}; stty icanon echo; echo end {A}", "end\n"),
     # Both ends of a local rsync run in this one process, with no fork or process exit
     # between them: a real _exit took every terminal session with it, and what one run
     # or one end sets must not reach another.
@@ -1423,6 +1427,8 @@ FIXTURES = {
     "first.pas": "program First;\nuses crt;\nbegin\n  writeln('first stage');\n  delay(2000);\nend.\n",
     "sdlkeys.pas": "program SdlKeys;\nvar i, k, n: integer;\nbegin\n  InitGraph(320, 240, 'smoke');\n  n := 0;\n  for i := 1 to 20 do\n  begin\n    GraphLoop(100);\n    k := PollKeyAny();\n    while k <> 0 do\n    begin\n      n := n + 1;\n      k := PollKeyAny();\n    end;\n  end;\n  CloseGraph;\n  writeln('keys ', n);\nend.\n",
     "halt2.pas": "program Halting2;\nbegin\n  writeln('before halt');\n  halt(3);\nend.\n",
+    "rawk.clike": 'int main() {\n    keypressed();\n    printf("raw\\n");\n    fflush();\n    delay(60000);\n    return 0;\n}\n',
+    "raww.clike": 'void w() {\n    keypressed();\n}\nint main() {\n    int t = spawn w();\n    join t;\n    printf("joined\\n");\n    fflush();\n    delay(60000);\n    return 0;\n}\n',
     "sdlclose.pas": "program SdlClose;\nbegin\n  InitGraph(320, 240, 'smoke');\n  CloseGraph;\n  writeln('closed');\nend.\n",
     "sdlerror.pas": "program SdlError;\nbegin\n  InitGraph(320, 240, 'smoke');\n  GLBegin('no_such_primitive');\nend.\n",
     "glprims.pas": "program GlPrims;\nbegin\n  InitGraph(320, 240, 'smoke');\n  GLBegin('quad_strip');\n  GLEnd;\n  GLBegin('polygon');\n  GLEnd;\n  CloseGraph;\n  writeln('drawn');\nend.\n",

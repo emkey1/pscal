@@ -29,6 +29,7 @@
 #include <time.h>
 #if defined(__APPLE__)
 #include <mach/mach.h>
+#include <malloc/malloc.h>
 #endif
 #define PATH_VIRTUALIZATION_NO_MACROS 1
 #include "common/path_truncate.h"
@@ -9489,6 +9490,48 @@ static void assert_stream_end_with_thread(void) {
     }
 }
 
+#if defined(__APPLE__)
+/* A poll over more descriptors than fit on the stack grows buffers of the thread's own. A
+ * thread that ends outside the vproc trampoline frees them from a key destructor, where
+ * Darwin's __thread values already read as zero, so each one used to leak about 5 KB. */
+static void *poll_wide_on_own_vproc(void *arg) {
+    (void)arg;
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+    struct pollfd fds[200];
+    for (int i = 0; i < 200; ++i) {
+        fds[i].fd = -1;
+        fds[i].events = POLLIN;
+        fds[i].revents = 0;
+    }
+    assert(vprocPollShim(fds, 200, 0) == 0);
+    vprocDeactivate();
+    vprocDestroy(vp);
+    return NULL;
+}
+
+static size_t heap_in_use(void) {
+    malloc_statistics_t stats;
+    malloc_zone_statistics(NULL, &stats);
+    return stats.size_in_use;
+}
+
+static void assert_poll_scratch_freed_at_thread_end(void) {
+    pthread_t thread;
+    assert(vprocHostPthreadCreate(&thread, NULL, poll_wide_on_own_vproc, NULL) == 0);
+    assert(pthread_join(thread, NULL) == 0);
+    size_t before = heap_in_use();
+    for (int i = 0; i < 200; ++i) {
+        assert(vprocHostPthreadCreate(&thread, NULL, poll_wide_on_own_vproc, NULL) == 0);
+        assert(pthread_join(thread, NULL) == 0);
+    }
+    size_t after = heap_in_use();
+    /* The leak was 200 x 5 KB. */
+    assert(after < before + 200 * 1024);
+}
+#endif
+
 static void assert_destroy_leaves_replaced_stdio_number_alone(void) {
     int hole = vprocHostOpen("/dev/null", O_RDONLY);
     assert(hole >= 0);
@@ -10207,6 +10250,10 @@ int main(void) {
     assert_named_descriptors_act_as_on_linux();
     fprintf(stderr, "TEST stream_end_with_thread\n");
     assert_stream_end_with_thread();
+#if defined(__APPLE__)
+    fprintf(stderr, "TEST poll_scratch_freed_at_thread_end\n");
+    assert_poll_scratch_freed_at_thread_end();
+#endif
     fprintf(stderr, "TEST cancelled_pipe_wait_leaves_pipe_usable\n");
     assert_cancelled_pipe_wait_leaves_pipe_usable();
     fprintf(stderr, "TEST two_pollers_on_a_pipe_keep_moving\n");
