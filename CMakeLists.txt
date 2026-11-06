@@ -2790,14 +2790,42 @@ if(PSCAL_BUILD_STATIC_LIBS)
         PSCAL_FRONTEND_DISPLAY_NAME=\"Aether\"
         PSCAL_FRONTEND_USAGE_NAME=\"aether\"
         PSCAL_FRONTEND_COMPILER_ID=\"aether\"
-        PSCAL_FRONTEND_INSTALL_HOOKS=aetherInstallFrontendHooks
-        PSCAL_PROGRAM_VERSION_OVERRIDE="${AETHER_LANG_VERSION}")
-    # The same release label as the aether executable's, for the iOS app.
-    if(EXISTS "${CMAKE_SOURCE_DIR}/components/aether/RELEASE")
-        file(STRINGS "${CMAKE_SOURCE_DIR}/components/aether/RELEASE" AETHER_RELEASE_LABEL LIMIT_COUNT 1)
-        if(AETHER_RELEASE_LABEL)
-            target_compile_definitions(pscal_aether_static PRIVATE PSCAL_RELEASE_LABEL="${AETHER_RELEASE_LABEL}")
+        PSCAL_FRONTEND_INSTALL_HOOKS=aetherInstallFrontendHooks)
+    # VERSION, plus "+<commit>" naming the exact aether source, as the
+    # executable prints it.
+    pscal_frontend_version(pscal_aether_static aether)
+    # The app ships a released language, so its label is that release's, not
+    # RELEASE's between-release dev label (`1.01-dev` names a release that
+    # does not exist yet). The release is the nearest tag whose VERSION is
+    # still this tree's: the language has not changed since it, and the
+    # commit after the date version says which build of it this is. With no
+    # such tag (a language change since, or a checkout without tags) the
+    # label stays RELEASE's.
+    set(_aether_dir "${CMAKE_SOURCE_DIR}/components/aether")
+    set(AETHER_APP_RELEASE_LABEL "")
+    if(EXISTS "${_aether_dir}/RELEASE")
+        file(STRINGS "${_aether_dir}/RELEASE" AETHER_APP_RELEASE_LABEL LIMIT_COUNT 1)
+    endif()
+    execute_process(
+        COMMAND git -C "${_aether_dir}" describe --tags --abbrev=0 --match "[0-9]*"
+        OUTPUT_VARIABLE _aether_tag
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE _aether_tag_result)
+    if(_aether_tag_result EQUAL 0 AND NOT _aether_tag STREQUAL "")
+        execute_process(
+            COMMAND git -C "${_aether_dir}" show "${_aether_tag}:VERSION"
+            OUTPUT_VARIABLE _aether_tag_version
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+            RESULT_VARIABLE _aether_tag_version_result)
+        if(_aether_tag_version_result EQUAL 0 AND _aether_tag_version STREQUAL AETHER_LANG_VERSION)
+            set(AETHER_APP_RELEASE_LABEL "${_aether_tag}")
         endif()
+    endif()
+    if(AETHER_APP_RELEASE_LABEL)
+        message(STATUS "Aether release label in the app: ${AETHER_APP_RELEASE_LABEL}")
+        target_compile_definitions(pscal_aether_static PRIVATE PSCAL_RELEASE_LABEL="${AETHER_APP_RELEASE_LABEL}")
     endif()
     # Aether installs its parse/semantic/module + diagnostic hooks at startup via
     # reaSetFrontendHooks() (src/aether/state.c); main() calls the installer named

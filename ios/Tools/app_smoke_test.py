@@ -32,7 +32,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import List, NamedTuple, Optional, Sequence, Tuple
+from typing import Callable, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 ROOT = Path(__file__).resolve().parents[2]
 RELEASE_BUILD = "Build/Products/Release-iphonesimulator/PSCAL.app"
@@ -60,12 +60,55 @@ SILENT_PORT = SILENT_SERVER.getsockname()[1]
 
 PRIMES = "Find all prime numbers up to: Prime numbers found up to 10:\n2 3 5 7 \n\nDone.\n"
 
+AETHER = ROOT / "components/aether"
+AETHER_GUIDE = AETHER / "docs/aether_for_llms_and_others.md"
+
+
+def git_out(*args: str) -> Optional[str]:
+    done = subprocess.run(["git", "-C", str(AETHER), *args], capture_output=True, text=True)
+    return done.stdout.strip() if done.returncode == 0 and done.stdout.strip() else None
+
+
+def aether_app_label() -> str:
+    """The release label the app's aether prints, worked out as the umbrella CMakeLists does for
+    pscal_aether_static: the nearest release tag whose VERSION is still this tree's, else RELEASE's."""
+    version = (AETHER / "VERSION").read_text().split("\n")[0].strip()
+    tag = git_out("describe", "--tags", "--abbrev=0", "--match", "[0-9]*")
+    if tag and git_out("show", f"{tag}:VERSION") == version:
+        return tag
+    return (AETHER / "RELEASE").read_text().split("\n")[0].strip()
+
+
+AETHER_VERSION_LINE = (f"Aether Compiler Version: {(AETHER / 'VERSION').read_text().split(chr(10))[0].strip()} "
+                       f"({aether_app_label()})\n")
+
+
+def guide_inventory_matches(got: Optional[str]) -> bool:
+    """The full guide's builtin inventory, regenerated from the app's own builtins_json, is the
+    inventory the bundled guide carries. The generator is aether's own; kind "unknown" entries are
+    what its probe would drop, and a current engine lists none."""
+    if not got:
+        return False
+    sys.path.insert(0, str(AETHER / "tools"))
+    try:
+        import gen_builtin_appendix as gen
+    finally:
+        sys.path.pop(0)
+    try:
+        entries = [e for e in json.loads(got) if e.get("kind") != "unknown"]
+    except (ValueError, AttributeError):
+        return False
+    text = AETHER_GUIDE.read_text(encoding="utf-8")
+    regenerated, _ = gen.regenerate(text, entries, str(AETHER_GUIDE))
+    return regenerated == text
+
 # (name, command, expected output). {o} is the test's result file. With an
-# expected output of None, the result file only has to appear.
+# expected output of None, the result file only has to appear; a function
+# instead of a string is given the result and says whether it passes.
 #
 # Each command redirects itself, so its result lands in its own file. In a pipeline
 # the redirect goes on the last stage.
-TESTS: List[Tuple[str, str, Optional[str]]] = [
+TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] = [
     ("cat_file", f"cat smoke/d.txt {R}", "b\na\nc\n"),
     ("cat_stdin", f"cat < smoke/d.txt {R}", "b\na\nc\n"),
     ("echo_pipe_cat", f"echo hi | cat {R}", "hi\n"),
@@ -370,6 +413,11 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("clike_fail_rc", f"clike smoke/nope.clike > /dev/null 2>&1; echo $? {R}", "1\n"),
     ("rea_fail_rc", f"rea smoke/nope.rea > /dev/null 2>&1; echo $? {R}", "1\n"),
     ("aether_fail_rc", f"aether smoke/nope.aether > /dev/null 2>&1; echo $? {R}", "1\n"),
+    # The app's aether reports the released language it ships, and the commit it was built from.
+    ("aether_version_label", f"aether --version | sed 's/+[0-9a-z-]* / /; s/, latest tag: [^)]*)$/)/' {R}", AETHER_VERSION_LINE),
+    ("aether_version_commit", f"aether --version | cut -d' ' -f4 | tr -d '0-9a-z-' {R}", "+\n"),
+    # ~/Docs carries the full Aether guide.
+    ("aether_guide_bundled", f"{{ cmp Docs/Aether/aether_for_llms_and_others.md smoke/guide.md && echo same; }} {R}", "same\n"),
     ("pascal_fail_or", f"pascal smoke/nope.pas 2>/dev/null || echo failed {R}", "failed\n"),
     ("pascal_halt_rc", f"pascal smoke/halt.pas > /dev/null 2>&1; echo $? {R}", "3\n"),
     # An SDL window gone as soon as it is up. It used to come back after the close, and released
@@ -1780,6 +1828,8 @@ end.
     "rl.aether": 'fn main() -> Void {\n    fx {\n        println("aether got ", read_line());\n'
                  '        println("then ", read_line());\n    }\n    ret;\n}\n',
     "all.aether": 'fn main() -> Void {\n    fx { print(read_all_stdin()); }\n    ret;\n}\n',
+    "builtins.aether": 'fn main() -> Void {\n    fx { println(builtins_json(true)); }\n    ret;\n}\n',
+    "guide.md": AETHER_GUIDE.read_text(encoding="utf-8"),
 }
 
 # The first lines of auto.sh, run in the app before any test.
@@ -2132,6 +2182,8 @@ def run_tests(session: Session, tests: Sequence, timeout: float, verbose: bool) 
             passed += 1
             if verbose:
                 print(f"info {name}: {got[:140]!r}")
+        elif callable(want) and want(got):
+            passed += 1
         elif got == want:
             passed += 1
             if known and known.always:
@@ -2142,7 +2194,7 @@ def run_tests(session: Session, tests: Sequence, timeout: float, verbose: bool) 
                 print(f"known {name}: {known.issue}")
         else:
             unexpected += 1
-            print(f"FAIL {name}: {shown}\n   want {want!r}\n   got  " + ("no result file" if got is None else repr(got[:220])))
+            print(f"FAIL {name}: {shown}\n   want {want.__name__ if callable(want) else repr(want)}\n   got  " + ("no result file" if got is None else repr(got[:220])))
     skipped = len(tests) - reached
     if skipped:
         print(f"did not run: {skipped} tests after {names[reached - 1]}")
@@ -2176,7 +2228,8 @@ def run_bisect(session: Session, target: str, timeout: float) -> int:
 
     def passes(chosen: Sequence[int]) -> bool:
         session.run(script_lines([TESTS[index] for index in chosen] + [TESTS[stop]]), timeout)
-        return session.result(target) == want
+        got = session.result(target)
+        return want(got) if callable(want) else got == want
 
     if passes(range(stop)):
         print(f"{target} passes after all {stop} earlier tests: nothing to bisect")
