@@ -99,6 +99,7 @@ Base: `V.1R32`
 
 ## Fixed in the frontends on every platform
 - A bytecode cache entry covers the files its program imports. An import is also looked for in the working directory, so one program can compile to two from two directories, and run from the second it could reuse the first's entry. Rea and Aether could also miss an edit to a module that an imported module uses.
+- The Rea `landscape` demo runs on macOS. It crashed in `glCreateShader` at its first frame: a 3D window there draws with the SDL renderer and has no OpenGL context, and `LandscapeDrawCloudLayer` called OpenGL anyway. The demo now draws its sprite clouds there. `LandscapeDrawCloudLayer` and `LandscapeDrawSkyDome` without a current OpenGL context are a runtime error, and the new `LandscapeShadersAvailable()` says whether they can draw.
 
 ## Faster in exsh
 - Commands that stay in the shell take about 0.67 of the time they did, which is about 1.21x bash 5 where it was 1.69x. The numbers are from `tools/shellbench_cacheable`, 3 rounds on one Mac, so they differ from the laptop's in V.1R32's notes. Commands that start a process are unchanged.

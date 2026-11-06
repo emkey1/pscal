@@ -3101,6 +3101,8 @@ if(NOT PSCAL_PLATFORM_IOS)
     set_tests_properties(rea_tests PROPERTIES ENVIRONMENT "REA_SKIP_TESTS=constructor_init field_access_assign field_access_read method_this_assign new_alloc new_assign_ptr")
     add_test(NAME json2bc_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_json2bc_tests.sh)
     add_test(NAME cache_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_cache_tests.sh)
+    add_test(NAME landscape_gl_context COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_landscape_gl_context_test.sh)
+    set_tests_properties(landscape_gl_context PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 # ---- AST JSON to Bytecode tool ----
