@@ -896,6 +896,13 @@ TESTS: List[Tuple[str, str, Optional[str]]] = [
     ("closed_in_tty_name", f'tty <&- > /dev/null 2>&1; [ $? -ne 0 ] && echo no {R}', "no\n"),
     ("closed_in_tty_null", f'tty < /dev/null {R}; echo "rc $?" {A}', "not a tty\nrc 1\n"),
     ("closed_in_then_works", f"awk '{{print}}' <&- 2>/dev/null; awk '{{print}}' smoke/d.txt {R}", "b\na\nc\n"),
+    # A compound first stage whose reader left: only the program that wrote dies (141), the rest runs.
+    ("reader_left_group", '{ cat smoke/big.txt; echo "x $?" > {o}; } | head -1 > /dev/null', "x 141\n"),
+    ("reader_left_subshell", '( cat smoke/big.txt; echo "x $?" > {o} ) | head -1 > /dev/null', "x 141\n"),
+    ("reader_left_if", 'if true; then cat smoke/big.txt; echo "x $?" > {o}; fi | head -1 > /dev/null', "x 141\n"),
+    ("reader_left_while", 'while :; do cat smoke/big.txt; echo "x $?" > {o}; break; done | head -1 > /dev/null', "x 141\n"),
+    ("reader_left_function", 'rlf() { cat smoke/big.txt; echo "x $?" > {o}; }; rlf | head -1 > /dev/null; unset -f rlf', "x 141\n"),
+    ("reader_left_builtin", ': > {o}; { while :; do echo y; done; echo x > {o}; } | head -1 > /dev/null', ""),
     ("sub_keeps_killed", f'( x=$(sleep 30); echo no ) {R} & p=$!; sleep 1; kill $p; wait $p; y=$(echo next); echo "$y" {A}; unset y', "next\n"),
     # A question to alias or type, and the rest of bash_parity_alias_type_lookup's kind.
     ("alias_lookup", f"alias sm='ls -l'; alias sm {R}; alias sm-missing 2>/dev/null; echo \"rc $?\" {A}; unalias sm", "alias sm='ls -l'\nrc 1\n"),

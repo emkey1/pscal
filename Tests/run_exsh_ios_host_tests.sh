@@ -53,6 +53,7 @@ RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_nohup_program
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_stale_pwd
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_compound_pipeline
+RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_reader_left_stage
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_background_group
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_background_pids
 RUN_VPROC_TESTS=1 python3 "${HARNESS}" --executable "${EXE}" --only bash_parity_background_release
