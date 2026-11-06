@@ -106,6 +106,9 @@ every language in sequence and in pipelines, programs reading a file or pipe, sc
 from the host. When it finishes it uninstalls the app and shuts down any simulator
 it booted.
 
+`KeyTests/keys.sh` types at the app's real prompt instead, for what only keys can show:
+lines typed while a program reads, Ctrl-C, Ctrl-D. See `KeyTests/README.md`.
+
 It takes the newest Release simulator build and a shut-down iPad or iPhone simulator
 that does not have the app. Use `--app` and `--device <udid or name>` to choose.
 

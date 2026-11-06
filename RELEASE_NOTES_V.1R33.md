@@ -112,6 +112,10 @@ Base: `V.1R32`
 - An `ssh` in the background keeps running when Ctrl-C is meant for the command in the foreground. It took the Ctrl-C and ended, and the foreground command did not.
 - Two `ssh`, `scp` or `sftp` at once keep their own working state: how `sftp` reads a command and expands a remote glob, and the buffers behind their messages, times and option parsing.
 - Each tab has an environment of its own, as each terminal's shell does on Linux: `export x=1` in one tab no longer shows in another, and what a command starts sees only what its shell exported. `ssh`, `scp`, `sftp` and `rsync` read that one too, `HOME`, `SSH_AUTH_SOCK` and a variable for `SendEnv` among them.
+- At the keyboard, a program looping on `eof(stdin)` and `readln` gets every typed line and ends on Ctrl-D. It lost what was typed and never ended, and `read(a); read(b); readln(s)` got wrong values the same way. After a program waiting in `eof` was killed, the next one got nothing typed.
+- Ctrl-C ends a VM program with status 130 and says nothing. On a Pascal `readln` it printed `--- VM execution Failed (Runtime Error) ---` and a debug line, and during `eof(stdin)` it gave 1.
+- Ctrl-C ends `delay()` at once. The program ran on to the end of the delay.
+- Ctrl-C ends the whole job, as it does on Linux: `wc` and `sort` print nothing, and `cat | tr a b` gives 130 and stops the rest of the line. `wc` printed `0 0 0`, and `cat | tr` gave 0 with the line running on.
 
 ## Updated in the iOS app
 - `ssh`, `scp`, `sftp` and `ssh-keygen` are OpenSSH 10.6p2, the latest upstream release (2026-11-05), up from 10.2p1. `ssh -V` says so. Every change the app makes to OpenSSH is carried over. Security fixes they gain:

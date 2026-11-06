@@ -1,0 +1,61 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+		AA0000000000000000000001 = {isa = PBXBuildFile; fileRef = AB0000000000000000000001; };
+		AA0000000000000000000002 = {isa = PBXBuildFile; fileRef = AB0000000000000000000002; };
+		AB0000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Host/Host.swift; sourceTree = "<group>"; };
+		AB0000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Driver/Drive.swift; sourceTree = "<group>"; };
+		AB0000000000000000000003 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = KeyHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AB0000000000000000000004 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KeyDriver.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AC0000000000000000000001 = {isa = PBXGroup; children = (AB0000000000000000000001, AB0000000000000000000002, AC0000000000000000000002, ); sourceTree = "<group>"; };
+		AC0000000000000000000002 = {isa = PBXGroup; children = (AB0000000000000000000003, AB0000000000000000000004, ); name = Products; sourceTree = "<group>"; };
+		AD0000000000000000000001 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (AA0000000000000000000001, ); runOnlyForDeploymentPostprocessing = 0; };
+		AD0000000000000000000002 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (AA0000000000000000000002, ); runOnlyForDeploymentPostprocessing = 0; };
+		AE0000000000000000000001 = {isa = PBXNativeTarget; buildConfigurationList = AF0000000000000000000002; buildPhases = (AD0000000000000000000001, ); buildRules = (); dependencies = (); name = KeyHost; productName = KeyHost; productReference = AB0000000000000000000003; productType = "com.apple.product-type.application"; };
+		AE0000000000000000000002 = {isa = PBXNativeTarget; buildConfigurationList = AF0000000000000000000003; buildPhases = (AD0000000000000000000002, ); buildRules = (); dependencies = (B10000000000000000000001, ); name = KeyDriver; productName = KeyDriver; productReference = AB0000000000000000000004; productType = "com.apple.product-type.bundle.ui-testing"; };
+		B00000000000000000000001 = {isa = PBXContainerItemProxy; containerPortal = B20000000000000000000001; proxyType = 1; remoteGlobalIDString = AE0000000000000000000001; remoteInfo = KeyHost; };
+		B10000000000000000000001 = {isa = PBXTargetDependency; target = AE0000000000000000000001; targetProxy = B00000000000000000000001; };
+		B20000000000000000000001 = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastUpgradeCheck = 2600; }; buildConfigurationList = AF0000000000000000000001; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base, ); mainGroup = AC0000000000000000000001; productRefGroup = AC0000000000000000000002; projectDirPath = ""; projectRoot = ""; targets = (AE0000000000000000000001, AE0000000000000000000002, ); };
+		B30000000000000000000001 = {isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; SDKROOT = iphoneos; ONLY_ACTIVE_ARCH = YES; ENABLE_TESTABILITY = YES; }; name = Debug; };
+		B30000000000000000000002 = {isa = XCBuildConfiguration; buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				PRODUCT_BUNDLE_IDENTIFIER = com.pscal.keyhost;
+				INFOPLIST_KEY_UILaunchStoryboardName = "";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = NO;
+			}; name = Debug; };
+		B30000000000000000000003 = {isa = XCBuildConfiguration; buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				PRODUCT_BUNDLE_IDENTIFIER = com.pscal.keydriver;
+				TEST_TARGET_NAME = KeyHost;
+			}; name = Debug; };
+		AF0000000000000000000001 = {isa = XCConfigurationList; buildConfigurations = (B30000000000000000000001, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
+		AF0000000000000000000002 = {isa = XCConfigurationList; buildConfigurations = (B30000000000000000000002, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
+		AF0000000000000000000003 = {isa = XCConfigurationList; buildConfigurations = (B30000000000000000000003, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
+	};
+	rootObject = B20000000000000000000001;
+}
