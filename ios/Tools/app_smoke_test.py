@@ -113,6 +113,14 @@ def df_shows_app_root(got: Optional[str]) -> bool:
         return False
     return any(line.split()[0] == "rootfs" and line.split()[-1] == "/" for line in lines[1:] if line.split())
 
+def ip_json_has_loopback(got: Optional[str]) -> bool:
+    """`ip -j a show lo` is JSON naming lo, with 127.0.0.1/8 among its addresses."""
+    try:
+        links = json.loads(got or "")
+        return links[0]["ifname"] == "lo" and any(
+            a.get("local") == "127.0.0.1" and a.get("prefixlen") == 8 for a in links[0]["addr_info"])
+    except (ValueError, LookupError, TypeError, AttributeError):
+        return False
 
 # (name, command, expected output). {o} is the test's result file. With an
 # expected output of None, the result file only has to appear; a function
@@ -531,6 +539,26 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     # ping's checksum went out byte-swapped, so every host (loopback too) dropped each request: 100% loss.
     ("ping_loopback", f"ping -c 2 127.0.0.1 > smoke/ping.out 2>&1; echo rc=$? {R}; grep -c '^64 bytes from 127.0.0.1: icmp_seq=' smoke/ping.out {A}; grep 'packets transmitted' smoke/ping.out {A}", "rc=0\n2\n2 packets transmitted, 2 packets received, 0.0% packet loss\n"),
     ("ping_localhost", f"ping -c 1 localhost > smoke/ping.out 2>&1; echo rc=$? {R}; grep -c ' bytes from ' smoke/ping.out {A}", "rc=0\n1\n"),
+    # ip: iproute2's words for the device's interfaces, and /proc/net from the same data.
+    ("ip_addr_lo", f"ip a {R}; echo rc=$? {A}",
+     lambda got: bool(got) and re.search(r"^1: lo: <LOOPBACK[A-Z_,-]*UP[A-Z_,-]*> mtu \d+ ", got, re.M) is not None
+     and "\n    inet 127.0.0.1/8 scope host lo\n       valid_lft forever preferred_lft forever\n" in got
+     and got.endswith("rc=0\n")),
+    ("ip_brief", f"ip -br a {R}; ip -br link {A}",
+     lambda got: bool(got) and all(re.match(r"^\S+ +(UP|DOWN|UNKNOWN) +(\S+ )*$", line) for line in got.splitlines())
+     and re.search(r"^lo +UNKNOWN +127\.0\.0\.1/8 ", got, re.M) is not None
+     and re.search(r"^lo +UNKNOWN +00:00:00:00:00:00 <LOOPBACK", got, re.M) is not None),
+    ("ip_json", f"ip -j a show lo {R}", ip_json_has_loopback),
+    ("ip_route", f"ip route {R}; echo rc=$? {A}; ip -6 r > /dev/null; echo rc=$? {A}; ip route get 127.0.0.1 {A}",
+     lambda got: bool(got) and "rc=0\nrc=0\nlocal 127.0.0.1 dev lo src 127.0.0.1 uid 501 \n    cache <local> \n" in got
+     and all(re.match(r"^(default|[0-9.]+(/\d+)?) .*dev \S+", line) for line in got.split("rc=0")[0].splitlines())),
+    ("ip_change_refused", f"ip link set lo down {R}; echo rc=$? {A}; sudo ip addr add 10.9.9.9/24 dev lo {A}; echo rc=$? {A}; ip link set nosuch up {A}; echo rc=$? {A}",
+     "RTNETLINK answers: Operation not permitted\nrc=2\nRTNETLINK answers: Operation not permitted\nrc=2\nCannot find device \"nosuch\"\nrc=1\n"),
+    ("ipaddr_from_snapshot", f"ipaddr -a -4 | grep '^lo ' {R}; ipaddr -a | grep -c '%' {A}; ipaddr -a -6 | grep -c '^lo0 ' {A}",
+     "lo           IPv4 127.0.0.1\n0\n0\n"),
+    ("ip_proc_agree", f"grep -c ' lo$' /proc/net/if_inet6 {R}; ip -6 -o a show lo | wc -l {A}; grep -c '^ *lo:' /proc/net/dev {A}; ip -4 r | grep -c . {A}; tail -n +2 /proc/net/route | grep -c . {A}",
+     lambda got: bool(got) and len(got.split()) == 5 and got.split()[0] == got.split()[1] and got.split()[2] == "1"
+     and got.split()[3] == got.split()[4]),
     # Replacing /etc/passwd reloads the app's table while other commands read it, and that load had no lock.
     ("user_db_reload", f"w=$(whoami); i=0; while [ $i -lt 40 ]; do sudo cp /etc/passwd /etc/passwd.t; sudo mv /etc/passwd.t /etc/passwd; whoami > /dev/null & whoami > /dev/null & id > /dev/null & wait; i=$((i+1)); done; [ \"$(whoami)\" = \"$w\" ] && echo same {R}", "same\n"),
     # A terminal is a login: nothing used to write the record, so who am i found nothing.

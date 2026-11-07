@@ -14,6 +14,7 @@ OUT_USER_DB="${BUILD_DIR}/ios_vproc_user_db_test"
 OUT_FIRST_THREAD="${BUILD_DIR}/ios_vproc_first_thread_test"
 OUT_UTMP_WRITERS="${BUILD_DIR}/ios_vproc_utmp_writers_test"
 OUT_SELF_SIGNAL="${BUILD_DIR}/ios_vproc_self_signal_test"
+OUT_IP="${BUILD_DIR}/ios_ip_app_test"
 OUT_NEXTVI_PASTE="${BUILD_DIR}/ios_nextvi_bracketed_paste_test"
 OUT_PING_PACKET="${BUILD_DIR}/ios_ping_packet_test"
 NEXTVI_OBJ="${BUILD_DIR}/nextvi_ios_regression_vi.o"
@@ -35,6 +36,7 @@ VPROC_SOURCES=(
   "${CORE}/src/common/path_virtualization.c"
   "${CORE}/src/common/env_snapshot.c"
   "${CORE}/src/common/path_truncate.c"
+  "${CORE}/src/common/net_snapshot.c"
   "${CORE}/src/common/runtime_tty.c"
   "${ROOT}/src/ios/runtime_session_stub.c"
   "${CORE}/src/runtime/vproc/tty/pscal_compat.c"
@@ -122,6 +124,15 @@ cc -DPSCAL_TARGET_IOS=1 \
    "${ROOT}/src/smallclue/src/utmp_rec.c" \
    -o "${OUT_UTMP_WRITERS}"
 
+# The app's ip and its /proc/net files, from one net snapshot.
+cc -DPSCAL_TARGET_IOS=1 \
+   "-I${CORE}/src" \
+   "-I${ROOT}/src/smallclue/src" \
+   "${ROOT}/Tests/ios_vproc/test_ip_app.c" \
+   "${ROOT}/src/smallclue/src/ip_app.c" \
+   "${CORE}/src/common/net_snapshot.c" \
+   -o "${OUT_IP}"
+
 cc -DPSCAL_TARGET_IOS=1 \
    -DNEXTVI_REGRESSION_TEST_HOOKS=1 \
    -Dmain=nextvi_main_entry \
@@ -136,7 +147,6 @@ cc -DPSCAL_TARGET_IOS=1 \
    "${ROOT}/Tests/ios_vproc/test_nextvi_bracketed_paste_regression.c" \
    "${NEXTVI_OBJ}" \
    -o "${OUT_NEXTVI_PASTE}"
-"${OUT_PING_PACKET}"
 
 # The app's ping packets, from ios/Sources/Bridge; on macOS it pings 127.0.0.1 too.
 cc -I"${ROOT}" \
@@ -188,6 +198,7 @@ diff -u "${ROOT}/Tests/ios_vproc/tty_diff.root.linux.out" "${OUT_TTY_DIFF}.root.
 "${OUT_USER_DB}"
 "${OUT_FIRST_THREAD}"
 "${OUT_UTMP_WRITERS}"
+"${OUT_IP}"
 "${OUT_SELF_SIGNAL}"
 "${OUT_NEXTVI_PASTE}"
 "${OUT_PING_PACKET}"

@@ -1353,6 +1353,7 @@ set(PSCAL_CORE_SOURCES
     components/pscal-core/src/common/env_snapshot.c
     components/pscal-core/src/common/pscal_hosts.c
     components/pscal-core/src/common/path_truncate.c
+    components/pscal-core/src/common/net_snapshot.c
     components/pscal-core/src/common/path_virtualization.c
     components/pscal-core/src/common/pscal_terminal_host.c
     components/pscal-core/src/common/frontend_kind.c
@@ -1441,6 +1442,7 @@ set(SMALLCLUE_SOURCES
     src/smallclue/src/who_app.c
     src/smallclue/src/tput_app.c
     src/smallclue/src/free_app.c
+    src/smallclue/src/ip_app.c
     src/smallclue/src/mount_app.c
 )
 
