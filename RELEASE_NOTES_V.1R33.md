@@ -231,3 +231,11 @@ Pipes, on iOS:
 Terminals, on iOS:
 - Ctrl-C in a script whose background job has already ended reaches the tab's own shell, not the script: the command ends and the script goes on. `sleep 1 & sleep 30; echo "no $?"` run with `sh` prints `no 130`, where bash ends the script.
 - The terminal's size can be wrong after an SDL program exits, and `reset` doesn't restore it. Seen on an iPad, not reproduced in the simulator.
+
+Found at validation (pin `30333722`), documented for this release and open for the next:
+- exsh and bash 5.3 disagree in two host tests that pass against CI's bash: with no locale variable set, exsh sorts a glob in C order (`Z` before `[a]`), where bash 5.3.20 on macOS sorts by the system collation (`bash_parity_glob_locale`); and one spaced `[[ ]]` form returns 0 in exsh where bash 5.3 returns 1 (`bash_parity_dbracket_redirect_word`).
+- On the iOS-flavoured host build, `interactive_ctrl_z_clike_frontend_prompt` failed once: after Ctrl-Z, `lps` didn't list the stopped CLike program. It sits beside twelve Ctrl-C and Ctrl-Z interactive cases that fail the same way since build 32, and the plain build has failed it before. Not shown to be new; a likely timing fault in the harness or the stop.
+- Pascal, Rea and CLike in the app still see the shell's commands as builtins. Aether no longer does.
+- `ssh-keygen` can hang in the app. Seen while testing file masks, and older than that change.
+- A line-mode read of a tab's terminal can return part of a line.
+- The script that builds the iSH-AOK root filesystem, and one ssh host test for the app's virtual home directory, fail as they did before the OpenSSH 10.6p2 update.
