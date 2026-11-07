@@ -1234,6 +1234,14 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     ("ssh_pipe_in", f"echo x | ssh -p 1 -o BatchMode=yes 127.0.0.1 cat > /dev/null 2>&1; echo \"rc=$?\" {R}", "rc=255\n"),
     ("ssh_config", f"ssh -G example.invalid 2>&1 | grep '^hostname ' {R}", "hostname example.invalid\n"),
     ("ssh_version", f"ssh -V 2>&1 | grep -c OpenSSH {R}", "1\n"),
+    # With no command and a terminal on stdin and stdout, ssh opens a session tab, a child of pid 1.
+    # Port 1 refuses it, so that ssh ends at once, and the kernel reaps it: three such zombies of
+    # pid 1 stayed on the owner's iPad. Its message goes to its own tab.
+    ("ssh_tab_reaped", f"ssh -p 1 -o BatchMode=yes 127.0.0.1 < /dev/tty > /dev/tty 2>&1; sleep 2; i=0; while [ $i -lt 50 ] && ps | awk '$NF==\"ssh\" && $3==\"running\"' | grep -q .; do sleep 0.2; i=$((i+1)); done; ps | awk '$NF==\"ssh\"' | wc -l | tr -d ' ' {R}", "0\n"),
+    # A row is a task. A new tab's thread named the app's own pid exsh before it had a task of
+    # its own: a row with no terminal, its time alive shown as CPU time (25% usr in top), which
+    # looked like a shell left spinning by a closed tab. It also renamed the first tab's shell.
+    ("no_row_for_a_name", f"ps | awk 'NR>1 && $NF==\"exsh\"' | wc -l | tr -d ' ' {R}", "0\n"),
     # rsync reaches ssh without going through the applet.
     ("rsync_ssh_refused", f"rsync -a -e 'ssh -p 1 -o BatchMode=yes' smoke/rs/a 127.0.0.1:x 2>&1 | grep -c 'Connection refused' {R}", "1\n"),
     # So do scp and sftp. A file on stderr is a host descriptor, and a sweep at ssh's start closed

@@ -2080,8 +2080,11 @@ static void assert_rusage_populated_on_exit(void) {
     VProc *vp = vprocCreate(NULL);
     assert(vp);
     int pid = vprocPid(vp);
+    /* Measured on the task's own thread: time alive no longer stands in for CPU time. */
+    vprocRegisterThread(vp, pthread_self());
     burn_cpu_for_ms(30);
     vprocMarkExit(vp, 0);
+    vprocUnregisterThread(vp, pthread_self());
 
     size_t cap = vprocSnapshot(NULL, 0);
     VProcSnapshot *snaps = calloc(cap ? cap : 1, sizeof(VProcSnapshot));
@@ -8421,6 +8424,124 @@ static void assert_orphan_rows_go_when_they_end(void) {
     vprocSetShellSelfPid(prev_shell);
 }
 
+/* The kernel's task is init. A child of its own that leads its own session, as a tab's shell and an
+ * ssh session do, is reaped as it ends: nothing else can wait for it. One in another task's session
+ * is the leader's to wait for, until the leader ends. The owner's iPad kept three ended ssh
+ * sessions as zombies of pid 1, and the kernel's SIGCHLD stayed pending ("sigchld" in top). */
+static void assert_kernel_reaps_its_children(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int prev_kernel = vprocGetKernelPid();
+    VProc *kernel = vprocCreate(NULL);
+    assert(kernel);
+    int kernel_pid = vprocPid(kernel);
+    vprocSetKernelPid(kernel_pid);
+    vprocSetParent(kernel_pid, 0);
+    assert(vprocSetSid(kernel_pid, kernel_pid) == 0);
+
+    VProc *ssh = vprocCreate(NULL);
+    VProc *leader = vprocCreate(NULL);
+    VProc *member = vprocCreate(NULL);
+    VProc *left = vprocCreate(NULL);
+    VProc *killed = vprocCreate(NULL);
+    assert(ssh && leader && member && left && killed);
+    int ssh_pid = vprocPid(ssh);
+    int leader_pid = vprocPid(leader);
+    int member_pid = vprocPid(member);
+    int left_pid = vprocPid(left);
+    int killed_pid = vprocPid(killed);
+    int leaders[] = { ssh_pid, leader_pid, killed_pid };
+    for (size_t i = 0; i < sizeof(leaders) / sizeof(leaders[0]); ++i) {
+        vprocSetParent(leaders[i], kernel_pid);
+        assert(vprocSetSid(leaders[i], leaders[i]) == 0);
+        assert(vprocSetPgid(leaders[i], leaders[i]) == 0);
+    }
+    vprocSetShellSelfPid(leader_pid);
+    vprocSetParent(member_pid, kernel_pid);
+    assert(vprocSetSid(member_pid, leader_pid) == 0);
+    vprocSetParent(left_pid, kernel_pid);
+    assert(vprocSetSid(left_pid, leader_pid) == 0);
+
+    vprocMarkExit(ssh, 255);
+    assert(task_row_parent(ssh_pid) == -1);
+    errno = 0;
+    assert(vprocKillShim(ssh_pid, 0) == -1 && errno == ESRCH);
+    assert(!vprocSigchldPending(kernel_pid));
+
+    /* The session's leader can still wait for the kernel's child in its session. */
+    vprocMarkExit(member, 4);
+    assert(task_row_parent(member_pid) == kernel_pid);
+    vprocActivate(leader);
+    int status = 0;
+    assert(vprocWaitPidShim(member_pid, &status, 0) == member_pid);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 4);
+    vprocDeactivate();
+
+    /* Not waited for, it goes with its leader. */
+    vprocMarkExit(left, 0);
+    assert(task_row_parent(left_pid) == kernel_pid);
+    vprocMarkExit(leader, 0);
+    assert(task_row_parent(leader_pid) == -1);
+    assert(task_row_parent(left_pid) == -1);
+
+    /* With no thread to say it ended, a kill is the end of it. */
+    assert(vprocKillShim(killed_pid, SIGKILL) == 0);
+    assert(task_row_parent(killed_pid) == -1);
+    assert(!vprocSigchldPending(kernel_pid));
+
+    VProc *all[] = { ssh, leader, member, left, killed };
+    for (size_t i = 0; i < sizeof(all) / sizeof(all[0]); ++i) {
+        vprocDestroy(all[i]);
+    }
+    vprocDiscard(kernel_pid);
+    vprocDestroy(kernel);
+    vprocSetKernelPid(prev_kernel);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+/* A name is no process, and time alive is no CPU time. The app's own pid, from getpid on a thread
+ * with no task, became a row named exsh, whose "CPU time" was how long the app had run, a tenth
+ * of it as system time: 29,000 s on the owner's iPad, and 25% usr in top with nothing running. */
+static void assert_rows_are_tasks_and_times_are_measured(void) {
+    int stray = 0;
+    for (int candidate = 900001; candidate < 900100; ++candidate) {
+        if (task_row_parent(candidate) == -1 && vprocGetSid(candidate) <= 0) {
+            stray = candidate;
+            break;
+        }
+    }
+    assert(stray > 0);
+    vprocSetCommandLabel(stray, "exsh");
+    char label[32] = { 0 };
+    assert(!vprocGetCommandLabel(stray, label, sizeof(label)));
+    size_t cap = vprocSnapshot(NULL, 0);
+    VProcSnapshot *snaps = calloc(cap ? cap : 1, sizeof(VProcSnapshot));
+    assert(snaps);
+    size_t count = vprocSnapshot(snaps, cap);
+    for (size_t i = 0; i < count; ++i) {
+        assert(snaps[i].pid != stray);
+    }
+    free(snaps);
+
+    int reserved = vprocReservePid();
+    assert(reserved > 0);
+    vprocSetCommandLabel(reserved, "idle");
+    usleep(120000);
+    cap = vprocSnapshot(NULL, 0);
+    snaps = calloc(cap ? cap : 1, sizeof(VProcSnapshot));
+    assert(snaps);
+    count = vprocSnapshot(snaps, cap);
+    bool found = false;
+    for (size_t i = 0; i < count; ++i) {
+        if (snaps[i].pid == reserved) {
+            found = true;
+            assert(snaps[i].rusage_utime == 0 && snaps[i].rusage_stime == 0);
+        }
+    }
+    assert(found);
+    free(snaps);
+    vprocDiscard(reserved);
+}
+
 static bool snapshot_contains_sid(const VProcSnapshot *snaps, size_t count, int sid) {
     if (sid <= 0) return false;
     for (size_t i = 0; i < count; ++i) {
@@ -10274,6 +10395,8 @@ int main(void) {
     assert_reparenting_uses_session_leader_sid();
     fprintf(stderr, "TEST orphan_rows_go_when_they_end\n");
     assert_orphan_rows_go_when_they_end();
+    assert_kernel_reaps_its_children();
+    assert_rows_are_tasks_and_times_are_measured();
     fprintf(stderr, "TEST terminate_session_discards_entries\n");
     assert_terminate_session_discards_entries();
     fprintf(stderr, "TEST pthread_inherits_session_ids\n");
