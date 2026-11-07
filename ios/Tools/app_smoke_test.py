@@ -102,6 +102,18 @@ def guide_inventory_matches(got: Optional[str]) -> bool:
     regenerated, _ = gen.regenerate(text, entries, str(AETHER_GUIDE))
     return regenerated == text
 
+def df_shows_app_root(got: Optional[str]) -> bool:
+    """df lists the app's own filesystems: a header, the root as rootfs on /, and nothing of the
+    device's (no host path, Apple volume or error for a mount outside the sandbox)."""
+    if not got:
+        return False
+    lines = got.splitlines()
+    leaks = ("No such file", "/private", "com.apple", "/dev/disk", "apfs")
+    if any(leak in got for leak in leaks) or not lines or not lines[0].startswith("Filesystem"):
+        return False
+    return any(line.split()[0] == "rootfs" and line.split()[-1] == "/" for line in lines[1:] if line.split())
+
+
 # (name, command, expected output). {o} is the test's result file. With an
 # expected output of None, the result file only has to appear; a function
 # instead of a string is given the result and says whether it passes.
@@ -157,6 +169,17 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     ("date_y", f"date +%Y {R}", time.strftime("%Y") + "\n"),
     ("stat_size", f"stat -c %s smoke/d.txt {R}", "6\n"),
     ("du_ok", f"du -s smoke/sub2 | wc -l {R}", "1\n"),
+    # The app's mount table: one root filesystem in the container and /proc, never the device's.
+    ("df_bare", f"df {R}", df_shows_app_root),
+    ("df_h", f"df -h {R}", df_shows_app_root),
+    ("df_root", f"df / {R}", df_shows_app_root),
+    ("df_dot", f"df . {R}", df_shows_app_root),
+    ("proc_mounts", f"head -2 /proc/mounts {R}",
+     "rootfs / ext4 rw,relatime 0 0\nproc /proc proc rw,nosuid,nodev,noexec,relatime 0 0\n"),
+    ("mount_list", f"mount | head -2 {R}",
+     "rootfs on / type ext4 (rw,relatime)\nproc on /proc type proc (rw,nosuid,nodev,noexec,relatime)\n"),
+    ("stat_f_root", f"stat -f -c '%T' / . {R}", "ext2/ext3\next2/ext3\n"),
+    ("stat_f_proc", f"stat -f -c '%T %b' /proc {R}", "proc 0\n"),
     ("xargs", f"echo smoke/d.txt | xargs cat {R}", "b\na\nc\n"),
     ("xargs_a", f"xargs -a smoke/d.txt echo {R}", "b a c\n"),
     ("tee_ok", f"echo t | tee smoke/tee.txt > /dev/null; cat smoke/tee.txt {R}", "t\n"),

@@ -4056,15 +4056,36 @@ static void assert_proc_mount_files_include_virtual_mounts(void) {
 
     assert(pathTruncateMountAdd(source_root, "/mnt/ext", "bind", "ro,nodev", 0));
 
+    /* The app's view: a source outside the container is "external", never its host path, and
+     * the root is one ext4 filesystem whatever the device's volumes are. */
     char buf[8192];
     assert(read_virtual_file("/proc/mounts", buf, sizeof(buf)) > 0);
-    assert(strstr(buf, source_root) != NULL);
-    assert(strstr(buf, " /mnt/ext ") != NULL);
-    assert(strstr(buf, " bind ") != NULL);
+    static const char mounts_head[] = "rootfs / ext4 rw,relatime 0 0\nproc /proc proc ";
+    assert(strncmp(buf, mounts_head, sizeof(mounts_head) - 1) == 0);
+    assert(strstr(buf, "external /mnt/ext fuse ro,nodev 0 0\n") != NULL);
+    assert(strstr(buf, source_root) == NULL);
 
     assert(read_virtual_file("/proc/mountinfo", buf, sizeof(buf)) > 0);
-    assert(strstr(buf, source_root) != NULL);
-    assert(strstr(buf, " /mnt/ext ") != NULL);
+    static const char mountinfo_head[] = "1 0 0:1 / / rw,relatime - ext4 rootfs rw,relatime\n";
+    assert(strncmp(buf, mountinfo_head, sizeof(mountinfo_head) - 1) == 0);
+    assert(strstr(buf, " /mnt/ext ro,nodev - fuse external ") != NULL);
+    assert(strstr(buf, source_root) == NULL);
+
+    /* statfs names the same table's entries; sizes are the real filesystem's. */
+    struct statfs sfs;
+    assert(pscalPathVirtualized_statfs("/", &sfs) == 0);
+    assert(strcmp(sfs.f_mntonname, "/") == 0);
+    assert(strcmp(sfs.f_mntfromname, "rootfs") == 0);
+    assert(strcmp(sfs.f_fstypename, "ext4") == 0);
+    assert(sfs.f_type == 0xEF53 && sfs.f_blocks > 0);
+    assert(pscalPathVirtualized_statfs("/mnt/ext", &sfs) == 0);
+    assert(strcmp(sfs.f_mntonname, "/mnt/ext") == 0);
+    assert(strcmp(sfs.f_mntfromname, "external") == 0);
+    assert(pscalPathVirtualized_statfs("/proc", &sfs) == 0);
+    assert(strcmp(sfs.f_mntonname, "/proc") == 0);
+    assert(sfs.f_type == 0x9FA0 && sfs.f_blocks == 0);
+    struct statvfs svfs;
+    assert(pscalPathVirtualized_statvfs("/", &svfs) == 0 && svfs.f_blocks > 0);
 
     pathTruncateMountClearAll();
     unsetenv("PATH_TRUNCATE");
@@ -4152,8 +4173,8 @@ static void assert_kernel_mounts_from_fstab_at_startup(void) {
 
     char mounts_buf[8192];
     assert(read_virtual_file("/proc/mounts", mounts_buf, sizeof(mounts_buf)) > 0);
-    assert(strstr(mounts_buf, source_root) != NULL);
-    assert(strstr(mounts_buf, " /mnt/ext ") != NULL);
+    assert(strstr(mounts_buf, source_root) == NULL);
+    assert(strstr(mounts_buf, "external /mnt/ext ") != NULL);
 
     pathTruncateMountClearAll();
     setenv("PATH_TRUNCATE", "/tmp", 1);
