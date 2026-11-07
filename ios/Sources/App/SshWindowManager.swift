@@ -1340,6 +1340,34 @@ private final class RuntimeMountFolderPicker: NSObject, UIDocumentPickerDelegate
         return FileManager.default.isReadableFile(atPath: normalizedPath)
     }
 
+    // /etc/fstab names a folder outside the app's storage by a label, as Linux's names a disk by
+    // UUID=, so the device's own path never shows in a file the app's users read. The label is
+    // kept here, beside the folder's bookmark.
+    private static let sourceLabelsDefaultsKey = "com.pscal.mount.sourceLabels.v1"
+
+    private func sourceLabels() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: Self.sourceLabelsDefaultsKey) as? [String: String] ?? [:]
+    }
+
+    func label(forPath path: String) -> String {
+        let normalized = Self.normalizePath(path)
+        var labels = sourceLabels()
+        if let existing = labels.first(where: { $0.value == normalized })?.key {
+            return "UUID=" + existing
+        }
+        let id = UUID().uuidString.lowercased()
+        labels[id] = normalized
+        UserDefaults.standard.set(labels, forKey: Self.sourceLabelsDefaultsKey)
+        return "UUID=" + id
+    }
+
+    func path(forLabel label: String) -> String? {
+        guard label.hasPrefix("UUID=") else {
+            return nil
+        }
+        return sourceLabels()[String(label.dropFirst(5)).lowercased()]
+    }
+
     func present(completion: @escaping (String?, Int32) -> Void) {
         guard self.completion == nil else {
             completion(nil, Int32(EBUSY))
@@ -1472,6 +1500,38 @@ func pscalRuntimeEnsureMountSourceAccess(_ path: UnsafePointer<CChar>?) -> Int32
     }
     errno = EACCES
     return -1
+}
+
+@_cdecl("pscalRuntimeMountSourceLabel")
+func pscalRuntimeMountSourceLabel(_ path: UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>? {
+    guard let path, path.pointee != 0 else {
+        errno = EINVAL
+        return nil
+    }
+    let sourcePath = String(cString: path)
+    guard let label = runOnMainBlocking("mountSourceLabel", work: {
+        RuntimeMountFolderPicker.shared.label(forPath: sourcePath)
+    }) else {
+        errno = EAGAIN
+        return nil
+    }
+    return strdup(label)
+}
+
+@_cdecl("pscalRuntimeMountSourceForLabel")
+func pscalRuntimeMountSourceForLabel(_ label: UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>? {
+    guard let label else {
+        errno = EINVAL
+        return nil
+    }
+    let text = String(cString: label)
+    guard let path = runOnMainBlocking("mountSourceForLabel", work: {
+        RuntimeMountFolderPicker.shared.path(forLabel: text)
+    }) ?? nil else {
+        errno = ENOENT
+        return nil
+    }
+    return strdup(path)
 }
 
 @_cdecl("pscalRuntimeOpenSshSession")

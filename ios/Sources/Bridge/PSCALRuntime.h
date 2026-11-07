@@ -188,6 +188,12 @@ char *pscalRuntimeCopyMountTargets(void);
 /// Opens an interactive iOS folder picker and returns a malloc-allocated path.
 /// Caller must free() the returned string; NULL indicates cancel/error with errno set.
 char *pscalRuntimePickMountSourceDirectory(void);
+/// The label /etc/fstab names a folder outside the app's storage by ("UUID=..."), made the
+/// first time and the same after; malloc-allocated. NULL with errno on failure.
+char *pscalRuntimeMountSourceLabel(const char *path);
+/// The folder a label from pscalRuntimeMountSourceLabel names; malloc-allocated, NULL with
+/// errno ENOENT for a label it never made.
+char *pscalRuntimeMountSourceForLabel(const char *label);
 
 /// Notifies the UI that an SDL window/session became active (iOS only).
 void pscalRuntimeSdlDidOpen(void);

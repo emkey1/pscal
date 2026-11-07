@@ -4120,6 +4120,16 @@ static bool testEncodeFstabField(const char *input, char *out, size_t out_size) 
     return true;
 }
 
+/* The runtime's fstab labels, as the app's Swift side keeps them: one label, set by the test. */
+static char gTestLabelledSource[PATH_MAX];
+char *pscalRuntimeMountSourceForLabel(const char *label) {
+    if (label && strcmp(label, "UUID=test-label") == 0 && gTestLabelledSource[0]) {
+        return strdup(gTestLabelledSource);
+    }
+    errno = ENOENT;
+    return NULL;
+}
+
 static void assert_kernel_mounts_from_fstab_at_startup(void) {
     char source_templ[] = "/tmp/vproc-fstab-src-XXXXXX";
     char *source_root = mkdtemp(source_templ);
@@ -4154,7 +4164,24 @@ static void assert_kernel_mounts_from_fstab_at_startup(void) {
     assert(fstab);
     char source_escaped[PATH_MAX * 4];
     assert(testEncodeFstabField(source_with_space, source_escaped, sizeof(source_escaped)));
-    assert(fprintf(fstab, "# test mount\n%s /mnt/ext bind rw 0 0\n", source_escaped) > 0);
+    /* A host path (an fstab from before), a path in the app's storage and a label. */
+    char inside_dir[PATH_MAX];
+    snprintf(inside_dir, sizeof(inside_dir), "%s/data/in", root);
+    char inside_cmd[PATH_MAX + 16];
+    snprintf(inside_cmd, sizeof(inside_cmd), "mkdir -p '%s'", inside_dir);
+    assert(system(inside_cmd) == 0);
+    char inside_file[PATH_MAX];
+    snprintf(inside_file, sizeof(inside_file), "%s/f.txt", inside_dir);
+    int inside_fd = open(inside_file, O_CREAT | O_WRONLY | O_TRUNC, 0600);
+    assert(inside_fd >= 0 && write(inside_fd, "inside", 6) == 6);
+    close(inside_fd);
+    assert(pscalPathVirtualized_mkdir("/mnt/in", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/mnt/lab", 0700) == 0 || errno == EEXIST);
+    snprintf(gTestLabelledSource, sizeof(gTestLabelledSource), "%s", source_with_space);
+    assert(fprintf(fstab, "# test mount\n%s /mnt/ext bind rw 0 0\n"
+                          "/data/in /mnt/in bind rw 0 0\n"
+                          "UUID=test-label /mnt/lab bind rw 0 0\n"
+                          "UUID=never-made /mnt/none bind rw 0 0\n", source_escaped) > 0);
     assert(fclose(fstab) == 0);
 
     vprocResetStartupFstabStateForTests();
@@ -4171,10 +4198,35 @@ static void assert_kernel_mounts_from_fstab_at_startup(void) {
     assert(strncmp(buf, "fstab-mounted", 13) == 0);
     close(mounted_fd);
 
+    mounted_fd = pscalPathVirtualized_open("/mnt/in/f.txt", O_RDONLY, 0);
+    assert(mounted_fd >= 0);
+    memset(buf, 0, sizeof(buf));
+    assert(read(mounted_fd, buf, sizeof(buf)) == 6 && strncmp(buf, "inside", 6) == 0);
+    close(mounted_fd);
+    mounted_fd = pscalPathVirtualized_open("/mnt/lab/hello.txt", O_RDONLY, 0);
+    assert(mounted_fd >= 0);
+    close(mounted_fd);
+
     char mounts_buf[8192];
     assert(read_virtual_file("/proc/mounts", mounts_buf, sizeof(mounts_buf)) > 0);
     assert(strstr(mounts_buf, source_root) == NULL);
     assert(strstr(mounts_buf, "external /mnt/ext ") != NULL);
+    assert(strstr(mounts_buf, "rootfs /mnt/in ext4 ") != NULL);
+    assert(strstr(mounts_buf, "external /mnt/lab ") != NULL);
+    assert(strstr(mounts_buf, " /mnt/none ") == NULL);
+
+    /* A descriptor's filesystem is named from the same table. */
+    int fs_fd = pscalPathVirtualized_open("/mnt/in/f.txt", O_RDONLY, 0);
+    assert(fs_fd >= 0);
+    struct statfs fd_sfs;
+    /* A host descriptor, tagged so the shim takes it whatever task the thread has. */
+    assert(vprocFstatfsShim(vprocTagHostFd(fs_fd), &fd_sfs) == 0);
+    assert(strcmp(fd_sfs.f_mntonname, "/mnt/in") == 0);
+    assert(strcmp(fd_sfs.f_mntfromname, "rootfs") == 0 && fd_sfs.f_type == 0xEF53);
+    struct statvfs fd_svfs;
+    assert(vprocFstatvfsShim(vprocTagHostFd(fs_fd), &fd_svfs) == 0 && fd_svfs.f_blocks > 0);
+    close(fs_fd);
+    gTestLabelledSource[0] = '\0';
 
     pathTruncateMountClearAll();
     setenv("PATH_TRUNCATE", "/tmp", 1);

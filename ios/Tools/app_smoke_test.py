@@ -188,6 +188,18 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
      "rootfs on / type ext4 (rw,relatime)\nproc on /proc type proc (rw,nosuid,nodev,noexec,relatime)\n"),
     ("stat_f_root", f"stat -f -c '%T' / . {R}", "ext2/ext3\next2/ext3\n"),
     ("stat_f_proc", f"stat -f -c '%T %b' /proc {R}", "proc 0\n"),
+    # /etc/fstab names a source the app's way: its path in the app, or a label for one outside.
+    ("fstab_inside",
+     f"mkdir -p smoke/fsi /mnt/fsi; sudo mount -p \"$HOME/smoke/fsi\" /mnt/fsi {R}; "
+     f"grep ' /mnt/fsi ' /etc/fstab | sed 's|^/[^ ]*/smoke/fsi |APP/smoke/fsi |' {A}; "
+     f"grep ' /mnt/fsi ' /etc/fstab | grep -c -e Containers -e /private -e /Users -e \"$PATH_TRUNCATE\" {A}; "
+     f"sudo umount -p /mnt/fsi {A}",
+     "APP/smoke/fsi /mnt/fsi bind rw 0 0\n0\n"),
+    ("fstab_external",
+     f"mkdir -p /mnt/fse; sudo mount -p \"$PSCALI_CONTAINER_ROOT/tmp\" /mnt/fse {R}; "
+     f"grep ' /mnt/fse ' /etc/fstab | sed 's/^UUID=[0-9a-f-]*/UUID=x/' {A}; grep -c '^external /mnt/fse fuse ' /proc/mounts {A}; "
+     f"sudo umount -p /mnt/fse {A}; grep -c /mnt/fse /etc/fstab {A}",
+     "UUID=x /mnt/fse bind rw 0 0\n1\n0\n"),
     ("xargs", f"echo smoke/d.txt | xargs cat {R}", "b\na\nc\n"),
     ("xargs_a", f"xargs -a smoke/d.txt echo {R}", "b a c\n"),
     ("tee_ok", f"echo t | tee smoke/tee.txt > /dev/null; cat smoke/tee.txt {R}", "t\n"),
