@@ -100,6 +100,7 @@ Base: `V.1R32`
 - `lps` no longer keeps an `exited` row for a task whose parent ended first. It stayed until the app restarted: `timeout 1 pascal x.pas` left one, and so did `( sleep 1 & )` and `sh -c 'sleep 1 &'`. A task like that shows as `running` while it runs, and its row goes when it ends, as init reaps one on Linux. Its end no longer runs the CHLD trap of the shell that took it in.
 - `mkfifo` is a command, and a FIFO goes where the task's directory says, with the task's mask. `tar` and `cp` making a FIFO, and `mknod`, went to the host's directory.
 - A file run with `.` at a prompt no longer announces its background jobs, as under bash.
+- An app update keeps what you changed in `/etc`. Each update used to replace the whole directory with the new build's copy, so edits to `/etc/hosts`, `/etc/passwd`, `/etc/fstab` and the rest were lost. Now a file still as an earlier build shipped it takes the new copy, a missing one comes back, and one you changed stays. The first update to this build keeps your `hosts`, `passwd`, `group`, `fstab`, `shadow`, `sudoers` and `hostname` if they differ, and updates the rest.
 - `ulimit` keeps each task's limits in the VM, and the open files limit holds its descriptors: a new task may have 1024 of them. Nothing else is enforced yet.
 - `sftp`'s `lumask`, and `ssh` and `scp -p`, set the task's file mask, not the whole app's.
 - What a command makes obeys its own file mask by every route, looser or tighter than the first tab's shell's. `git`, `ssh-keygen`, `ssh`, `scp`, `sftp` and `rsync` made files and directories through libc, which goes by one mask for the whole app, the first tab's shell's: `( umask 077; git init r )` left `r/.git` readable by everyone, and nothing `sftp` made after `lumask` obeyed it. So did a program's own `mkdir`, `creat` or `fopen`.
@@ -219,7 +220,6 @@ Base: `V.1R32`
 - `uname -s` stays `iPadOS_PSCAL`, and `uname -r` shows iOS's Darwin version.
 
 ## Known Issues
-- An app update replaces `/etc` with the bundle's copy, keeping only `shadow`, `sudoers` and `hostname`, so edits to `/etc/hosts`, `/etc/passwd` or `/etc/fstab` are lost at each update.
 - `micro` makes a new file with the first tab's shell's mask, not its own: the Go runtime reaches libc directly.
 Descriptor names, on iOS:
 - `/proc/$$/fd/1` inside a redirected group misses the redirection: `{ echo a > /proc/$$/fd/1; } > f` leaves `f` empty. Host builds write `a` to `f`, as Linux does. Seen through the smoke tool, which runs in the nested `.exshrc` context, not at a prompt.

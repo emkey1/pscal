@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import Compression
+import CryptoKit
 
 private enum RuntimePaths {
     static var documentsDirectory: URL {
@@ -351,27 +352,12 @@ final class RuntimeAssetInstaller {
 
         let workspaceEtc = RuntimePaths.workspaceEtcDirectory
         if needsWorkspaceEtcRefresh() {
-            // A new build replaces etc, but the passwords, sudo's rules and the host name are the
-            // owner's: they go back as they were. Deleting shadow from Files is how a forgotten
-            // password is cleared, and only that brings back the empty one.
-            var kept: [String: Data] = [:]
-            for name in ["shadow", "sudoers", "hostname"] {
-                let file = workspaceEtc.appendingPathComponent(name, isDirectory: false)
-                if !isSymbolicLink(at: file), let data = try? Data(contentsOf: file) {
-                    kept[name] = data
-                }
-            }
             do {
-                if fileManager.fileExists(atPath: workspaceEtc.path) || isSymbolicLink(at: workspaceEtc) {
+                if isSymbolicLink(at: workspaceEtc) {
                     try fileManager.removeItem(at: workspaceEtc)
                 }
                 try ensureWorkspaceDirectoriesExist()
-                try fileManager.copyItem(at: bundledEtc, to: workspaceEtc)
-                for (name, data) in kept {
-                    let file = workspaceEtc.appendingPathComponent(name, isDirectory: false)
-                    try? fileManager.removeItem(at: file)
-                    try data.write(to: file)
-                }
+                try mergeBundledEtc(from: bundledEtc, into: workspaceEtc)
                 try writeWorkspaceEtcVersionMarker()
                 NSLog("PSCAL iOS: installed etc assets to %@", workspaceEtc.path)
             } catch {
@@ -606,6 +592,71 @@ final class RuntimeAssetInstaller {
         } catch {
             NSLog("PSCAL iOS: failed to sync etc/%@ assets: %@", name, error.localizedDescription)
         }
+    }
+
+    /// A new build's etc, without losing what the owner changed. Each file the app ships has its
+    /// SHA-256 recorded in Documents/.etc.shipped. A file still as shipped takes the new build's
+    /// copy, a missing one is copied, and one that differs from what was shipped is the owner's
+    /// and stays. With no record yet (the first update to this scheme), a differing file stays if
+    /// it is one people edit; the rest take the new copy, as every file did before.
+    private func mergeBundledEtc(from bundledEtc: URL, into workspaceEtc: URL) throws {
+        let manifestURL = RuntimePaths.documentsDirectory.appendingPathComponent(".etc.shipped", isDirectory: false)
+        let previous: [String: String]? = (try? Data(contentsOf: manifestURL)).flatMap {
+            try? JSONSerialization.jsonObject(with: $0) as? [String: String]
+        }
+        let userEdited: Set<String> = ["hosts", "passwd", "group", "fstab", "shadow", "sudoers", "hostname",
+                                       "rc.local", "profile", "exshrc"]
+        try fileManager.createDirectory(at: workspaceEtc, withIntermediateDirectories: true)
+        var shipped: [String: String] = [:]
+        guard let walker = fileManager.enumerator(at: bundledEtc, includingPropertiesForKeys: [.isDirectoryKey]) else {
+            return
+        }
+        let basePath = bundledEtc.standardizedFileURL.path
+        for case let source as URL in walker {
+            let sourcePath = source.standardizedFileURL.path
+            guard sourcePath.hasPrefix(basePath + "/") else { continue }
+            let relative = String(sourcePath.dropFirst(basePath.count + 1))
+            let target = workspaceEtc.appendingPathComponent(relative)
+            if (try? source.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                if !fileManager.fileExists(atPath: target.path) {
+                    try fileManager.createDirectory(at: target, withIntermediateDirectories: true)
+                }
+                continue
+            }
+            guard let bundledData = try? Data(contentsOf: source) else { continue }
+            let bundledHash = sha256Hex(bundledData)
+            shipped[relative] = bundledHash
+            if isSymbolicLink(at: target) {
+                continue  // the owner's
+            }
+            guard let current = try? Data(contentsOf: target) else {
+                try fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fileManager.copyItem(at: source, to: target)
+                continue
+            }
+            let currentHash = sha256Hex(current)
+            if currentHash == bundledHash {
+                continue
+            }
+            let asShipped: Bool
+            if let previous = previous {
+                asShipped = previous[relative] == currentHash
+            } else {
+                asShipped = !userEdited.contains(relative)
+            }
+            if asShipped {
+                try fileManager.removeItem(at: target)
+                try fileManager.copyItem(at: source, to: target)
+            } else {
+                NSLog("PSCAL iOS: keeping the owner's etc/%@", relative)
+            }
+        }
+        let data = try JSONSerialization.data(withJSONObject: shipped, options: [.sortedKeys])
+        try data.write(to: manifestURL, options: [.atomic])
+    }
+
+    private func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     /// root's home, which /etc/passwd names, with the skeleton's shell startup file.
