@@ -505,6 +505,9 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     ("passwd_own", f"printf 'me\\nme\\n' | passwd > /dev/null 2>&1; echo rc=$? {R}; sudo grep -c '^mobile:[$]6[$]' /etc/shadow {A}; sudo passwd -d mobile > /dev/null", "rc=0\n1\n"),
     ("hostname_default", f"hostname {R}; hostname -s {A}; echo \"$HOSTNAME\" {A}; uname -n {A}", "iDevice\niDevice\niDevice\niDevice\n"),
     ("hostname_set", f"hostname foo 2> /dev/null; echo rc=$? {R}; sudo hostname smoke.host; hostname {A}; hostname -s {A}; uname -n {A}; sudo hostname iDevice", "rc=1\nsmoke.host\nsmoke\nsmoke.host\n"),
+    # ping's checksum went out byte-swapped, so every host (loopback too) dropped each request: 100% loss.
+    ("ping_loopback", f"ping -c 2 127.0.0.1 > smoke/ping.out 2>&1; echo rc=$? {R}; grep -c '^64 bytes from 127.0.0.1: icmp_seq=' smoke/ping.out {A}; grep 'packets transmitted' smoke/ping.out {A}", "rc=0\n2\n2 packets transmitted, 2 packets received, 0.0% packet loss\n"),
+    ("ping_localhost", f"ping -c 1 localhost > smoke/ping.out 2>&1; echo rc=$? {R}; grep -c ' bytes from ' smoke/ping.out {A}", "rc=0\n1\n"),
     # Replacing /etc/passwd reloads the app's table while other commands read it, and that load had no lock.
     ("user_db_reload", f"w=$(whoami); i=0; while [ $i -lt 40 ]; do sudo cp /etc/passwd /etc/passwd.t; sudo mv /etc/passwd.t /etc/passwd; whoami > /dev/null & whoami > /dev/null & id > /dev/null & wait; i=$((i+1)); done; [ \"$(whoami)\" = \"$w\" ] && echo same {R}", "same\n"),
     # A terminal is a login: nothing used to write the record, so who am i found nothing.

@@ -15,6 +15,7 @@ OUT_FIRST_THREAD="${BUILD_DIR}/ios_vproc_first_thread_test"
 OUT_UTMP_WRITERS="${BUILD_DIR}/ios_vproc_utmp_writers_test"
 OUT_SELF_SIGNAL="${BUILD_DIR}/ios_vproc_self_signal_test"
 OUT_NEXTVI_PASTE="${BUILD_DIR}/ios_nextvi_bracketed_paste_test"
+OUT_PING_PACKET="${BUILD_DIR}/ios_ping_packet_test"
 NEXTVI_OBJ="${BUILD_DIR}/nextvi_ios_regression_vi.o"
 # The vproc/tty platform layer lives in pscal-core since the components split;
 # only the back-compat headers and the session stub stayed in the umbrella's src/ios.
@@ -135,6 +136,12 @@ cc -DPSCAL_TARGET_IOS=1 \
    "${ROOT}/Tests/ios_vproc/test_nextvi_bracketed_paste_regression.c" \
    "${NEXTVI_OBJ}" \
    -o "${OUT_NEXTVI_PASTE}"
+"${OUT_PING_PACKET}"
+
+# The app's ping packets, from ios/Sources/Bridge; on macOS it pings 127.0.0.1 too.
+cc -I"${ROOT}" \
+   "${ROOT}/Tests/ios_vproc/test_ping_packet.c" \
+   -o "${OUT_PING_PACKET}"
 
 # test_host_guards signals groups and everything, trusting its own kill to catch a call that gets
 # through. A name looked up or a raw syscall would pass that by and send a real one, so stop here.
@@ -183,3 +190,4 @@ diff -u "${ROOT}/Tests/ios_vproc/tty_diff.root.linux.out" "${OUT_TTY_DIFF}.root.
 "${OUT_UTMP_WRITERS}"
 "${OUT_SELF_SIGNAL}"
 "${OUT_NEXTVI_PASTE}"
+"${OUT_PING_PACKET}"
