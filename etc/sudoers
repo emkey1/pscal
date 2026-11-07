@@ -1,0 +1,16 @@
+# /etc/sudoers for the PSCAL app.
+#
+# sudo asks for root's password (rootpw), and root has none until one is set
+# with `sudo passwd`, so until then sudo asks for nothing. A password sudo has
+# checked counts for five minutes in the tab it was typed in; `sudo -k` ends
+# that early.
+#
+# Edit as root. The syntax is sudo's own; anything this sudo doesn't
+# understand is skipped, never taken as a match.
+Defaults rootpw
+
+root    ALL=(ALL:ALL) ALL
+mobile  ALL=(ALL:ALL) ALL
+%wheel  ALL=(ALL:ALL) ALL
+
+@includedir /etc/sudoers.d

@@ -351,12 +351,27 @@ final class RuntimeAssetInstaller {
 
         let workspaceEtc = RuntimePaths.workspaceEtcDirectory
         if needsWorkspaceEtcRefresh() {
+            // A new build replaces etc, but the passwords, sudo's rules and the host name are the
+            // owner's: they go back as they were. Deleting shadow from Files is how a forgotten
+            // password is cleared, and only that brings back the empty one.
+            var kept: [String: Data] = [:]
+            for name in ["shadow", "sudoers", "hostname"] {
+                let file = workspaceEtc.appendingPathComponent(name, isDirectory: false)
+                if !isSymbolicLink(at: file), let data = try? Data(contentsOf: file) {
+                    kept[name] = data
+                }
+            }
             do {
                 if fileManager.fileExists(atPath: workspaceEtc.path) || isSymbolicLink(at: workspaceEtc) {
                     try fileManager.removeItem(at: workspaceEtc)
                 }
                 try ensureWorkspaceDirectoriesExist()
                 try fileManager.copyItem(at: bundledEtc, to: workspaceEtc)
+                for (name, data) in kept {
+                    let file = workspaceEtc.appendingPathComponent(name, isDirectory: false)
+                    try? fileManager.removeItem(at: file)
+                    try data.write(to: file)
+                }
                 try writeWorkspaceEtcVersionMarker()
                 NSLog("PSCAL iOS: installed etc assets to %@", workspaceEtc.path)
             } catch {
@@ -365,6 +380,9 @@ final class RuntimeAssetInstaller {
         }
 
         ensureEtcFileNamed("passwd", bundleRoot: bundleRoot)
+        ensureEtcFileNamed("shadow", bundleRoot: bundleRoot, permissions: 0o640)
+        ensureEtcFileNamed("sudoers", bundleRoot: bundleRoot, permissions: 0o640)
+        ensureRootHome(bundleRoot: bundleRoot)
         ensureEtcFileNamed("group", bundleRoot: bundleRoot)
         ensureEtcFileNamed("hosts", bundleRoot: bundleRoot)
         ensureEtcFileNamed("fstab", bundleRoot: bundleRoot)
@@ -590,8 +608,24 @@ final class RuntimeAssetInstaller {
         }
     }
 
+    /// root's home, which /etc/passwd names, with the skeleton's shell startup file.
+    private func ensureRootHome(bundleRoot: URL) {
+        let rootHome = RuntimePaths.documentsDirectory.appendingPathComponent("var/root", isDirectory: true)
+        do {
+            try fileManager.createDirectory(at: rootHome, withIntermediateDirectories: true)
+            let skelRc = bundleRoot.appendingPathComponent("etc/skel/.exshrc", isDirectory: false)
+            let rootRc = rootHome.appendingPathComponent(".exshrc", isDirectory: false)
+            if fileManager.fileExists(atPath: skelRc.path) && !fileManager.fileExists(atPath: rootRc.path) {
+                try fileManager.copyItem(at: skelRc, to: rootRc)
+            }
+        } catch {
+            NSLog("PSCAL iOS: failed to ensure var/root: %@", error.localizedDescription)
+        }
+    }
+
     private func ensureEtcFileNamed(_ name: String,
                                     bundleRoot: URL,
+                                    permissions: Int? = nil,
                                     executable: Bool = false,
                                     replaceExisting: Bool = false,
                                     replaceExistingIfDifferent: Bool = false) {
@@ -621,6 +655,9 @@ final class RuntimeAssetInstaller {
             }
             if executable {
                 try markExecutable(at: workspaceFile)
+            }
+            if let permissions = permissions {
+                try fileManager.setAttributes([.posixPermissions: permissions], ofItemAtPath: workspaceFile.path)
             }
         } catch {
             NSLog("PSCAL iOS: failed to ensure etc/%@: %@", name, error.localizedDescription)

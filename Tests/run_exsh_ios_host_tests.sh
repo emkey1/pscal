@@ -218,6 +218,8 @@ bash "${ROOT}/Tests/ios_vproc/test_thread_end_streams.sh" "${EXE}"
 python3 "${ROOT}/Tests/ios_vproc/test_thread_end_raw_mode.py" "${EXE}"
 bash "${ROOT}/Tests/ios_vproc/test_imports_cache.sh" "${EXE}"
 python3 "${ROOT}/Tests/ios_vproc/test_termios_base.py" "${EXE}"
+# Root, su, sudo and passwd: who a task is and what a normal user may not touch.
+bash "${ROOT}/Tests/run_ios_root_regression.sh" "${EXE}"
 
 # How the line editor wraps, which only shows on a terminal.
 RUN_VPROC_TESTS=1 python3 "${INTERACTIVE_HARNESS}" --executable "${EXE}" --only line_wrap

@@ -537,10 +537,14 @@ static void vm_group_one_is_not_everything(void) {
     expect_signal("kill(-1) from pid 1 and another task", outsider, SIGUSR1);
 }
 
-/* As init on Linux: the call succeeds and nothing happens. */
+/* As init on Linux: init is root's, so a normal user may not signal it, and from root the call
+ * succeeds and nothing happens. */
 static void vm_nothing_kills_the_kernel(void) {
     int kernel = vprocEnsureKernelPid();
     (void)become_task();
+    expect_kill("kill(kernel, SIGTERM) as a user", kernel, SIGTERM, -1, EPERM);
+    expect_kill("kill(kernel, 0) as a user", kernel, 0, -1, EPERM);
+    vprocExecApplyCredentials("su");
     expect_kill("kill(kernel, SIGTERM)", kernel, SIGTERM, 0, 0);
     expect_kill("kill(kernel, SIGKILL)", kernel, SIGKILL, 0, 0);
     expect_kill("kill(kernel, 0)", kernel, 0, 0, 0);

@@ -62,13 +62,14 @@ fi
 
 # Edit to your preference
 #USER="user"  # Uncomment and change, or edit /etc/passwd for UID 501 to change
-HOST="iDevice"
+# The host name is the system's: `sudo hostname NAME` until the app restarts, or /etc/hostname.
+HOST="$(hostname 2>/dev/null || echo iDevice)"
 
 # Provide coloured prompts when attached to a terminal.  The prompt tokens are
 # the same as Bash's \u, \h, \W, \t, etc.  Non-interactive sessions keep the
 # minimal "exsh$" prompt so scripts are unaffected.
 if [ -t 1 ]; then
-    export PS1="\[\033[1;36m\][\t]\[\033[0m\] \[\033[1;32m\]$USER@$HOST \[\033[1;34m\]\W\[\033[0m\] ⚡ "
+    export PS1="\[\033[1;36m\][\t]\[\033[0m\] \[\033[1;32m\]\u@\h \[\033[1;34m\]\W\[\033[0m\] ⚡ "
 else
     export PS1="exsh$ "
 fi

@@ -1372,6 +1372,7 @@ set(PSCAL_CORE_SOURCES
 
 set(SMALLCLUE_SOURCES
     src/smallclue/src/core.c
+    src/smallclue/src/shadow_ios.c
     src/smallclue/src/git_app.c
     src/smallclue/src/integration.c
     src/smallclue/src/dvtm_app.c
@@ -3027,9 +3028,12 @@ set(_pscal_install_root_destination [==[${PSCAL_INSTALL_ROOT_DESTINATION}]==])")
     install(DIRECTORY fonts/
             DESTINATION "${_pscal_runtime_root}/fonts"
             USE_SOURCE_PERMISSIONS)
+    # shadow and sudoers are the iOS app's accounts, for its own /etc, and mean nothing on a host.
     install(DIRECTORY etc/
             DESTINATION "${_pscal_runtime_root}/etc"
-            USE_SOURCE_PERMISSIONS)
+            USE_SOURCE_PERMISSIONS
+            PATTERN "shadow" EXCLUDE
+            PATTERN "sudoers" EXCLUDE)
     install(DIRECTORY Examples/tiny/
             DESTINATION "${_pscal_runtime_root}/Examples/tiny"
             USE_SOURCE_PERMISSIONS)

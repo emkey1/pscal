@@ -11,6 +11,11 @@ Base: `V.1R32`
 - Workspace, an option beside the tab bar: a desktop of windows inside the app. Shell sessions open as windows that move, resize, zoom and stack, on more than one Desktop, and an arrangement can be saved and restored. Tabs work as before, and the Workspace button switches between them.
 - Workspace's applets, from its Applets menu: Desktops, Launcher, Quick Actions, Sessions, Themes, Clock, Monitor, Networks, Logs, Settings, Diagnostics, File Manager, MotePad (a text editor), Markdown, Image Viewer, Storage, Browser, Video Player, Music and Equalizer.
 - `ws` reaches Workspace from a shell inside it: `ws open TOOL [PATH]` opens an applet, on a file for those that take one, `ws applets` lists the open applet windows, and `ws status` says whether the shell is in Workspace and which applets it can open.
+- Root, `su` and `sudo`. You are `mobile` (uid 501) as before, and now a normal user: `id` shows `uid=501(mobile) gid=501(mobile)` with the groups in the app's `/etc/group`, not the simulator host's. `sudo cmd` runs `cmd` as root, `su` starts a root shell until `exit`, `su -` uses root's home `/var/root`, and `su pscal` becomes that account. Root ends with the command, also in a pipeline, a subshell or a job.
+- A normal user can't create, change, rename or remove anything under `/etc`, or read `/etc/shadow`: `echo x > /etc/foo` says `Permission denied`, and `sudo` does it. `cd /etc`, `..`, a symlink and a hard link reach the same check. `ls -l /etc` shows root as the owner, and `sudo chown` records the owner it gives a file.
+- Root has no password until you set one with `sudo passwd`. Then `sudo` asks for root's password (`Defaults rootpw` in `/etc/sudoers`) and remembers it for 5 minutes in that tab, `sudo -k` forgets it, and `su` asks every time. `passwd` changes your own, and `sudo passwd -d root` removes root's. Passwords are stored as SHA-512 (`$6$`) in `/etc/shadow`, which the app keeps across updates. If you forget root's, delete `etc/shadow` in the Files app (On My iPad, PSCAL): the next launch puts it back with no passwords.
+- `hostname` prints the system's name, `iDevice`, or the first line of `/etc/hostname` at launch. `sudo hostname NAME` renames it until the app restarts, and `uname -n`, `$HOSTNAME`, `\h` in a prompt and `/proc/sys/kernel/hostname` follow. It used to print `unknown` and an error, and `hostname -s` tried to set the name `-s`.
+- A program's `exec` runs the new program in the app and then ends, as on Linux. It can no longer replace the app, and `sudo`, `su` and `login` use it as written.
 
 ## Fixed in exsh
 - IFS splits only what an expansion produced, as in bash. Text a word itself holds used to split too: `IFS=:; printf '<%s>' a:b` gave two fields, `IFS=/; ls /dev/null` passed `dev` and `null`, and `IFS=e; echo hello` could not find its command. Redirection targets, `for` lists, loop conditions and the words inside `$(...)` all follow it. Where bash 3.2 and 5 differ, as in `a:$x:b`, exsh follows 5.
@@ -205,8 +210,16 @@ Base: `V.1R32`
 - Ctrl-C and Ctrl-Z typed at a terminal become signals in the session's reader, not in the line discipline, and a command runs with `isig` clear.
 - Flow control isn't done: Ctrl-S and Ctrl-Q are ordinary keys whatever `ixon` says.
 - With `icanon` clear, input translation and echo stop too, where Linux keeps them while their own flags are set.
+- Root is a guard rail, not a lock. The app's files are ordinary files in its Documents folder, and the Files app and Finder reach all of them, `/etc/shadow` included. Everything is owned by the one real user underneath, so what `ls -l` shows for an owner is the app's record.
+- Applets have no files, so `su`, `sudo`, `passwd` and `login` are set-user-id by name, and `chmod u+s` on another program gives it nothing.
+- Root bypasses no file mode: a mode 000 file stays unreadable to root until `chmod`. Writes outside `/etc`, including `/bin`, are not refused yet.
+- `kill` of another user's task is refused only outside your own tab's session, so you can still signal a `sudo` job you started, as sudo's relay allows on Linux. A process group or `-1` isn't checked.
+- `ssh`, `scp`, `sftp` and the Go tools (`micro`) still run as `mobile`, and `micro /etc/shadow` isn't stopped: they reach the system directly.
+- A program started by `exec` sees its path as `argv[0]`, so `su -` starts a shell that doesn't know it is a login shell.
+- `uname -s` stays `iPadOS_PSCAL`, and `uname -r` shows iOS's Darwin version.
 
 ## Known Issues
+- An app update replaces `/etc` with the bundle's copy, keeping only `shadow`, `sudoers` and `hostname`, so edits to `/etc/hosts`, `/etc/passwd` or `/etc/fstab` are lost at each update.
 - `micro` makes a new file with the first tab's shell's mask, not its own: the Go runtime reaches libc directly.
 Descriptor names, on iOS:
 - `/proc/$$/fd/1` inside a redirected group misses the redirection: `{ echo a > /proc/$$/fd/1; } > f` leaves `f` empty. Host builds write `a` to `f`, as Linux does. Seen through the smoke tool, which runs in the nested `.exshrc` context, not at a prompt.
