@@ -218,6 +218,8 @@ RUN_VPROC_TESTS=1 RUN_IOS_FRONTEND_STDIN_TESTS=1 python3 "${HARNESS}" --executab
 
 # Runs under its own throwaway roots, not the harness: a regression here removes files.
 bash "${ROOT}/Tests/ios_vproc/test_empty_path.sh" "${EXE}"
+# $HOME names the home as pwd and realpath do (/home), under its own throwaway root.
+bash "${ROOT}/Tests/ios_vproc/test_virtual_home.sh" "${EXE}"
 bash "${ROOT}/Tests/ios_vproc/test_kill_blocked.sh" "${EXE}"
 bash "${ROOT}/Tests/ios_vproc/test_kill_vm_reader.sh" "${EXE}"
 bash "${ROOT}/Tests/ios_vproc/test_kill_last_stage.sh" "${EXE}"

@@ -222,7 +222,6 @@ Base: `V.1R32`
 - `micro` makes a new file with the first tab's shell's mask, not its own: the Go runtime reaches libc directly.
 Descriptor names, on iOS:
 - `/proc/$$/fd/1` inside a redirected group misses the redirection: `{ echo a > /proc/$$/fd/1; } > f` leaves `f` empty. Host builds write `a` to `f`, as Linux does. Seen through the smoke tool, which runs in the nested `.exshrc` context, not at a prompt.
-- `readlink /proc/self/fd/3` on a file, and `readlink -f /dev/stdout` with stdout on a file, don't give the path that `$HOME` names it by. Host builds do.
 
 Terminals, on iOS:
 - Ctrl-C in a script whose background job has already ended reaches the tab's own shell, not the script: the command ends and the script goes on. `sleep 1 & sleep 30; echo "no $?"` run with `sh` prints `no 130`, where bash ends the script.

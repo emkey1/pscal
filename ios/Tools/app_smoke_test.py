@@ -1431,6 +1431,17 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     ("dev_proc_other_task", f"sleep 5 < smoke/d.txt & p=$!; sleep 0.3; cat /proc/$p/fd/0 {R}; kill $p; wait $p 2>/dev/null", "b\na\nc\n"),
     ("dev_proc_no_such_task", f"{{ echo a 2>/dev/null > /proc/99999/fd/1; echo \"rc $?\"; }} {R}", "rc 1\n"),
     ("dev_proc_link", f"{{ exec 3< smoke/d.txt; [ \"$(readlink /proc/self/fd/3)\" = \"$HOME/smoke/d.txt\" ] && echo same; exec 3<&-; }} {R}", "same\n"),
+    # $HOME is the app's name for the home directory, as pwd, realpath and /proc/self/fd give it.
+    # It was the host's (.../Documents/home), so none of these agreed with it.
+    ("home_virtual", f"echo \"$HOME\" {R}; echo ~ {A}", "/home\n/home\n"),
+    ("home_cd_pwd", f"cd smoke; cd; pwd {R}; echo \"$PWD\" {A}", "/home\n/home\n"),
+    ("home_readlink_f", f"readlink -f ~/smoke/d.txt {R}; realpath ~ {A}", "/home/smoke/d.txt\n/home\n"),
+    ("home_fd_link", f"{{ exec 3< ~/smoke/d.txt; readlink /proc/self/fd/3; exec 3<&-; }} {R}", "/home/smoke/d.txt\n"),
+    ("home_dirs", f"cd ~/smoke; dirs > {O} 2>&1; cd", "~/smoke\n"),
+    ("home_git", f"rm -rf smoke/gh; git init -q ~/smoke/gh > /dev/null 2>&1; ls -d ~/smoke/gh/.git {R}; rm -rf smoke/gh", "/home/smoke/gh/.git\n"),
+    # ssh finds ~/.ssh by $HOME. No server: -G resolves the config, ssh-keygen reads keys and known_hosts.
+    ("home_ssh_config", f"mkdir -p ~/.ssh; [ -e ~/.ssh/config ] && mv ~/.ssh/config ~/.ssh/config.smoke-saved; printf 'Host smokehome.invalid\\n  Port 2299\\n  User smokeu\\n' > ~/.ssh/config; ssh -G smokehome.invalid 2>&1 | grep -E '^(user|port) ' | sort {R}; rm -f ~/.ssh/config; [ -e ~/.ssh/config.smoke-saved ] && mv ~/.ssh/config.smoke-saved ~/.ssh/config", "port 2299\nuser smokeu\n"),
+    ("home_ssh_keys", f"mkdir -p ~/.ssh; rm -f ~/.ssh/smoke_hk ~/.ssh/smoke_hk.pub; cp smoke/hk ~/.ssh/smoke_hk; cp smoke/hk.pub ~/.ssh/smoke_hk.pub; chmod 600 ~/.ssh/smoke_hk; ssh-keygen -y -f ~/.ssh/smoke_hk > smoke/hky 2>&1; cut -d' ' -f1 smoke/hky {R}; touch ~/.ssh/known_hosts; {{ printf 'smokehome.invalid '; cat ~/.ssh/smoke_hk.pub; }} >> ~/.ssh/known_hosts; ssh-keygen -F smokehome.invalid 2>&1 | grep -c ed25519 {A}; ssh-keygen -R smokehome.invalid > /dev/null 2>&1; ssh-keygen -F smokehome.invalid 2>&1 | grep -c ed25519 {A}; rm -f ~/.ssh/smoke_hk ~/.ssh/smoke_hk.pub", "ssh-ed25519\n1\n0\n"),
     ("dev_cat_file", f"cat /dev/stdin < smoke/d.txt {R}", "b\na\nc\n"),
     ("dev_cat_pipe", f"echo hi | cat /dev/stdin {R}", "hi\n"),
     ("dev_cat_flags", f"echo hi | cat -n /dev/stdin {R}", "     1\thi\n"),
@@ -1734,11 +1745,30 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     # Near last: a second tab opens and closes, and the rows after it check this tab's /dev/tty.
     # The hook in the new tab's .exshrc runs smoke/tab.sh when there is one. That tab's exit ends its login.
     ("tab_login", f"printf 'who am i > \"$HOME/smoke/tab.who\"\\nuntil [ -e \"$HOME/smoke/tab.go\" ]; do sleep 0.1; done\\nexit\\n' > smoke/tab.sh; tabadd; waitfile smoke/tab.who; users | wc -w {R}; awk '{{print ($2 ~ /^pts\\/[1-9]/)}}' smoke/tab.who {A}; touch smoke/tab.go; waitusers 1; rm smoke/tab.sh; users | wc -w {A}", "2\n1\n1\n"),
+    # A second tab names its home the same way, and its ssh finds the same ~/.ssh/config.
+    ("tab_home_ssh", f"rm -f smoke/tab.hm smoke/tab.hd; mkdir -p ~/.ssh; [ -e ~/.ssh/config ] && mv ~/.ssh/config ~/.ssh/config.smoke-saved; printf 'Host smokehome.invalid\\n  Port 2299\\n' > ~/.ssh/config; printf '%s\\n' 'echo \"$HOME\" > \"$HOME/smoke/tab.hm\"' 'ssh -G smokehome.invalid 2>&1 | grep \"^port \" >> \"$HOME/smoke/tab.hm\"' 'touch \"$HOME/smoke/tab.hd\"' 'exit' > smoke/tab.sh; tabadd; waitfile smoke/tab.hd; cat smoke/tab.hm {R}; waitusers 1; rm -f smoke/tab.sh ~/.ssh/config; [ -e ~/.ssh/config.smoke-saved ] && mv ~/.ssh/config.smoke-saved ~/.ssh/config", "/home\nport 2299\n"),
     # /dev/tty went by a table a second tab could take over, and that tab's close could leave this one without.
     ("stty_named_after_tab", f"stty -F /dev/tty size > /dev/null 2>&1; echo $? {R}", "0\n"),
     ("dev_tty_after_tab", f"tty < /dev/tty | sed 's/[0-9]*$//' {R}", "/dev/pts/\n"),
 ]
 BY_NAME = {test[0]: test for test in TESTS}
+
+
+_TEST_KEY: Optional[dict] = None
+
+
+def test_key() -> dict:
+    """A throwaway ed25519 pair, made by the host's ssh-keygen once per run, for rows that read keys.
+
+    Made here so that no row needs `ssh-keygen -N` before another ssh-keygen in the same app."""
+    global _TEST_KEY
+    if _TEST_KEY is None:
+        with tempfile.TemporaryDirectory() as d:
+            key = Path(d) / "hk"
+            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "smk", "-f", str(key)],
+                           check=True, stdin=subprocess.DEVNULL)
+            _TEST_KEY = {"hk": key.read_text(), "hk.pub": key.with_suffix(".pub").read_text()}
+    return _TEST_KEY
 
 
 def utmp_record(user: str, line: str) -> str:
@@ -2100,10 +2130,7 @@ class Known(NamedTuple):
 # The Known Issues in RELEASE_NOTES_V.1R34.md that these tests hit. A test here
 # that fails any other way is an unexpected failure. When one is fixed, drop it
 # here and from the next release's notes.
-_READLINK_FILE = "readlink of a descriptor's link to a file does not give the path $HOME names it by"
 KNOWN = {
-    "dev_realpath_file": Known(_READLINK_FILE, None),
-    "dev_proc_link": Known(_READLINK_FILE, ""),
 }
 
 
@@ -2290,6 +2317,9 @@ class Session:
         self.smoke.mkdir(parents=True)
         for name, body in FIXTURES.items():
             (self.smoke / name).write_text(body)
+        for name, body in test_key().items():
+            (self.smoke / name).write_text(body)
+            (self.smoke / name).chmod(0o600)
         (self.smoke / "auto.sh").write_text("\n".join([TAB_HOOK, *SETUP, *lines, "touch smoke/AUTODONE"]) + "\n")
         # What the last run leaves when iOS ends the app without notice, and a wtmp due to move aside.
         records = self.home.parent / "var"
