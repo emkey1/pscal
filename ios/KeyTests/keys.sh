@@ -245,16 +245,17 @@ case_utf8_typed() { # characters beyond ASCII at the prompt go in whole, not dro
     prompt_answers utf8_typed
 }
 
-case_micro_task_mask() { # micro (Go) makes a new file with its own task's mask, not the first tab shell's
+case_micro_task_mask() { # micro (Go) makes its directories with its own task's mask, not the first tab shell's
+    # micro's Go code makes ~/.config/micro/buffers as it opens a file, mode 0777 less the mask, so
+    # its mode is the mask micro ran under, read with no keys sent to micro.
+    local bufs="$H/.config/micro/buffers"
+    fresh; rm -rf "$bufs"
+    type_line 'umask 022; (umask 077; micro mk.txt)'; sleep 12
+    check micro_task_mask "$( [ -d "$bufs" ] && stat -f %Lp "$bufs")" "700"
+    fresh; rm -rf "$bufs"
+    type_line 'umask 022; micro mk.txt'; sleep 12
+    check "micro_task_mask, the shell's own 022" "$( [ -d "$bufs" ] && stat -f %Lp "$bufs")" "755"
     fresh
-    type_line 'umask 022; (umask 077; micro mk.txt)'; sleep 8
-    run "text hi"; sleep 1
-    ctrl s; sleep 3
-    ctrl q; sleep 4
-    type_line 'ls -l mk.txt | cut -c1-10 > mk.out'
-    wait_for mk.out 20
-    check micro_task_mask "$(got mk.out)" "-rw-------~"
-    prompt_answers micro_task_mask
 }
 
 case_fd_names_at_prompt() { # /proc/$$/fd in a redirected group, typed at the prompt, not from a sourced file

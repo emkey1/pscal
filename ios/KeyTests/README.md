@@ -18,7 +18,7 @@ and two that need the real prompt or a full-screen program:
 | `wc_ctrl_c`, `sort_ctrl_c` | `wc` and `sort` print nothing on Ctrl-C |
 | `pipe_ctrl_c` | Ctrl-C on `cat \| tr` gives 130, and the rest of the line doesn't run |
 | `utf8_typed` | `echo é⚡x` and emoji typed at the prompt run whole, and Backspace takes an emoji whole (V.1R34) |
-| `micro_task_mask` | `micro` makes a new file with its own task's mask: `(umask 077; micro f)` under a session mask of 022 |
+| `micro_task_mask` | `micro` makes its directories with its own task's mask: `~/.config/micro/buffers` is 700 under `(umask 077; micro f)` with a session mask of 022 |
 | `fd_names_at_prompt` | `{ echo a > /proc/$$/fd/1; } > f` typed at the prompt writes `f` |
 
 ## Running it
