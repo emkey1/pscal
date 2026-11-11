@@ -5,7 +5,8 @@ with a person at the keys: lines typed while a program reads, Ctrl-C, Ctrl-D. `a
 can't type, and the iOS-flavoured host build has no session terminal, so neither can test these.
 This can. It is not run by CI.
 
-`keys.sh` has one case for each keyboard form fixed in V.1R33, and one for typed UTF-8 (V.1R34):
+`keys.sh` has one case for each keyboard form fixed in V.1R33, and from V.1R34 one for typed UTF-8
+and two that need the real prompt or a full-screen program:
 
 | Case | What it checks |
 |---|---|
@@ -17,6 +18,8 @@ This can. It is not run by CI.
 | `wc_ctrl_c`, `sort_ctrl_c` | `wc` and `sort` print nothing on Ctrl-C |
 | `pipe_ctrl_c` | Ctrl-C on `cat \| tr` gives 130, and the rest of the line doesn't run |
 | `utf8_typed` | `echo é⚡x` and emoji typed at the prompt run whole, and Backspace takes an emoji whole (V.1R34) |
+| `micro_task_mask` | `micro` makes a new file with its own task's mask: `(umask 077; micro f)` under a session mask of 022 |
+| `fd_names_at_prompt` | `{ echo a > /proc/$$/fd/1; } > f` typed at the prompt writes `f` |
 
 ## Running it
 

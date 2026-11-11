@@ -629,7 +629,9 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     ("socket_set_blocking", f"pascal smoke/sock.pas {R}", "0\n0\n"),
     # A socket's number can also be a slot's. Poll then asked about the slot, a file that is
     # always ready, and close took the slot and left the socket open.
-    ("socket_number_is_a_slot", f"exec 200>smoke/s200; pascal smoke/s1.pas {R}; echo still >&200; echo \"wr=$?\" {A}; exec 200>&-; echo \"file=$(cat smoke/s200)\" {A}", "200\n0\n0\n200\nwr=0\nfile=still\n"),
+    # Host numbers are the app's: s1.pas takes every free one below 200, so any other thread that
+    # opens a file meanwhile gets 200. Slots 200-203 are there so the socket still lands on one.
+    ("socket_number_is_a_slot", f"exec 200>smoke/s200 201>smoke/s201 202>smoke/s202 203>smoke/s203; pascal smoke/s1.pas {R}; for n in 200 201 202 203; do echo still >&$n; done; echo \"wr=$?\" {A}; exec 200>&- 201>&- 202>&- 203>&-; cat smoke/s200 smoke/s201 smoke/s202 smoke/s203 | grep -c still {A}", "slot\n0\n0\nslot\nwr=0\n4\n"),
     ("socket_tcp", f"pascal smoke/tcp.pas {R}", "listen 0\nno client 0\nconnect 0\nclient waiting 1\nnothing sent 0\ncan write 2\nsend 5\ndata waiting 1\nreceived hello\ndrained 0\nclose 0\npeer gone 1\n"),
     ("socket_tcp_numbers_are_slots", f"i=200; while [ $i -le 207 ]; do eval \"exec $i>>smoke/s3\"; i=$((i+1)); done; FILL=1 pascal smoke/tcp.pas {R}; i=200; while [ $i -le 207 ]; do eval \"exec $i>&-\"; i=$((i+1)); done", "listen 0\nno client 0\nconnect 0\nclient waiting 1\nnothing sent 0\ncan write 2\nsend 5\ndata waiting 1\nreceived hello\ndrained 0\nclose 0\npeer gone 1\nnumbers 200\n"),
     # A stream can't write to stdout opened for reading. Its fallback dup'ed the host number
@@ -1424,6 +1426,8 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     # A command has a vproc of its own, and $$ is the shell's. The name still means that process.
     ("dev_proc_shell_redirected", f"{{ {{ echo a > /proc/$$/fd/1; }} > smoke/f; cat smoke/f; }} {R}", "a\n"),
     ("dev_proc_shell_from_a_stage", f"{{ {{ {{ echo a >> /proc/$$/fd/1; echo b; }} | tr b c > smoke/g; }} > smoke/f; cat smoke/f smoke/g; }} {R}", "a\nc\n"),
+    # A /proc/<pid>/fd link says what the descriptor is now, not what it was at the last refresh.
+    ("dev_proc_shell_link_moves", f"{{ {{ readlink /proc/$$/fd/8 | sed 's#.*/##'; }} 8> smoke/l1; {{ readlink /proc/$$/fd/8 | sed 's#.*/##'; }} 8> smoke/l2; }} {R}", "l1\nl2\n"),
     ("dev_proc_other_task", f"sleep 5 < smoke/d.txt & p=$!; sleep 0.3; cat /proc/$p/fd/0 {R}; kill $p; wait $p 2>/dev/null", "b\na\nc\n"),
     ("dev_proc_no_such_task", f"{{ echo a 2>/dev/null > /proc/99999/fd/1; echo \"rc $?\"; }} {R}", "rc 1\n"),
     ("dev_proc_link", f"{{ exec 3< smoke/d.txt; [ \"$(readlink /proc/self/fd/3)\" = \"$HOME/smoke/d.txt\" ] && echo same; exec 3<&-; }} {R}", "same\n"),
@@ -1806,7 +1810,7 @@ FIXTURES = {
     "key.pas": "program Key;\nuses crt;\nvar c: char;\nbegin\n  c := readkey;\n  writeln(ord(c));\nend.\n",
     "key2.pas": "program Key2;\nuses crt;\nvar c: char;\nbegin\n  c := readkey;\n  writeln(ord(c));\n  c := readkey;\n  writeln(ord(c));\nend.\n",
     "where.pas": "program Where;\nuses crt;\nbegin\n  writeln(wherex > 0, ' ', wherey > 0);\nend.\n",
-    "s1.pas": "program S1;\nvar s, s2, n, i: integer;\n    all: array[0..255] of integer;\nbegin\n  n := 0;\n  s := socketcreate(1);\n  while (s >= 0) and (s < 200) and (n < 255) do\n  begin\n    all[n] := s;\n    n := n + 1;\n    s := socketcreate(1);\n  end;\n  writeln(s);\n  writeln(socketpoll(s, 50, 1));\n  socketclose(s);\n  writeln(socketlasterror);\n  s2 := socketcreate(1);\n  writeln(s2);\n  socketclose(s2);\n  for i := 0 to n - 1 do socketclose(all[i]);\nend.\n",
+    "s1.pas": "program S1;\nvar s, s2, n, i: integer;\n    all: array[0..255] of integer;\nbegin\n  n := 0;\n  s := socketcreate(1);\n  while (s >= 0) and (s < 200) and (n < 255) do\n  begin\n    all[n] := s;\n    n := n + 1;\n    s := socketcreate(1);\n  end;\n  if (s >= 200) and (s <= 203) then writeln('slot') else writeln(s);\n  writeln(socketpoll(s, 50, 1));\n  socketclose(s);\n  writeln(socketlasterror);\n  s2 := socketcreate(1);\n  if (s2 >= 200) and (s2 <= 203) then writeln('slot') else writeln(s2);\n  socketclose(s2);\n  for i := 0 to n - 1 do socketclose(all[i]);\nend.\n",
     "sno.pas": "program Sno;\nvar s: integer;\nbegin\n  s := socketcreate(1);\n  writeln(s);\n  socketclose(s);\nend.\n",
     "tcp.pas": "program Tcp;\nvar l, c, a, port, i, n, s: integer;\n    all: array[0..255] of integer;\n    fill: boolean;\n    r: mstream;\nbegin\n  n := 0;\n  fill := getenv('FILL') <> '';\n  if fill then\n  begin\n    s := socketcreate(0);\n    while (s >= 0) and (s < 199) and (n < 255) do\n    begin\n      all[n] := s;\n      n := n + 1;\n      s := socketcreate(0);\n    end;\n    all[n] := s;\n    n := n + 1;\n  end;\n  port := 0;\n  i := 0;\n  while (port = 0) and (i < 200) do\n  begin\n    l := socketcreate(0);\n    if socketbindaddr(l, '127.0.0.1', 39100 + i) = 0 then port := 39100 + i else socketclose(l);\n    i := i + 1;\n  end;\n  writeln('listen ', socketlisten(l, 4));\n  writeln('no client ', socketpoll(l, 50, 1));\n  c := socketcreate(0);\n  writeln('connect ', socketconnect(c, '127.0.0.1', port));\n  writeln('client waiting ', socketpoll(l, 2000, 1));\n  a := socketaccept(l);\n  writeln('nothing sent ', socketpoll(a, 50, 1));\n  writeln('can write ', socketpoll(c, 2000, 2));\n  writeln('send ', socketsend(c, 'hello'));\n  writeln('data waiting ', socketpoll(a, 2000, 1));\n  r := socketreceive(a, 16);\n  writeln('received ', mstreambuffer(r));\n  mstreamfree(r);\n  writeln('drained ', socketpoll(a, 50, 1));\n  socketclose(c);\n  writeln('close ', socketlasterror);\n  writeln('peer gone ', socketpoll(a, 2000, 1));\n  socketclose(a);\n  socketclose(l);\n  if fill then writeln('numbers ', l);\n  for i := 0 to n - 1 do socketclose(all[i]);\nend.\n",
     "sock.pas": "program Sock;\nvar s: integer;\nbegin\n  s := socketcreate(0);\n  socketsetblocking(s, false);\n  writeln(socketlasterror);\n  socketclose(s);\n  writeln(socketlasterror);\nend.\n",
@@ -2084,15 +2088,11 @@ class Known(NamedTuple):
     always: bool = True  # False: it comes and goes, so a pass is no news.
 
 
-# The Known Issues in RELEASE_NOTES_V.1R33.md that these tests hit. A test here
+# The Known Issues in RELEASE_NOTES_V.1R34.md that these tests hit. A test here
 # that fails any other way is an unexpected failure. When one is fixed, drop it
 # here and from the next release's notes.
-_PROC_SHELL = "/proc/$$/fd/N inside a redirected group misses the redirection"
 _READLINK_FILE = "readlink of a descriptor's link to a file does not give the path $HOME names it by"
 KNOWN = {
-    "dev_proc_own_pid": Known(_PROC_SHELL, ""),
-    "dev_proc_shell_redirected": Known(_PROC_SHELL, ""),
-    "dev_proc_shell_from_a_stage": Known(_PROC_SHELL, "c\n"),
     "dev_realpath_file": Known(_READLINK_FILE, None),
     "dev_proc_link": Known(_READLINK_FILE, ""),
 }

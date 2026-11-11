@@ -2715,6 +2715,64 @@ static void assert_sighandler_resets_with_sa_resethand(void) {
     vprocDestroy(vp);
 }
 
+/* A thread no task runs on, such as the Go runtime's, makes files with the mask it is given,
+ * whatever the host's is: a looser one puts back what the host's took, a tighter one takes more,
+ * and a file already there keeps its mode. */
+static void assert_open_with_mask(void) {
+    char root[] = "/tmp/vproc-withmask-XXXXXX";
+    assert(mkdtemp(root) != NULL);
+    mode_t host = (umask)(022);
+    char path[PATH_MAX];
+    struct stat st;
+
+    snprintf(path, sizeof(path), "%s/tight", root);
+    int fd = vprocHostOpenatWithMask(077, AT_FDCWD, path, O_CREAT | O_WRONLY, 0666);
+    assert(fd >= 0);
+    assert((fstat)(fd, &st) == 0 && (st.st_mode & 0777) == 0600);
+    (close)(fd);
+
+    snprintf(path, sizeof(path), "%s/loose", root);
+    fd = vprocHostOpenatWithMask(0, AT_FDCWD, path, O_CREAT | O_WRONLY | O_TRUNC, 0666);
+    assert(fd >= 0);
+    assert((fstat)(fd, &st) == 0 && (st.st_mode & 0777) == 0666);
+    (close)(fd);
+
+    /* There already: its mode stays, with no O_EXCL failure. */
+    assert((chmod)(path, 0640) == 0);
+    fd = vprocHostOpenatWithMask(0, AT_FDCWD, path, O_CREAT | O_WRONLY, 0666);
+    assert(fd >= 0);
+    assert((fstat)(fd, &st) == 0 && (st.st_mode & 0777) == 0640);
+    (close)(fd);
+    errno = 0;
+    assert(vprocHostOpenatWithMask(0, AT_FDCWD, path, O_CREAT | O_EXCL | O_WRONLY, 0666) == -1 && errno == EEXIST);
+
+    snprintf(path, sizeof(path), "%s/host", root);
+    fd = vprocHostOpenatWithMask(-1, AT_FDCWD, path, O_CREAT | O_WRONLY, 0666);
+    assert(fd >= 0);
+    assert((fstat)(fd, &st) == 0 && (st.st_mode & 0777) == 0644);
+    (close)(fd);
+
+    /* Relative to a directory descriptor. */
+    int dir = (open)(root, O_RDONLY);
+    assert(dir >= 0);
+    fd = vprocHostOpenatWithMask(0, dir, "at", O_CREAT | O_WRONLY, 0666);
+    assert(fd >= 0);
+    assert((fstat)(fd, &st) == 0 && (st.st_mode & 0777) == 0666);
+    (close)(fd);
+    assert(vprocHostMkdiratWithMask(0, dir, "d0", 0777) == 0);
+    assert((fstatat)(dir, "d0", &st, 0) == 0 && (st.st_mode & 0777) == 0777);
+    assert(vprocHostMkdiratWithMask(077, dir, "d77", 0777) == 0);
+    assert((fstatat)(dir, "d77", &st, 0) == 0 && (st.st_mode & 0777) == 0700);
+    assert(vprocHostMkdiratWithMask(-1, dir, "dh", 0777) == 0);
+    assert((fstatat)(dir, "dh", &st, 0) == 0 && (st.st_mode & 0777) == 0755);
+    (close)(dir);
+
+    (umask)(host);
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    assert(system(cleanup_cmd) == 0);
+}
+
 static void assert_sigprocmask_round_trip(void) {
     VProc *vp = vprocCreate(NULL);
     assert(vp);
@@ -10377,6 +10435,8 @@ int main(void) {
     assert_sigsuspend_drains_pending();
     fprintf(stderr, "TEST sigprocmask_round_trip\n");
     assert_sigprocmask_round_trip();
+    fprintf(stderr, "TEST open_with_mask\n");
+    assert_open_with_mask();
     fprintf(stderr, "TEST sighandler_resets_with_sa_resethand\n");
     assert_sighandler_resets_with_sa_resethand();
     fprintf(stderr, "TEST sigwait_receives_pending\n");

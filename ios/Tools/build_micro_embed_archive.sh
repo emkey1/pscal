@@ -214,6 +214,9 @@ if [[ ! -f "${OUTPUT_LIB}" ]]; then
   echo "[micro-embed] error: archive not created: ${OUTPUT_LIB}" >&2
   exit 1
 fi
+# What Go makes goes by the file mask of the task that started it, not the host's.
+python3 "${ROOT_DIR}/ios/Tools/go_archive_redirect_libc.py" "${OUTPUT_LIB}"
+
 if [[ ! -f "${tmp_header}" ]]; then
   echo "[micro-embed] error: header not created: ${tmp_header}" >&2
   exit 1

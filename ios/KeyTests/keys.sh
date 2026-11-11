@@ -12,7 +12,7 @@ APP=""
 UD=""
 WORK="${TMPDIR:-/tmp}/pscal-keytests"
 CASES=()
-ALL_CASES="eof_readln_loop eof_after_kill eof_ctrl_c_status readln_ctrl_c_quiet delay_ctrl_c wc_ctrl_c sort_ctrl_c pipe_ctrl_c utf8_typed"
+ALL_CASES="eof_readln_loop eof_after_kill eof_ctrl_c_status readln_ctrl_c_quiet delay_ctrl_c wc_ctrl_c sort_ctrl_c pipe_ctrl_c utf8_typed micro_task_mask fd_names_at_prompt"
 
 while [ $# -gt 0 ]; do
     case $1 in
@@ -243,6 +243,26 @@ case_utf8_typed() { # characters beyond ASCII at the prompt go in whole, not dro
     wait_for v.out 20
     check "utf8_typed, a character at a time" "$(got v.out)" "ü😀日~"
     prompt_answers utf8_typed
+}
+
+case_micro_task_mask() { # micro (Go) makes a new file with its own task's mask, not the first tab shell's
+    fresh
+    type_line 'umask 022; (umask 077; micro mk.txt)'; sleep 8
+    run "text hi"; sleep 1
+    ctrl s; sleep 3
+    ctrl q; sleep 4
+    type_line 'ls -l mk.txt | cut -c1-10 > mk.out'
+    wait_for mk.out 20
+    check micro_task_mask "$(got mk.out)" "-rw-------~"
+    prompt_answers micro_task_mask
+}
+
+case_fd_names_at_prompt() { # /proc/$$/fd in a redirected group, typed at the prompt, not from a sourced file
+    fresh
+    type_line '{ echo a > /proc/$$/fd/1; } > pg.out'
+    wait_for pg.out 10
+    check "fd_names_at_prompt, /proc/\$\$ in a redirected group" "$(got pg.out)" "a~"
+    prompt_answers fd_names_at_prompt
 }
 
 for c in "${CASES[@]}"; do

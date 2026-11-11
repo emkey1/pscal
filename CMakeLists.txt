@@ -2001,6 +2001,7 @@ if(PSCAL_PLATFORM_IOS)
                 --target "${_pscal_micro_target}"
             DEPENDS
                 "${CMAKE_SOURCE_DIR}/ios/Tools/build_micro_embed_archive.sh"
+                "${CMAKE_SOURCE_DIR}/ios/Tools/go_archive_redirect_libc.py"
                 "${CMAKE_SOURCE_DIR}/ios/Tools/go_patches/tcell_tscreen_unix.go"
                 "${CMAKE_SOURCE_DIR}/ios/Tools/go_patches/tcell_tscreen_unix_darwin.go"
                 "${CMAKE_SOURCE_DIR}/third-party/micro/go.mod"
