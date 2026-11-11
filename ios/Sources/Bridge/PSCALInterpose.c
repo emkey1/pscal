@@ -1758,7 +1758,8 @@ static ssize_t pscal_interpose_write(int fd, const void *buf, size_t count) {
     if (!pscalInterposeEnter()) {
         return pscalRawWriteKernel(fd, buf, count);
     }
-    ssize_t res = vprocWriteShim(fd, buf, count);
+    /* Host code sets SIGPIPE on the host, not on a task, so a reader leaving is only EPIPE. */
+    ssize_t res = vprocWriteShimNoSignal(fd, buf, count);
     pscalInterposeLeave();
     return res;
 }
@@ -1820,7 +1821,7 @@ static ssize_t pscal_interpose_writev(int fd, const struct iovec *iov, int iovcn
         }
         while (remaining > 0) {
             size_t chunk = remaining;
-            ssize_t w = vprocWriteShim(fd, base, chunk);
+            ssize_t w = vprocWriteShimNoSignal(fd, base, chunk);
             if (w <= 0) {
                 pscalInterposeLeave();
                 return (total > 0) ? total : w;

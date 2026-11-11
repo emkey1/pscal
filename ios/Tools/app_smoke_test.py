@@ -1149,10 +1149,21 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     # A thread's streams close as it ends: each of these used to leave a descriptor open for the
     # life of the app. Tests/ios_vproc/test_thread_end_streams.sh counts them.
     ("frontend_streams_repeat", f"i=0; while [ $i -lt 100 ]; do pascal smoke/hello.pas > /dev/null; pascal smoke/halt2.pas > smoke/ho; i=$((i + 1)); done; pascal smoke/hello.pas | wc -l | tr -d ' ' {R}", "1\n"),
-    # A killed frontend whose FIFO reader has stalled, or gone, ends at once: its writes wait where
-    # a kill can act. Tests/ios_vproc/test_thread_end_streams.sh also checks it lets go of the FIFO.
+    # A killed frontend whose FIFO reader has stalled ends at once: its writes wait where a kill can
+    # act. Tests/ios_vproc/test_thread_end_streams.sh also checks it lets go of the FIFO. One whose
+    # reader has gone takes SIGPIPE from the kernel, as on Linux, where it used to run on for good.
     ("frontend_fifo_stalled_kill", f"rm -f smoke/kf; mkfifo smoke/kf; sleep 30 < smoke/kf & r=$!; clike smoke/flood.clike > smoke/kf & p=$!; sleep 1; kill $p; wait $p; echo \"ended $?\" {R}; kill $r; wait $r; clike smoke/hello.clike {A}; rm -f smoke/kf", "ended 143\nclike ok 42\n"),
-    ("frontend_fifo_reader_gone", f"rm -f smoke/kf; mkfifo smoke/kf; head -c 5 < smoke/kf > /dev/null & r=$!; clike smoke/flood.clike > smoke/kf & p=$!; wait $r; sleep 1; kill $p; wait $p; echo \"ended $?\" {R}; rm -f smoke/kf", "ended 143\n"),
+    ("frontend_fifo_reader_gone", f"rm -f smoke/kf; mkfifo smoke/kf; head -c 5 < smoke/kf > /dev/null & r=$!; clike smoke/flood.clike > smoke/kf & p=$!; wait $r; wait $p; echo \"ended $?\" {R}; rm -f smoke/kf", "ended 141\n"),
+    # A write to a pipe whose reader has gone is SIGPIPE, default 141, for a frontend, an applet and
+    # a shell; under `trap '' PIPE` it is EPIPE and the writer goes on. Tests/ios_vproc/test_closed_pipe.sh.
+    ("sigpipe_clike", f"{{ clike smoke/flood.clike | head -1; echo \"${{PIPESTATUS[*]}}\"; }} {R}", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n141 0\n"),
+    ("sigpipe_pascal", f"{{ pascal smoke/flood.pas | head -1; echo \"${{PIPESTATUS[*]}}\"; }} {R}", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n141 0\n"),
+    ("sigpipe_yes", f"{{ yes | head -1; echo \"${{PIPESTATUS[0]}}\"; }} {R}", "y\n141\n"),
+    ("sigpipe_frontend_ignored", f"( trap '' PIPE; clike smoke/some.clike | head -1; echo \"${{PIPESTATUS[*]}}\" ) {R}", "line 0\n0 0\n"),
+    ("sigpipe_yes_ignored", f"( trap '' PIPE; yes 2>/dev/null | head -1; echo \"${{PIPESTATUS[*]}}\" ) {R}", "y\n1 0\n"),
+    ("sigpipe_subshell_builtin", f"{{ ( while :; do echo x; done ) | head -1; echo \"${{PIPESTATUS[*]}}\"; }} {R}", "x\n141 0\n"),
+    ("sigpipe_script", f"sh smoke/sigpipe.sh {R}; echo \"rc $?\" {A}", "started\nrc 141\n"),
+    ("sigpipe_script_ignored", f"sh smoke/sigpipe_ign.sh {R}", "went on 1\n"),
     ("rea_thread_output", f"rea smoke/thread.rea | tr -d ' ' | sort {R}", "childok\nmainok\n"),
     # A killed program in raw mode puts the terminal back, from its thread's key destructor,
     # and so does a worker that went raw. Tests/ios_vproc/test_thread_end_raw_mode.py has both.
@@ -1778,6 +1789,10 @@ FIXTURES = {
     "first.pas": "program First;\nuses crt;\nbegin\n  writeln('first stage');\n  delay(2000);\nend.\n",
     "sdlkeys.pas": "program SdlKeys;\nvar i, k, n: integer;\nbegin\n  InitGraph(320, 240, 'smoke');\n  n := 0;\n  for i := 1 to 20 do\n  begin\n    GraphLoop(100);\n    k := PollKeyAny();\n    while k <> 0 do\n    begin\n      n := n + 1;\n      k := PollKeyAny();\n    end;\n  end;\n  CloseGraph;\n  writeln('keys ', n);\nend.\n",
     "flood.clike": 'int main() {\n    while (1) {\n        printf("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\n");\n    }\n    return 0;\n}\n',
+    "flood.pas": "program Flood;\nbegin\n  while true do writeln('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx');\nend.\n",
+    "some.clike": 'int main() {\n    int i;\n    for (i = 0; i < 20000; i++) {\n        printf("line %d\\n", i);\n    }\n    printf("done\\n");\n    return 0;\n}\n',
+    "sigpipe.sh": "exec 3> >(head -1 > /dev/null)\necho started\nsleep 1\nwhile :; do echo line >&3; done\necho survived\n",
+    "sigpipe_ign.sh": "trap '' PIPE\nexec 3> >(head -1 > /dev/null)\nsleep 1\nfor i in 1 2 3; do sleep 0.5; echo line >&3; done 2>/dev/null\necho \"went on $?\"\n",
     "halt2.pas": "program Halting2;\nbegin\n  writeln('before halt');\n  halt(3);\nend.\n",
     "kp.clike": 'int main() {\n    keypressed();\n    return 0;\n}\n',
     "rawk.clike": 'int main() {\n    keypressed();\n    printf("raw\\n");\n    fflush();\n    delay(60000);\n    return 0;\n}\n',

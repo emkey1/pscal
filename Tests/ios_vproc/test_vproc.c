@@ -1066,6 +1066,59 @@ static int vprocSpawnHolderParentEntry(int argc, char **argv) {
     return 88;
 }
 
+/* A test that wants EPIPE from a pipe whose reader has gone ignores SIGPIPE, as a program on
+ * Linux must: by default the kernel raises it on the writing task. */
+static void ignore_sigpipe_for(VProc *vp) {
+    struct sigaction ign;
+    memset(&ign, 0, sizeof(ign));
+    sigemptyset(&ign.sa_mask);
+    ign.sa_handler = SIG_IGN;
+    assert(vprocSigaction(vprocPid(vp), SIGPIPE, &ign, NULL) == 0);
+}
+
+typedef struct {
+    bool ignore;
+    ssize_t wrote;
+    int err;
+    int dying;
+} ClosedPipeWriter;
+
+static void *closed_pipe_writer_main(void *arg) {
+    ClosedPipeWriter *w = (ClosedPipeWriter *)arg;
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+    if (w->ignore) {
+        ignore_sigpipe_for(vp);
+    }
+    int p[2];
+    assert(vprocPipeShim(p) == 0);
+    assert(vprocCloseShim(p[0]) == 0);
+    errno = 0;
+    w->wrote = vprocWriteShim(p[1], "x", 1);
+    w->err = errno;
+    /* Nothing that could act on a cancel after this: the task may be dying. */
+    w->dying = vprocCurrentDyingSignal();
+    return NULL;
+}
+
+/* A write to a pipe whose reader has gone raises SIGPIPE on the writing task, as on Linux: by
+ * default the task is ending with that signal. Ignored, the write is only EPIPE. */
+static void assert_closed_pipe_write_raises_sigpipe(void) {
+    /* The host's own disposition is the app's, which ignores it. */
+    void (*prev_sigpipe)(int) = signal(SIGPIPE, SIG_IGN);
+    for (int ignore = 0; ignore <= 1; ++ignore) {
+        ClosedPipeWriter w = { .ignore = ignore != 0 };
+        pthread_t t;
+        assert(pthread_create(&t, NULL, closed_pipe_writer_main, &w) == 0);
+        assert(pthread_join(t, NULL) == 0);
+        assert(w.wrote == -1 && w.err == EPIPE);
+        assert(w.dying == (ignore ? 0 : SIGPIPE));
+    }
+    signal(SIGPIPE, prev_sigpipe);
+}
+
 /* A kill unwinds the thread past the scope's end, and the scope has to end anyway. */
 static void assert_kill_ends_scopes_and_descendants(void) {
     alarm(60);
@@ -1073,6 +1126,7 @@ static void assert_kill_ends_scopes_and_descendants(void) {
     assert(vp);
     vprocRegisterThread(vp, pthread_self());
     vprocActivate(vp);
+    ignore_sigpipe_for(vp);
 
     struct pscal_fd *read_end = NULL;
     struct pscal_fd *write_end = NULL;
@@ -1138,6 +1192,7 @@ static void assert_spawn_entry_runs_as_a_child(void) {
     assert(vp);
     vprocRegisterThread(vp, pthread_self());
     vprocActivate(vp);
+    ignore_sigpipe_for(vp);
     vprocSetenvShim("SPAWN_TEST_VALUE", "parent", 1);
 
     /* Runs, on the caller's descriptors and environment, and gets waited for. */
@@ -10234,6 +10289,8 @@ int main(void) {
     assert_terminate_session_by_id_goes_by_its_shell();
     fprintf(stderr, "TEST fstat_and_ttyname_on_slots\n");
     assert_fstat_and_ttyname_on_slots();
+    fprintf(stderr, "TEST closed_pipe_write_raises_sigpipe\n");
+    assert_closed_pipe_write_raises_sigpipe();
     fprintf(stderr, "TEST spawn_entry_runs_as_a_child\n");
     assert_spawn_entry_runs_as_a_child();
     fprintf(stderr, "TEST kill_ends_scopes_and_descendants\n");

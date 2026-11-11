@@ -170,8 +170,8 @@ else
     echo "ok kill_stalled_reader"
 fi
 
-# A FIFO's reader that goes away gives the writer EPIPE, not the whole shell a SIGPIPE: the
-# shell's own signal() goes to its vproc, and the host's disposition ended it with 141.
+# A FIFO's reader that goes away ends the writer with SIGPIPE, not the whole shell: the host's
+# disposition once ended the shell with 141. The kill after finds the writer already gone.
 setup
 mkfifo "$T/f"
 printf '%s\n' 'head -c 50 < f > /dev/null &
@@ -189,7 +189,7 @@ wait "$SHELL_PID"
 rc=$?
 out=$(cat "$T/out.txt")
 if [ "$rc" != 0 ] || [ "$out" != "reader 0
-ended 143" ]; then
+ended 141" ]; then
     echo "FAIL reader_leaves: status $rc, output: $out"
     head -5 "$T/err.txt"
     fails=$((fails + 1))
