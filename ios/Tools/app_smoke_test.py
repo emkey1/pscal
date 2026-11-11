@@ -472,6 +472,16 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     # effect of Aether's pure `sum`, and `cat` compiled as a call.
     ("aether_pure_sum", f"aether --no-cache smoke/psum.aether {R}", "sum 6\n"),
     ("aether_no_shell_cat", f"aether --no-cache smoke/pcat.aether > /dev/null 2> smoke/pcat.err; echo $? {R}; grep -c SCOPE-001 smoke/pcat.err {A}", "1\n1\n"),
+    # Nor are they Pascal's, CLike's or Rea's: `cat('f')` ran smallclue's cat, a program's own `sum`
+    # was said to override a builtin, and the extended builtins had a "shell" category. On a Mac,
+    # Pascal stops at the call (at run time), CLike and Rea when compiling.
+    ("pascal_no_shell_cat", f"pascal --no-cache smoke/pcat.pas > smoke/pcat.pout 2>&1; echo $? {R}; grep -c \"Undefined global variable 'cat'\" smoke/pcat.pout {A}; grep -c 'after cat' smoke/pcat.pout {A}", "1\n1\n0\n"),
+    ("pascal_own_sum", f"pascal --no-cache smoke/psum.pas {R}", "sum 6\n"),
+    ("pascal_no_shell_category", f"pascal --no-cache smoke/pext.pas {R}", "shell cat FALSE\n"),
+    ("clike_no_shell_cat", f"clike --no-cache smoke/pcat.clike > smoke/pcat.cout 2>&1; echo $? {R}; grep -c \"undefined function 'cat'\" smoke/pcat.cout {A}", "1\n1\n"),
+    ("clike_own_sum", f"clike --no-cache smoke/psum.clike {R}", "sum 6\n"),
+    ("rea_no_shell_cat", f"rea --no-cache smoke/pcat.rea > smoke/pcat.rout 2>&1; echo $? {R}; grep -c \"identifier 'cat' not in scope\" smoke/pcat.rout {A}", "1\n1\n"),
+    ("rea_own_sum", f"rea --no-cache smoke/psum.rea {R}", "sum 6\n"),
     ("pascal_fail_or", f"pascal smoke/nope.pas 2>/dev/null || echo failed {R}", "failed\n"),
     ("pascal_halt_rc", f"pascal smoke/halt.pas > /dev/null 2>&1; echo $? {R}", "3\n"),
     # An SDL window gone as soon as it is up. It used to come back after the close, and released
@@ -2087,6 +2097,13 @@ end.
     "psum.aether": '@pure\nfn total(xs: Int[]) -> Int {\n    ret sum(xs);\n}\n\nfn main() -> Void {\n'
                    '    let xs: Int[] = [1, 2, 3];\n    fx { println("sum ", total(xs)); }\n    ret;\n}\n',
     "pcat.aether": 'fn main() -> Void {\n    fx { cat("smoke/d.txt"); println("after cat"); }\n    ret;\n}\n',
+    "pcat.pas": "program PCat;\nbegin\n  cat('smoke/d.txt');\n  writeln('after cat');\nend.\n",
+    "psum.pas": "program PSum;\nfunction sum(a, b: integer): integer;\nbegin\n  sum := a + b;\nend;\nbegin\n  writeln('sum ', sum(2, 4));\nend.\n",
+    "pext.pas": "program PExt;\nbegin\n  writeln('shell cat ', HasExtBuiltin('shell', 'cat'));\nend.\n",
+    "pcat.clike": 'int main() {\n    cat("smoke/d.txt");\n    printf("after cat\\n");\n    return 0;\n}\n',
+    "psum.clike": 'int sum(int a, int b) {\n    return a + b;\n}\nint main() {\n    printf("sum %d\\n", sum(2, 4));\n    return 0;\n}\n',
+    "pcat.rea": 'cat("smoke/d.txt");\nwriteln("after cat");\n',
+    "psum.rea": 'int sum(int a, int b) {\n    return a + b;\n}\nwriteln("sum ", sum(2, 4));\n',
     "guide.md": AETHER_GUIDE.read_text(encoding="utf-8"),
 }
 
