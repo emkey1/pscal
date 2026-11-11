@@ -2425,6 +2425,13 @@ endif()
 # exsh front-end sources, consumed from the exsh submodule. The shared shell
 # pieces (backend shell.c, common ast/builtin helpers) live in pscal-core.
 set(EXSH_SRC components/exsh/src/shell)
+# exsh's release, MAJOR.MINOR.PATCH (components/exsh/VERSION): `exsh --version`, $EXSH_VERSION
+# and EXSH_VERSINFO, in the executable and in the static library the app links alike.
+file(STRINGS "${CMAKE_SOURCE_DIR}/components/exsh/VERSION" EXSH_RELEASE_VERSION LIMIT_COUNT 1)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/components/exsh/VERSION")
+if(NOT EXSH_RELEASE_VERSION)
+    set(EXSH_RELEASE_VERSION "unknown")
+endif()
 set(SHELL_SOURCES
     ${EXSH_SRC}/main.c
     ${EXSH_SRC}/lexer.c
@@ -2453,7 +2460,7 @@ if(NOT PSCAL_PLATFORM_IOS OR (PSCAL_FORCE_IOS AND NOT PSCAL_MACCATALYST))
     add_executable(exsh ${SHELL_SOURCES})
     pscal_frontend_version(exsh exsh)
     target_link_libraries(exsh PRIVATE pscal_core_static)
-    target_compile_definitions(exsh PRIVATE FRONTEND_SHELL)
+    target_compile_definitions(exsh PRIVATE FRONTEND_SHELL EXSH_RELEASE_VERSION="${EXSH_RELEASE_VERSION}")
     if(PSCAL_HAS_LIBCURL)
         if(TARGET CURL::libcurl)
             target_link_libraries(exsh PRIVATE CURL::libcurl)
@@ -2509,12 +2516,14 @@ if(PSCAL_BUILD_STATIC_LIBS)
         FRONTEND FRONTEND_SHELL
         SOURCES ${SHELL_SOURCES})
     target_link_libraries(pscal_exsh_static PUBLIC pscal_core_static)
+    target_compile_definitions(pscal_exsh_static PRIVATE EXSH_RELEASE_VERSION="${EXSH_RELEASE_VERSION}")
 endif()
 if(SMALLCLUE_WITH_EXSH AND NOT TARGET pscal_exsh_static)
     pscal_add_static_library(pscal_exsh_static
         FRONTEND FRONTEND_SHELL
         SOURCES ${SHELL_SOURCES})
     target_link_libraries(pscal_exsh_static PUBLIC pscal_core_static)
+    target_compile_definitions(pscal_exsh_static PRIVATE EXSH_RELEASE_VERSION="${EXSH_RELEASE_VERSION}")
 endif()
 
 # Tiny C front-end executable (sources consumed from the clike submodule)

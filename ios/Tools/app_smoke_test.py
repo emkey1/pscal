@@ -1565,6 +1565,15 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     ("nohup_job_hup", f"nohup sleep 2 {R} & p=$!; sleep 1; kill -HUP $p; wait $p; echo rc=$? {A}", "rc=0\n"),
     ("nohup_shell_keeps_hup", f"{{ trap 'echo got' HUP; nohup true; kill -HUP $$; echo after; trap - HUP; }} {R}", "got\nafter\n"),
     ("nohup_terminal", f"rm -f nohup.out; nohup printf 'to-file\\n' 2> /dev/null; echo stays {R}; cat nohup.out {A}; rm -f nohup.out", "stays\nto-file\n"),
+    # A shell nohup starts has HUP ignored on entry, as on Linux: its trap changes nothing, and trap lists it.
+    ("nohup_sh_trap_hup", f"nohup sh -c 'trap \"echo got\" HUP; kill -HUP $$; echo after; trap -p HUP' {R}", "after\ntrap -- '' SIGHUP\n"),
+    ("ignored_hup_on_entry", f"( trap '' HUP; sh -c 'trap \"echo got\" HUP; kill -HUP $$; echo after' ) {R}", "after\n"),
+    ("plain_sh_traps_hup", f"sh -c 'trap \"echo got\" HUP; kill -HUP $$; echo after' {R}", "got\nafter\n"),
+    # history's options; a nested shell's list starts empty.
+    ("history_options", f"sh -c 'history -s one; history -s two; history -s three; history -d 2; history; history -c; history; echo end' {R}", "    1  one\n    2  three\nend\n"),
+    ("stray_rparen", f"eval 'echo )' 2> /dev/null; echo \"rc=$?\" {R}", "rc=2\n"),
+    # exsh's release: --version and -v print `exsh X.Y.Z`, which $EXSH_VERSION and EXSH_VERSINFO hold.
+    ("exsh_version", f"echo \"$EXSH_VERSION ${{EXSH_VERSINFO[0]}}\" {R}; exsh --version | head -1 {A}; exsh -v | head -1 {A}", "2.0.0 2\nexsh 2.0.0\nexsh 2.0.0\n"),
     # The app is not root, so chroot stops before it could run anything.
     ("chroot_refused", f"chroot smoke id -u 2> /dev/null; echo \"rc=$?\" {R}", "rc=1\n"),
     ("chroot_no_command", f"chroot smoke 2> /dev/null; echo \"rc=$?\" {R}", "rc=1\n"),

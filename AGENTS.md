@@ -24,6 +24,10 @@
 - When adding VM builtins, append them to the end of the dispatch tables/registration arrays so legacy builtin IDs remain stable.
   Never insert new entries mid-table—shifting established builtin IDs breaks existing bytecode, so this **must never happen**.
 
+## Versions
+- exsh is `MAJOR.MINOR.PATCH` in `components/exsh/VERSION` (2.0.0 is the V.1R34 release): MAJOR for a change that breaks a script that worked before, MINOR for new features or changed behaviour, PATCH for fixes only. Bump it once per PSCAL release that changes exsh, not per commit, and add the release's entry to `components/exsh/CHANGELOG.md` at the same time. `exsh --version`, `$EXSH_VERSION` and `EXSH_VERSINFO` read it; `BASH_VERSION` stays `5.2.0(1)-exsh`.
+- Aether's language version is `components/aether/VERSION` (YYYY-MM-DD-N), bumped only on language-affecting changes with `components/aether/tools/bump_version.py`.
+
 ## Workflow Tips
 - Always read existing globals before introducing new ones—regressions often come from missing reset logic during module/unit compiles.
 - Tests are slow; when editing the compiler, run at least the relevant front-end suite prior to broader sweeps.
