@@ -12,7 +12,7 @@ APP=""
 UD=""
 WORK="${TMPDIR:-/tmp}/pscal-keytests"
 CASES=()
-ALL_CASES="eof_readln_loop eof_after_kill eof_ctrl_c_status readln_ctrl_c_quiet delay_ctrl_c wc_ctrl_c sort_ctrl_c pipe_ctrl_c"
+ALL_CASES="eof_readln_loop eof_after_kill eof_ctrl_c_status readln_ctrl_c_quiet delay_ctrl_c wc_ctrl_c sort_ctrl_c pipe_ctrl_c utf8_typed"
 
 while [ $# -gt 0 ]; do
     case $1 in
@@ -228,6 +228,21 @@ case_pipe_ctrl_c() { # Ctrl-C on `cat | tr` gives 130, and the rest of the line 
     ctrl c; sleep 3
     check pipe_ctrl_c "$(status)" "rc 130~"
     check "pipe_ctrl_c, rest of the line" "$(got r.out)" ""
+}
+
+case_utf8_typed() { # characters beyond ASCII at the prompt go in whole, not dropped with a bell
+    fresh
+    type_line 'echo é⚡x > u.out'
+    wait_for u.out 20
+    check utf8_typed "$(got u.out)" "é⚡x~"
+    # A character at a time, with an emoji, and Backspace taking it whole.
+    run 'chars echo ü😀日😀'
+    sleep 4
+    run 'chars \b'
+    type_line ' > v.out'
+    wait_for v.out 20
+    check "utf8_typed, a character at a time" "$(got v.out)" "ü😀日~"
+    prompt_answers utf8_typed
 }
 
 for c in "${CASES[@]}"; do

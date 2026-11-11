@@ -5,6 +5,9 @@ Base: `V.1R33`
 ## New in the iOS app
 - `ip`, iproute2's command for the device's network, in Linux's layout and words: `ip a` (`ip address show [dev NAME]`), `ip link`, `ip route` and `ip route get ADDRESS`, with `-4`, `-6`, `-0`, `-br`, `-o`, `-j` and `-p`. The loopback interface is `lo`, as on Linux; the others keep iOS's names (`en0`, `pdp_ip0`, `utun0`).
 
+## Fixed in exsh
+- The prompt takes characters beyond ASCII, typed or pasted. Any byte past ASCII, such as `é`, `ü`, `⚡`, a CJK character or an emoji, was dropped with a bell, so `echo é⚡x` ran as `echo x`. A character now goes in whole, combining marks included. The cursor keys, Backspace, Delete and Ctrl-T move by the character, a wide one takes two columns as on the terminal, and history, reverse search, completion and wrapped lines all hold such characters. Bytes that make no character go in as they are, as in bash. Option-b, -f, -d, -t and -. still run their shortcuts (word back, word forward, delete word, swap words, last argument), as Esc-b and so on do, so those five symbols can't be typed at the prompt.
+
 ## Fixed in the iOS app
 - `ping` gets replies. Every request went out with its checksum's two bytes swapped, so every host, a LAN host, the router and the app's own loopback alike, dropped it as corrupt. Each packet then ended in `Request timeout for icmp_seq N (Resource temporarily unavailable)`, with 100% loss.
 - `df` shows the app's own filesystems: the root as `rootfs` on `/`, with the size and free space of the app's storage, and anything mounted in the app. It read the device's mount table, so it printed `No such file or directory` for each of the device's own volumes and listed the rest on `/` under Apple's volume names. `df`, `df -h`, `df /` and `df .` agree.
