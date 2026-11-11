@@ -33,10 +33,10 @@ path_prepend() {
 # Expose user-level executables first when available.
 path_prepend "$HOME/.local/bin"
 path_prepend "$HOME/bin"
-# iOS/iPadOS app bundle bin (mirrored into Documents/bin at launch).
+# iOS/iPadOS: the app's bin is /bin, below; no device path goes into PATH.
 # Avoid command substitutions here to prevent hangs on constrained runtimes.
 if [ -n "${PSCALI_CONTAINER_ROOT:-}" ]; then
-    docroot="${PSCALI_CONTAINER_ROOT}/Documents"
+    docroot=""
 else
     # Derive parent dir without spawning subshells.
     case "$HOME" in

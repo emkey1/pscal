@@ -14,7 +14,7 @@ esac
 trap 'rm -rf "$BASE"' EXIT
 # The name the shell sees for the root, which may differ from mktemp's spelling (/var, /private/var).
 T=$(cd "$BASE" && pwd -P)
-mkdir -p "$T/home/sub"
+mkdir -p "$T/home/sub" "$T/tmp"
 echo needle > "$T/home/f"
 
 fails=0
@@ -25,7 +25,8 @@ check() {
     local home=$1 cmd=$2 want=$3 out
     n=$((n + 1))
     out=$(cd "$T/home" && env -u PSCALI_CONTAINER_ROOT -u PSCALI_REAL_HOME -u PSCALI_HOME \
-        PATH_TRUNCATE="$T" HOME="$home" TMPDIR="$T" "$EXE" --no-cache -c "$cmd" 2>&1 < /dev/null)
+        PATH_TRUNCATE="$T" HOME="$home" TMPDIR="$T/tmp" PATH="$T/bin:$PATH" SESSIONPATH="$T/tmp:~:." \
+        "$EXE" --no-cache -c "$cmd" 2>&1 < /dev/null)
     if [ "$out" != "$want" ]; then
         echo "FAIL $cmd: got [$out], wanted [$want]"
         fails=$((fails + 1))
@@ -44,6 +45,13 @@ check "$T/home" '[ "$(cd; pwd)" = "$HOME" ] && [ "$(readlink -f ~)" = "$HOME" ] 
 check "$T/home" 'sh -c '\''echo "$HOME"'\'''               '/home'
 # cd with no operand goes to $HOME, whatever it is set to, as in bash.
 check "$T/home" 'HOME=/home/sub; cd; pwd'                   '/home/sub'
+# $TMPDIR, $PATH and $SESSIONPATH take the app's names too.
+check "$T/home" 'echo "$TMPDIR"; echo "${PATH%%:*}"; echo "$SESSIONPATH"' $'/tmp\n/bin\n/tmp:~:.'
+# Temporary files, times and links on an app path, which reached the host's /home.
+check "$T/home" 'cp ~/f ~/g; sed -i s/needle/pin/ ~/g; cat ~/g; ls ~ | grep -c "^sed"' $'pin\n0'
+check "$T/home" ': > ~/t; touch -r ~/f ~/t; echo $?; [ ~/t -nt ~/f ] || [ ~/f -nt ~/t ] || echo same' $'0\nsame'
+check "$T/home" 'rm -f ~/c; cp -p ~/f ~/c; echo $?; [ ~/c -nt ~/f ] || [ ~/f -nt ~/c ] || echo same' $'0\nsame'
+check "$T/home" 'rm -f ~/l; ln -L ~/f ~/l; echo $?; cat ~/l' $'0\nneedle'
 # The same directory by another spelling of the root.
 case "$T" in
     /private/*) check "${T#/private}/home" 'echo "$HOME"' '/home' ;;

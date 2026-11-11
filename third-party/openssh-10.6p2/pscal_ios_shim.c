@@ -1578,6 +1578,62 @@ int pscal_ios_rename(const char *oldpath, const char *newpath) {
     return rename(old_target, new_target);
 }
 
+/* mkstemp and mkdtemp on an app path (known_hosts under /home, $TMPDIR as /tmp): the template is
+ * filled in where it is, with only its random part, so the caller keeps the name it gave. */
+static const char *pscal_ios_mktemp_host(const char *templ, char *host, size_t host_size, size_t *out_xs) {
+    char remapped[PATH_MAX];
+    const char *target = pscal_ios_effective_path(templ, remapped, sizeof(remapped));
+    size_t len = strlen(templ);
+    size_t xs = 0;
+    while (xs < len && templ[len - 1 - xs] == 'X') {
+        xs++;
+    }
+    *out_xs = xs;
+    if (target == NULL || target == templ || strcmp(target, templ) == 0) {
+        return NULL;
+    }
+    size_t tlen = strlen(target);
+    if (tlen + 1 > host_size || tlen < xs || strcmp(target + tlen - xs, templ + len - xs) != 0) {
+        return NULL;
+    }
+    memcpy(host, target, tlen + 1);
+    return host;
+}
+
+int pscal_ios_mkstemp(char *templ) {
+    if (templ == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    char host[PATH_MAX];
+    size_t xs = 0;
+    if (pscal_ios_mktemp_host(templ, host, sizeof(host), &xs) == NULL) {
+        return mkstemp(templ);
+    }
+    int fd = mkstemp(host);
+    if (fd >= 0) {
+        memcpy(templ + strlen(templ) - xs, host + strlen(host) - xs, xs);
+    }
+    return fd;
+}
+
+char *pscal_ios_mkdtemp(char *templ) {
+    if (templ == NULL) {
+        errno = EINVAL;
+        return NULL;
+    }
+    char host[PATH_MAX];
+    size_t xs = 0;
+    if (pscal_ios_mktemp_host(templ, host, sizeof(host), &xs) == NULL) {
+        return mkdtemp(templ);
+    }
+    if (mkdtemp(host) == NULL) {
+        return NULL;
+    }
+    memcpy(templ + strlen(templ) - xs, host + strlen(host) - xs, xs);
+    return templ;
+}
+
 int pscal_ios_link(const char *target, const char *linkpath) {
     char remapped_target[PATH_MAX];
     char remapped_link[PATH_MAX];

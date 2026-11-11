@@ -1439,6 +1439,17 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     ("home_fd_link", f"{{ exec 3< ~/smoke/d.txt; readlink /proc/self/fd/3; exec 3<&-; }} {R}", "/home/smoke/d.txt\n"),
     ("home_dirs", f"cd ~/smoke; dirs > {O} 2>&1; cd", "~/smoke\n"),
     ("home_git", f"rm -rf smoke/gh; git init -q ~/smoke/gh > /dev/null 2>&1; ls -d ~/smoke/gh/.git {R}; rm -rf smoke/gh", "/home/smoke/gh/.git\n"),
+    # $TMPDIR, $PATH and $SESSIONPATH name what they name as the app does, as $HOME does: /tmp, /bin.
+    ("env_app_names", f"echo \"$TMPDIR\" {R}; for v in HOME TMPDIR PATH SESSIONPATH; do eval \"x=\\${{$v}}\"; case \"$x\" in *Containers/*|*/Documents/*|*/Documents) echo \"$v $x\";; esac; done {A}; echo \"$PATH\" | tr : '\\n' | grep -cx /bin {A}", "/tmp\n1\n"),
+    ("exshrc_migrated", f"grep -c 'PSCALI_CONTAINER_ROOT}}/Documents\"' ~/.exshrc {R}", "0\n"),
+    ("tmpdir_tools", f"sort -T \"$TMPDIR\" smoke/d.txt {R}; cat <<< here {A}; ls -d \"$TMPDIR\" {A}", "a\nb\nc\nhere\n/tmp\n"),
+    # Temporary files, times, links and owners on an app path: sed -i, touch -r, cp -p, ln -L and tar
+    # reached the host's /home, so ~/f failed once ~ was /home, as /home/f always had.
+    ("home_sed_inplace", f"cp smoke/d.txt ~/smoke/hs1.txt; sed -i s/a/q/ ~/smoke/hs1.txt; cd smoke/sub; sed -i s/b/r/ /home/smoke/hs1.txt; cd; cat ~/smoke/hs1.txt {R}; ls ~/smoke | grep -c '^sed' {A}", "r\nq\nc\n0\n"),
+    ("home_touch_ref", f"rm -f ~/smoke/ht1; : > ~/smoke/ht1; touch -r smoke/d.txt ~/smoke/ht1; echo $? {R}; if [ ~/smoke/ht1 -nt smoke/d.txt ] || [ smoke/d.txt -nt ~/smoke/ht1 ]; then echo differ; else echo same; fi {A}", "0\nsame\n"),
+    ("home_cp_p", f"rm -f ~/smoke/hcp; cp -p smoke/d.txt ~/smoke/hcp; echo $? {R}; if [ ~/smoke/hcp -nt smoke/d.txt ] || [ smoke/d.txt -nt ~/smoke/hcp ]; then echo differ; else echo same; fi {A}", "0\nsame\n"),
+    ("home_ln_logical", f"rm -f ~/smoke/hlL; ln -L ~/smoke/d.txt ~/smoke/hlL; echo $? {R}; cat ~/smoke/hlL {A}; rm -f ~/smoke/hlL", "0\nb\na\nc\n"),
+    ("home_tar_extract", f"rm -rf smoke/htx smoke/ht.tar; mkdir -p smoke/htx; (cd smoke && tar cf ht.tar d.txt); tar xf ~/smoke/ht.tar -C ~/smoke/htx; echo $? {R}; cat ~/smoke/htx/d.txt {A}; rm -rf smoke/htx smoke/ht.tar", "0\nb\na\nc\n"),
     # ssh finds ~/.ssh by $HOME. No server: -G resolves the config, ssh-keygen reads keys and known_hosts.
     ("home_ssh_config", f"mkdir -p ~/.ssh; [ -e ~/.ssh/config ] && mv ~/.ssh/config ~/.ssh/config.smoke-saved; printf 'Host smokehome.invalid\\n  Port 2299\\n  User smokeu\\n' > ~/.ssh/config; ssh -G smokehome.invalid 2>&1 | grep -E '^(user|port) ' | sort {R}; rm -f ~/.ssh/config; [ -e ~/.ssh/config.smoke-saved ] && mv ~/.ssh/config.smoke-saved ~/.ssh/config", "port 2299\nuser smokeu\n"),
     ("home_ssh_keys", f"mkdir -p ~/.ssh; rm -f ~/.ssh/smoke_hk ~/.ssh/smoke_hk.pub; cp smoke/hk ~/.ssh/smoke_hk; cp smoke/hk.pub ~/.ssh/smoke_hk.pub; chmod 600 ~/.ssh/smoke_hk; ssh-keygen -y -f ~/.ssh/smoke_hk > smoke/hky 2>&1; cut -d' ' -f1 smoke/hky {R}; touch ~/.ssh/known_hosts; {{ printf 'smokehome.invalid '; cat ~/.ssh/smoke_hk.pub; }} >> ~/.ssh/known_hosts; ssh-keygen -F smokehome.invalid 2>&1 | grep -c ed25519 {A}; ssh-keygen -R smokehome.invalid > /dev/null 2>&1; ssh-keygen -F smokehome.invalid 2>&1 | grep -c ed25519 {A}; rm -f ~/.ssh/smoke_hk ~/.ssh/smoke_hk.pub", "ssh-ed25519\n1\n0\n"),
@@ -1747,6 +1758,8 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     ("tab_login", f"printf 'who am i > \"$HOME/smoke/tab.who\"\\nuntil [ -e \"$HOME/smoke/tab.go\" ]; do sleep 0.1; done\\nexit\\n' > smoke/tab.sh; tabadd; waitfile smoke/tab.who; users | wc -w {R}; awk '{{print ($2 ~ /^pts\\/[1-9]/)}}' smoke/tab.who {A}; touch smoke/tab.go; waitusers 1; rm smoke/tab.sh; users | wc -w {A}", "2\n1\n1\n"),
     # A second tab names its home the same way, and its ssh finds the same ~/.ssh/config.
     ("tab_home_ssh", f"rm -f smoke/tab.hm smoke/tab.hd; mkdir -p ~/.ssh; [ -e ~/.ssh/config ] && mv ~/.ssh/config ~/.ssh/config.smoke-saved; printf 'Host smokehome.invalid\\n  Port 2299\\n' > ~/.ssh/config; printf '%s\\n' 'echo \"$HOME\" > \"$HOME/smoke/tab.hm\"' 'ssh -G smokehome.invalid 2>&1 | grep \"^port \" >> \"$HOME/smoke/tab.hm\"' 'touch \"$HOME/smoke/tab.hd\"' 'exit' > smoke/tab.sh; tabadd; waitfile smoke/tab.hd; cat smoke/tab.hm {R}; waitusers 1; rm -f smoke/tab.sh ~/.ssh/config; [ -e ~/.ssh/config.smoke-saved ] && mv ~/.ssh/config.smoke-saved ~/.ssh/config", "/home\nport 2299\n"),
+    # Opening a tab emptied /tmp: each tab's start removed and remade it.
+    ("tab_keeps_tmp", f"rm -f smoke/tab.td; echo kept > /tmp/smoke_keep; printf '%s\\n' 'echo up > \"$HOME/smoke/tab.td\"' 'exit' > smoke/tab.sh; tabadd; waitfile smoke/tab.td; waitusers 1; rm -f smoke/tab.sh; cat /tmp/smoke_keep {R}; rm -f /tmp/smoke_keep", "kept\n"),
     # /dev/tty went by a table a second tab could take over, and that tab's close could leave this one without.
     ("stty_named_after_tab", f"stty -F /dev/tty size > /dev/null 2>&1; echo $? {R}", "0\n"),
     ("dev_tty_after_tab", f"tty < /dev/tty | sed 's/[0-9]*$//' {R}", "/dev/pts/\n"),
@@ -2288,7 +2301,11 @@ class Session:
         # The app keeps an .exshrc that already exists, so write the one it would
         # seed on first launch, plus the hook.
         skel = self.app / "etc/skel/.exshrc"
-        (self.home / ".exshrc").write_text((skel.read_text() if skel.exists() else "") + f"\n{HOOK}\n")
+        # As an upgrade finds it: build 33's skeleton put the app's bin in PATH by the device's path,
+        # and the launch rewrites that line (exshrc_migrated).
+        rc = (skel.read_text() if skel.exists() else "").replace(
+            '    docroot=""\n', '    docroot="${PSCALI_CONTAINER_ROOT}/Documents"\n', 1)
+        (self.home / ".exshrc").write_text(rc + f"\n{HOOK}\n")
 
     def finish(self, keep: bool) -> None:
         if keep:

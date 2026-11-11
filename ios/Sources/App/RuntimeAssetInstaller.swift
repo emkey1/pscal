@@ -668,6 +668,13 @@ final class RuntimeAssetInstaller {
             let rootRc = rootHome.appendingPathComponent(".exshrc", isDirectory: false)
             if fileManager.fileExists(atPath: skelRc.path) && !fileManager.fileExists(atPath: rootRc.path) {
                 try fileManager.copyItem(at: skelRc, to: rootRc)
+            } else if let oldData = try? Data(contentsOf: rootRc),
+                      let oldContents = String(data: oldData, encoding: .utf8) {
+                // The same lines an earlier skeleton shipped, as for the user's ~/.exshrc.
+                let migrated = migratedExshrcContents(oldContents)
+                if migrated != oldContents {
+                    try migrated.write(to: rootRc, atomically: true, encoding: .utf8)
+                }
             }
         } catch {
             NSLog("PSCAL iOS: failed to ensure var/root: %@", error.localizedDescription)
@@ -1038,15 +1045,24 @@ final class RuntimeAssetInstaller {
     }
 
     private func migratedExshrcContents(_ contents: String) -> String {
-        let pattern = #"(?m)^[ \t]*if \[ "\$\{PSCALSHELL_THREAD_METRICS:-0\}" != "0" \]; then\n[ \t]*echo "\[exsh\] worker pool snapshot"\n[ \t]*threadpool_report\n[ \t]*fi\n?"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return contents
-        }
-        let range = NSRange(contents.startIndex..<contents.endIndex, in: contents)
-        let updated = regex.stringByReplacingMatches(in: contents,
+        // Each (pattern, replacement) matches only what an earlier build shipped, so an edited line stays.
+        let rules: [(String, String)] = [
+            (#"(?m)^[ \t]*if \[ "\$\{PSCALSHELL_THREAD_METRICS:-0\}" != "0" \]; then\n[ \t]*echo "\[exsh\] worker pool snapshot"\n[ \t]*threadpool_report\n[ \t]*fi\n?"#, ""),
+            // PATH named the app's bin by the device's path; /bin, prepended after it, is the same folder.
+            (#"(?m)^([ \t]*)docroot="\$\{PSCALI_CONTAINER_ROOT\}/Documents"[ \t]*$"#, "$1docroot=\"\""),
+            (#"(?m)^[ \t]*if \[ -n "\$\{PSCALI_CONTAINER_ROOT:-\}" \]; then\n[ \t]*path_prepend "\$\{PSCALI_CONTAINER_ROOT\}/Documents/bin"\n[ \t]*fi\n?"#, ""),
+        ]
+        var updated = contents
+        for (pattern, template) in rules {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else {
+                continue
+            }
+            let range = NSRange(updated.startIndex..<updated.endIndex, in: updated)
+            updated = regex.stringByReplacingMatches(in: updated,
                                                      options: [],
                                                      range: range,
-                                                     withTemplate: "")
+                                                     withTemplate: template)
+        }
         guard updated != contents else {
             return contents
         }

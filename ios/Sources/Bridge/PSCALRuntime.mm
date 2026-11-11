@@ -1891,7 +1891,8 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
         if (sessionRoot.length > 0) {
             vprocSetenvShim("HOME", sessionRoot.UTF8String, 1);
             vprocSetenvShim("SESSIONPATH", sessionRoot.UTF8String, 1);
-            vprocSetenvShim("TMPDIR", sessionRoot.UTF8String, 1);
+            /* The installer's Documents/tmp, a tab's /tmp, when it set one: only a fallback here. */
+            vprocSetenvShim("TMPDIR", sessionRoot.UTF8String, 0);
             vprocSetenvShim("PWD", sessionRoot.UTF8String, 1);
             chdir(sessionRoot.UTF8String);
         }

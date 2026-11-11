@@ -638,7 +638,19 @@ final class PscalRuntimeBootstrap: ObservableObject, @unchecked Sendable {
         send(wrapped)
     }
 
+    private static let purgeLock = NSLock()
+    private static var purgedThisLaunch = false
+
+    /// /tmp is emptied once per launch, as at boot on Linux. Each tab has a bootstrap of its own, and
+    /// this ran at every one's start, so opening a tab emptied /tmp under the other tabs' commands.
     private func purgeTransientState() {
+        Self.purgeLock.lock()
+        let already = Self.purgedThisLaunch
+        Self.purgedThisLaunch = true
+        Self.purgeLock.unlock()
+        if already {
+            return
+        }
         let fm = FileManager.default
         let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)

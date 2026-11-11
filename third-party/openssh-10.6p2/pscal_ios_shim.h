@@ -66,6 +66,8 @@ int pscal_ios_unlink(const char *path);
 int pscal_ios_remove(const char *path);
 int pscal_ios_rename(const char *oldpath, const char *newpath);
 int pscal_ios_link(const char *target, const char *linkpath);
+int pscal_ios_mkstemp(char *templ);
+char *pscal_ios_mkdtemp(char *templ);
 int pscal_ios_symlink(const char *target, const char *linkpath);
 char *pscal_ios_realpath(const char *path, char *resolved_path);
 ssize_t pscal_ios_readlink(const char *path, char *buf, size_t bufsize);
@@ -175,6 +177,10 @@ int pscal_ios_execlp(const char *file, const char *arg, ...);
 # define remove(path) pscal_ios_remove((path))
 # define rename(oldpath, newpath) pscal_ios_rename((oldpath), (newpath))
 # define link(target, linkpath) pscal_ios_link((target), (linkpath))
+# undef mkstemp
+# define mkstemp(templ) pscal_ios_mkstemp((templ))
+# undef mkdtemp
+# define mkdtemp(templ) pscal_ios_mkdtemp((templ))
 # define symlink(target, linkpath) pscal_ios_symlink((target), (linkpath))
 # define pthread_create(thread, attr, start_routine, arg) \
     vprocPthreadCreateShim((thread), (attr), (start_routine), (arg))
