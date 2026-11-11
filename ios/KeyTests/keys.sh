@@ -12,7 +12,7 @@ APP=""
 UD=""
 WORK="${TMPDIR:-/tmp}/pscal-keytests"
 CASES=()
-ALL_CASES="eof_readln_loop eof_after_kill eof_ctrl_c_status readln_ctrl_c_quiet delay_ctrl_c wc_ctrl_c sort_ctrl_c pipe_ctrl_c utf8_typed micro_task_mask micro_keys_unbuffered fd_names_at_prompt"
+ALL_CASES="eof_readln_loop eof_after_kill eof_ctrl_c_status readln_ctrl_c_quiet delay_ctrl_c wc_ctrl_c sort_ctrl_c pipe_ctrl_c utf8_typed micro_task_mask micro_keys_unbuffered micro_shell_cwd fd_names_at_prompt"
 
 while [ $# -gt 0 ]; do
     case $1 in
@@ -259,7 +259,7 @@ case_micro_task_mask() { # micro (Go) makes its directories with its own task's 
 }
 
 case_micro_keys_unbuffered() { # micro takes each key as it comes: text, Ctrl-S and Ctrl-Q work with no Enter typed
-    # Run from $HOME: micro's Go code takes a relative name from the app's directory, not the shell's.
+    # Run from $HOME, where a relative name lands with or without micro_shell_cwd's fix: this case is the keys.
     fresh; rm -f "$H/kq.txt"
     type_line 'cd; micro kq.txt; echo "rc $?" > kt/ed.out; cd kt'; sleep 12
     run "text hi"; sleep 1; ctrl s; sleep 2; ctrl q; wait_for ed.out 10
@@ -267,6 +267,20 @@ case_micro_keys_unbuffered() { # micro takes each key as it comes: text, Ctrl-S 
     check "micro_keys_unbuffered, the file saved" "$( [ -f "$H/kq.txt" ] && tr '\n' '~' < "$H/kq.txt")" "hi~"
     prompt_answers micro_keys_unbuffered
     rm -f "$H/kq.txt"
+}
+case_micro_shell_cwd() { # micro opens and saves a relative name in the shell's directory, and an app path such as ~/x
+    fresh; rm -f "$H/kt/cw.txt" "$H/cw.txt" "$H/kt/ab.txt"
+    type_line 'micro cw.txt; echo "rc $?" > ed.out'; sleep 12
+    run "text hi"; sleep 1; ctrl s; sleep 2; ctrl q; wait_for ed.out 10
+    check micro_shell_cwd "$(got ed.out)" "rc 0~"
+    check "micro_shell_cwd, saved in the shell's directory" "$(got cw.txt)" "hi~"
+    check "micro_shell_cwd, nothing in the app's" "$( [ -e "$H/cw.txt" ] && echo there)" ""
+    rm -f "$H/kt"/*.out
+    type_line 'micro ~/kt/ab.txt; echo "rc $?" > ed.out'; sleep 12
+    run "text ab"; sleep 1; ctrl s; sleep 2; ctrl q; wait_for ed.out 10
+    check "micro_shell_cwd, an app path" "$(got ab.txt)" "ab~"
+    prompt_answers micro_shell_cwd
+    rm -f "$H/kt/cw.txt" "$H/cw.txt" "$H/kt/ab.txt"
 }
 case_fd_names_at_prompt() { # /proc/$$/fd in a redirected group, typed at the prompt, not from a sourced file
     fresh

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Point a Go c-archive's own calls to libc's open, openat, mkdir and mkdirat at PSCAL's shims.
+"""Point a Go c-archive's own libc calls that make files or take a path at PSCAL's shims.
 
 The Go runtime reaches libc directly, on threads no task runs on, so nothing of the app's file
 mask applies to what a Go program makes: the host's mask does. In the archive's go.o each of
 these is one undefined symbol that every call relocates against. This renames those symbols
 (_open to _pscal_go_open, and so on), so the final link binds them to smallclue's micro_app.c,
-which applies the mask of the task that started the program. Nothing else in the app changes.
+which applies the mask of the task that started the program. The path calls (stat, rename,
+chdir, getcwd and the rest in RENAMES) resolve a name against that task's working directory and
+its app paths, where the Go runtime's own would take the whole app's. Nothing else in the app changes.
 
 Usage: go_archive_redirect_libc.py ARCHIVE
 Exits 1 if go.o is missing, is not a 64-bit Mach-O object, or still names a symbol afterwards.
@@ -23,6 +25,27 @@ RENAMES = {
     b"_openat": b"_pscal_go_openat",
     b"_mkdir": b"_pscal_go_mkdir",
     b"_mkdirat": b"_pscal_go_mkdirat",
+    b"_stat": b"_pscal_go_stat",
+    b"_lstat": b"_pscal_go_lstat",
+    b"_fstatat": b"_pscal_go_fstatat",
+    b"_faccessat": b"_pscal_go_faccessat",
+    b"_chmod": b"_pscal_go_chmod",
+    b"_chown": b"_pscal_go_chown",
+    b"_lchown": b"_pscal_go_lchown",
+    b"_link": b"_pscal_go_link",
+    b"_symlink": b"_pscal_go_symlink",
+    b"_readlink": b"_pscal_go_readlink",
+    b"_readlinkat": b"_pscal_go_readlinkat",
+    b"_rename": b"_pscal_go_rename",
+    b"_rmdir": b"_pscal_go_rmdir",
+    b"_truncate": b"_pscal_go_truncate",
+    b"_unlink": b"_pscal_go_unlink",
+    b"_unlinkat": b"_pscal_go_unlinkat",
+    b"_utimensat": b"_pscal_go_utimensat",
+    b"_utimes": b"_pscal_go_utimes",
+    b"_chdir": b"_pscal_go_chdir",
+    b"_fchdir": b"_pscal_go_fchdir",
+    b"_getcwd": b"_pscal_go_getcwd",
 }
 MH_MAGIC_64 = 0xFEEDFACF
 LC_SYMTAB = 0x2

@@ -20,6 +20,7 @@ and two that need the real prompt or a full-screen program:
 | `utf8_typed` | `echo é⚡x` and emoji typed at the prompt run whole, and Backspace takes an emoji whole (V.1R34) |
 | `micro_task_mask` | `micro` makes its directories with its own task's mask: `~/.config/micro/buffers` is 700 under `(umask 077; micro f)` with a session mask of 022 |
 | `micro_keys_unbuffered` | `micro` gets each key as it is typed: `hi`, Ctrl-S and Ctrl-Q with no Enter save `hi` and end micro with 0, and the prompt runs the next line |
+| `micro_shell_cwd` | `micro cw.txt` saves in the shell's directory, not the app's, and `micro ~/kt/ab.txt` (an app path) saves there too |
 | `fd_names_at_prompt` | `{ echo a > /proc/$$/fd/1; } > f` typed at the prompt writes `f` |
 
 ## Running it
