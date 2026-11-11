@@ -39,6 +39,8 @@ int pscal_ios_fprintf(FILE *stream, const char *format, ...);
 int pscal_ios_printf(const char *format, ...);
 int pscal_ios_fputs(const char *s, FILE *stream);
 int pscal_ios_puts(const char *s);
+size_t pscal_ios_fwrite(const void *ptr, size_t size, size_t nitems, FILE *stream);
+int pscal_ios_fputc(int c, FILE *stream);
 int pscal_ios_close(int fd);
 int pscal_ios_dup(int fd);
 int pscal_ios_dup2(int fd, int target);
@@ -126,6 +128,10 @@ int pscal_ios_execlp(const char *file, const char *arg, ...);
 # define printf(...) pscal_ios_printf(__VA_ARGS__)
 # define fputs(...) pscal_ios_fputs(__VA_ARGS__)
 # define puts(...) pscal_ios_puts(__VA_ARGS__)
+/* Without these, `ssh-keygen -y` wrote the key with fwrite to the app's own stdout,
+ * past the command's pipe or $(...), while its comment and newline went through. */
+# define fwrite(...) pscal_ios_fwrite(__VA_ARGS__)
+# define fputc(...) pscal_ios_fputc(__VA_ARGS__)
 # define close(...) pscal_ios_close(__VA_ARGS__)
 # define pipe(...) vprocPipeShim(__VA_ARGS__)
 # define socket(...) vprocSocketShim(__VA_ARGS__)

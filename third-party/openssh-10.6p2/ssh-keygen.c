@@ -64,6 +64,35 @@
 #include "cipher.h"
 #include "pscal_runtime_hooks.h"
 
+#ifdef PSCAL_TARGET_IOS
+/*
+ * stdio's stdin is the host's fd 0 in the app, never the command's: a pipe or a
+ * redirection reaches only the task's fd 0. So `echo y | ssh-keygen -f k`
+ * answered nothing at "Overwrite (y/n)?", and `-f -` read the wrong input. Read
+ * through smallclue's per-thread stream over fd 0, as the applets do. It belongs
+ * to the thread, so an fclose of it only clears its end-of-file. Weak, for
+ * anything that links this without smallclue.
+ */
+FILE *smallclueAppStdin(void) __attribute__((weak));
+static FILE *
+pscal_keygen_stdin(void)
+{
+	return smallclueAppStdin != NULL ? smallclueAppStdin() : stdin;
+}
+static int
+pscal_keygen_fclose(FILE *f)
+{
+	if (f == pscal_keygen_stdin()) {
+		clearerr(f);
+		return 0;
+	}
+	return fclose(f);
+}
+#undef stdin
+#define stdin pscal_keygen_stdin()
+#define fclose(f) pscal_keygen_fclose(f)
+#endif
+
 #ifdef ENABLE_PKCS11
 #include "ssh-pkcs11.h"
 #endif
@@ -83,37 +112,37 @@
 
 #define KEY_COMMENT_MAX		(NI_MAXHOST + 1024)
 
-static int quiet = 0;
+static PSCAL_SSH_THREAD_LOCAL int quiet = 0;
 
 /* Flag indicating that we just want to see the key fingerprint */
-static int print_fingerprint = 0;
-static int print_bubblebabble = 0;
+static PSCAL_SSH_THREAD_LOCAL int print_fingerprint = 0;
+static PSCAL_SSH_THREAD_LOCAL int print_bubblebabble = 0;
 
 /* Hash algorithm to use for fingerprints. */
-static int fingerprint_hash = SSH_FP_HASH_DEFAULT;
+static PSCAL_SSH_THREAD_LOCAL int fingerprint_hash = SSH_FP_HASH_DEFAULT;
 
 /* The identity file name, given on the command line or entered by the user. */
-static char identity_file[PATH_MAX];
-static int have_identity = 0;
+static PSCAL_SSH_THREAD_LOCAL char identity_file[PATH_MAX];
+static PSCAL_SSH_THREAD_LOCAL int have_identity = 0;
 
 /* This is set to the passphrase if given on the command line. */
-static char *identity_passphrase = NULL;
+static PSCAL_SSH_THREAD_LOCAL char *identity_passphrase = NULL;
 
 /* This is set to the new passphrase if given on the command line. */
-static char *identity_new_passphrase = NULL;
+static PSCAL_SSH_THREAD_LOCAL char *identity_new_passphrase = NULL;
 
 /* Key type when certifying */
-static u_int cert_key_type = SSH2_CERT_TYPE_USER;
+static PSCAL_SSH_THREAD_LOCAL u_int cert_key_type = SSH2_CERT_TYPE_USER;
 
 /* "key ID" of signed key */
-static char *cert_key_id = NULL;
+static PSCAL_SSH_THREAD_LOCAL char *cert_key_id = NULL;
 
 /* Comma-separated list of principal names for certifying keys */
-static char *cert_principals = NULL;
+static PSCAL_SSH_THREAD_LOCAL char *cert_principals = NULL;
 
 /* Validity period for certificates */
-static uint64_t cert_valid_from = 0;
-static uint64_t cert_valid_to = ~0ULL;
+static PSCAL_SSH_THREAD_LOCAL uint64_t cert_valid_from = 0;
+static PSCAL_SSH_THREAD_LOCAL uint64_t cert_valid_to = ~0ULL;
 
 /* Certificate options */
 #define CERTOPT_X_FWD				(1)
@@ -125,9 +154,9 @@ static uint64_t cert_valid_to = ~0ULL;
 #define CERTOPT_REQUIRE_VERIFY			(1<<6)
 #define CERTOPT_DEFAULT	(CERTOPT_X_FWD|CERTOPT_AGENT_FWD| \
 			 CERTOPT_PORT_FWD|CERTOPT_PTY|CERTOPT_USER_RC)
-static uint32_t certflags_flags = CERTOPT_DEFAULT;
-static char *certflags_command = NULL;
-static char *certflags_src_addr = NULL;
+static PSCAL_SSH_THREAD_LOCAL uint32_t certflags_flags = CERTOPT_DEFAULT;
+static PSCAL_SSH_THREAD_LOCAL char *certflags_command = NULL;
+static PSCAL_SSH_THREAD_LOCAL char *certflags_src_addr = NULL;
 
 /* Arbitrary extensions specified by user */
 struct cert_ext {
@@ -135,8 +164,8 @@ struct cert_ext {
 	char *val;
 	int crit;
 };
-static struct cert_ext *cert_ext;
-static size_t ncert_ext;
+static PSCAL_SSH_THREAD_LOCAL struct cert_ext *cert_ext;
+static PSCAL_SSH_THREAD_LOCAL size_t ncert_ext;
 
 /* Conversion to/from various formats */
 enum {
@@ -146,27 +175,27 @@ enum {
 	FMT_HEXDUMP
 } convert_format = FMT_RFC4716;
 
-static char *key_type_name = NULL;
+static PSCAL_SSH_THREAD_LOCAL char *key_type_name = NULL;
 
 /* Load key from this PKCS#11 provider */
-static char *pkcs11provider = NULL;
+static PSCAL_SSH_THREAD_LOCAL char *pkcs11provider = NULL;
 
 /* FIDO/U2F provider to use */
-static char *sk_provider = NULL;
+static PSCAL_SSH_THREAD_LOCAL char *sk_provider = NULL;
 
 /* Format for writing private keys */
-static int private_key_format = SSHKEY_PRIVATE_OPENSSH;
+static PSCAL_SSH_THREAD_LOCAL int private_key_format = SSHKEY_PRIVATE_OPENSSH;
 
 /* Cipher for new-format private keys */
-static char *openssh_format_cipher = NULL;
+static PSCAL_SSH_THREAD_LOCAL char *openssh_format_cipher = NULL;
 
 /* Number of KDF rounds to derive new format keys. */
-static int rounds = 0;
+static PSCAL_SSH_THREAD_LOCAL int rounds = 0;
 
 /* argv0 */
 extern char *__progname;
 
-static char hostname[NI_MAXHOST];
+static PSCAL_SSH_THREAD_LOCAL char hostname[NI_MAXHOST];
 
 #ifdef WITH_OPENSSL
 /* moduli.c */
@@ -3388,14 +3417,16 @@ ssh_keygen_reset(void)
 	fingerprint_hash = SSH_FP_HASH_DEFAULT;
 	memset(identity_file, 0, sizeof(identity_file));
 	have_identity = 0;
-	free(identity_passphrase);
+	/*
+	 * -P, -N, -I and -n leave these pointing into the last run's argv,
+	 * which its caller owns and has freed by now: forget them, never free
+	 * them. Freeing them corrupted the app's heap from the second
+	 * ssh-keygen on (an abort, a bogus "Too many arguments", or a hang).
+	 */
 	identity_passphrase = NULL;
-	free(identity_new_passphrase);
 	identity_new_passphrase = NULL;
 	cert_key_type = SSH2_CERT_TYPE_USER;
-	free(cert_key_id);
 	cert_key_id = NULL;
-	free(cert_principals);
 	cert_principals = NULL;
 	cert_valid_from = 0;
 	cert_valid_to = ~0ULL;

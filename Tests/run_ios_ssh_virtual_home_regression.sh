@@ -36,8 +36,12 @@ KEY
 chmod 700 "${TEST_ROOT}/home/.ssh"
 chmod 600 "${TEST_ROOT}/home/.ssh/id_ed25519"
 
-CMD="export PATH_TRUNCATE=${TEST_ROOT}; export PSCALI_ETC_ROOT=${TEST_ROOT}/etc; export HOME=${TEST_ROOT}/home; ssh -G -F /dev/null pi"
-OUTPUT="$(${EXSH} -c "${CMD}" 2>&1 || true)"
+# The app sets these before its shell starts, so the test does too. The path
+# layer reads the process's environment, and an `export` inside `-c` changes
+# only the shell's own (private since pscal-core ec10d62), so set that way the
+# root stayed the caller's HOME and the test failed on correct code.
+OUTPUT="$(PATH_TRUNCATE="${TEST_ROOT}" PSCALI_ETC_ROOT="${TEST_ROOT}/etc" HOME="${TEST_ROOT}/home" \
+  "${EXSH}" -c 'ssh -G -F /dev/null pi' 2>&1 || true)"
 
 if [[ "${OUTPUT}" != *"userknownhostsfile /home/.ssh/known_hosts /home/.ssh/known_hosts2"* ]]; then
   echo "FAIL: expected known-hosts paths to resolve under /home/.ssh" >&2

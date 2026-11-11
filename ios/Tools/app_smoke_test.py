@@ -1698,6 +1698,12 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     # What a task makes obeys its own mask by every route, looser or tighter than the app's, which is the first tab's shell's. ssh-keygen and git reached libc, which used the app's.
     ("mask_looser_task", f"rm -rf smoke/tl smoke/tld; umask 077; ( umask 022; : > smoke/tl; mkdir smoke/tld ); umask 022; ls -ld smoke/tl smoke/tld | cut -c1-10 {R}", "-rw-r--r--\ndrwxr-xr-x\n"),
     ("mask_keygen", f"rm -f smoke/kh smoke/kh.pub; umask 077; ( umask 022; ssh-keygen -q -t ed25519 -N '' -f smoke/kh < /dev/null ); umask 022; ls -l smoke/kh smoke/kh.pub | cut -c1-10 {R}", "-rw-------\n-rw-r--r--\n"),
+    # ssh-keygen after another in the same app: the second freed the first's -N value, which
+    # is argv's, and the app ended (SIGABRT) or the heap went bad. "Overwrite (y/n)?" and
+    # -f - read the app's own fd 0, not the command's stdin.
+    ("keygen_again", f"rm -f smoke/kg1 smoke/kg1.pub smoke/kg2 smoke/kg2.pub; ssh-keygen -q -t ed25519 -N '' -C a -f smoke/kg1 < /dev/null; ssh-keygen -q -t ecdsa -N x -C b -f smoke/kg2 < /dev/null; ssh-keygen -l -f smoke/kg1 > /dev/null; echo \"$?\" {R}; ssh-keygen -y -P x -f smoke/kg2 | cut -d' ' -f1 {A}", "0\necdsa-sha2-nistp256\n"),
+    ("keygen_overwrite_answer", f"a=$(ssh-keygen -l -f smoke/kg1); echo n | ssh-keygen -q -t ed25519 -N '' -f smoke/kg1 > /dev/null; echo \"$?\" {R}; [ \"$(ssh-keygen -l -f smoke/kg1)\" = \"$a\" ] && echo kept {A}; echo y | ssh-keygen -q -t ed25519 -N '' -f smoke/kg1 > /dev/null; echo \"$?\" {A}; [ \"$(ssh-keygen -l -f smoke/kg1)\" != \"$a\" ] && echo replaced {A}", "1\nkept\n0\nreplaced\n"),
+    ("keygen_stdin_file", f"[ \"$(ssh-keygen -l -f - < smoke/kg2.pub)\" = \"$(ssh-keygen -l -f smoke/kg2.pub)\" ] && echo same {R}; cat smoke/kg1.pub | ssh-keygen -l -f - | cut -d' ' -f4 {A}", "same\n(ED25519)\n"),
     ("mask_git", f"rm -rf smoke/gm smoke/gn; ( umask 077; git init -q smoke/gm ) > /dev/null 2>&1; umask 077; git init -q smoke/gn > /dev/null 2>&1; umask 022; a=$(cd smoke/gm && find . | sort | xargs ls -ld | cut -c1-10); b=$(cd smoke/gn && find . | sort | xargs ls -ld | cut -c1-10); [ -n \"$a\" ] && [ \"$a\" = \"$b\" ] && echo same {R}; ls -ld smoke/gm/.git | cut -c1-10 {A}; rm -rf smoke/gm smoke/gn", "same\ndrwx------\n"),
     # Last, so that the listing tests above never see these names in $HOME.
     ("vm_cleanup", f"rm -rf vm.* vmj.json smoke/v1 smoke/v2; ls vm.in 2>/dev/null | wc -l {R}", "0\n"),

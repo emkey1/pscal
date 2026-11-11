@@ -281,14 +281,15 @@ read_passphrase(const char *prompt, int flags)
 		ssize_t rd = -1;
 		if (use_session_queue) {
 			rd = vprocSessionReadInputShim(&ch, 1);
-			if (rd <= 0) {
+			if (rd < 0) {
 				int session_errno = errno;
 				/* Nested scp->ssh can race session queue setup/rotation.
-				 * Fall back to direct stdin read before failing. */
-				if (rd == 0 ||
-				    (session_errno != EINTR &&
-				     session_errno != EAGAIN &&
-				     session_errno != EWOULDBLOCK)) {
+				 * Fall back to direct stdin read before failing. A 0 is
+				 * the end-of-file key or a closed input, never this: it
+				 * ends the answer, as on Linux. */
+				if (session_errno != EINTR &&
+				    session_errno != EAGAIN &&
+				    session_errno != EWOULDBLOCK) {
 					ssize_t fallback_rd = vprocReadShim(STDIN_FILENO, &ch, 1);
 					if (fallback_rd > 0) {
 						rd = fallback_rd;
@@ -303,15 +304,6 @@ read_passphrase(const char *prompt, int flags)
 		if (rd < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
 			continue;
 		}
-		if (rd == 0 && use_session_queue) {
-			/* Session queue EOF may be transient when nested tools rotate
-			 * stdin plumbing (scp -> ssh). Retry instead of submitting an
-			 * empty password immediately. */
-			if (++session_idle_spins < 5000) {
-				usleep(1000);
-				continue;
-			}
-		}
 		if (rd < 0 && use_session_queue) {
 			/* Give session-backed stdin a short grace period before
 			 * treating it as a hard failure. */
@@ -323,10 +315,11 @@ read_passphrase(const char *prompt, int flags)
 		if (rd > 0) {
 			session_idle_spins = 0;
 		}
-		if (rd == 0 && use_session_queue) {
-			usleep(1000);
-			continue;
-		}
+		/*
+		 * End of input ends the answer. This went on waiting for good
+		 * after a short grace, so `ssh-keygen < /dev/null` with no
+		 * terminal, or the end-of-file key at a prompt, hung.
+		 */
 		if (rd <= 0) {
 			debug3_f("PSCAL iOS read_passphrase read rc=%zd errno=%d",
 			    rd, errno);

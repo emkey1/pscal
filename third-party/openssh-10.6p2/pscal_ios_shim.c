@@ -564,6 +564,43 @@ int pscal_ios_fputs(const char *s, FILE *stream) {
     return 0;
 }
 
+size_t pscal_ios_fwrite(const void *ptr, size_t size, size_t nitems, FILE *stream) {
+    if (!stream || (!ptr && size != 0 && nitems != 0)) {
+        errno = EINVAL;
+        return 0;
+    }
+    if (!pscal_ios_stream_uses_session_write(stream)) {
+        return fwrite(ptr, size, nitems, stream);
+    }
+    if (size == 0 || nitems == 0) {
+        return 0;
+    }
+    int out_fd = fileno(stream);
+    if (out_fd < 0) {
+        errno = EBADF;
+        return 0;
+    }
+    const char *bytes = (const char *)ptr;
+    size_t len = size * nitems;
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = pscal_ios_write(out_fd, bytes + off, len - off);
+        if (n <= 0) {
+            return off / size;
+        }
+        off += (size_t)n;
+    }
+    return nitems;
+}
+
+int pscal_ios_fputc(int c, FILE *stream) {
+    unsigned char ch = (unsigned char)c;
+    if (pscal_ios_fwrite(&ch, 1, 1, stream) != 1) {
+        return EOF;
+    }
+    return ch;
+}
+
 int pscal_ios_puts(const char *s) {
     const char *text = s ? s : "(null)";
     int rc = pscal_ios_fputs(text, stdout);
