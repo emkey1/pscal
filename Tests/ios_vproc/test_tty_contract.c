@@ -539,15 +539,11 @@ static void test_end_of_file(void) {
     /* Alone: one read of 0, and the count says it was the key. */
     type(&p, "\x04");
     assert(p.s->ops->read(p.s, &c, 1) == 0);
-    assert(pscalTtyTakeEofKey(p.s));
-    assert(!pscalTtyTakeEofKey(p.s));
-    assert(!pscalTtyTakeEofKey(NULL));
     expectAgain(p.s);
     /* After text: hands it over, and then waits. */
     type(&p, "xy\x04");
     expectRead(p.s, "xy");
     expectAgain(p.s);
-    assert(!pscalTtyTakeEofKey(p.s));
     /* After text, a byte at a time: the mark goes with the last of it. */
     type(&p, "xy\x04");
     assert(p.s->ops->read(p.s, &c, 1) == 1 && c == 'x');
@@ -557,7 +553,6 @@ static void test_end_of_file(void) {
     type(&p, "one\n\x04two\n");
     expectRead(p.s, "one\n");
     assert(p.s->ops->read(p.s, &c, 1) == 0);
-    assert(pscalTtyTakeEofKey(p.s));
     expectRead(p.s, "two\n");
     /* A short read splits a line, and the rest needs no wait. */
     type(&p, "hello\n");
@@ -579,7 +574,6 @@ static void test_end_of_file(void) {
     setL(p.s, 0, ICANON_);
     char m;
     assert(p.s->ops->read(p.s, &m, 1) == 1 && m == 0);
-    assert(!pscalTtyTakeEofKey(p.s));
     /* A flush takes marks with it. */
     setL(p.s, ICANON_, 0);
     type(&p, "one\n\x04");
@@ -628,46 +622,6 @@ static void test_long_line(void) {
     assert(masterDrain(&p, echoed, sizeof(echoed)) == TTY_BUF_SIZE - 1);
     type(&p, "w");
     assert(masterDrain(&p, echoed, sizeof(echoed)) == 1 && echoed[0] == 'w');
-    pairClose(&p);
-}
-
-static void test_session_reader_keys(void) {
-    Pair p = pairOpen();
-    char echo[128];
-    /* Without a session reader these stay data. */
-    setL(p.s, 0, ISIG_);
-    type(&p, "ab\x03" "c\n");
-    masterDrain(&p, echo, sizeof(echo));
-    expectRead(p.s, "ab\x03" "c\n");
-    /* With one, they end the line at once, and take what was typed with them. */
-    pscalTtySetSessionReader(p.s);
-    pscalTtySetSessionReader(NULL);
-    type(&p, "gone");
-    expectAgain(p.s);
-    type(&p, "\x03");
-    masterDrain(&p, echo, sizeof(echo));
-    assert(strcmp(echo, "gone^C\r\n") == 0);
-    expectRead(p.s, "\x03");
-    type(&p, "more\x1a");
-    masterDrain(&p, echo, sizeof(echo));
-    assert(strcmp(echo, "more^Z") == 0);
-    expectRead(p.s, "\x1a");
-    /* Lines typed ahead go too. */
-    type(&p, "one\ntwo\n\x03");
-    masterDrain(&p, echo, sizeof(echo));
-    expectRead(p.s, "\x03");
-    expectAgain(p.s);
-    /* NOFLSH keeps them. */
-    setL(p.s, NOFLSH_, 0);
-    type(&p, "one\n\x03");
-    masterDrain(&p, echo, sizeof(echo));
-    expectRead(p.s, "one\n");
-    expectRead(p.s, "\x03");
-    setL(p.s, 0, NOFLSH_);
-    /* Not in raw mode: there they stay data. */
-    setL(p.s, 0, ICANON_ | ECHO_);
-    type(&p, "\x03");
-    expectRead(p.s, "\x03");
     pairClose(&p);
 }
 
@@ -738,7 +692,6 @@ static void test_raw_modes(void) {
     /* VMIN of 0 never waits, and its 0 is not the key. */
     setCc(p.s, VMIN_, 0);
     assert(p.s->ops->read(p.s, got, 1) == 0);
-    assert(!pscalTtyTakeEofKey(p.s));
     setCc(p.s, VMIN_, 1);
     /* Short of VMIN a poll doesn't call it readable, and a non-blocking read takes what's
      * there. Only with nothing there does it say so. */
@@ -760,7 +713,6 @@ static void test_raw_modes(void) {
     /* VMIN 0 with VTIME: a read of nothing waits for the timer, or for a byte. */
     setCc(p.s, VMIN_, 0);
     assert(p.s->ops->read(p.s, got, sizeof(got)) == 0);
-    assert(!pscalTtyTakeEofKey(p.s));
     expectAgain(p.s);
     type(&p, "q");
     assert(p.s->ops->read(p.s, got, sizeof(got)) == 1 && got[0] == 'q');
@@ -1484,7 +1436,6 @@ static void test_hangup(void) {
     assert(s->ops->ioctl(s, TIOCSPGRP_, &v) == _ENOTTY);
     /* It still queues keys. */
     assert(tty_input(slave, "k\n", 2, false) == 2);
-    assert(!pscalTtyTakeEofKey(s));
     /* The number stays taken while the slave is held. */
     assert(pscalPtyExists(num));
     struct pscal_fd *late = NULL;
@@ -1572,7 +1523,7 @@ static void test_waiting(void) {
     msleep(20);
     type(&p, "\x04");
     pthread_join(t, NULL);
-    assert(op.result == 0 && pscalTtyTakeEofKey(p.s));
+    assert(op.result == 0);
 
     /* A cancelled read leaves the terminal usable and its cleanup can close. */
     memset(&op, 0, sizeof(op));
@@ -1693,7 +1644,6 @@ static void test_poll(void) {
     assert(p.s->ops->poll(p.s) == (POLL_WRITE | POLL_READ));
     char c;
     assert(p.s->ops->read(p.s, &c, 1) == 0);
-    assert(pscalTtyTakeEofKey(p.s));
 
     /* Raw: any byte. A change to raw that reveals text wakes too. */
     type(&p, "un");
@@ -1750,8 +1700,6 @@ static void test_fd(void) {
     assert(pscal_fd_close(fd) == 0);
     /* Not terminals: everything asked about them is a quiet no. */
     fd = pscal_fd_create(&kNoOps);
-    pscalTtySetSessionReader(fd);
-    assert(!pscalTtyTakeEofKey(fd));
     assert(pscalTtyCheckBackgroundRead(fd) == 0);
     assert(!pscalPtyIsMaster(fd) && !pscalPtyIsSlave(fd));
     assert(pscalPtyUnlock(fd) == _EINVAL);
@@ -1776,7 +1724,6 @@ int main(void) {
     RUN(test_output_flags);
     RUN(test_end_of_file);
     RUN(test_long_line);
-    RUN(test_session_reader_keys);
     RUN(test_signal_keys);
     RUN(test_raw_modes);
     RUN(test_write);

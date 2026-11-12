@@ -28,8 +28,6 @@ else
 fi
 run_step "Extended builtin inventory parity (incl. SDL/3D entries)" \
   bash "${TESTS_DIR}/run_ios_ext_builtin_sanity.sh"
-run_step "SCP prompt unit regression" \
-  bash "${TESTS_DIR}/run_ios_scp_prompt_regression.sh"
 
 # RUN_INTERACTIVE_SIGNAL_TESTS=1 can be exported by callers to include PTY
 # Ctrl-C/Ctrl-Z checks during the host suite run.

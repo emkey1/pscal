@@ -516,6 +516,55 @@ static void case_interrupt_key_leaves_raw_mode_input_open(void) {
     expect_text("k");
 }
 
+/* Ctrl-C at one tab's terminal reaches that tab's foreground job and no other tab's. */
+static void case_interrupt_key_stays_in_its_tab(void) {
+    terminal a;
+    terminal_open(&a);
+    terminal_run_command(&a);
+    const int a_pid = vprocPid(gCommand);
+
+    /* The other tab: a terminal of its own, whose session's foreground job holds SIGINT
+     * blocked, so that one sent to it stays to be seen. */
+    struct pscal_fd *b_master = NULL;
+    struct pscal_fd *b_slave = NULL;
+    int b_num = -1;
+    assert(pscalPtyOpenMaster(O_RDWR, &b_master, &b_num) == 0);
+    assert(pscalPtyUnlock(b_master) == 0);
+    assert(pscalPtyOpenSlave(b_num, O_RDWR, &b_slave) == 0);
+    VProc *b_job = vprocCreate(NULL);
+    assert(b_job);
+    const int b_pid = vprocPid(b_job);
+    assert(vprocSetSid(b_pid, b_pid) == 0);
+    b_slave->tty->session = (pid_t_)b_pid;
+    b_slave->tty->fg_group = (pid_t_)b_pid;
+    vprocActivate(b_job);
+    sigset_t block;
+    sigemptyset(&block);
+    sigaddset(&block, SIGINT);
+    assert(vprocPthreadSigmaskShim(SIG_BLOCK, &block, NULL) == 0);
+    vprocDeactivate();
+
+    sigset_t pending;
+    /* The key at the other tab: its job has it, this tab's command does not. */
+    assert(b_master->ops->write(b_master, "\x03", 1) == 1);
+    usleep(50000);
+    sigemptyset(&pending);
+    assert(vprocSigpending(b_pid, &pending) == 0 && sigismember(&pending, SIGINT));
+    sigemptyset(&pending);
+    assert(vprocSigpending(a_pid, &pending) == 0 && !sigismember(&pending, SIGINT));
+    char got[16];
+    assert(read_terminal(got, sizeof(got), NOTHING_WAIT_MS) == -2);
+    /* The key here: this tab's command's input ends. */
+    assert(read_waiting_for_keys(&a, "\x03", got, sizeof(got)) == 0);
+    assert(vprocTakeTerminalInterrupted());
+
+    vprocMarkExit(b_job, 0);
+    vprocDiscard(b_pid);
+    vprocDestroy(b_job);
+    pscal_fd_close(b_slave);
+    pscal_fd_close(b_master);
+}
+
 /* At the prompt it is a key: the line editor throws away the line being edited. */
 static void case_prompt_takes_the_interrupt_key(void) {
     terminal t;
@@ -1076,6 +1125,7 @@ int main(void) {
         CASE(case_interrupt_key_ends_a_waiting_read),
         CASE(case_interrupt_key_takes_lines_typed_ahead),
         CASE(case_interrupt_key_leaves_raw_mode_input_open),
+        CASE(case_interrupt_key_stays_in_its_tab),
         CASE(case_prompt_takes_the_interrupt_key),
         CASE(case_waiting_reader_follows_change_to_raw),
         CASE(case_waiting_reader_follows_change_to_line),

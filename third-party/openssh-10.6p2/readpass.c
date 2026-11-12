@@ -74,32 +74,13 @@ pscal_dump_session_state(const char *tag, int host_fd)
 		debug3_f("PSCAL iOS %s session=null host_fd=%d", tag, host_fd);
 		return;
 	}
-	VProcSessionInput *input = session->input;
 	int stdin_fd = session->stdin_host_fd;
 	int stdout_fd = session->stdout_host_fd;
 	int stderr_fd = session->stderr_host_fd;
 	bool needs_refresh = vprocSessionStdioNeedsRefresh(session);
-	if (!input) {
-		debug3_f("PSCAL iOS %s session_in=%d out=%d err=%d host_fd=%d refresh=%d input=null",
-		    tag, stdin_fd, stdout_fd, stderr_fd, host_fd, (int)needs_refresh);
-		return;
-	}
-	pthread_mutex_lock(&input->mu);
-	debug3_f("PSCAL iOS %s session_in=%d out=%d err=%d host_fd=%d refresh=%d len=%zu cap=%zu eof=%d reader=%d reader_fd=%d stop=%d intr=%d",
-	    tag,
-	    stdin_fd,
-	    stdout_fd,
-	    stderr_fd,
-	    host_fd,
-	    (int)needs_refresh,
-	    input->len,
-	    input->cap,
-	    (int)input->eof,
-	    (int)input->reader_active,
-	    input->reader_fd,
-	    (int)input->stop_requested,
-	    (int)input->interrupt_pending);
-	pthread_mutex_unlock(&input->mu);
+	debug3_f("PSCAL iOS %s session_in=%d out=%d err=%d host_fd=%d refresh=%d terminal=%d",
+	    tag, stdin_fd, stdout_fd, stderr_fd, host_fd, (int)needs_refresh,
+	    session->pty_slave != NULL);
 }
 #endif
 
@@ -212,7 +193,7 @@ read_passphrase(const char *prompt, int flags)
 	    session->stdin_pscal_fd->ops &&
 	    session->stdin_pscal_fd->ops->read;
 	bool has_session_stdin = session &&
-	    (session->stdin_host_fd >= 0 || has_pscal_stdin || session->input != NULL);
+	    (session->stdin_host_fd >= 0 || has_pscal_stdin);
 	struct termios saved_termios;
 	bool restore_termios = false;
 	if (vp) {
