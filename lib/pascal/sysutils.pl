@@ -24,6 +24,9 @@ function ExtractFilePath(const FileName: string): string;
 function IncludeTrailingPathDelimiter(const S: string): string;
 function ExcludeTrailingPathDelimiter(const S: string): string;
 
+// --- Environment ---
+function GetEnvironmentVariable(const Name: string): string;
+
 // --- Conversions ---
 // function StrToIntDef(S: string; Default: Longint): Longint; // Needs TryStrToInt built-in
 // function FloatToStr(Value: Extended): string; // Needs complex formatting support
@@ -34,6 +37,14 @@ function ExcludeTrailingPathDelimiter(const S: string): string;
 // function Time: TDateTime; // Needs built-in support
 
 implementation
+
+// --- Environment ---
+
+// The value of environment variable Name, or '' when it is not set.
+function GetEnvironmentVariable(const Name: string): string;
+begin
+  GetEnvironmentVariable := GetEnv(Name);
+end;
 
 // --- String Manipulation ---
 
