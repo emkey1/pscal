@@ -63,6 +63,7 @@ Base: `V.1R33`
 - Pascal: calling a procedure or function that was never declared, or reading a variable that was never declared, is a compile error: `Undefined procedure or function 'foo'`, `Undefined variable 'z'`. Such a program used to compile, run up to that line and stop with `Undefined global variable`, so a mistake on a line that rarely runs went unnoticed. In the app, a shell command such as `cat('f')` is reported the same way.
 - The bundled Pascal examples hangman to hangman5, LamdaCalc, GameOfLife and UI called routines PSCAL does not have (`GetEnvironmentVariable`, `Delete`, `GetTickCount`, `Move`, `SizeOf`, `Assigned`) and stopped when they reached that line. They use `GetEnv`, `Copy`, `Delay`, an element copy and `<> nil` instead.
 - `simple_web_server` serves its pages. It called `pos` with its arguments reversed and loaded files without checking that they exist, so its first request ended it.
+- Ctrl-C ends a Pascal, CLike or Rea program that is waiting in a socket call (`socketAccept`, a receive or a connect) on macOS and Linux. A server waiting for a connection, such as `simple_web_server`, went on waiting and the shell never got its prompt back.
 
 ## Differs from Linux on iOS
 - `ip` changes nothing: `ip link set`, `ip address add` and `ip route add` say `RTNETLINK answers: Operation not permitted` with status 2, as for a normal user on Linux, and root gets the same answer. The app can't configure the device's network.
