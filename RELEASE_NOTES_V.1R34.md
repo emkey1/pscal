@@ -58,6 +58,9 @@ Base: `V.1R33`
 ## Fixed in Pascal, CLike and Rea
 - CLike: storing a character literal into a string (`s[i] = '-'`) stopped the program with "Type mismatch for character assignment". It had failed since CLike moved to the shared compiler in June; hangman5 died on its first line of play. A Char stored into a WideChar no longer warns "may lose precision".
 - Pascal, CLike and Rea programs ended by Ctrl-C exit with status 130 on macOS and Linux, as on iOS. They exited 0, so a script carried on as if the program had finished.
+- CLike: a function can call one defined further down the file, and a prototype (`int f(int);`) declares one, as in C. Such a call stopped the program with `Undefined global variable`, which kept the bundled `simple_web_server` from starting.
+- CLike: `fopen(path, "w")` opens the file. A one-letter mode is a character literal, and `fopen` stopped with `fopen expects (path:string, mode:string)`.
+- `simple_web_server` serves its pages. It called `pos` with its arguments reversed and loaded files without checking that they exist, so its first request ended it.
 
 ## Differs from Linux on iOS
 - `ip` changes nothing: `ip link set`, `ip address add` and `ip route add` say `RTNETLINK answers: Operation not permitted` with status 2, as for a normal user on Linux, and root gets the same answer. The app can't configure the device's network.
