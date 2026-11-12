@@ -11,6 +11,22 @@ import SwiftUI
 import UIKit
 import WebKit
 
+extension Notification.Name {
+    /// A program asked for the terminal's size to be put right (`reset`). userInfo "sessionId".
+    static let terminalSizeRefreshRequested = Notification.Name("terminalSizeRefreshRequested")
+}
+
+/// Called from C, on any thread: the session's terminal is to be measured again, and its size
+/// told to the runtime even if this view has told it the same before.
+@_cdecl("pscalRuntimeRefreshTerminalSizeForSession")
+func pscalRuntimeRefreshTerminalSizeForSession(_ sessionId: UInt64) {
+    DispatchQueue.main.async {
+        NotificationCenter.default.post(name: .terminalSizeRefreshRequested,
+                                        object: nil,
+                                        userInfo: ["sessionId": sessionId])
+    }
+}
+
 private struct TerminalGrid: Equatable {
     let columns: Int
     let rows: Int
@@ -167,6 +183,24 @@ final class HtermTerminalController: NSObject {
         readShared().runtimeGrid == TerminalGrid(columns: columns, rows: rows)
     }
 
+    /// Whether the session's terminal holds this size now. Anything can have set it since this
+    /// view last did: a program, `stty`, a window that has gone, so this, and not what was last
+    /// sent, says whether a size still has to go.
+    static func terminalHasSize(sessionId: UInt64, columns: Int, rows: Int) -> Bool {
+        guard let grid = terminalGrid(ofSession: sessionId) else { return false }
+        return grid == TerminalGrid(columns: columns, rows: rows)
+    }
+
+    private static func terminalGrid(ofSession sessionId: UInt64) -> TerminalGrid? {
+        guard sessionId != 0 else { return nil }
+        var columns: Int32 = 0
+        var rows: Int32 = 0
+        guard PSCALRuntimeGetSessionWinsize(sessionId, &columns, &rows) == 0, columns > 0, rows > 0 else {
+            return nil
+        }
+        return TerminalGrid(columns: Int(columns), rows: Int(rows))
+    }
+
     /// The few facts other threads ask about. Metrics and an attaching runtime read them from
     /// their own queues, and those queues can have the main thread waiting on them, so
     /// reading must never wait for the main thread in turn.
@@ -251,6 +285,10 @@ final class HtermTerminalController: NSObject {
         super.init()
 
         relay.controller = self
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(sizeRefreshRequested(_:)),
+                                               name: .terminalSizeRefreshRequested,
+                                               object: nil)
         applyWebViewSettings()
         web.navigationDelegate = self
         startMemorySignals()
@@ -673,11 +711,28 @@ final class HtermTerminalController: NSObject {
             gridAwaitingSession = grid
             return
         }
-        // Re-attaching a view or switching tabs measures again, and that's not a resize.
-        guard grid != readShared().runtimeGrid else { return }
+        // Re-attaching a view or switching tabs measures again, and that's not a resize. What
+        // the terminal holds decides, not what this view last sent: something else may have
+        // changed it since, and then the view's grid has to go again.
+        if Self.terminalGrid(ofSession: resizeSessionId) == grid {
+            updateShared { $0.runtimeGrid = grid }
+            return
+        }
         sshResizeLog("[ssh-resize] hterm[\(instanceId)] forwarding \(grid.columns)x\(grid.rows) to session \(resizeSessionId)")
         PSCALRuntimeUpdateSessionWindowSize(resizeSessionId, Int32(grid.columns), Int32(grid.rows))
         updateShared { $0.runtimeGrid = grid }
+    }
+
+    /// `reset`, or anything else that wants the true size back: measure, and send the result.
+    @objc private func sizeRefreshRequested(_ note: Notification) {
+        guard let sessionId = note.userInfo?["sessionId"] as? UInt64,
+              sessionId != 0, sessionId == resizeSessionId else { return }
+        sshResizeLog("[ssh-resize] hterm[\(instanceId)] size refresh requested")
+        updateShared { $0.runtimeGrid = nil }
+        if let grid = measuredGrid {
+            forwardToRuntime(grid)
+        }
+        measureGrid(reason: "refresh")
     }
 
     func setResizeSessionId(_ sessionId: UInt64) {

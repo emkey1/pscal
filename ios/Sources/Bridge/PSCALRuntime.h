@@ -81,6 +81,9 @@ void PSCALRuntimeConfigureAsanReportPath(const char *path);
 /// Updates the PTY window size (columns/rows). Safe to call before launching;
 /// the size will be applied once exsh starts.
 void PSCALRuntimeUpdateWindowSize(int columns, int rows);
+/* The terminal's view measures itself again and tells the session, even a size it told it
+ * before. For `reset`, after whatever else may have set the size. */
+void PSCALRuntimeRefreshWindowSize(void);
 /// Requests the UI to update the current tab title (iOS only).
 int PSCALRuntimeSetTabTitle(const char *title);
 /// Requests the UI to update the current tab startup command (iOS only).

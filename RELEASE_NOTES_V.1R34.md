@@ -43,6 +43,19 @@ Base: `V.1R33`
 - `/tmp` is emptied once per launch, as at boot on Linux. Opening a tab emptied it too, under whatever the other tabs were doing.
 - `sed -i`, `cp -p` and `ln -L` work on a path written from the root, such as `/home/f`, and on `~/f` now that `~` is `/home`. They reached the device's own `/home` and failed: `sed: couldn't open temporary file`, `cp: preserving times`, `ln: failed to create hard link`.
 
+- Ctrl-S stops a terminal's output and Ctrl-Q starts it again, as on Linux, while `ixon` is set, which it is by default (`stty -ixon` turns it off). With `ixany` any key starts it. Echo typed while stopped shows when output starts, a program writing waits (or gets `EAGAIN`), and Ctrl-C or Ctrl-Z starts output again. `tcflow` works, and a packet-mode reader hears of a stop and a start. They were ordinary keys whatever `ixon` said.
+- With `icanon` clear, the terminal still translates Return (`icrnl`, `inlcr`, `igncr`) and echoes (`echo`, `echoctl`) by their own flags, as Linux does. So `read -n 1` shows the key, as in bash, and Enter at a Pascal `ReadKey` gives `#10` on iOS as it already does on macOS and Linux.
+- A terminal's keys that raise a signal send one signal per key, in the order typed, and drop echo not yet shown with the input they flush.
+- A signal interrupts a read or write waiting on a terminal, as on Linux: a handler without `SA_RESTART` gets `EINTR`, one with it carries on, and a job stopped in a read and continued goes on reading.
+- Changing a terminal from a background job (`stty`, `tcsetattr`, `tcflush`, `tcflow`, `tcsetpgrp`, `tcdrain`'s break) stops the job with `SIGTTOU`, unless it ignores or blocks that signal, as on Linux.
+- A non-blocking write to a terminal returns how much it took, and a pty master only says it can be written when there is room.
+- A pty master reads what its slave wrote before its last close, then `EIO`, and keys written meanwhile wait for the slave's next open. It read 0 at once and lost that output.
+- Pascal `ReadKey`: Ctrl-C ends the program. It left only the procedure that called `ReadKey`, so a game reading keys in a procedure (DiceGame) carried on.
+
+## Fixed in Pascal, CLike and Rea
+- CLike: storing a character literal into a string (`s[i] = '-'`) stopped the program with "Type mismatch for character assignment". It had failed since CLike moved to the shared compiler in June; hangman5 died on its first line of play. A Char stored into a WideChar no longer warns "may lose precision".
+- Pascal, CLike and Rea programs ended by Ctrl-C exit with status 130 on macOS and Linux, as on iOS. They exited 0, so a script carried on as if the program had finished.
+
 ## Differs from Linux on iOS
 - `ip` changes nothing: `ip link set`, `ip address add` and `ip route add` say `RTNETLINK answers: Operation not permitted` with status 2, as for a normal user on Linux, and root gets the same answer. The app can't configure the device's network.
 - `ip` shows every address as `valid_lft forever preferred_lft forever`, without `dynamic` or `temporary`, and prints no `qdisc` or `qlen`: iOS doesn't report them. iOS hides hardware addresses, so `link/ether` shows `02:00:00:00:00:00`.

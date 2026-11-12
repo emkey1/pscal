@@ -1709,6 +1709,7 @@ static int hitIndex(int sig) {
         case SIGTTOU: return 2;
         case SIGWINCH: return 3;
         case SIGINT: return 4;
+        case SIGUSR1: return 6;
         default: return 5;
     }
 }
@@ -3405,8 +3406,544 @@ static void secRoot(void) {
     munmap(shared, sizeof(SharedPath));
 }
 
+/* --- stage B --- */
+
+#define K_TCXONC 0x540aUL
+#define K_TCOOFF 0
+#define K_TCOON 1
+#define K_TCIOFF 2
+#define K_TCION 3
+#define KI_IXANY 0x800u
+#define KI_IXOFF 0x1000u
+
+/* L2: out of line mode, translation and echo still go by their own flags. */
+static void rawScript(const char *label, uint32_t l_on, uint32_t l_off, uint32_t i_on, uint32_t i_off, const void *typed, size_t len) {
+    Pty p;
+    if (!ptyOpen(&p)) return;
+    setL(p.s, l_on, KL_ICANON | KL_ISIG | l_off);
+    setI(p.s, i_on, KI_IXON | i_off);
+    keys(&p, label, typed, len);
+    reads(&p, label);
+    ptyClose(&p);
+}
+
+#define RAWS(label, l_on, l_off, i_on, i_off, text) rawScript((label), (l_on), (l_off), (i_on), (i_off), (text), sizeof(text) - 1)
+
+static void secNonCanonical(void) {
+    section("L2 out of line mode");
+    RAWS("defaults", 0, 0, 0, 0, "a\rb\nc");
+    RAWS("no echo", 0, KL_ECHO, 0, 0, "a\rb\nc");
+    RAWS("no icrnl", 0, 0, 0, KI_ICRNL, "a\rb\nc");
+    RAWS("inlcr", 0, 0, KI_INLCR, KI_ICRNL, "a\rb\nc");
+    RAWS("igncr", 0, 0, KI_IGNCR, 0, "a\rb\nc");
+    RAWS("inlcr igncr", 0, 0, KI_INLCR | KI_IGNCR, KI_ICRNL, "a\rb\nc");
+    RAWS("control keys", 0, 0, 0, 0, "\x01\x7f\t\x1b[A");
+    RAWS("control keys, no echoctl", 0, KL_ECHOCTL, 0, 0, "\x01\x7f\t\x1b[A");
+    RAWS("editing keys", 0, 0, 0, 0, "ab\x7f\x15\x17\x12\x04" "c");
+    RAWS("editing keys, no echo", 0, KL_ECHO, 0, 0, "ab\x7f\x15\x17\x12\x04" "c");
+    RAWS("echonl", KL_ECHONL, KL_ECHO, 0, 0, "a\nb");
+    RAWS("literal next", 0, 0, 0, 0, "\x16" "a\x16\x7f" "b");
+    RAWS("literal next, no iexten", 0, KL_IEXTEN, 0, 0, "\x16" "a\x16\x7f" "b");
+    RAWS("literal next, no echo", 0, KL_ECHO, 0, 0, "\x16" "a\x16\x7f" "b");
+    RAWS("eol keys", 0, 0, 0, 0, "a\x04" "b");
+    RAWS("no opost", 0, 0, 0, 0, "a\n");
+    {
+        Pty p;
+        if (!ptyOpen(&p)) return;
+        setL(p.s, 0, KL_ICANON | KL_ISIG);
+        setI(p.s, 0, KI_IXON);
+        setO(p.s, 0, KO_OPOST);
+        KEYS(&p, "echo without opost", "a\nb\tc");
+        reads(&p, "echo without opost");
+        ptyClose(&p);
+    }
+    {
+        Pty p;
+        if (!ptyOpen(&p)) return;
+        setL(p.s, 0, KL_ICANON | KL_ISIG);
+        setI(p.s, KI_IUTF8, KI_IXON);
+        KEYS(&p, "utf8", "\xc3\xa9\x7f" "x");
+        reads(&p, "utf8");
+        ptyClose(&p);
+    }
+    {
+        /* What the shell's prompt asks for: raw, echo off, ICRNL and IXON left as they are. */
+        Pty p;
+        if (!ptyOpen(&p)) return;
+        setL(p.s, 0, KL_ICANON | KL_ECHO | KL_ISIG);
+        KEYS(&p, "a prompt's mode", "ls\r");
+        reads(&p, "a prompt's mode");
+        ptyClose(&p);
+    }
+    {
+        /* A line typed ahead in raw mode, then line mode: the line is there to read. */
+        Pty p;
+        if (!ptyOpen(&p)) return;
+        setL(p.s, 0, KL_ICANON | KL_ECHO | KL_ISIG);
+        KEYS(&p, "typed ahead", "one\rtw");
+        setL(p.s, KL_ICANON | KL_ECHO, 0);
+        KEYS(&p, "then line mode", "o\r");
+        reads(&p, "typed ahead");
+        ptyClose(&p);
+    }
+}
+
+/* L6: flow control. */
+static void showWrite(const char *label, int fd, const void *data, size_t len) {
+    const ssize_t n = write(fd, data, len);
+    sayResult(label, n);
+}
+
+static void flowScript(const char *label, bool raw, uint32_t i_on, uint32_t i_off) {
+    Pty p;
+    if (!ptyOpen(&p)) return;
+    if (raw) {
+        setL(p.s, 0, KL_ICANON | KL_ISIG);
+    }
+    setI(p.s, i_on, i_off);
+    char name[128];
+    snprintf(name, sizeof(name), "%s: stop", label);
+    KEYS(&p, name, "a\x13" "b");
+    snprintf(name, sizeof(name), "%s: write while stopped", label);
+    showWrite(name, p.s, "out", 3);
+    snprintf(name, sizeof(name), "%s: slave", label);
+    showPoll(name, p.s);
+    snprintf(name, sizeof(name), "%s: master", label);
+    showPoll(name, p.m);
+    masterOutput(label, &p);
+    snprintf(name, sizeof(name), "%s: start", label);
+    KEYS(&p, name, "c\x11" "d");
+    masterOutput(label, &p);
+    snprintf(name, sizeof(name), "%s: slave", label);
+    showPoll(name, p.s);
+    if (!raw) {
+        KEYS(&p, label, "\n");
+    }
+    reads(&p, label);
+    ptyClose(&p);
+}
+
+static void secFlowControl(void) {
+    section("L6 flow control");
+    flowScript("ixon, line mode", false, 0, 0);
+    flowScript("ixon, raw", true, 0, 0);
+    flowScript("no ixon", false, 0, KI_IXON);
+    flowScript("ixany", false, KI_IXANY, 0);
+    flowScript("ixoff", false, KI_IXOFF, 0);
+    {
+        Pty p;
+        if (!ptyOpen(&p)) return;
+        setL(p.s, 0, KL_ECHO);
+        KEYS(&p, "stopped twice", "\x13\x13");
+        showWrite("write", p.s, "x", 1);
+        KEYS(&p, "start once", "\x11");
+        masterOutput("start once", &p);
+        KEYS(&p, "start again", "\x11");
+        masterOutput("start again", &p);
+        ptyClose(&p);
+    }
+    {
+        Pty p;
+        if (!ptyOpen(&p)) return;
+        setCc(p.s, KV_STOP, 'x');
+        setCc(p.s, KV_START, 'y');
+        KEYS(&p, "other keys", "ax\x13" "b");
+        showWrite("write", p.s, "o", 1);
+        masterOutput("other keys", &p);
+        KEYS(&p, "other keys", "y\n");
+        masterOutput("other keys", &p);
+        reads(&p, "other keys");
+        ptyClose(&p);
+    }
+    {
+        Pty p;
+        if (!ptyOpen(&p)) return;
+        setCc(p.s, KV_STOP, 'x');
+        setCc(p.s, KV_START, 'x');
+        KEYS(&p, "one key for both", "axb");
+        showWrite("write", p.s, "o", 1);
+        masterOutput("one key for both", &p);
+        KEYS(&p, "one key for both", "x\n");
+        masterOutput("one key for both", &p);
+        reads(&p, "one key for both");
+        ptyClose(&p);
+    }
+    {
+        Pty p;
+        if (!ptyOpen(&p)) return;
+        setCc(p.s, KV_STOP, 0);
+        KEYS(&p, "stop key off", "a\x13" "b\n");
+        reads(&p, "stop key off");
+        ptyClose(&p);
+    }
+    {
+        Pty p;
+        if (!ptyOpen(&p)) return;
+        setL(p.s, 0, KL_ECHO);
+        KEYS(&p, "stopped", "\x13");
+        showWrite("write", p.s, "x", 1);
+        setI(p.s, 0, KI_IXON);
+        masterOutput("ixon cleared", &p);
+        showWrite("write", p.s, "y", 1);
+        masterOutput("ixon cleared", &p);
+        ptyClose(&p);
+    }
+    {
+        Pty p;
+        if (!ptyOpen(&p)) return;
+        setL(p.s, 0, KL_ECHO);
+        KEYS(&p, "stopped, then a flush", "\x13");
+        sayResult("TCFLSH output", ioctl(p.s, K_TCFLSH, (long)1));
+        showWrite("write", p.s, "x", 1);
+        masterOutput("after the flush", &p);
+        KEYS(&p, "start", "\x11");
+        masterOutput("start", &p);
+        ptyClose(&p);
+    }
+    section("L6 TCXONC");
+    {
+        Pty p;
+        if (!ptyOpen(&p)) return;
+        setL(p.s, 0, KL_ECHO);
+        sayResult("TCOOFF", ioctl(p.s, K_TCXONC, (long)K_TCOOFF));
+        showWrite("write", p.s, "x", 1);
+        masterOutput("TCOOFF", &p);
+        KEYS(&p, "start key", "\x11");
+        masterOutput("start key", &p);
+        sayResult("TCOOFF", ioctl(p.s, K_TCXONC, (long)K_TCOOFF));
+        sayResult("TCOON", ioctl(p.s, K_TCXONC, (long)K_TCOON));
+        masterOutput("TCOON", &p);
+        sayResult("TCIOFF", ioctl(p.s, K_TCXONC, (long)K_TCIOFF));
+        masterOutput("TCIOFF", &p);
+        sayResult("TCION", ioctl(p.s, K_TCXONC, (long)K_TCION));
+        masterOutput("TCION", &p);
+        sayResult("TCXONC 7", ioctl(p.s, K_TCXONC, (long)7));
+        sayResult("TCOOFF on the master", ioctl(p.m, K_TCXONC, (long)K_TCOOFF));
+        showWrite("master write", p.m, "k", 1);
+        showWrite("slave write", p.s, "z", 1);
+        masterOutput("TCOOFF on the master", &p);
+        sayResult("TCOON on the master", ioctl(p.m, K_TCXONC, (long)K_TCOON));
+        masterOutput("TCOON on the master", &p);
+        setI(p.s, 0, KI_IXON);
+        sayResult("TCOOFF without ixon", ioctl(p.s, K_TCXONC, (long)K_TCOOFF));
+        showWrite("write", p.s, "w", 1);
+        masterOutput("TCOOFF without ixon", &p);
+        sayResult("TCOON", ioctl(p.s, K_TCXONC, (long)K_TCOON));
+        masterOutput("TCOON", &p);
+        ptyClose(&p);
+    }
+    section("L6 packet mode");
+    {
+        Pty p;
+        if (!ptyOpen(&p)) return;
+        int on = 1;
+        sayResult("TIOCPKT on", ioctl(p.m, K_TIOCPKT, &on));
+        setL(p.s, 0, KL_ECHO);
+        KEYS(&p, "stop", "\x13");
+        showPacket("stopped", &p, 16);
+        KEYS(&p, "start", "\x11");
+        showPacket("started", &p, 16);
+        sayResult("TCOOFF", ioctl(p.s, K_TCXONC, (long)K_TCOOFF));
+        showPacket("TCOOFF", &p, 16);
+        sayResult("TCOON", ioctl(p.s, K_TCXONC, (long)K_TCOON));
+        showPacket("TCOON", &p, 16);
+        ptyClose(&p);
+    }
+}
+
+/* L12: a non-blocking write takes what fits. */
+static void secShortWrites(void) {
+    section("L12 non-blocking writes");
+    Pty p;
+    if (!ptyOpen(&p)) return;
+    static char big[1 << 20];
+    memset(big, 'o', sizeof(big));
+    setO(p.s, 0, KO_OPOST);
+    /* Nobody reads the master: the slave's output has nowhere to go after a while. */
+    size_t total = 0;
+    ssize_t n = 0;
+    int writes = 0;
+    while ((n = write(p.s, big, sizeof(big))) > 0 && writes < 64) {
+        total += (size_t)n;
+        writes++;
+    }
+    /* Kept now: the lines below write, which may change errno. */
+    int err = n < 0 ? errno : 0;
+    say("slave: took some at first: %s", total > 0 ? "yes" : "no");
+    say("slave: took less than asked: %s", total < sizeof(big) ? "yes" : "no");
+    say("slave: then: %s", n < 0 ? errName(err) : "more");
+    /* Not asked: on Linux whether a full slave polls writable varies from run to run. */
+    unsigned char sink[4096];
+    size_t drained = 0;
+    for (;;) {
+        const ssize_t r = read(p.m, sink, sizeof(sink));
+        if (r <= 0) {
+            break;
+        }
+        drained += (size_t)r;
+    }
+    say("master: read all that was taken: %s", drained == total ? "yes" : "no");
+    showPoll("slave, emptied", p.s);
+    ptyClose(&p);
+
+    /* Keys with no reader, out of line mode. */
+    if (!ptyOpen(&p)) return;
+    setRaw(p.s);
+    total = 0;
+    writes = 0;
+    while ((n = write(p.m, big, sizeof(big))) > 0 && writes < 64) {
+        total += (size_t)n;
+        writes++;
+    }
+    err = n < 0 ? errno : 0;
+    say("master: took some at first: %s", total > 0 ? "yes" : "no");
+    say("master: took less than asked: %s", total < sizeof(big) ? "yes" : "no");
+    say("master: then: %s", n < 0 ? errName(err) : "more");
+    showPoll("master, full", p.m);
+    drained = 0;
+    for (;;) {
+        const ssize_t r = read(p.s, sink, sizeof(sink));
+        if (r <= 0) {
+            break;
+        }
+        drained += (size_t)r;
+    }
+    say("slave: read all that was taken: %s", drained == total ? "yes" : "no");
+    showPoll("master, emptied", p.m);
+    ptyClose(&p);
+}
+
+/* L24: the slave's last close. */
+static void secLastClose(void) {
+    section("L24 the slave's last close");
+    Pty p;
+    if (!ptyOpen(&p)) return;
+    (void)!write(p.s, "bye\n", 4);
+    close(p.s);
+    sleepMs(20);
+    showPoll("master", p.m);
+    char line[256];
+    size_t at = (size_t)snprintf(line, sizeof(line), "master: read");
+    for (int i = 0; i < 4; i++) {
+        unsigned char got[64];
+        const ssize_t n = read(p.m, got, sizeof(got));
+        char text[128];
+        if (n > 0) {
+            at += (size_t)snprintf(line + at, sizeof(line) - at, " \"%s\"", esc(text, sizeof(text), got, (size_t)n));
+        } else if (n == 0) {
+            at += (size_t)snprintf(line + at, sizeof(line) - at, " EOF");
+        } else {
+            at += (size_t)snprintf(line + at, sizeof(line) - at, " %s", errName(errno));
+        }
+    }
+    say("%s", line);
+    showWrite("master write", p.m, "k", 1);
+    /* Opened again: the master has a terminal behind it once more. */
+    p.s = open(p.path, O_RDWR | O_NOCTTY | O_NONBLOCK);
+    sayResult("reopen", p.s < 0 ? -1 : 0);
+    /* The echo of that key takes a moment on Linux. */
+    sleepMs(30);
+    showPoll("master, reopened", p.m);
+    showWrite("slave write", p.s, "again\n", 6);
+    masterOutput("reopened", &p);
+    reads(&p, "reopened");
+    ptyClose(&p);
+
+    if (!ptyOpen(&p)) return;
+    close(p.s);
+    sleepMs(20);
+    showPoll("master, nothing written", p.m);
+    const int other = open(p.path, O_RDWR | O_NOCTTY | O_NONBLOCK);
+    showPoll("master, after a reopen", p.m);
+    close(other);
+    close(p.m);
+}
+
+/* L17: changing the terminal from the background. */
+typedef struct {
+    Pty *p;
+    int what;
+    int disposition; /* 0 default, 1 ignore, 2 block */
+} Changer;
+
+static int bgChanger(void *raw) {
+    const Changer *c = (const Changer *)raw;
+    setpgid(0, 0);
+    if (c->disposition == 1) {
+        signal(SIGTTOU, SIG_IGN);
+    } else {
+        signal(SIGTTOU, SIG_DFL);
+    }
+    if (c->disposition == 2) {
+        sigset_t set;
+        sigemptyset(&set);
+        sigaddset(&set, SIGTTOU);
+        sigprocmask(SIG_BLOCK, &set, NULL);
+    }
+    const int s = open(c->p->path, O_RDWR | O_NOCTTY);
+    mark(1);
+    long result = 0;
+    KTermios t;
+    int group = getpgrp();
+    switch (c->what) {
+        case 0:
+            result = ioctl(s, K_TCGETS, &t);
+            break;
+        case 1:
+            ioctl(s, K_TCGETS, &t);
+            result = ioctl(s, K_TCSETS, &t);
+            break;
+        case 2:
+            result = ioctl(s, K_TCFLSH, (long)0);
+            break;
+        case 3:
+            result = ioctl(s, K_TCXONC, (long)K_TCOON);
+            break;
+        case 4:
+            result = ioctl(s, K_TIOCSPGRP, &group);
+            break;
+        case 5:
+            result = ioctl(s, K_TCSBRK, (long)1);
+            break;
+        case 6: {
+            KWinsize w;
+            ioctl(s, K_TIOCGWINSZ, &w);
+            result = ioctl(s, K_TIOCSWINSZ, &w);
+            break;
+        }
+        default:
+            break;
+    }
+    sayResult("job: request", result);
+    close(s);
+    return 0;
+}
+
+static void runChanger(Pty *p, int what, int disposition) {
+    static const char *names[] = {"TCGETS", "TCSETS", "TCFLSH", "TCXONC", "TIOCSPGRP", "TCSBRK", "TIOCSWINSZ"};
+    static const char *dispositions[] = {"default", "ignored", "blocked"};
+    say("- %s, SIGTTOU %s", names[what], dispositions[disposition]);
+    clearMarks();
+    Changer c = {p, what, disposition};
+    const pid_t me = getpgrp();
+    const pid_t pid = procSpawn(bgChanger, &c);
+    setpgid(pid, pid);
+    awaitMark(1);
+    int status = 0;
+    const pid_t waited = waitpid(pid, &status, WUNTRACED);
+    if (waited != pid) {
+        say("leader: wait: %s", errName(errno));
+        return;
+    }
+    if (WIFSTOPPED(status)) {
+        say("leader: job stopped by %s", signalName(WSTOPSIG(status)));
+        setForeground("leader: job to the foreground", p, pid);
+        kill(-pid, SIGCONT);
+        procFinish("job", pid);
+        setForeground("leader: back", p, me);
+    } else if (WIFEXITED(status)) {
+        say("leader: job exited %d", WEXITSTATUS(status));
+        procReaped(pid);
+    } else {
+        say("leader: job other");
+        procReaped(pid);
+    }
+}
+
+static void caseBgChanges(Pty *p) {
+    for (int what = 0; what < 7; what++) {
+        runChanger(p, what, 0);
+    }
+    runChanger(p, 1, 1);
+    runChanger(p, 1, 2);
+    runChanger(p, 4, 1);
+}
+
+/* L10: a signal and a read waiting on the terminal. */
+typedef struct {
+    Pty *p;
+    int how; /* 0 handler, 1 handler with SA_RESTART, 2 default (a stop comes) */
+} Waiter;
+
+static int blockedReader(void *raw) {
+    const Waiter *w = (const Waiter *)raw;
+    if (w->how < 2) {
+        installHandler(SIGUSR1, w->how == 1);
+    }
+    const int s = open(w->p->path, O_RDWR | O_NOCTTY);
+    mark(1);
+    char buf[64];
+    const ssize_t n = read(s, buf, sizeof(buf));
+    char text[128];
+    char result[32];
+    say("reader: read %s \"%s\"", resultName(result, sizeof(result), n), n > 0 ? esc(text, sizeof(text), buf, (size_t)n) : "");
+    if (w->how < 2) {
+        say("reader: handler ran: %s", hitsOf(SIGUSR1) > 0 ? "yes" : "no");
+    }
+    close(s);
+    return 0;
+}
+
+static void caseSignalBlockedRead(Pty *p) {
+    for (int how = 0; how < 3; how++) {
+        static const char *names[] = {"a handler", "a handler with SA_RESTART", "stopped and continued"};
+        say("- %s", names[how]);
+        clearMarks();
+        /* What the last case typed for a reader that had gone is still there. */
+        (void)ioctl(p->s, K_TCFLSH, (long)0);
+        Waiter w = {p, how};
+        const pid_t pid = procSpawn(blockedReader, &w);
+        awaitMark(1);
+        sleepMs(50);
+        if (how < 2) {
+            kill(pid, SIGUSR1);
+        } else {
+            kill(pid, SIGSTOP);
+            int status = 0;
+            const pid_t waited = waitpid(pid, &status, WUNTRACED);
+            say("leader: stopped: %s", waited == pid && WIFSTOPPED(status) ? "yes" : "no");
+            kill(pid, SIGCONT);
+        }
+        sleepMs(50);
+        (void)!write(p->m, "line\n", 5);
+        procFinish("reader", pid);
+        char drained[64];
+        (void)drain(p->m, drained, sizeof(drained));
+    }
+}
+
+/* L6 with L9: a key that raises a signal starts stopped output, and takes echo not yet out
+ * with the input it flushes. */
+static void caseFlowAndSignalKeys(Pty *p) {
+    installHandler(SIGINT, true);
+    signal(SIGTSTP, SIG_IGN);
+    setL(p->s, 0, KL_ICANON);
+    SIGNAL_KEYS(p, "raw, the key after a byte", "a\x03" "b");
+    reads(p, "raw");
+    setL(p->s, 0, KL_ECHOCTL);
+    SIGNAL_KEYS(p, "raw, no echoctl", "a\x03" "b");
+    reads(p, "raw, no echoctl");
+    setL(p->s, KL_ICANON | KL_ECHOCTL, 0);
+    SIGNAL_KEYS(p, "line mode", "a\x03" "b\n");
+    reads(p, "line mode");
+    /* Given time to reach the master: output on its way can go with the flush on Linux. */
+    (void)!write(p->s, "out", 3);
+    sleepMs(30);
+    SIGNAL_KEYS(p, "output not yet read, then the key", "\x03");
+    KEYS(p, "stop", "\x13");
+    showWrite("write, stopped", p->s, "x", 1);
+    SIGNAL_KEYS(p, "the interrupt key", "\x03");
+    showWrite("write after it", p->s, "y", 1);
+    masterOutput("after", p);
+    KEYS(p, "stop", "\x13");
+    SIGNAL_KEYS(p, "the suspend key, ignored", "\x1a");
+    showWrite("write after it", p->s, "z", 1);
+    masterOutput("after", p);
+    say("signals %d", hitsOf(SIGINT));
+}
+
 int main(int argc, char **argv) {
-    gShared = (Shared *)mmap(NULL, sizeof(Shared), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANON, -1, 0);
+    gShared =(Shared *)mmap(NULL, sizeof(Shared), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANON, -1, 0);
     setvbuf(stdout, NULL, _IOLBF, 0);
     platformInit();
     if (argc > 1 && strcmp(argv[1], "root") == 0) {
@@ -3476,5 +4013,12 @@ int main(int argc, char **argv) {
     sessionCase("keys that raise a signal", caseSignalKey);
     sessionCase("L13 keys that raise a signal, in packet mode", caseSignalKeyPacket);
     secWinsizeNoSession();
+    secNonCanonical();
+    secFlowControl();
+    secShortWrites();
+    secLastClose();
+    sessionCase("L17 changing the terminal from the background", caseBgChanges);
+    sessionCase("L6 L9 signal keys and stopped output", caseFlowAndSignalKeys);
+    sessionCase("L10 a signal and a blocked read", caseSignalBlockedRead);
     return 0;
 }

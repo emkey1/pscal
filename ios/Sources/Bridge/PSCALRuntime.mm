@@ -100,6 +100,7 @@ extern "C" {
     ShellRuntimeState *shellRuntimeActivateContext(ShellRuntimeState *ctx);
     void shellRuntimeDestroyContext(ShellRuntimeState *ctx);
     int32_t pscalRuntimeSetTabTitleForSession(uint64_t session_id, const char *title);
+    void pscalRuntimeRefreshTerminalSizeForSession(uint64_t session_id);
     int32_t pscalRuntimeSetTabStartupCommandForSession(uint64_t session_id, const char *command);
     void pscalRuntimeBindSessionToBootstrap(void *runtime_context, uint64_t session_id);
     void pscalRuntimeBindSessionToBootstrapHandle(void *bootstrap_handle, uint64_t session_id);
@@ -2179,6 +2180,13 @@ void PSCALRuntimeUpdateWindowSize(int columns, int rows) {
 
     if (active && runtime_thread) {
         (void)pthread_kill(runtime_thread, SIGWINCH);
+    }
+}
+
+void PSCALRuntimeRefreshWindowSize(void) {
+    uint64_t session_id = PSCALRuntimeCurrentSessionId();
+    if (session_id != 0) {
+        pscalRuntimeRefreshTerminalSizeForSession(session_id);
     }
 }
 

@@ -1964,3 +1964,274 @@ master: size 24 80 3 4
 through the master: ok, signals 0
 slave: size 25 81 5 6
 master: size 25 81 5 6
+
+== L2 out of line mode
+defaults: keys "a\rb\nc" echo "a\r\nb^Jc"
+defaults: read "a\nb\nc" EAGAIN
+no echo: keys "a\rb\nc" echo ""
+no echo: read "a\nb\nc" EAGAIN
+no icrnl: keys "a\rb\nc" echo "a^Mb^Jc"
+no icrnl: read "a\rb\nc" EAGAIN
+inlcr: keys "a\rb\nc" echo "a^Mb^Mc"
+inlcr: read "a\rb\rc" EAGAIN
+igncr: keys "a\rb\nc" echo "ab^Jc"
+igncr: read "ab\nc" EAGAIN
+inlcr igncr: keys "a\rb\nc" echo "ab^Mc"
+inlcr igncr: read "ab\rc" EAGAIN
+control keys: keys "\x01\x7f\t\x1b[A" echo "^A^?\t^[[A"
+control keys: read "\x01\x7f\t\x1b[A" EAGAIN
+control keys, no echoctl: keys "\x01\x7f\t\x1b[A" echo "\x01\x7f\t\x1b[A"
+control keys, no echoctl: read "\x01\x7f\t\x1b[A" EAGAIN
+editing keys: keys "ab\x7f\x15\x17\x12\x04c" echo "ab^?^U^W^R^Dc"
+editing keys: read "ab\x7f\x15\x17\x12\x04c" EAGAIN
+editing keys, no echo: keys "ab\x7f\x15\x17\x12\x04c" echo ""
+editing keys, no echo: read "ab\x7f\x15\x17\x12\x04c" EAGAIN
+echonl: keys "a\nb" echo ""
+echonl: read "a\nb" EAGAIN
+literal next: keys "\x16a\x16\x7fb" echo "^Va^V^?b"
+literal next: read "\x16a\x16\x7fb" EAGAIN
+literal next, no iexten: keys "\x16a\x16\x7fb" echo "^Va^V^?b"
+literal next, no iexten: read "\x16a\x16\x7fb" EAGAIN
+literal next, no echo: keys "\x16a\x16\x7fb" echo ""
+literal next, no echo: read "\x16a\x16\x7fb" EAGAIN
+eol keys: keys "a\x04b" echo "a^Db"
+eol keys: read "a\x04b" EAGAIN
+no opost: keys "a\n" echo "a^J"
+no opost: read "a\n" EAGAIN
+echo without opost: keys "a\nb\tc" echo "a^Jb\tc"
+echo without opost: read "a\nb\tc" EAGAIN
+utf8: keys "\xc3\xa9\x7fx" echo "\xc3\xa9^?x"
+utf8: read "\xc3\xa9\x7fx" EAGAIN
+a prompt's mode: keys "ls\r" echo ""
+a prompt's mode: read "ls\n" EAGAIN
+typed ahead: keys "one\rtw" echo ""
+then line mode: keys "o\r" echo "o\r\n"
+typed ahead: read "one\ntw" "o\n" EAGAIN
+
+== L6 flow control
+ixon, line mode: stop: keys "a\x13b" echo ""
+ixon, line mode: write while stopped: EAGAIN
+ixon, line mode: slave: poll 0 -
+ixon, line mode: master: poll 1 OUT
+ixon, line mode: master has ""
+ixon, line mode: start: keys "c\x11d" echo "abcd"
+ixon, line mode: master has ""
+ixon, line mode: slave: poll 1 OUT
+ixon, line mode: keys "\n" echo "\r\n"
+ixon, line mode: read "abcd\n" EAGAIN
+ixon, raw: stop: keys "a\x13b" echo ""
+ixon, raw: write while stopped: EAGAIN
+ixon, raw: slave: poll 1 IN
+ixon, raw: master: poll 1 OUT
+ixon, raw: master has ""
+ixon, raw: start: keys "c\x11d" echo "abcd"
+ixon, raw: master has ""
+ixon, raw: slave: poll 1 IN OUT
+ixon, raw: read "abcd" EAGAIN
+no ixon: stop: keys "a\x13b" echo "a^Sb"
+no ixon: write while stopped: 3
+no ixon: slave: poll 1 OUT
+no ixon: master: poll 1 IN OUT
+no ixon: master has "out"
+no ixon: start: keys "c\x11d" echo "c^Qd"
+no ixon: master has ""
+no ixon: slave: poll 1 OUT
+no ixon: keys "\n" echo "\r\n"
+no ixon: read "a\x13bc\x11d\n" EAGAIN
+ixany: stop: keys "a\x13b" echo "ab"
+ixany: write while stopped: 3
+ixany: slave: poll 1 OUT
+ixany: master: poll 1 IN OUT
+ixany: master has "out"
+ixany: start: keys "c\x11d" echo "cd"
+ixany: master has ""
+ixany: slave: poll 1 OUT
+ixany: keys "\n" echo "\r\n"
+ixany: read "abcd\n" EAGAIN
+ixoff: stop: keys "a\x13b" echo ""
+ixoff: write while stopped: EAGAIN
+ixoff: slave: poll 0 -
+ixoff: master: poll 1 OUT
+ixoff: master has ""
+ixoff: start: keys "c\x11d" echo "abcd"
+ixoff: master has ""
+ixoff: slave: poll 1 OUT
+ixoff: keys "\n" echo "\r\n"
+ixoff: read "abcd\n" EAGAIN
+stopped twice: keys "\x13\x13" echo ""
+write: EAGAIN
+start once: keys "\x11" echo ""
+start once: master has ""
+start again: keys "\x11" echo ""
+start again: master has ""
+other keys: keys "ax\x13b" echo ""
+write: EAGAIN
+other keys: master has ""
+other keys: keys "y\n" echo "a^Sb\r\n"
+other keys: master has ""
+other keys: read "a\x13b\n" EAGAIN
+one key for both: keys "axb" echo "ab"
+write: 1
+one key for both: master has "o"
+one key for both: keys "x\n" echo "\r\n"
+one key for both: master has ""
+one key for both: read "ab\n" EAGAIN
+stop key off: keys "a\x13b\n" echo "a^Sb\r\n"
+stop key off: read "a\x13b\n" EAGAIN
+stopped: keys "\x13" echo ""
+write: EAGAIN
+ixon cleared: master has ""
+write: 1
+ixon cleared: master has "y"
+stopped, then a flush: keys "\x13" echo ""
+TCFLSH output: 0
+write: EAGAIN
+after the flush: master has ""
+start: keys "\x11" echo ""
+start: master has ""
+
+== L6 TCXONC
+TCOOFF: 0
+write: EAGAIN
+TCOOFF: master has ""
+start key: keys "\x11" echo ""
+start key: master has ""
+TCOOFF: 0
+TCOON: 0
+TCOON: master has ""
+TCIOFF: 0
+TCIOFF: master has "\x13"
+TCION: 0
+TCION: master has "\x11"
+TCXONC 7: EINVAL
+TCOOFF on the master: 0
+master write: EAGAIN
+slave write: 1
+TCOOFF on the master: master has "z"
+TCOON on the master: 0
+TCOON on the master: master has ""
+TCOOFF without ixon: 0
+write: EAGAIN
+TCOOFF without ixon: master has ""
+TCOON: 0
+TCOON: master has ""
+
+== L6 packet mode
+TIOCPKT on: 0
+stop: keys "\x13" echo "\x04"
+stopped: poll 1 OUT
+stopped: read EAGAIN
+start: keys "\x11" echo "\b"
+started: poll 1 OUT
+started: read EAGAIN
+TCOOFF: 0
+TCOOFF: poll 1 IN PRI OUT
+TCOOFF: read 1 "\x04"
+TCOON: 0
+TCOON: poll 1 IN PRI OUT
+TCOON: read 1 "\b"
+
+== L12 non-blocking writes
+slave: took some at first: yes
+slave: took less than asked: yes
+slave: then: EAGAIN
+master: read all that was taken: yes
+slave, emptied: poll 1 OUT
+master: took some at first: yes
+master: took less than asked: yes
+master: then: EAGAIN
+master, full: poll 0 -
+slave: read all that was taken: yes
+master, emptied: poll 1 OUT
+
+== L24 the slave's last close
+master: poll 1 IN OUT HUP
+master: read "bye\r\n" EIO EIO EIO
+master write: 1
+reopen: 0
+master, reopened: poll 1 IN OUT
+slave write: 6
+reopened: master has "kagain\r\n"
+reopened: read EAGAIN
+master, nothing written: poll 1 OUT HUP
+master, after a reopen: poll 1 OUT
+-- L17 changing the terminal from the background
+- TCGETS, SIGTTOU default
+job: request: 0
+leader: job exited 0
+- TCSETS, SIGTTOU default
+leader: job stopped by SIGTTOU
+leader: job to the foreground: 0
+job: request: 0
+job: exited 0
+leader: back: 0
+- TCFLSH, SIGTTOU default
+leader: job stopped by SIGTTOU
+leader: job to the foreground: 0
+job: request: 0
+job: exited 0
+leader: back: 0
+- TCXONC, SIGTTOU default
+leader: job stopped by SIGTTOU
+leader: job to the foreground: 0
+job: request: 0
+job: exited 0
+leader: back: 0
+- TIOCSPGRP, SIGTTOU default
+leader: job stopped by SIGTTOU
+leader: job to the foreground: 0
+job: request: 0
+job: exited 0
+leader: back: 0
+- TCSBRK, SIGTTOU default
+leader: job stopped by SIGTTOU
+leader: job to the foreground: 0
+job: request: 0
+job: exited 0
+leader: back: 0
+- TIOCSWINSZ, SIGTTOU default
+job: request: 0
+leader: job exited 0
+- TCSETS, SIGTTOU ignored
+job: request: 0
+leader: job exited 0
+- TCSETS, SIGTTOU blocked
+job: request: 0
+leader: job exited 0
+- TIOCSPGRP, SIGTTOU ignored
+job: request: 0
+leader: job exited 0
+leader: exited 0
+-- L6 L9 signal keys and stopped output
+raw, the key after a byte: keys "a\x03b" echo "^Cb"
+raw: read "b" EAGAIN
+raw, no echoctl: keys "a\x03b" echo "\x03b"
+raw, no echoctl: read "b" EAGAIN
+line mode: keys "a\x03b\n" echo "^Cb\r\n"
+line mode: read "b\n" EAGAIN
+output not yet read, then the key: keys "\x03" echo "out^C"
+stop: keys "\x13" echo ""
+write, stopped: EAGAIN
+the interrupt key: keys "\x03" echo "^C"
+write after it: 1
+after: master has "y"
+stop: keys "\x13" echo ""
+the suspend key, ignored: keys "\x1a" echo "^Z"
+write after it: 1
+after: master has "z"
+signals 5
+leader: exited 0
+-- L10 a signal and a blocked read
+- a handler
+reader: read EINTR ""
+reader: handler ran: yes
+reader: exited 0
+- a handler with SA_RESTART
+reader: read 5 "line\n"
+reader: handler ran: yes
+reader: exited 0
+- stopped and continued
+leader: stopped: yes
+reader: read 5 "line\n"
+reader: exited 0
+leader: exited 0

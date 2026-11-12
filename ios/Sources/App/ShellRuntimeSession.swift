@@ -359,7 +359,7 @@ final class ShellRuntimeSession: ObservableObject {
             self?.htermController.forceGridSize(columns: clampedColumns, rows: clampedRows)
         }
         // When this is the page's own measurement, the controller has already passed it on.
-        guard !htermController.runtimeHasSize(columns: clampedColumns, rows: clampedRows) else {
+        guard !HtermTerminalController.terminalHasSize(sessionId: sessionId, columns: clampedColumns, rows: clampedRows) else {
             return
         }
         withRuntimeContext {
