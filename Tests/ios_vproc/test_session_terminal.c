@@ -1,7 +1,6 @@
 /* Keys typed at a session's terminal, read the way a command in the app reads
- * them: through the shims, as a pipeline stage, with the session's reader thread
- * running. Each case runs in its own process, so that a lost key fails that case
- * by timing out instead of ending the run. */
+ * them: through the shims, as a pipeline stage. Each case runs in its own process,
+ * so that a lost key fails that case by timing out instead of ending the run. */
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -71,10 +70,9 @@ static void terminal_set_raw(terminal *t) {
     terminal_set_lflags(t, 0, ICANON_ | ECHO_ | ISIG_);
 }
 
-/* What the shell gives a command: line mode and echo, with Ctrl-C and Ctrl-Z left
- * for the session's reader. */
+/* What the shell gives a command: line mode, echo, and ISIG, as on Linux (L20). */
 static void terminal_set_line(terminal *t) {
-    terminal_set_lflags(t, ICANON_ | ECHO_, ISIG_);
+    terminal_set_lflags(t, ICANON_ | ECHO_ | ISIG_, 0);
 }
 
 /* shell_pid, if there is one, is who the session's reader takes itself for. */
@@ -95,13 +93,16 @@ static void terminal_open_for_shell(terminal *t, int shell_pid) {
     assert(t->vp);
     vprocRegisterThread(t->vp, pthread_self());
     vprocActivate(t->vp);
-    /* The reader starts as it does in the app, for the prompt, in raw mode. */
+    /* A tab's shell leads a session of its own, and claims its terminal once it has a task:
+     * that gives the terminal to its session with its group in the foreground, where the
+     * terminal sends Ctrl-C (L20). */
+    (void)vprocSetSid(vprocPid(t->vp), vprocPid(t->vp));
+    vprocSessionStdioActivate(t->session);
+    /* Raw, as the shell's prompt leaves it. A read goes to the terminal itself (L20): there
+     * is no reader thread. */
     terminal_set_raw(t);
     t->session->shell_pid = shell_pid;
-    assert(vprocSessionInputEnsureShim());
     vprocSetPipelineStage(true);
-    /* Let the reader get to its read of the terminal. */
-    usleep(20000);
 }
 
 static void terminal_open(terminal *t) {
@@ -124,7 +125,8 @@ static ssize_t read_fd(int fd, void *buf, size_t count, int timeout_ms) {
     if (ready == 0) {
         return -2;
     }
-    assert(ready > 0);
+    /* A signal ends a poll as it does a read: the read says what it did to the input. */
+    assert(ready > 0 || errno == EINTR);
     return vprocReadShim(fd, buf, count);
 }
 
@@ -301,16 +303,16 @@ static void case_prompt_ignores_old_end_of_file_key(void) {
     terminal t;
     terminal_open(&t);
     terminal_set_line(&t);
-    int pid = vprocPid(t.vp);
-    t.session->shell_pid = pid;
+    /* Ctrl-D typed while a command ran and nothing read it. The prompt's line editor reads in
+     * raw mode, where that end-of-file key is a byte 0, as on Linux: not the end of the shell's
+     * input, so the tab stays open. */
     type_str(&t, "\x04");
     usleep(50000);
-    vprocSetShellPromptReadActive(pid, true);
-    char c;
-    errno = 0;
-    assert(vprocSessionReadInputShimMode(&c, 1, true) == -1);
-    assert(errno == EAGAIN);
-    vprocSetShellPromptReadActive(pid, false);
+    terminal_set_raw(&t);
+    char c = 1;
+    assert(read_terminal(&c, 1, KEY_WAIT_MS) == 1);
+    assert(c == 0);
+    terminal_set_line(&t);
     type_str(&t, "\x04");
     expect_eof();
 }
@@ -338,6 +340,9 @@ static void case_line_too_long_for_the_buffer(void) {
 
 /* --- Ctrl-C and Ctrl-Z in line mode --- */
 
+static void terminal_run_command(terminal *t);
+static void terminal_end_command(void);
+
 static void expect_control_key_or_interrupt(unsigned char key) {
     unsigned char got = 0;
     ssize_t n = read_terminal(&got, 1, KEY_WAIT_MS);
@@ -354,13 +359,13 @@ static void expect_control_key_or_interrupt(unsigned char key) {
 static void case_line_control_keys_get_past_the_line(void) {
     terminal t;
     terminal_open(&t);
-    terminal_set_line(&t);
+    terminal_run_command(&t);
     /* No Return follows: the key must not wait for one, and what was typed of
-     * the line is gone with it. */
+     * the line is gone with it (isig, L20). */
     type_str(&t, "ab\x03");
     expect_control_key_or_interrupt(0x03);
-    type_str(&t, "cd\x1a");
-    expect_control_key_or_interrupt(0x1a);
+    terminal_end_command();
+    terminal_run_command(&t);
     type_str(&t, "next\n");
     expect_text("next\n");
 }
@@ -387,15 +392,54 @@ static void case_control_keys_stay_data_without_session_reader(void) {
 
 /* A command as the app runs it. exsh_main blocks SIGINT, so on every vproc the
  * signal only waits; nothing in it can wake or end a read. */
+/* The command terminal_run_command started, if it is still running. */
+static VProc *gCommand = NULL;
+
 static void terminal_run_command(terminal *t) {
     terminal_set_line(t);
-    int pid = vprocPid(t->vp);
+    /* t->vp is the shell: it blocks SIGINT for its own catcher, as exsh does. */
+    int shell = vprocPid(t->vp);
     sigset_t set;
     sigemptyset(&set);
     sigaddset(&set, SIGINT);
     assert(vprocPthreadSigmaskShim(SIG_BLOCK, &set, NULL) == 0);
-    vprocSetPgid(pid, pid);
-    t->session->shell_pid = pid;
+    vprocSetPgid(shell, shell);
+    t->session->shell_pid = shell;
+    vprocSetShellSelfPid(shell);
+    vprocSetShellSelfTid(pthread_self());
+    (void)vprocRegisterTidHint(shell, pthread_self());
+    (void)vprocSetShellTask(shell, true);
+    /* The command is a task of its own on the shell's thread, in a group of its own in the
+     * foreground, as the app runs a pipeline stage. It starts with SIGINT unblocked. */
+    VProc *command = vprocCreate(NULL);
+    assert(command);
+    gCommand = command;
+    vprocRegisterThread(command, pthread_self());
+    vprocActivate(command);
+    int pid = vprocPid(command);
+    assert(vprocSetPgid(pid, pid) == 0);
+    int sid = vprocGetSid(shell);
+    assert(sid > 0);
+    assert(vprocSetForegroundPgid(sid, pid) == 0);
+}
+
+/* The command ends, as its task would, and the shell is current again. */
+static void terminal_end_command(void) {
+    if (!gCommand) {
+        return;
+    }
+    const int pid = vprocPid(gCommand);
+    vprocDeactivate();
+    vprocMarkExit(gCommand, 128 + SIGINT);
+    vprocDiscard(pid);
+    vprocDestroy(gCommand);
+    gCommand = NULL;
+    /* The shell takes the terminal back, as exsh does after a command. */
+    const int shell = vprocGetShellSelfPid();
+    const int sid = shell > 0 ? vprocGetSid(shell) : -1;
+    if (sid > 0) {
+        (void)vprocSetForegroundPgid(sid, vprocGetPgid(shell));
+    }
 }
 
 typedef struct {
@@ -428,12 +472,15 @@ static void case_interrupt_key_ends_a_waiting_read(void) {
     expect_nothing();
     char got[16];
     assert(read_waiting_for_keys(&t, "\x03", got, sizeof(got)) == 0);
-    expect_echo(&t, "gone^C\r\n");
+    /* The terminal echoes the key, as Linux's does; the new line is the shell's. */
+    expect_echo(&t, "gone^C");
     /* A loop that goes on reading stays stopped, whatever it is. */
     assert(vprocReadShim(STDIN_FILENO, got, sizeof(got)) == 0);
     assert(vprocTakeTerminalInterrupted());
     assert(!vprocTakeTerminalInterrupted());
     /* The next command reads again, and what was typed before the key is not there. */
+    terminal_end_command();
+    terminal_run_command(&t);
     type_str(&t, "next\n");
     expect_text("next\n");
 }
@@ -448,10 +495,13 @@ static void case_interrupt_key_takes_lines_typed_ahead(void) {
     char got[16];
     assert(vprocReadShim(STDIN_FILENO, got, sizeof(got)) == 0);
     assert(vprocTakeTerminalInterrupted());
+    terminal_end_command();
+    terminal_run_command(&t);
     expect_nothing();
 }
 
-/* Keys that a program in raw mode asked for: the key does not end its input. */
+/* Keys that a program in raw mode asked for: with isig clear the key is a byte, as on Linux,
+ * and its input stays open. */
 static void case_interrupt_key_leaves_raw_mode_input_open(void) {
     terminal t;
     terminal_open(&t);
@@ -459,8 +509,8 @@ static void case_interrupt_key_leaves_raw_mode_input_open(void) {
     terminal_set_raw(&t);
     char got[16];
     errno = 0;
-    assert(read_waiting_for_keys(&t, "\x03", got, sizeof(got)) == -1);
-    assert(errno == EINTR);
+    assert(read_waiting_for_keys(&t, "\x03", got, sizeof(got)) == 1);
+    assert(got[0] == 0x03);
     assert(!vprocTakeTerminalInterrupted());
     type_str(&t, "k");
     expect_text("k");

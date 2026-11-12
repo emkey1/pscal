@@ -3942,6 +3942,182 @@ static void caseFlowAndSignalKeys(Pty *p) {
     say("signals %d", hitsOf(SIGINT));
 }
 
+/* --- L21, L22, L23: hanging up --- */
+
+/* Each role counts its own: a "process" under vproc is a thread of this one. */
+enum { HUP_CHILD = 20, CONT_CHILD, HUP_LEADER, CONT_LEADER };
+
+static void childHup(int sig) {
+    (void)sig;
+    __atomic_add_fetch(&gShared->hits[HUP_CHILD], 1, __ATOMIC_RELAXED);
+}
+
+static void childCont(int sig) {
+    (void)sig;
+    __atomic_add_fetch(&gShared->hits[CONT_CHILD], 1, __ATOMIC_RELAXED);
+}
+
+static void leaderHup(int sig) {
+    (void)sig;
+    __atomic_add_fetch(&gShared->hits[HUP_LEADER], 1, __ATOMIC_RELAXED);
+}
+
+static void leaderCont(int sig) {
+    (void)sig;
+    __atomic_add_fetch(&gShared->hits[CONT_LEADER], 1, __ATOMIC_RELAXED);
+}
+
+static void handleWith(int sig, void (*fn)(int)) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sigemptyset(&sa.sa_mask);
+    sa.sa_handler = fn;
+    sa.sa_flags = SA_RESTART;
+    sigaction(sig, &sa, NULL);
+}
+
+static int hitCount(int index) {
+    return __atomic_load_n(&gShared->hits[index], __ATOMIC_RELAXED);
+}
+
+/* Waits up to two seconds for a count to come. In a call, as a handler under vproc runs
+ * when its task next makes one. */
+static bool hitWithin(int index) {
+    for (int waited = 0; waited < 200; waited++) {
+        if (hitCount(index) > 0) {
+            return true;
+        }
+        (void)poll(NULL, 0, 10);
+    }
+    return false;
+}
+
+/* A job in the foreground group of the leader's terminal, which outlives the leader. */
+static int hangupWatcher(void *raw) {
+    const Pty *p = (const Pty *)raw;
+    /* Its copy of the master would keep the master open. */
+    close(p->m);
+    handleWith(SIGHUP, childHup);
+    handleWith(SIGCONT, childCont);
+    mark(10);
+    const bool hup = hitWithin(HUP_CHILD);
+    /* After what the leader has to say. */
+    sleepMs(150);
+    say("job: SIGHUP: %s", hup ? "yes" : "no");
+    say("job: SIGCONT: %s", hitCount(CONT_CHILD) > 0 ? "yes" : "no");
+    const int tty = open("/dev/tty", O_RDWR);
+    sayResult("job: open /dev/tty", tty >= 0 ? 0 : -1);
+    if (tty >= 0) {
+        close(tty);
+    }
+    mark(11);
+    return 0;
+}
+
+/* L22: the leader ends, with a job in its terminal's foreground group. */
+static void caseLeaderExits(Pty *p) {
+    (void)procSpawn(hangupWatcher, p);
+    awaitMark(10);
+}
+
+/* L22: the leader gives the terminal up. */
+static void caseLeaderNoTty(Pty *p) {
+    signal(SIGHUP, SIG_IGN);
+    const pid_t pid = procSpawn(hangupWatcher, p);
+    awaitMark(10);
+    sayResult("leader: TIOCNOTTY", ioctl(p->s, K_TIOCNOTTY));
+    awaitMark(11);
+    procFinish("job", pid);
+}
+
+/* L21: the master's last close. */
+static void caseMasterCloses(Pty *p) {
+    handleWith(SIGHUP, leaderHup);
+    handleWith(SIGCONT, leaderCont);
+    const pid_t pid = procSpawn(hangupWatcher, p);
+    awaitMark(10);
+    close(p->m);
+    p->m = -1;
+    const bool hup = hitWithin(HUP_LEADER);
+    sleepMs(50);
+    say("leader: SIGHUP: %s", hup ? "yes" : "no");
+    say("leader: SIGCONT: %s", hitCount(CONT_LEADER) > 0 ? "yes" : "no");
+    char byte;
+    sayResult("leader: read", read(p->s, &byte, 1));
+    sayResult("leader: write", write(p->s, "x", 1));
+    awaitMark(11);
+    procFinish("job", pid);
+}
+
+/* L21 again, with the job in a foreground group of its own. */
+static int foregroundWatcher(void *raw) {
+    setpgid(0, 0);
+    mark(12);
+    awaitMark(13);
+    return hangupWatcher(raw);
+}
+
+static void caseMasterClosesForeground(Pty *p) {
+    handleWith(SIGHUP, leaderHup);
+    handleWith(SIGCONT, leaderCont);
+    const pid_t pid = procSpawn(foregroundWatcher, p);
+    awaitMark(12);
+    sayResult("leader: TIOCSPGRP", ioctl(p->s, K_TIOCSPGRP, &(int){(int)pid}));
+    mark(13);
+    awaitMark(10);
+    close(p->m);
+    p->m = -1;
+    const bool hup = hitWithin(HUP_LEADER);
+    sleepMs(50);
+    say("leader: SIGHUP: %s", hup ? "yes" : "no");
+    say("leader: SIGCONT: %s", hitCount(CONT_LEADER) > 0 ? "yes" : "no");
+    awaitMark(11);
+    procFinish("job", pid);
+}
+
+/* L23: a stopped job left orphaned when its parent, the leader, ends. */
+static int orphanedJob(void *raw) {
+    (void)raw;
+    setpgid(0, 0);
+    handleWith(SIGHUP, childHup);
+    handleWith(SIGCONT, childCont);
+    mark(10);
+    raise(SIGSTOP);
+    const bool hup = hitWithin(HUP_CHILD);
+    sleepMs(50);
+    say("orphan: SIGHUP: %s", hup ? "yes" : "no");
+    say("orphan: SIGCONT: %s", hitCount(CONT_CHILD) > 0 ? "yes" : "no");
+    mark(11);
+    return 0;
+}
+
+static int orphanParent(void *raw) {
+    (void)raw;
+    if (setsid() < 0) {
+        say("setsid: %s", errName(errno));
+        return 1;
+    }
+    const pid_t pid = procSpawn(orphanedJob, NULL);
+    awaitMark(10);
+    int status = 0;
+    const pid_t waited = waitpid(pid, &status, WUNTRACED);
+    say("parent: job stopped: %s", waited == pid && WIFSTOPPED(status) ? "yes" : "no");
+    return 0;
+}
+
+static void secHangUps(void) {
+    sessionCase("L22 the leader ends", caseLeaderExits);
+    awaitMark(11);
+    sessionCase("L22 the leader gives its terminal up", caseLeaderNoTty);
+    sessionCase("L21 the master's last close", caseMasterCloses);
+    sessionCase("L21 the master's last close, a job in the foreground", caseMasterClosesForeground);
+    say("-- L23 a stopped group orphaned");
+    clearMarks();
+    const pid_t pid = procSpawn(orphanParent, NULL);
+    procFinish("parent", pid);
+    awaitMark(11);
+}
+
 int main(int argc, char **argv) {
     gShared =(Shared *)mmap(NULL, sizeof(Shared), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANON, -1, 0);
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -4020,5 +4196,6 @@ int main(int argc, char **argv) {
     sessionCase("L17 changing the terminal from the background", caseBgChanges);
     sessionCase("L6 L9 signal keys and stopped output", caseFlowAndSignalKeys);
     sessionCase("L10 a signal and a blocked read", caseSignalBlockedRead);
+    secHangUps();
     return 0;
 }

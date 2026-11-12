@@ -2235,3 +2235,39 @@ leader: stopped: yes
 reader: read 5 "line\n"
 reader: exited 0
 leader: exited 0
+-- L22 the leader ends
+leader: exited 0
+job: SIGHUP: yes
+job: SIGCONT: no
+job: open /dev/tty: ENXIO
+-- L22 the leader gives its terminal up
+leader: TIOCNOTTY: 0
+job: SIGHUP: yes
+job: SIGCONT: yes
+job: open /dev/tty: ENXIO
+job: exited 0
+leader: exited 0
+-- L21 the master's last close
+leader: SIGHUP: yes
+leader: SIGCONT: yes
+leader: read: 0
+leader: write: EIO
+job: SIGHUP: no
+job: SIGCONT: no
+job: open /dev/tty: ENXIO
+job: exited 0
+leader: exited 0
+-- L21 the master's last close, a job in the foreground
+leader: TIOCSPGRP: 0
+leader: SIGHUP: yes
+leader: SIGCONT: yes
+job: SIGHUP: no
+job: SIGCONT: no
+job: open /dev/tty: ENXIO
+job: exited 0
+leader: exited 0
+-- L23 a stopped group orphaned
+parent: job stopped: yes
+parent: exited 0
+orphan: SIGHUP: yes
+orphan: SIGCONT: yes

@@ -50,6 +50,8 @@ Base: `V.1R33`
 - Changing a terminal from a background job (`stty`, `tcsetattr`, `tcflush`, `tcflow`, `tcsetpgrp`, `tcdrain`'s break) stops the job with `SIGTTOU`, unless it ignores or blocks that signal, as on Linux.
 - A non-blocking write to a terminal returns how much it took, and a pty master only says it can be written when there is room.
 - A pty master reads what its slave wrote before its last close, then `EIO`, and keys written meanwhile wait for the slave's next open. It read 0 at once and lost that output.
+- Ctrl-C, Ctrl-\ and Ctrl-Z are signals from the terminal itself, as on Linux: a command sees `isig` set (`stty -a`), `stty -isig` makes them ordinary keys, and a program in raw mode reads them as bytes. They were made into signals by a reader in front of the terminal, and a command ran with `isig` clear.
+- Closing a tab hangs up its shell with SIGHUP and SIGCONT, as closing a terminal window does on Linux. When a shell that leads its session ends, the job in the foreground on its terminal gets SIGHUP and the terminal stops being the session's (`/dev/tty` says `No such device or address`). A stopped job left without its shell gets SIGHUP and SIGCONT.
 - Pascal `ReadKey`: Ctrl-C ends the program. It left only the procedure that called `ReadKey`, so a game reading keys in a procedure (DiceGame) carried on.
 
 ## Fixed in Pascal, CLike and Rea
