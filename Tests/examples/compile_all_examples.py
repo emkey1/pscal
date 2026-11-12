@@ -110,7 +110,19 @@ def read_sdl_enabled_from_cache(cache_path: Path) -> bool:
     return False
 
 
+# Examples outside an sdl/ directory that call routines only an SDL build has
+# (GetTicks, the sound system). Pascal reports an undeclared routine when
+# compiling, so on a build without SDL they cannot compile.
+SDL_EXAMPLES_OUTSIDE_SDL_DIRS = {
+    "components/pascal/examples/base/Checkers",
+    "components/pascal/examples/base/EightPuzzle",
+    "components/pascal/examples/base/psound",
+}
+
+
 def is_sdl_example(path: Path) -> bool:
+    if path.as_posix() in SDL_EXAMPLES_OUTSIDE_SDL_DIRS:
+        return True
     return any(part.lower() == "sdl" for part in path.parts)
 
 
