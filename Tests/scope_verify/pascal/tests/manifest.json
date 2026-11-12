@@ -52,21 +52,21 @@
       "id": "routine_nested_function_leak_error",
       "name": "Nested function cannot escape its scope",
       "category": "routine_scope",
-      "description": "Calling a nested helper from the outer scope now raises a semantic error instead of failing at runtime.",
-      "expect": "runtime_error",
+      "description": "Calling a nested helper from the outer scope is a compile error.",
+      "expect": "compile_error",
       "code": "program RoutineNestedFunctionLeak;\n\nfunction Outer(value: Integer): Integer;\n  function Hidden(delta: Integer): Integer;\n  begin\n    Hidden := value + delta;\n  end;\nbegin\n  Outer := Hidden(1);\nend;\n\nbegin\n  writeln(Outer(2));\n  writeln(Hidden(3));\nend.",
-      "expected_stderr_substring": "Undefined global variable 'hidden'",
-      "failure_reason": "Calling a nested function from the global scope resolves against globals and now fails at runtime."
+      "expected_stderr_substring": "Undefined procedure or function 'hidden'",
+      "failure_reason": "A nested function is not visible outside its enclosing routine; the compiler reports the call."
     },
     {
       "id": "routine_parameter_leak_error",
-      "name": "Parameter access outside routine fails at runtime",
+      "name": "Parameter access outside routine is a compile error",
       "category": "routine_scope",
-      "description": "Accessing a routine parameter from the outer scope triggers a runtime failure.",
-      "expect": "runtime_error",
+      "description": "Accessing a routine parameter from the outer scope is a compile error.",
+      "expect": "compile_error",
       "code": "program RoutineParameterLeak;\n\nprocedure Echo(value: Integer);\nbegin\n  writeln('inside=', value);\nend;\n\nbegin\n  Echo(3);\n  writeln(value);\nend.",
-      "expected_stderr_substring": "Undefined global variable",
-      "failure_reason": "Routine parameters are not visible outside the routine body; runtime reports an undefined variable."
+      "expected_stderr_substring": "Undefined variable 'value'",
+      "failure_reason": "Routine parameters are not visible outside the routine body; the compiler reports an undefined variable."
     },
     {
       "id": "routine_duplicate_local_error",
@@ -180,10 +180,10 @@
       "id": "routine_sibling_local_access_error",
       "name": "Sibling routine cannot access another's local",
       "category": "routine_scope",
-      "description": "Attempting to read a local variable from a different routine triggers a runtime failure.",
-      "expect": "runtime_error",
+      "description": "Reading a local variable of a different routine is a compile error.",
+      "expect": "compile_error",
       "code": "program RoutineSiblingLocalAccess;\n\nprocedure Producer;\nvar\n  hidden: Integer;\nbegin\n  hidden := 1;\n  writeln('producer=', hidden);\nend;\n\nprocedure Consumer;\nbegin\n  writeln(hidden);\nend;\n\nbegin\n  Producer;\n  Consumer;\nend.",
-      "expected_stderr_substring": "Undefined global variable",
+      "expected_stderr_substring": "Undefined variable 'hidden'",
       "failure_reason": "Locals belong to their routine activation; sibling procedures must not see each other's locals."
     },
     {
@@ -288,11 +288,11 @@
       "id": "closure_missing_capture_error",
       "name": "Closure referencing unknown name",
       "category": "closure_scope",
-      "description": "Closures must fail when referencing identifiers that are not in scope.",
-      "expect": "runtime_error",
+      "description": "Closures must fail to compile when referencing identifiers that are not in scope.",
+      "expect": "compile_error",
       "code": "program ClosureMissingCaptureError;\n\nprocedure Demo;\nvar\n  outer: Integer;\n\n  function Inner: Integer;\n  begin\n    Inner := ghost + outer;\n  end;\n\nbegin\n  outer := 3;\n  writeln('value=', Inner());\nend;\n\nbegin\n  Demo;\nend.",
-      "expected_stderr_substring": "Undefined global variable 'ghost'",
-      "failure_reason": "Runtime resolution surfaces missing global bindings when closures reference undeclared names."
+      "expected_stderr_substring": "Undefined variable 'ghost'",
+      "failure_reason": "The compiler reports an undeclared name a closure refers to."
     },
     {
       "id": "const_shadow_local_overrides_global",

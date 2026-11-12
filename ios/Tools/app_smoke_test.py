@@ -475,7 +475,7 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     # Nor are they Pascal's, CLike's or Rea's: `cat('f')` ran smallclue's cat, a program's own `sum`
     # was said to override a builtin, and the extended builtins had a "shell" category. On a Mac,
     # Pascal stops at the call (at run time), CLike and Rea when compiling.
-    ("pascal_no_shell_cat", f"pascal --no-cache smoke/pcat.pas > smoke/pcat.pout 2>&1; echo $? {R}; grep -c \"Undefined global variable 'cat'\" smoke/pcat.pout {A}; grep -c 'after cat' smoke/pcat.pout {A}", "1\n1\n0\n"),
+    ("pascal_no_shell_cat", f"pascal --no-cache smoke/pcat.pas > smoke/pcat.pout 2>&1; echo $? {R}; grep -c \"Undefined procedure or function 'cat'\" smoke/pcat.pout {A}; grep -c 'after cat' smoke/pcat.pout {A}", "1\n1\n0\n"),
     ("pascal_own_sum", f"pascal --no-cache smoke/psum.pas {R}", "sum 6\n"),
     ("pascal_no_shell_category", f"pascal --no-cache smoke/pext.pas {R}", "shell cat FALSE\n"),
     ("clike_no_shell_cat", f"clike --no-cache smoke/pcat.clike > smoke/pcat.cout 2>&1; echo $? {R}; grep -c \"undefined function 'cat'\" smoke/pcat.cout {A}", "1\n1\n"),

@@ -60,6 +60,8 @@ Base: `V.1R33`
 - Pascal, CLike and Rea programs ended by Ctrl-C exit with status 130 on macOS and Linux, as on iOS. They exited 0, so a script carried on as if the program had finished.
 - CLike: a function can call one defined further down the file, and a prototype (`int f(int);`) declares one, as in C. Such a call stopped the program with `Undefined global variable`, which kept the bundled `simple_web_server` from starting.
 - CLike: `fopen(path, "w")` opens the file. A one-letter mode is a character literal, and `fopen` stopped with `fopen expects (path:string, mode:string)`.
+- Pascal: calling a procedure or function that was never declared, or reading a variable that was never declared, is a compile error: `Undefined procedure or function 'foo'`, `Undefined variable 'z'`. Such a program used to compile, run up to that line and stop with `Undefined global variable`, so a mistake on a line that rarely runs went unnoticed. In the app, a shell command such as `cat('f')` is reported the same way.
+- The bundled Pascal examples hangman to hangman5, LamdaCalc, GameOfLife and UI called routines PSCAL does not have (`GetEnvironmentVariable`, `Delete`, `GetTickCount`, `Move`, `SizeOf`, `Assigned`) and stopped when they reached that line. They use `GetEnv`, `Copy`, `Delay`, an element copy and `<> nil` instead.
 - `simple_web_server` serves its pages. It called `pos` with its arguments reversed and loaded files without checking that they exist, so its first request ended it.
 
 ## Differs from Linux on iOS

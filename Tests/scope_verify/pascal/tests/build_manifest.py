@@ -203,8 +203,8 @@ add({
     "id": "routine_nested_function_leak_error",
     "name": "Nested function cannot escape its scope",
     "category": "routine_scope",
-    "description": "Calling a nested helper from the outer scope now raises a semantic error instead of failing at runtime.",
-    "expect": "runtime_error",
+    "description": "Calling a nested helper from the outer scope is a compile error.",
+    "expect": "compile_error",
     "code": """
         program RoutineNestedFunctionLeak;
 
@@ -222,18 +222,18 @@ add({
           writeln(Hidden(3));
         end.
     """,
-    "expected_stderr_substring": "Undefined global variable 'hidden'",
-    "failure_reason": "Calling a nested function from the global scope resolves against globals and now fails at runtime.",
+    "expected_stderr_substring": "Undefined procedure or function 'hidden'",
+    "failure_reason": "A nested function is not visible outside its enclosing routine; the compiler reports the call.",
 })
 
 
 
 add({
     "id": "routine_parameter_leak_error",
-    "name": "Parameter access outside routine fails at runtime",
+    "name": "Parameter access outside routine is a compile error",
     "category": "routine_scope",
-    "description": "Accessing a routine parameter from the outer scope triggers a runtime failure.",
-    "expect": "runtime_error",
+    "description": "Accessing a routine parameter from the outer scope is a compile error.",
+    "expect": "compile_error",
     "code": """
         program RoutineParameterLeak;
 
@@ -247,8 +247,8 @@ add({
           writeln(value);
         end.
     """,
-    "expected_stderr_substring": "Undefined global variable",
-    "failure_reason": "Routine parameters are not visible outside the routine body; runtime reports an undefined variable.",
+    "expected_stderr_substring": "Undefined variable 'value'",
+    "failure_reason": "Routine parameters are not visible outside the routine body; the compiler reports an undefined variable.",
 })
 
 add({
@@ -597,8 +597,8 @@ add({
     "id": "routine_sibling_local_access_error",
     "name": "Sibling routine cannot access another's local",
     "category": "routine_scope",
-    "description": "Attempting to read a local variable from a different routine triggers a runtime failure.",
-    "expect": "runtime_error",
+    "description": "Reading a local variable of a different routine is a compile error.",
+    "expect": "compile_error",
     "code": """
         program RoutineSiblingLocalAccess;
 
@@ -620,7 +620,7 @@ add({
           Consumer;
         end.
     """,
-    "expected_stderr_substring": "Undefined global variable",
+    "expected_stderr_substring": "Undefined variable 'hidden'",
     "failure_reason": "Locals belong to their routine activation; sibling procedures must not see each other's locals.",
 })
 
@@ -1016,8 +1016,8 @@ add({
     "id": "closure_missing_capture_error",
     "name": "Closure referencing unknown name",
     "category": "closure_scope",
-    "description": "Closures must fail when referencing identifiers that are not in scope.",
-    "expect": "runtime_error",
+    "description": "Closures must fail to compile when referencing identifiers that are not in scope.",
+    "expect": "compile_error",
     "code": """
         program ClosureMissingCaptureError;
 
@@ -1039,8 +1039,8 @@ add({
           Demo;
         end.
     """,
-    "expected_stderr_substring": "Undefined global variable 'ghost'",
-    "failure_reason": "Runtime resolution surfaces missing global bindings when closures reference undeclared names.",
+    "expected_stderr_substring": "Undefined variable 'ghost'",
+    "failure_reason": "The compiler reports an undeclared name a closure refers to.",
 })
 
 add({
