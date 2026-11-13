@@ -76,3 +76,21 @@ Base: `V.1R33`
 - `ip` changes nothing: `ip link set`, `ip address add` and `ip route add` say `RTNETLINK answers: Operation not permitted` with status 2, as for a normal user on Linux, and root gets the same answer. The app can't configure the device's network.
 - `ip` shows every address as `valid_lft forever preferred_lft forever`, without `dynamic` or `temporary`, and prints no `qdisc` or `qlen`: iOS doesn't report them. iOS hides hardware addresses, so `link/ether` shows `02:00:00:00:00:00`.
 - `ip neigh`, `ip rule` and the other objects past address, link and route aren't there, nor are `-s`, `-d` and batch mode.
+
+## Validation
+- This release was validated at umbrella `bd29e28d`, on an iPad 26 simulator (30 runs), an iPhone 26 simulator (10 runs) and an iPad 27 simulator (10 runs), with the app's smoke pass 40 of 40, and installed on an A10X iPad. The one red in the host gate is `exsh_bash32`, which compares exsh against the bash 3.2 that macOS ships; it is not run against a current bash.
+
+## Known Issues
+- The terminal's size may still be wrong after an SDL program exits on an iPad, where `reset` doesn't restore it. The fix is in this build (the view sends its size again after such a program exits and when `reset` asks), but the bug was never reproduced in a simulator and the fix hasn't been checked on an iPad.
+- `scp`'s password prompt against a real server is untested: the app's ssh tests run against a local server, and a run against someone else's needs the owner's say-so each time.
+
+## Planned for build 35
+Pascal's remaining gaps against Free Pascal, all of them outside Object Pascal:
+- default values for parameters, as in `procedure p(x: Integer = 5)`;
+- `for x in` over an array, set or string;
+- `AnsiString` as a type name;
+- `Pred` (`Succ` is there);
+- SysUtils conversions such as `StrToInt` (`IntToStr`, `UpperCase`, `Trim` and `Format` are there);
+- value typecasts such as `Integer('A')` and `Char(65)`.
+
+PSCAL Pascal has closures, records with methods, `inherit` and interfaces instead of Object Pascal, so `class`, `object`, properties, generics, operator overloading and routine overloading are deliberately left out and are not planned.
