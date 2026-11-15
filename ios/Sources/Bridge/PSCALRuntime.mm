@@ -2686,7 +2686,20 @@ static BOOL PSCALRuntimeWindowIsVisible(UIWindow *window) {
     return YES;
 }
 
+/* Window-focus tracing for the SDL handover. This is instrumentation, not
+ * something a user asked for: its NSLog lines land in the tab's output, so a
+ * second SDL run in the same tab printed six lines of window state over the
+ * program's own. Off unless PSCALI_SDL_FOCUS_LOG says otherwise, like the
+ * other PSCALI_* debug switches above. */
+static bool PSCALRuntimeSDLFocusLoggingEnabled(void) {
+    const char *env = getenv("PSCALI_SDL_FOCUS_LOG");
+    return env && *env && strcmp(env, "0") != 0;
+}
+
 static void PSCALRuntimeLogWindowFocusState(const char *tag, NSArray<UIWindow *> *windows) {
+    if (!PSCALRuntimeSDLFocusLoggingEnabled()) {
+        return;
+    }
     NSMutableString *line = [NSMutableString stringWithFormat:@"[SDLFocus] %s", tag ? tag : "state"];
     for (UIWindow *window in windows) {
         if (!window) {
@@ -3027,7 +3040,7 @@ static BOOL PSCALRuntimeActivateSDLWindow(UIWindow *sdlWindow, NSArray<UIWindow 
     PSCALRuntimeRefreshTrackedWindows(windows);
     PSCALRuntimeLogWindowFocusState("activate.begin", windows);
     if (sdlWindow) {
-        NSLog(@"[SDLFocus] activate.candidate ptr=%p class=%@ isSDL=%d",
+        if (PSCALRuntimeSDLFocusLoggingEnabled()) NSLog(@"[SDLFocus] activate.candidate ptr=%p class=%@ isSDL=%d",
               sdlWindow,
               NSStringFromClass(sdlWindow.class),
               PSCALRuntimeIsSDLWindow(sdlWindow) ? 1 : 0);
@@ -3045,7 +3058,7 @@ static BOOL PSCALRuntimeActivateSDLWindow(UIWindow *sdlWindow, NSArray<UIWindow 
             PSCALRuntimeMarkSDLWindow(firstResponderWindow);
             sTrackedSDLWindow = firstResponderWindow;
             sdlWindow = firstResponderWindow;
-            NSLog(@"[SDLFocus] discovered.fromFirstResponder ptr=%p class=%@",
+            if (PSCALRuntimeSDLFocusLoggingEnabled()) NSLog(@"[SDLFocus] discovered.fromFirstResponder ptr=%p class=%@",
                   firstResponderWindow,
                   NSStringFromClass(firstResponderWindow.class));
         }
@@ -3059,7 +3072,7 @@ static BOOL PSCALRuntimeActivateSDLWindow(UIWindow *sdlWindow, NSArray<UIWindow 
                                                forEvent:nil];
             [terminalWindow endEditing:YES];
             sTrackedTerminalWindow = terminalWindow;
-            NSLog(@"[SDLFocus] fallback.noSDLWindow ptr=%p class=%@",
+            if (PSCALRuntimeSDLFocusLoggingEnabled()) NSLog(@"[SDLFocus] fallback.noSDLWindow ptr=%p class=%@",
                   terminalWindow,
                   NSStringFromClass(terminalWindow.class));
         }
@@ -3328,11 +3341,11 @@ extern "C" void pscalIOSPromoteSDLNativeWindow(void *nativeWindow) {
         if (sdlWindow) {
             PSCALRuntimeMarkSDLWindow(sdlWindow);
             sTrackedSDLWindow = sdlWindow;
-            NSLog(@"[SDLFocus] native.window ptr=%p class=%@",
+            if (PSCALRuntimeSDLFocusLoggingEnabled()) NSLog(@"[SDLFocus] native.window ptr=%p class=%@",
                   sdlWindow,
                   NSStringFromClass(sdlWindow.class));
         } else {
-            NSLog(@"[SDLFocus] native.window ptr=(nil)");
+            if (PSCALRuntimeSDLFocusLoggingEnabled()) NSLog(@"[SDLFocus] native.window ptr=(nil)");
         }
         (void)PSCALRuntimePromoteSpecificSDLWindowAttempt(sdlWindow);
         static const int kRetryDelaysMs[] = {50, 100, 200, 350, 500, 750, 1000, 1500, 2000};
