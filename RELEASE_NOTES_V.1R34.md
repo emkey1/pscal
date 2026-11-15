@@ -90,7 +90,7 @@ Base: `V.1R33`
 - This release's code is umbrella `a53d0f70`, validated on an iPad 26 simulator (30 runs), an iPhone 26 simulator (10 runs) and an iPad 27 simulator (10 runs), with the app's smoke pass 40 of 40, and installed on an M4 iPad Pro, where the awk, `git add` and `git commit` cases above and an SDL program were run on the device itself. The one red in the host gate is `exsh_bash32`, which compares exsh against the bash 3.2 that macOS ships; it is not run against a current bash.
 
 ## Known Issues
-- A second SDL program in the same tab makes iOS itself log `Unbalanced calls to begin/end appearance transitions` into that tab. The line comes from UIKit, over SDL's own view controller, and is noise only: the program runs and exits normally.
+- An SDL program makes iOS itself log `Unbalanced calls to begin/end appearance transitions` into the tab it was started from, twice per run. The lines come from UIKit, over SDL's own view controller, and are noise only: the program draws, exits normally and leaves the terminal as it was.
 - One app test, `ssh_stop_int`, failed once and was not reproduced: a backgrounded `ssh` to a server that never answers ignored an interrupt and waited out its 20-second timeout. It then passed 31 further runs, and every full smoke run since, on this build and the one before it. It looks like a race between the signal and ssh's start.
 - `scp`'s password prompt against a real server is untested: the app's ssh tests run against a local server, and a run against someone else's needs the owner's say-so each time.
 
