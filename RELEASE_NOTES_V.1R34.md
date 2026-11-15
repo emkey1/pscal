@@ -53,6 +53,7 @@ Base: `V.1R33`
 - A pty master reads what its slave wrote before its last close, then `EIO`, and keys written meanwhile wait for the slave's next open. It read 0 at once and lost that output.
 - Ctrl-C, Ctrl-\ and Ctrl-Z are signals from the terminal itself, as on Linux: a command sees `isig` set (`stty -a`), `stty -isig` makes them ordinary keys, and a program in raw mode reads them as bytes. They were made into signals by a reader in front of the terminal, and a command ran with `isig` clear.
 - Closing a tab hangs up its shell with SIGHUP and SIGCONT, as closing a terminal window does on Linux. When a shell that leads its session ends, the job in the foreground on its terminal gets SIGHUP and the terminal stops being the session's (`/dev/tty` says `No such device or address`). A stopped job left without its shell gets SIGHUP and SIGCONT.
+- Ctrl-C in a script whose background job has already finished ends the script, as in bash: `sleep 1 & sleep 30; echo "no $?"` run with `sh` ends at the Ctrl-C, where it used to end only `sleep 30` and carry on to the `echo`. A background job runs in-process in the app, and when a program inside one ended it handed the terminal to the tab's own shell, so the next Ctrl-C went there instead of to the script. Such a job now leaves the terminal alone, and a program takes it only when its caller is the foreground job, giving back only what it took.
 - Pascal `ReadKey`: Ctrl-C ends the program. It left only the procedure that called `ReadKey`, so a game reading keys in a procedure (DiceGame) carried on.
 
 ## Fixed in Pascal, CLike and Rea
@@ -78,10 +79,11 @@ Base: `V.1R33`
 - `ip neigh`, `ip rule` and the other objects past address, link and route aren't there, nor are `-s`, `-d` and batch mode.
 
 ## Validation
-- This release was validated at umbrella `bd29e28d`, on an iPad 26 simulator (30 runs), an iPhone 26 simulator (10 runs) and an iPad 27 simulator (10 runs), with the app's smoke pass 40 of 40, and installed on an A10X iPad. The one red in the host gate is `exsh_bash32`, which compares exsh against the bash 3.2 that macOS ships; it is not run against a current bash.
+- This release's code is umbrella `475d3fd6`, validated on an iPad 26 simulator (30 runs), an iPhone 26 simulator (10 runs) and an iPad 27 simulator (10 runs), with the app's smoke pass 40 of 40, and installed on an A10X iPad. The one red in the host gate is `exsh_bash32`, which compares exsh against the bash 3.2 that macOS ships; it is not run against a current bash.
 
 ## Known Issues
 - The terminal's size may still be wrong after an SDL program exits on an iPad, where `reset` doesn't restore it. The fix is in this build (the view sends its size again after such a program exits and when `reset` asks), but the bug was never reproduced in a simulator and the fix hasn't been checked on an iPad.
+- One app test, `ssh_stop_int`, failed once and was not reproduced: a backgrounded `ssh` to a server that never answers ignored an interrupt and waited out its 20-second timeout. It then passed 31 further runs, and every full smoke run since, on this build and the one before it. It looks like a race between the signal and ssh's start.
 - `scp`'s password prompt against a real server is untested: the app's ssh tests run against a local server, and a run against someone else's needs the owner's say-so each time.
 
 ## Planned for build 35
