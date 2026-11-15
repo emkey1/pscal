@@ -17,6 +17,9 @@ final class TerminalTabManager: ObservableObject {
         }
         return value != "0"
     }()
+    /// The first tab's profile. It is the app's own session, which cannot be closed, and
+    /// its saved settings stand in for the defaults a new tab starts from.
+    private static let rootProfileID = "shell.1"
     private static let tabTitleDefaultsPrefix = "com.pscal.terminal.tabAppearance."
     private static let tabStartupCommandDefaultsPrefix = "com.pscal.terminal.tabAppearance."
     private static let tabTitleResetOnStartDefaultsPrefix = "com.pscal.terminal.tabAppearance."
@@ -80,7 +83,7 @@ final class TerminalTabManager: ObservableObject {
 
     private init() {
         let runtime = PscalRuntimeBootstrap.shared
-        let rootProfileID = "shell.1"
+        let rootProfileID = Self.rootProfileID
         let rootAppearance = TerminalTabAppearanceSettings(profileID: rootProfileID)
         let rootTitle = Self.startupTabTitle(
             forProfileID: rootProfileID,
@@ -356,6 +359,7 @@ final class TerminalTabManager: ObservableObject {
         if removedId == activeSdlTabId {
             activeSdlTabId = nil
         }
+        forgetProfile(ofTabAt: index)
         tabs.remove(at: index)
         if selectedId == removedId {
             if let shellTab = tabs.first(where: { tab in
@@ -659,6 +663,32 @@ final class TerminalTabManager: ObservableObject {
         if !TerminalTabAppearanceSettings.hasStoredForegroundColor(forProfileID: profileID) {
             appearance.updateForegroundColor(sourceAppearance.foregroundColor)
         }
+    }
+
+    /// A closed tab takes its saved settings with it. Slots are handed out again by number,
+    /// so a new tab in a closed tab's slot would otherwise come up wearing its name, startup
+    /// command, font and colours. What a surviving tab still uses, and the first tab's
+    /// profile, stay: a tab closing is not a reason to forget the defaults.
+    private func forgetProfile(ofTabAt index: Int) {
+        guard tabs.indices.contains(index) else { return }
+        let profileID = tabs[index].appearanceProfileID
+        guard profileID != Self.rootProfileID else { return }
+        let removedId = tabs[index].id
+        guard !tabs.contains(where: { $0.id != removedId && $0.appearanceProfileID == profileID }) else {
+            return
+        }
+        appearanceSettingsByProfileID.removeValue(forKey: profileID)
+        Self.forgetPersistedProfile(profileID)
+        tabInitLog("forgot profile \(profileID) with tab \(removedId)")
+    }
+
+    private static func forgetPersistedProfile(_ profileID: String) {
+        for key in [tabTitleDefaultsKey(forProfileID: profileID),
+                    tabStartupCommandDefaultsKey(forProfileID: profileID),
+                    tabTitleResetOnStartDefaultsKey(forProfileID: profileID)] {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        TerminalTabAppearanceSettings.forgetStoredAppearance(forProfileID: profileID)
     }
 
     private func nextAvailableShellProfileSlot() -> Int {

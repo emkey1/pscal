@@ -690,6 +690,17 @@ final class TerminalTabAppearanceSettings: ObservableObject {
         return UserDefaults.standard.data(forKey: key) != nil
     }
 
+    /// Drops everything stored for one tab's profile, for a tab that has been closed: the
+    /// slots are handed out again by number, so what is left behind would dress the next
+    /// tab in that slot.
+    static func forgetStoredAppearance(forProfileID profileID: String) {
+        let suffix = sanitizedProfileID(profileID)
+        let prefix = "com.pscal.terminal.tabAppearance.\(suffix)."
+        for key in ["fontPointSize", "fontName", "backgroundColor", "foregroundColor"] {
+            UserDefaults.standard.removeObject(forKey: prefix + key)
+        }
+    }
+
     private static func backgroundColorKey(forProfileID profileID: String) -> String {
         let suffix = sanitizedProfileID(profileID)
         return "com.pscal.terminal.tabAppearance.\(suffix).backgroundColor"

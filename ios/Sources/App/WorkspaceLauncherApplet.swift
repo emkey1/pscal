@@ -24,6 +24,9 @@ enum WorkspaceLauncherStore {
         get { UserDefaults.standard.array(forKey: key) as? [Shortcut] ?? [] }
         set {
             UserDefaults.standard.set(newValue, forKey: key)
+            // Now rather than at the system's leisure: an edit the user has made is the sort
+            // of thing that has to survive the app being killed, as a saved arrangement does.
+            UserDefaults.standard.synchronize()
             NotificationCenter.default.post(name: .workspaceLauncherShortcutsDidChange, object: nil)
         }
     }

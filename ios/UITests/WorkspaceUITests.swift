@@ -116,4 +116,63 @@ final class WorkspaceUITests: XCTestCase {
         text.typeText("c")
         XCTAssertEqual(text.value as? String, "cab")
     }
+
+    // MARK: - Launcher
+
+    /// Taps through the Launcher's own Add and Edit dialogs. The shortcut tree is in
+    /// UserDefaults, so an edit that never reaches the store looks like a Launcher that
+    /// forgets, and only real touches go through the alert's Save.
+    private func launcherRow(_ name: String) -> XCUIElement {
+        app.staticTexts.matching(identifier: name).firstMatch
+    }
+
+    private func typeInto(_ field: XCUIElement, _ text: String) {
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "no text field to type into")
+        field.tap()
+        field.typeText(text)
+    }
+
+    func testTheLauncherSavesAnAddedShortcutAndAnEditOfIt() {
+        let launcher = openApplet(group: "Workspace", title: "Launcher")
+        let probe = "uitprobe"
+        let renamed = "uitprobe2"
+
+        launcher.buttons["workspace.launcher.add"].tap()
+        tap("Add Shortcut…")
+        typeInto(app.textFields["workspace.launcher.name"], probe)
+        typeInto(app.textFields["workspace.launcher.command"], "echo probe")
+        tap("Save")
+        XCTAssertTrue(launcherRow(probe).waitForExistence(timeout: 10), "Add didn't save the shortcut")
+
+        // Edit mode, then the row itself, is how a shortcut is renamed.
+        launcher.buttons["workspace.launcher.edit"].tap()
+        launcherRow(probe).tap()
+        let name = app.textFields.element(boundBy: 0)
+        XCTAssertTrue(name.waitForExistence(timeout: 10), "no Edit Shortcut dialog")
+        name.tap()
+        // Backspaces, not Select All: the editing menu has no hit point in this window.
+        name.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 24))
+        name.typeText(renamed)
+        // Whatever ended up in the field is what Save has to keep, caret quirks and all.
+        let edited = (name.value as? String) ?? ""
+        XCTAssertFalse(edited.isEmpty, "the name field came up empty")
+        XCTAssertNotEqual(edited, probe, "nothing was typed, so there is no rename to save")
+        tap("Save")
+        XCTAssertTrue(launcherRow(edited).waitForExistence(timeout: 10),
+                      "Save didn't keep the rename to \(edited)")
+
+        // And it survives a restart: the store is the only place it can have been kept.
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(menuButton.waitForExistence(timeout: 60), "Workspace didn't come back")
+        let reopened = openApplet(group: "Workspace", title: "Launcher")
+        XCTAssertTrue(reopened.waitForExistence(timeout: 10))
+        XCTAssertTrue(launcherRow(edited).waitForExistence(timeout: 10), "the rename was lost on restart")
+
+        // Leave nothing behind for the next run.
+        reopened.buttons["workspace.launcher.edit"].tap()
+        launcherRow(edited).tap()
+        tap("Delete")
+        XCTAssertFalse(launcherRow(edited).waitForExistence(timeout: 5), "Delete didn't remove it")
+    }
 }
