@@ -2,6 +2,8 @@
 
 Base: `V.1R33`
 
+Status: build 34, tagged `V.1R34` on umbrella `f5a5e8a9`, uploaded to TestFlight on 2026-11-16.
+
 ## New in the iOS app
 - `ip`, iproute2's command for the device's network, in Linux's layout and words: `ip a` (`ip address show [dev NAME]`), `ip link`, `ip route` and `ip route get ADDRESS`, with `-4`, `-6`, `-0`, `-br`, `-o`, `-j` and `-p`. The loopback interface is `lo`, as on Linux; the others keep iOS's names (`en0`, `pdp_ip0`, `utun0`).
 
