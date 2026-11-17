@@ -50,6 +50,11 @@ void PSCALRuntimeConfigureHandlers(PSCALRuntimeOutputHandler output_handler,
 void PSCALRuntimeOutputDidProcess(size_t length);
 void PSCALRuntimeSetOutputBufferingEnabled(int enabled);
 size_t PSCALRuntimeDrainOutput(uint8_t **out_buffer, size_t max_bytes);
+/// Called when output arrives in an empty buffer, so a reader need not poll for it. It runs on
+/// the writing thread with the buffer locked: it may schedule a drain, never drain. Once this
+/// returns after being given NULL, the old handler is not running and won't be called again.
+typedef void (*PSCALRuntimeOutputAvailableHandler)(void *context);
+void PSCALRuntimeSetOutputAvailableHandler(PSCALRuntimeOutputAvailableHandler handler, void *context);
 
 /// Completes interposer initialization once the app runtime is ready.
 void PSCALRuntimeInterposeBootstrap(void);

@@ -463,6 +463,8 @@ typedef struct {
     size_t tail;
     size_t size;
     bool active;
+    PSCALRuntimeOutputAvailableHandler available_handler;
+    void *available_context;
     pthread_mutex_t lock;
     pthread_cond_t can_read;
     pthread_cond_t can_write;
@@ -1110,6 +1112,7 @@ static bool PSCALRuntimeQueueOutput(const char *buffer, size_t length) {
         pthread_mutex_unlock(&s_output_ring.lock);
         return false;
     }
+    const bool was_empty = (s_output_ring.size == 0);
     size_t offset = 0;
     size_t tail = s_output_ring.tail;
     size_t first = s_output_ring.capacity - tail;
@@ -1128,8 +1131,21 @@ static bool PSCALRuntimeQueueOutput(const char *buffer, size_t length) {
     }
     s_output_ring.tail = tail;
     pthread_cond_signal(&s_output_ring.can_read);
+    /* Under the lock, so that clearing the handler waits for a call in progress. A drain takes
+     * everything, so the next output after it finds the buffer empty and calls again. */
+    if (was_empty && s_output_ring.available_handler) {
+        s_output_ring.available_handler(s_output_ring.available_context);
+    }
     pthread_mutex_unlock(&s_output_ring.lock);
     return true;
+}
+
+void PSCALRuntimeSetOutputAvailableHandler(PSCALRuntimeOutputAvailableHandler handler, void *context) {
+    pthread_once(&s_output_ring_once, PSCALRuntimeOutputRingInitOnce);
+    pthread_mutex_lock(&s_output_ring.lock);
+    s_output_ring.available_handler = handler;
+    s_output_ring.available_context = handler ? context : NULL;
+    pthread_mutex_unlock(&s_output_ring.lock);
 }
 
 size_t PSCALRuntimeDrainOutput(uint8_t **out_buffer, size_t max_bytes) {

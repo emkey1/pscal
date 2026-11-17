@@ -329,7 +329,8 @@ final class PscalRuntimeBootstrap: ObservableObject, @unchecked Sendable {
     private let stateQueue = DispatchQueue(label: "com.pscal.runtime.state")
     private let stateQueueKey = DispatchSpecificKey<UInt8>()
     private let launchQueue = DispatchQueue(label: "com.pscal.runtime.launch", qos: .userInitiated)
-    private let outputDrainQueue = DispatchQueue(label: "com.pscal.runtime.output", qos: .utility)
+    // What a key echoes goes through here, so it is not background work.
+    private let outputDrainQueue = DispatchQueue(label: "com.pscal.runtime.output", qos: .userInteractive)
     private let runtimeStackSizeBytes = 32 * 1024 * 1024
     private var handlerContext: UnsafeMutableRawPointer?
     private let terminalBuffer: TerminalBuffer
@@ -357,8 +358,6 @@ final class PscalRuntimeBootstrap: ObservableObject, @unchecked Sendable {
     private var sessionId: UInt64 = 0
     private var shellContext: UnsafeMutableRawPointer?
     private var runtimeContext: OpaquePointer?
-    private var outputDrainTimer: DispatchSourceTimer?
-    private let outputDrainInterval: TimeInterval = 0.001
     private let outputDrainMaxBytes: Int = 1024 * 1024
     private let outputHandlerGroup = DispatchGroup()
     private var htermController: HtermTerminalController?
@@ -423,6 +422,16 @@ final class PscalRuntimeBootstrap: ObservableObject, @unchecked Sendable {
         bootstrap.outputHandlerGroup.enter()
         bootstrap.consumeOutput(buffer: base, length: Int(length))
         bootstrap.outputHandlerGroup.leave()
+    }
+
+    /// Output has arrived in an empty buffer. This runs on the thread that wrote it, with the
+    /// buffer locked, so all it does is ask for a drain.
+    private lazy var outputAvailableHandler: PSCALRuntimeOutputAvailableHandler = { context in
+        guard let context else { return }
+        let bootstrap = Unmanaged<PscalRuntimeBootstrap>.fromOpaque(context).takeUnretainedValue()
+        bootstrap.outputDrainQueue.async {
+            bootstrap.drainOutput()
+        }
     }
 
     private lazy var exitHandler: PSCALRuntimeExitHandler = { status, context in
@@ -747,6 +756,7 @@ final class PscalRuntimeBootstrap: ObservableObject, @unchecked Sendable {
             self.withRuntimeContext {
                 PSCALRuntimeSetOutputBufferingEnabled(1)
                 PSCALRuntimeConfigureHandlers(self.outputHandler, self.exitHandler, self.handlerContext)
+                PSCALRuntimeSetOutputAvailableHandler(self.outputAvailableHandler, self.handlerContext)
             }
             self.startOutputDrain()
 
@@ -1182,6 +1192,8 @@ final class PscalRuntimeBootstrap: ObservableObject, @unchecked Sendable {
     private func releaseHandlerContext() {
         guard let context = handlerContext else { return }
         withRuntimeContext {
+            // First, and it waits for a call in progress: `context` is only good until then.
+            PSCALRuntimeSetOutputAvailableHandler(nil, nil)
             PSCALRuntimeConfigureHandlers(nil, nil, nil)
         }
         outputHandlerGroup.notify(queue: outputDrainQueue) { [context] in
@@ -1300,41 +1312,41 @@ final class PscalRuntimeBootstrap: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Takes whatever is waiting now. After that the runtime says when there is more
+    /// (`outputAvailableHandler`); this used to be a timer that looked every millisecond for as
+    /// long as the tab lived.
     private func startOutputDrain() {
         outputDrainQueue.async { [weak self] in
-            guard let self else { return }
-            if self.outputDrainTimer != nil {
-                return
-            }
-            let timer = DispatchSource.makeTimerSource(queue: self.outputDrainQueue)
-            timer.schedule(deadline: .now(), repeating: self.outputDrainInterval, leeway: .milliseconds(2))
-            timer.setEventHandler { [weak self] in
-                self?.drainOutputOnce()
-            }
-            self.outputDrainTimer = timer
-            timer.resume()
+            self?.drainOutput()
         }
     }
 
+    /// The last of the output, for a shell that has ended.
     private func stopOutputDrain() {
         outputDrainQueue.async { [weak self] in
-            guard let self else { return }
-            if let timer = self.outputDrainTimer {
-                timer.cancel()
-                self.outputDrainTimer = nil
+            self?.drainOutput()
+        }
+    }
+
+    /// One piece at a time, so that other work queued here gets its turn during a flood.
+    private func drainOutput() {
+        if drainOutputOnce() {
+            outputDrainQueue.async { [weak self] in
+                self?.drainOutput()
             }
         }
     }
 
-    private func drainOutputOnce() {
+    private func drainOutputOnce() -> Bool {
         var outPtr: UnsafeMutablePointer<UInt8>?
         let count = withRuntimeContext {
             PSCALRuntimeDrainOutput(&outPtr, outputDrainMaxBytes)
         }
-        guard count > 0, let base = outPtr else { return }
+        guard count > 0, let base = outPtr else { return false }
         let data = Data(bytesNoCopy: base, count: Int(count), deallocator: .free)
         enqueueHtermOutput(data)
         appendOutput(data)
+        return true
     }
 
     // --- RENDER SCHEDULING (THROTTLED) ---

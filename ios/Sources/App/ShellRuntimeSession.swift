@@ -118,7 +118,7 @@ final class ShellRuntimeSession: ObservableObject {
     }()
     private let stateQueue = DispatchQueue(label: "com.pscal.shell.session.state")
     private let inputQueue = DispatchQueue(label: "com.pscal.shell.session.input", qos: .userInitiated)
-    private let outputQueue = DispatchQueue(label: "com.pscal.shell.session.output", qos: .utility)
+    private let outputQueue = DispatchQueue(label: "com.pscal.shell.session.output", qos: .userInteractive)
     private var renderQueued = false
     private var lastRenderTime: TimeInterval = 0
     private let minRenderInterval: TimeInterval = 0.016
