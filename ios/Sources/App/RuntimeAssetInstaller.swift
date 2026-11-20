@@ -28,6 +28,10 @@ private enum RuntimePaths {
         homeDirectory.appendingPathComponent(".examples.version", isDirectory: false)
     }
 
+    static var workspaceExamplesModesMarker: URL {
+        homeDirectory.appendingPathComponent(".examples.modes", isDirectory: false)
+    }
+
     static var workspaceDocsVersionMarker: URL {
         homeDirectory.appendingPathComponent(".docs.version", isDirectory: false)
     }
@@ -259,13 +263,15 @@ final class RuntimeAssetInstaller {
                 try fileManager.copyItem(at: bundledExamples, to: workspaceExamples)
                 try writeWorkspaceExamplesVersionMarker()
                 rewritePlaceholders(in: workspaceExamples, installRoot: bundleRoot.path)
+                restoreExampleExecuteBits(in: workspaceExamples)
                 NSLog("PSCAL iOS: refreshed Examples workspace at %@", workspaceExamples.path)
             } catch {
                 NSLog("PSCAL iOS: failed to install workspace Examples directory: %@", error.localizedDescription)
             }
         } else {
+            var copiedCount = 0
             do {
-                let copiedCount = try copyMissingItemsWithCount(from: bundledExamples, to: workspaceExamples)
+                copiedCount = try copyMissingItemsWithCount(from: bundledExamples, to: workspaceExamples)
                 if copiedCount > 0 {
                     NSLog("PSCAL iOS: ensured Examples workspace at %@ (installed %d missing file(s))",
                           workspaceExamples.path, copiedCount)
@@ -275,7 +281,46 @@ final class RuntimeAssetInstaller {
                       workspaceExamples.path, error.localizedDescription)
             }
             rewritePlaceholders(in: workspaceExamples, installRoot: bundleRoot.path)
+            // Once for a tree copied by a build that left the bits off, and again whenever
+            // files arrive; not every launch, so a bit the user cleared stays cleared.
+            if copiedCount > 0 || !fileManager.fileExists(atPath: RuntimePaths.workspaceExamplesModesMarker.path) {
+                restoreExampleExecuteBits(in: workspaceExamples)
+            }
         }
+    }
+
+    /// Installing an app clears the execute bit on every bundled file that isn't a binary,
+    /// so the examples arrive as plain documents: File Manager opens one in a viewer rather
+    /// than running it. A file that starts with `#!` is a program, and gets the bit back.
+    private func restoreExampleExecuteBits(in directory: URL) {
+        guard let enumerator = fileManager.enumerator(at: directory, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else {
+            return
+        }
+        var restored = 0
+        for case let fileURL as URL in enumerator {
+            guard (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else {
+                continue
+            }
+            var info = stat()
+            guard stat(fileURL.path, &info) == 0, info.st_mode & 0o111 == 0 else {
+                continue
+            }
+            guard let handle = try? FileHandle(forReadingFrom: fileURL) else {
+                continue
+            }
+            let start = (try? handle.read(upToCount: 2)) ?? nil
+            try? handle.close()
+            guard start == Data([0x23, 0x21]) else {
+                continue
+            }
+            if chmod(fileURL.path, (info.st_mode & 0o7777) | 0o111) == 0 {
+                restored += 1
+            }
+        }
+        if restored > 0 {
+            NSLog("PSCAL iOS: marked %d example program(s) executable", restored)
+        }
+        try? Data("1\n".utf8).write(to: RuntimePaths.workspaceExamplesModesMarker, options: [.atomic])
     }
 
     private func installWorkspaceDocsIfNeeded(bundleRoot: URL) {
