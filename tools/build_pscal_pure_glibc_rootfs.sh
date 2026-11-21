@@ -42,7 +42,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >/tmp/apt.log 2>&1
 apt-get install -y --no-install-recommends \
     build-essential cmake git ca-certificates pkg-config curl wget python3 patch openssh-client xz-utils \
-    zlib1g-dev libssl-dev libncurses-dev libc-ares-dev autoconf automake libtool file \
+    zlib1g-dev libssl-dev libncurses-dev libc-ares-dev libsqlite3-dev autoconf automake libtool file \
     netbase \
     >>/tmp/apt.log 2>&1 || (tail -100 /tmp/apt.log; exit 1)
 echo APT_OK
@@ -85,6 +85,13 @@ mkdir -p /work/curl-build
 # it. CMAKE_C_STANDARD_LIBRARIES is the end of the link line; linker flags
 # would land before the objects and be dropped.
 CURL_STATIC_DEPS="-lssl -lcrypto -lcares -lz"
+# Aether turns on pscal-core's PSCAL_SQLITE (its sqlite_* builtins), whose
+# find_package(SQLite3 REQUIRED) would otherwise pick Debian's libsqlite3.so
+# -- unlinkable under -static. Point it at the archive, and give the end of
+# the link line what libsqlite3.a itself needs (dlopen for extensions, libm).
+SQLITE_STATIC_LIB="/usr/lib/$(gcc -dumpmachine)/libsqlite3.a"
+[ -f "$SQLITE_STATIC_LIB" ] || { echo "FATAL: $SQLITE_STATIC_LIB missing"; exit 1; }
+STATIC_DEPS="$CURL_STATIC_DEPS -lm -ldl -lpthread"
 
 FRONTENDS="pascal aether rea clike exsh"
 # Provenance: which commit of each component this image was actually built
@@ -111,7 +118,8 @@ for repo in $FRONTENDS; do
   # "Unknown argument -lz".
   EXTRA_CMAKE_ARGS=(
     "-DPSCAL_CURL=ON"
-    "-DCMAKE_C_STANDARD_LIBRARIES=$CURL_STATIC_DEPS"
+    "-DCMAKE_C_STANDARD_LIBRARIES=$STATIC_DEPS"
+    "-DSQLite3_LIBRARY=$SQLITE_STATIC_LIB"
     # Stamps `<frontend> -v` with the image it belongs to. The frontends take
     # this rather than running `git describe` because the clones above are
     # --depth 1 and a shallow clone has no tags; the matching git tag is pushed
@@ -143,7 +151,7 @@ echo "=== building smallclue (native aarch64 glibc via setup_posix_env.sh) ==="
 # has broken in between builds before (e.g. commit 12a084d "Add chroot
 # applet" landed a table entry with no linked implementation). Bump this
 # deliberately, not implicitly.
-SMALLCLUE_PIN="${SMALLCLUE_PIN:-5cbb81d}"
+SMALLCLUE_PIN="${SMALLCLUE_PIN:-1e347f3}"
 # --recurse-submodules, not a plain clone: smallclue's third-party deps
 # (openssh, libgit2, dvtm, nextvi, openrsync) are submodules now, and
 # fetch_dependencies.sh only knows how to re-download the ones that still have
@@ -188,6 +196,17 @@ find "$OPENSSH_DIR" \( -name '*.c' -o -name '*.h' \) \
 if grep -rq "__thread" "$OPENSSH_DIR" --include='*.c' --include='*.h'; then
   echo "FATAL: __thread survived in the OpenSSH tree"
   grep -rn "__thread" "$OPENSSH_DIR" --include='*.c' --include='*.h' | head -5
+  exit 1
+fi
+# smallclue defines the globals the fork declares (pscal_openssh_interrupted
+# and friends) in a file build_smallclue.sh generates; since smallclue bde79dd
+# those definitions are `__thread` too, to match. Strip them the same way, or
+# the link fails "TLS definition ... mismatches non-TLS reference in scp.o".
+sed -i 's/^__thread \(volatile sig_atomic_t pscal_openssh_\|int pscal_openssh_\)/\1/' \
+    /work/smallclue/build_smallclue.sh
+if grep -q '^__thread .*pscal_openssh_' /work/smallclue/build_smallclue.sh; then
+  echo "FATAL: a thread-local openssh global survived in build_smallclue.sh"
+  grep -n '^__thread .*pscal_openssh_' /work/smallclue/build_smallclue.sh
   exit 1
 fi
 
@@ -684,6 +703,12 @@ chmod +x "$RFS/etc/rc"
 # secondary path (still fully correct on their own) for any case where
 # login is somehow bypassed, but login is now the primary, always-tried-
 # first entry point for both boot and interactive sessions.
+# smallclue has a `login` applet now, so the applet loop above left
+# /usr/bin/login as a symlink to smallclue -- and `cat >` follows it, writing
+# this script over the smallclue binary itself. /bin/sh is that binary, so the
+# image then cannot start a shell at all. Unlink first, as the su/sudo/passwd
+# wrappers do.
+rm -f "$RFS/usr/bin/login"
 cat > "$RFS/usr/bin/login" <<'EOF'
 #!/usr/bin/sh
 # `case`, not `[ "$1" = "-f" ]` -- smallclue's own `test`/`[` misparses a
@@ -760,6 +785,11 @@ if [ "$MISSING_HELPERS" -ne 0 ]; then
 fi
 echo "all referenced helpers present"
 
+# Every applet, /bin/sh included, is a symlink to this one file, so anything
+# that writes through one of those symlinks replaces the whole userland. Insist
+# it is still the binary that was built, byte for byte.
+cmp -s "$LOCAL_OUT/bin/smallclue" "$RFS/usr/bin/smallclue" \
+  || { echo "FATAL: /usr/bin/smallclue was overwritten during assembly"; head -c 200 "$RFS/usr/bin/smallclue"; exit 1; }
 echo "== Step 3/3: package as .tar.xz, container-local, then copy the finished archive out =="
 # .tar.xz (not .tar.gz + a separate host-side xz repack) specifically so
 # there is NO intermediate extract/recompress step on the macOS host --
