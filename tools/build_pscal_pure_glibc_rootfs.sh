@@ -151,7 +151,7 @@ echo "=== building smallclue (native aarch64 glibc via setup_posix_env.sh) ==="
 # has broken in between builds before (e.g. commit 12a084d "Add chroot
 # applet" landed a table entry with no linked implementation). Bump this
 # deliberately, not implicitly.
-SMALLCLUE_PIN="${SMALLCLUE_PIN:-1e347f3}"
+SMALLCLUE_PIN="${SMALLCLUE_PIN:-5015818}"
 # --recurse-submodules, not a plain clone: smallclue's third-party deps
 # (openssh, libgit2, dvtm, nextvi, openrsync) are submodules now, and
 # fetch_dependencies.sh only knows how to re-download the ones that still have
@@ -349,6 +349,24 @@ else
 fi
 
 cp "$LOCAL_OUT/bin/smallclue" "$RFS/usr/bin/smallclue"
+# The licences of what this image is built from, where smallclue's licenses
+# command looks on Linux, under the names it asks for. An entry with no file
+# here (SDL2, hterm, micro: the app's, not this image's) is left out of its menu.
+mkdir -p "$RFS/usr/share/licenses/smallclue"
+install_licence() {
+  if [ -f "$2" ]; then
+    cp "$2" "$RFS/usr/share/licenses/smallclue/$1"
+  else
+    echo "  licence not found: $1 ($2)"
+  fi
+}
+install_licence pscal_LICENSE.txt /work/pascal/LICENSE
+install_licence libgit2_LICENSE.txt /work/smallclue/third-party/libgit2/COPYING
+install_licence openssh_LICENSE.txt /work/smallclue/third-party/openssh/LICENCE
+install_licence curl_LICENSE.txt /pbuild-curl/COPYING
+install_licence openssl_LICENSE.txt /usr/share/doc/libssl3/copyright
+install_licence nextvi_LICENSE.txt /work/smallclue/third-party/nextvi/LICENSE
+install_licence yyjson_LICENSE.txt /work/aether/external/pscal-core/src/third_party/yyjson/LICENSE
 chmod +x "$RFS/usr/bin/smallclue"
 APPLETS=$(awk '
     /static const SmallclueApplet kSmallclueApplets\[\] = \{/ { in_table = 1; next }
@@ -360,10 +378,25 @@ APPLETS=$(awk '
         print line
     }
 ' /work/smallclue/src/core.c | sort -u)
+# The table is read as text, so an entry under an #if this build does not take
+# -- the PSCAL app's own addt, tadd and ws -- is still listed, and a link to it
+# says "'ws' applet not found". Ask the binary instead: smallclue-help NAME
+# answers 0 for an applet it has. A binary without smallclue-help (older than
+# smallclue 5015818) cannot be asked, and gets every link as before.
+SC_BIN="$LOCAL_OUT/bin/smallclue"
+SC_CAN_ASK=""
+"$SC_BIN" smallclue-help smallclue-help >/dev/null 2>&1 </dev/null && SC_CAN_ASK=1
 for applet in $APPLETS; do
   [ "$applet" = "smallclue" ] && continue
   [ "$applet" = "exsh" ] && continue
+  if [ -n "$SC_CAN_ASK" ] && ! "$SC_BIN" smallclue-help "$applet" >/dev/null 2>&1 </dev/null; then
+    echo "  not linked: $applet (not in this build)"
+    continue
+  fi
   ln -sf smallclue "$RFS/usr/bin/$applet"
+done
+for want in ip ifconfig; do
+  [ -L "$RFS/usr/bin/$want" ] || { echo "FATAL: smallclue has no $want applet"; exit 1; }
 done
 # su, sudo and passwd go to the NATIVE programs, not the applet symlinks the
 # loop above just made. SmallCLUE is a multicall binary: /usr/bin/smallclue
