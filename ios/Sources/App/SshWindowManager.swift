@@ -162,6 +162,20 @@ final class TerminalTabManager: ObservableObject {
         return result
     }
 
+    /// A tab for one program: no prompt, only what the program prints and reads. When it ends
+    /// the tab says so and waits for a key, so short output can be read, then closes.
+    func openShellTab(runningProgram command: String, title: String?) -> Int32 {
+        let result = openShellTab(restoreProfileDefaults: false)
+        guard result == 0, let index = tabs.indices.last,
+              case .shell(let runtime) = tabs[index].kind else { return result }
+        runtime.oneShotCommand = command
+            + "; __pscal_st=$?; printf '\\n[Ended with status %d. Press a key to close.]' \"$__pscal_st\"; read -r -s -n 1 __pscal_key"
+        if let title, !title.isEmpty {
+            _ = applyTabTitle(title, toTabAtIndex: index, persist: false)
+        }
+        return result
+    }
+
     func registerShellPgid(_ pgid: Int, tabId: UInt64) {
         guard pgid > 0 else { return }
         pgidToTab[pgid] = tabId

@@ -1151,10 +1151,10 @@ final class WorkspaceFileManagerAppletViewController: WorkspaceAppletViewControl
             navigate(toPath: item.path)
             return
         }
-        // A regular file with any execute bit is a program, not a document: run it in a new
-        // terminal, like double-clicking one on a desktop, since no viewer can run it.
+        // A regular file with any execute bit is a program, not a document: run it in a window
+        // of its own, like double-clicking one on a desktop, since no viewer can run it.
         if item.kind == .regular, item.posixMode & 0o111 != 0 {
-            workspaceHost?.openNewTerminalWindow(runningOnce: Self.shellQuoted(item.path), title: item.name)
+            workspaceHost?.openNewTerminalWindow(runningProgram: Self.shellQuoted(item.path), title: item.name)
             return
         }
         guard let tool = WorkspaceFileOpenRouter.tool(forPath: item.path, kind: item.kind) else {

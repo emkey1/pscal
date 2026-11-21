@@ -267,6 +267,9 @@ enum WorkspaceTestHooks {
         case "run-shortcut":
             guard let workspace else { return ["ok": false, "error": "not in Workspace"] }
             workspace.runLauncherShortcut(command: decode(rest), title: nil)
+        case "run-program":
+            guard let workspace else { return ["ok": false, "error": "not in Workspace"] }
+            workspace.openNewTerminalWindow(runningProgram: decode(rest), title: "program")
         case "add-shortcut":
             let pieces = rest.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
             guard let name = pieces.first, !name.isEmpty else { return ["ok": false, "error": "usage: add-shortcut <name> <command>"] }

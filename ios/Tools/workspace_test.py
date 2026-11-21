@@ -533,6 +533,28 @@ def run_applet_tests(app, results):
     results.check("a shortcut opens a terminal", dump and len(dump["tabs"]) == tabs_before + 1, dump)
     text = app.wait_file("wt_launcher", timeout=30)
     results.check("a shortcut's command runs once the prompt is up", text == "launched", text)
+    # A program File Manager runs: a window with no prompt, which waits for a key and closes.
+    with open(os.path.join(app.home, "wt_prog"), "w") as handle:
+        handle.write("#!/bin/sh\nread line\necho \"ran $line $0\" > ~/wt_prog_out\n")
+    os.chmod(os.path.join(app.home, "wt_prog"), 0o755)
+    app.clear_file("wt_prog_out")
+    tabs_before = [t["id"] for t in app.dump()["tabs"]]
+    app.send("run-program", "~/wt_prog")
+    dump = wait_for(app, lambda d: len(d["tabs"]) == len(tabs_before) + 1)
+    results.check("a program opens a window", dump and len(dump["tabs"]) == len(tabs_before) + 1, dump)
+    prog = [t["id"] for t in (dump or {}).get("tabs", []) if t["id"] not in tabs_before]
+    if prog:
+        time.sleep(4)
+        results.check("a program's window has no prompt running other commands",
+                      not os.path.exists(os.path.join(app.home, "wt_prog_out")), None)
+        text = app.wait_file("wt_prog_out", prog[0], "typed", timeout=30)
+        results.check("a program reads its window's input", bool(text) and text.startswith("ran typed"), text)
+        time.sleep(1.5)
+        still = any(t["id"] == prog[0] for t in app.dump()["tabs"])
+        results.check("a program's window stays up when it ends", still, None)
+        app.send("type", "%s x" % prog[0])
+        dump = wait_for(app, lambda d: not any(t["id"] == prog[0] for t in d["tabs"]))
+        results.check("a key closes a program's window", dump is not None and not any(t["id"] == prog[0] for t in dump["tabs"]), dump)
     app.send("run-shortcut", "{clock}")
     dump = wait_for(app, lambda d: any(w["tool"] == "clock" for w in d.get("windows", [])))
     results.check("a {token} opens its applet", dump and any(w["tool"] == "clock" for w in dump["windows"]), dump)

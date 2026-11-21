@@ -757,6 +757,13 @@ final class WorkspaceViewController: UIViewController, UIGestureRecognizerDelega
         syncFromManager()
     }
 
+    /// A new terminal for one program: only its output and input, and it closes after it ends.
+    func openNewTerminalWindow(runningProgram command: String, title: String?) {
+        pendingTabWindow = nil
+        _ = manager.openShellTab(runningProgram: command, title: title)
+        syncFromManager()
+    }
+
     func openNewTab(in window: WorkspaceWindowView) {
         pendingTabWindow = window
         _ = manager.openShellTab()

@@ -519,6 +519,10 @@ final class PscalRuntimeBootstrap: ObservableObject, @unchecked Sendable {
         pendingHtermBytes = 0
     }
 
+    /// Set before `start()`: the shell runs this one command line and ends, with no prompt and
+    /// no startup file, so the tab shows a program's own output and nothing else.
+    var oneShotCommand: String?
+
     init() {
         // 1. Initialize properties first
         self.runtimeId = Self.nextRuntimeId()
@@ -686,7 +690,9 @@ final class PscalRuntimeBootstrap: ObservableObject, @unchecked Sendable {
         )
         let runInitSetting = TerminalFontSettings.shared.runInitAsPid1OnFirstTab || persistedRunInitSetting
         let launchInitAsPid1 = (self === PscalRuntimeBootstrap.shared) && runInitSetting
-        let launchArgs = launchInitAsPid1 ? ["init", "--service-mode"] : ["exsh"]
+        let oneShot = (self === PscalRuntimeBootstrap.shared) ? nil : oneShotCommand
+        let launchArgs = launchInitAsPid1 ? ["init", "--service-mode"]
+            : (oneShot.map { ["exsh", "-c", $0] } ?? ["exsh"])
         let launchCommand = launchArgs.joined(separator: " ")
         tabInitLog("runtime=\(runtimeId) launchInit=\(launchInitAsPid1) persisted=\(persistedRunInitSetting) shared=\(self === PscalRuntimeBootstrap.shared)")
         tabInitLog("runtime=\(runtimeId) start begin")
