@@ -502,6 +502,8 @@ TESTS: List[Tuple[str, str, Union[None, str, Callable[[Optional[str]], bool]]]] 
     ("shebang_frontend_file", f"Examples/clike/base/hello {R}", "Hello World!\n"),
     ("shebang_frontend_sub", f"x=$(Examples/clike/base/hello); echo \"got $x\" {R}", "got Hello World!\n"),
     ("shebang_frontend_pipe", f"Examples/clike/base/hello | cat {R}", "Hello World!\n"),
+    # An Aether example carries a #! line too, so File Manager and a bare path both run it.
+    ("shebang_aether_file", f"Examples/aether/base/hello {R}", "Hello from Aether\n2 * 21 = 42\n"),
     ("shebang_frontend_time", f"time Examples/clike/base/hello | head -1 {R}", "Hello World!\n"),
     # time is a keyword, so it times a function too, and the applet stays one quote away.
     ("time_function", f"tj() {{ echo in; return 3; }}; {{ {{ time tj; }} 2>/dev/null; echo $?; }} {R}", "in\n3\n"),
