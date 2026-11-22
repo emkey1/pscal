@@ -151,7 +151,7 @@ echo "=== building smallclue (native aarch64 glibc via setup_posix_env.sh) ==="
 # has broken in between builds before (e.g. commit 12a084d "Add chroot
 # applet" landed a table entry with no linked implementation). Bump this
 # deliberately, not implicitly.
-SMALLCLUE_PIN="${SMALLCLUE_PIN:-5015818}"
+SMALLCLUE_PIN="${SMALLCLUE_PIN:-c88b1b6}"
 # --recurse-submodules, not a plain clone: smallclue's third-party deps
 # (openssh, libgit2, dvtm, nextvi, openrsync) are submodules now, and
 # fetch_dependencies.sh only knows how to re-download the ones that still have
