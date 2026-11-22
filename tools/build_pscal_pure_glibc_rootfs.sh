@@ -151,7 +151,7 @@ echo "=== building smallclue (native aarch64 glibc via setup_posix_env.sh) ==="
 # has broken in between builds before (e.g. commit 12a084d "Add chroot
 # applet" landed a table entry with no linked implementation). Bump this
 # deliberately, not implicitly.
-SMALLCLUE_PIN="${SMALLCLUE_PIN:-c88b1b6}"
+SMALLCLUE_PIN="${SMALLCLUE_PIN:-8830b63}"
 # --recurse-submodules, not a plain clone: smallclue's third-party deps
 # (openssh, libgit2, dvtm, nextvi, openrsync) are submodules now, and
 # fetch_dependencies.sh only knows how to re-download the ones that still have
@@ -600,12 +600,49 @@ HOME_URL="https://github.com/emkey1/pscal"
 EOF
 chmod 644 "$RFS/etc/os-release"
 
+# /etc/profile, read by every login: exsh reads only ~/.exshrc, so each user's
+# .exshrc starts by sourcing this (below, and /etc/skel for new users). It
+# reads /etc/profile.d, where iSH-AOK's native-links.sh puts its PATH entry;
+# before this, nothing in the image read either, and native programs were not
+# on PATH for an ssh login or the console.
 cat > "$RFS/etc/profile" <<'EOF'
-export PATH=/usr/bin
+PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
+export PATH
 export PSCAL_INSTALL_ROOT=/usr/local/pscal
 export PS1='\u@\h:\w\$ '
+for f in /etc/profile.d/*.sh; do
+    [ -r "$f" ] && . "$f"
+done
+unset f
 EOF
 chmod 644 "$RFS/etc/profile"
+mkdir -p "$RFS/etc/profile.d"
+
+# iSH-AOK's native programs (zsh, ktop, motepad, helix, ...), AFTER the
+# image's own commands, so nothing here is shadowed. native-links.sh, when it
+# has been run, puts its links ahead of them instead.
+cat > "$RFS/etc/profile.d/10-aok-native.sh" <<'EOF'
+# iSH-AOK's native programs, after this image's own commands.
+if [ -d /AOK/native ]; then
+    case ":$PATH:" in
+        *":/AOK/native:"*) ;;
+        *) PATH="$PATH:/AOK/native"; export PATH ;;
+    esac
+fi
+EOF
+chmod 644 "$RFS/etc/profile.d/10-aok-native.sh"
+
+# Every user's exsh starts by reading /etc/profile: root's here, new users'
+# from /etc/skel (iSH-AOK's provisioner copies it into a home it creates).
+mkdir -p "$RFS/etc/skel"
+for rc in "$RFS/root/.exshrc" "$RFS/etc/skel/.exshrc"; do
+  cat > "$rc" <<'EOF'
+# Read by exsh at every interactive start. exsh does not read /etc/profile
+# itself, so this does.
+[ -r /etc/profile ] && . /etc/profile
+EOF
+  chmod 644 "$rc"
+done
 
 # The one-time setup hint, in root's exsh rc.
 #
@@ -616,8 +653,7 @@ chmod 644 "$RFS/etc/profile"
 # file, and telling someone to run something that does not exist is worse than
 # saying nothing.
 #
-# NOT /etc/profile: nothing in this image reads it. /etc/rc sets PATH and PS1
-# itself and then runs exsh, whose startup file is ~/.exshrc.
+# In root's .exshrc rather than /etc/profile, because it is root's to act on.
 cat >> "$RFS/root/.exshrc" <<'EOF'
 
 if [ ! -f /etc/pscal-provisioned ] && [ -f /AOK/tools/provision-ultimate-pscal.sh ]; then
